@@ -1,49 +1,44 @@
 # Hierarchical Placement Walkthrough
 
-Configure topology levels across cloud zones and physical racks, request domain placement for
-multi-`Pod` replicas, and see what a node move and a hierarchy change do.
+Publish cloud-zone and rack topology hierarchies, constrain multi-`Pod` serving replicas to one
+failure domain, and observe how moving a node between racks differs from changing hierarchy levels.
 
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Discover cloud zones](#step-1-discover-cloud-zones)
-- [Step 2: Request zone placement](#step-2-request-zone-placement)
-- [Step 3: Publish an inventory snapshot](#step-3-publish-an-inventory-snapshot)
-- [Step 4: Request rack placement](#step-4-request-rack-placement)
-- [Step 5: Move a node](#step-5-move-a-node)
+- [Zone placement](#zone-placement)
+- [Rack placement](#rack-placement)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
 ## Summary
 
-*Topology-aware scheduling (TAS)* places multi-`Pod` replicas inside one failure domain — a cloud zone
-or a physical rack. Configure a read-only cloud-zone `TopologySource`, then narrow placement to a
-static rack inventory snapshot. Moving a node between racks and changing the hierarchy levels have
-different effects on existing workloads.
-
-The steps discover infrastructure hierarchies, apply placement constraints to serving workloads, and
-manage topology updates.
+*Topology-aware scheduling (TAS)* packs all *`size`* `Pod`s of a replica inside one failure domain
+(such as an availability zone or physical rack). You first discover existing cloud zone labels via a
+read-only `TopologySource`, then switch to a versioned `ConfigMap` rack snapshot and move a node
+without draining queues:
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
-| `TopologySource` | cluster | administrator | the hierarchy levels and where each node's values come from |
-| `ConfigMap` | namespace | administrator | the versioned rack inventory snapshot (Step 3) |
-| `ModelDeployment` | namespace | user | the *`topology.requiredLevel`* placement constraint |
+| `TopologySource` | cluster | administrator | Declares ordered hierarchy levels and where node domain values come from |
+| `ConfigMap` | namespace | administrator | Versioned rack inventory snapshot consumed in Steps 3–5 |
+| `ModelDeployment` | namespace | user | Requests domain packing via *`roles[].topology.requiredLevel`* |
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
-| Cluster | Kubernetes with GPUStack installed |
-| Nodes | labeled `topology.kubernetes.io/region` and `topology.kubernetes.io/zone` for Steps 1 and 2; Steps 3 through 5 publish a `ConfigMap` rack inventory instead |
-| `AcceleratorType` | `gpustack--nvidia-a10g-linux-amd64` |
-| Model | `Qwen/Qwen2.5-7B-Instruct` |
-| Engine | vLLM `gpustack/runner:cuda13.0-vllm0.29.0`, with `llm-d-router` |
+| Cluster | Kubernetes with GPUStack installed (illustrative configuration examples) |
+| Nodes | Worker `Node`s carrying `topology.kubernetes.io/region` and `zone` in Steps 1–2; `ConfigMap` snapshot in Steps 3–5 |
+| `AcceleratorType` | `gpustack--nvidia-a10g-linux-amd64` (substitute an `Active` pool from `kubectl get acctype`) |
+| Model and engine | `Qwen/Qwen2.5-7B-Instruct` on vLLM `gpustack/runner:cuda13.0-vllm0.29.0` |
 
-## Step 1: Discover cloud zones
+## Zone placement
 
-Verify existing node labels and cluster status before configuring topology sources:
+### Step 1: Discover cloud zones
+
+Check existing `Node` topology labels and confirm no conflicting `TopologySource` already selects the
+worker nodes:
 
 ```bash
 kubectl get nodes --show-labels
@@ -51,8 +46,7 @@ kubectl get topologysources
 kubectl get topologies.kueue.x-k8s.io
 ```
 
-When nodes already carry cloud provider labels for regions and zones, define a read-only
-`TopologySource` using *`nodeLabels`*:
+Save and apply `cloud-zones.yaml` to build a two-level hierarchy from existing cloud provider labels:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -69,20 +63,29 @@ spec:
   nodeLabels: {}
 ```
 
-The operator validates that labels form a strict tree (each zone belongs to exactly one region) and
-computes a profile hash. `Node`s receive `topology.gpustack.ai/profile=fnv64-<hash>`, and Kueue
-materializes the matching `Topology` resource.
-
-Check source readiness:
-
 ```bash
-kubectl get topologysources cloud-zones -o yaml
+kubectl apply -f cloud-zones.yaml
+kubectl get topologysource cloud-zones \
+  -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+kubectl get topologies.kueue.x-k8s.io
 ```
 
-## Step 2: Request zone placement
+Example output (illustrative):
 
-When a serving replica consists of multiple `Pod`s (such as tensor-parallel groups spanning multiple nodes),
-request placement within a single availability zone:
+```text
+Valid=True Valid
+Ready=True Ready
+NAME                 AGE
+gpustack-fnv64-...   12s
+```
+
+The operator verifies that every zone belongs to one region, stamps `topology.gpustack.ai/profile=fnv64-<hash>`
+onto matched `Node`s, and materializes the Kueue `Topology` resource. If `Ready` is `False`, match the
+condition reason in [Troubleshooting](#troubleshooting).
+
+### Step 2: Request zone placement
+
+Constrain a two-`Pod` (`size: 2`) serving replica to a single availability zone:
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -107,24 +110,34 @@ request placement within a single availability zone:
 +        requiredLevel: topology.kubernetes.io/zone
 ```
 
-Kueue *TAS* admits the replica only when a single zone contains enough unallocated capacity to host all
-2 `Pod`s. If capacity is scattered across zones without filling any single zone, the workload waits in
-`Pending` rather than stranding split `Pod`s.
+Apply the deployment and verify that both member `Pod`s of replica `r0` land in the same zone:
 
-## Step 3: Publish an inventory snapshot
+```bash
+kubectl -n team-a get pods -l app.kubernetes.io/instance=qwen-distributed \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.nodeName}{"\n"}{end}' |
+  while read -r pod node; do
+    zone=$(kubectl get node "$node" -o jsonpath='{.metadata.labels.topology\.kubernetes\.io/zone}')
+    printf "%s\t%s\t%s\n" "$pod" "$node" "$zone"
+  done
+```
 
-Before changing sources, plan for queue draining and possible workload interruption. See
-[Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy).
-Remove `cloud-zones` before selecting the same nodes with the snapshot source:
+If free GPUs are split across zones without two free GPUs in any single zone, Kueue holds the entire
+replica `Pending` instead of stranding half-scheduled `Pod`s.
+
+## Rack placement
+
+### Step 3: Publish an inventory snapshot
+
+Changing ordered hierarchy `levels` triggers `HoldAndDrain` queue migration; review
+[Live hierarchy changes](../../modules/topology/operations.md#live-hierarchy-changes) before running
+this step on shared clusters. Delete `cloud-zones` first so two sources do not claim the same `Node`s:
 
 ```bash
 kubectl delete topologysource cloud-zones
 ```
 
-Without a single Ready source, nodes fall back to the
-[hostname-only profile](../../modules/topology/scheduling.md#hierarchy-profiles).
-In private data centers without cloud labels, publish a versioned rack snapshot in a `ConfigMap`.
-Save this manifest as `topology-inventory.yaml`. Replace the node names and labels with your inventory:
+Save `topology-inventory.yaml` (replacing `worker-a` and `worker-b` with your `Node` names) to publish
+a three-level `ConfigMap` rack snapshot:
 
 ```yaml
 apiVersion: v1
@@ -165,21 +178,31 @@ spec:
     maxStaleness: 10m
 ```
 
-The operator validates the snapshot atomically, creates NFD `NodeFeature` resources, and writes the
-custom labels to each node. Apply the saved manifest, then inspect the source and queues:
+Apply `topology-inventory.yaml` and wait until `data-center` is `Ready` and queues report
+`TopologyReady=True`:
 
 ```bash
 kubectl apply -f topology-inventory.yaml
-kubectl get topologysource data-center -o yaml
-kubectl get clusterqueues.kueue.x-k8s.io -o yaml
+kubectl get topologysource data-center \
+  -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+kubectl get node worker-a -o jsonpath='{.metadata.labels.topology\.gpustack\.ai/rack}{"\n"}'
 ```
 
-Wait for the source to become Ready and the managed queues to report `TopologyReady=True`.
-See [Verification](../../modules/topology/operations.md#verification) for the node and flavor checks.
+Example output (illustrative):
 
-## Step 4: Request rack placement
+```text
+Valid=True Valid
+Ready=True Ready
+rack-01
+```
 
-With rack labels published, narrow the workload constraint from zone-level to rack-level:
+If `Valid=False` or `Ready=False`, fix `ConfigMap/topology-inventory` or `TopologySource/data-center`
+rather than editing NFD `NodeFeature` objects directly; see
+[Verification](../../modules/topology/operations.md#verification).
+
+### Step 4: Request rack placement
+
+Narrow `qwen-distributed` from zone-level placement to rack-level placement:
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -195,12 +218,13 @@ With rack labels published, narrow the workload constraint from zone-level to ra
 +        requiredLevel: topology.gpustack.ai/rack
 ```
 
-All `Pod`s within each replica group are placed within the same physical rack, minimizing inter-switch
-network latency.
+Verify that the rolled replica schedules all `size` `Pod`s on `Node`s sharing one
+`topology.gpustack.ai/rack` label (a single rack must hold enough GPUs for the full `size`).
 
-## Step 5: Move a node
+### Step 5: Update rack assignment
 
-When a node is cabled into a new rack, update the `ConfigMap` snapshot with an incremented revision:
+When `worker-b` is re-cabled to `rack-03`, update `ConfigMap/topology-inventory` and increment
+`revision`:
 
 ```diff
  apiVersion: v1
@@ -226,42 +250,40 @@ When a node is cabled into a new rack, update the `ConfigMap` snapshot with an i
 +        topology.gpustack.ai/rack: rack-03
 ```
 
-The profile is a hash of the ordered level keys, and the keys did not change.
-The node keeps its profile, so the worker creates no flavor and applies no hold.
-The node carries the new rack value after NFD publishes it.
+Confirm that `worker-b` updates its rack label while keeping the same `topology.gpustack.ai/profile`
+hash:
 
-A change to the ordered level keys is a different operation that can evict and readmit workloads,
-unlike the revision-only change shown above. See
-[Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy) for the
-`HoldAndDrain` migration sequence and its interruption impact before editing `levels`.
+```bash
+kubectl get node worker-b \
+  -o jsonpath='{.metadata.labels.topology\.gpustack\.ai/rack}{"\t"}{.metadata.labels.topology\.gpustack\.ai/profile}{"\n"}'
+```
+
+Because `spec.levels` did not change, the profile hash stays identical and no `HoldAndDrain` queue
+migration occurs. Editing `spec.levels` changes the profile hash and drains queues; see
+[Live hierarchy changes](../../modules/topology/operations.md#live-hierarchy-changes).
 
 ## Limitations
 
-- Single-source node ownership and the hostname-only profile fallback are covered in
-  [Hierarchy profiles](../../modules/topology/scheduling.md#hierarchy-profiles).
-- Domain capacity packing and multi-role gang holds are covered in
-  [Troubleshooting](../../modules/topology/scheduling.md#troubleshooting).
-- Changing the ordered `levels` list on a live hierarchy triggers `HoldAndDrain` migration; see
-  [Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy).
+- Each `Node` must match at most one Ready `TopologySource`; zero or multiple matches fall back to the
+  hostname-only profile ([Topology inventory sources](../../modules/topology/operations.md#topology-inventory-sources)).
+- Domain capacity fragmentation and multi-role gang holds are covered in
+  [Diagnose Pending workloads](../../modules/topology/operations.md#diagnose-pending-workloads).
 
 ## Troubleshooting
 
-For general failure surfaces (including `AwaitingQueueStatus`, `HoldAndDrain` flavor migration, and
-domain capacity fragmentation), see [Topology-Aware Scheduling Failure Surfaces](../../modules/topology/scheduling.md#troubleshooting)
-and [Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy).
-
-| Symptom | Signal | Check & Mitigation |
+| Symptom | Signal | Resolution |
 |---|---|---|
-| `TopologySource` `Ready=False` | Reason: `InvalidHierarchy` / `SnapshotInvalid` | Label hierarchy invalid (child key must have unique parent value); fix snapshot syntax or missing node entries |
-| `TopologySource` `Ready=False` | Reason: `OwnershipConflict` | Multiple writable sources target the same node; adjust node selectors to ensure disjoint sets |
-| `TopologySource` `Valid=False` | Reason: `ConfigMapReadFailed` | Verify `ConfigMap` name and namespace match the worker installation |
-| Node Topology Profile falls back to single-level `hostname` | Ambiguous source ownership | `Node` selected by 0 or multiple Ready sources; check node selectors across all sources |
-| Multi-role deployment has 1 `Workload` reserved but `Pod` not bound | Joint admission gang hold | First role fits in domain, but held until secondary role (*prefill*/*decode*) secures domain capacity; check other roles |
+| `TopologySource` `Ready=False` | `Reason: InvalidHierarchy` or `SnapshotInvalid` | A child value maps to multiple parent values, or snapshot YAML is invalid. Fix the `ConfigMap` snapshot or node labels so levels form a strict tree. |
+| `TopologySource` `Ready=False` | `Reason: OwnershipConflict` | Two writable `TopologySource`s match the same `Node`. Make their *`spec.nodeSelector`* sets disjoint. |
+| `TopologySource` `Valid=False` | `Reason: ConfigMapReadFailed` | Confirm *`configMapRef.name`*, *`namespace`*, and *`key`* exist and are readable by the worker. |
+| `Node` falls back to hostname profile | Selected by zero or multiple Ready sources | Inspect *`spec.nodeSelector`* across `kubectl get topologysources -o yaml` so exactly one Ready source matches the `Node`. |
+| Multi-role replica reserves one `Workload` while `Pod`s wait | Joint admission gang hold | One role fits its domain while a peer role (*Prefill* or *Decode*) awaits domain capacity; check `Workload` conditions across all roles ([Diagnose Pending workloads](../../modules/topology/operations.md#diagnose-pending-workloads)). |
 
 ---
 
-**See also** — [Topology-Aware Scheduling](../../modules/topology/scheduling.md) (levels and profiles) ·
-[Topology-Aware Scheduling Operations](../../modules/topology/operations.md) (`ConfigMap` and Webhook sources) ·
-[Model Deployment Configuration](../../modules/model-deployment/configuration.md)
+**See also** — [Topology](../../modules/topology/_index.md) (capability overview) ·
+[Topology-Aware Scheduling Operations](../../modules/topology/operations.md) (`ConfigMap`, Topograph,
+and Webhook sources) · [Configuration](../../modules/model-deployment/configuration.md#topology-placement)
+(*`topology.requiredLevel`* field rules)
 
-**Next** → [Shared Cache Walkthrough](../kv-cache/shared-cache.md)
+**Next** → [Shared Cache Walkthrough](../kv-cache/shared-cache.md) — stand up a shared KV cache from backend to workload.

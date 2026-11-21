@@ -1,27 +1,27 @@
 # KV Cache Backend
 
-A `KVCacheBackend` configures shared KV cache for inference workloads. With a managed backend,
-the operator runs a leader for metadata and a member group with one store process per selected
-node. An external backend connects to an existing service.
+A `KVCacheBackend` configures shared KV cache storage for inference workloads. On a managed backend,
+the operator runs a metadata leader and one store member per selected `Node` in each member group.
+An external backend connects to an existing service.
 
-Mooncake calls the leader a master. Its flags, environment variables and metrics use that name.
+Mooncake calls the leader a `master`, and its flags, environment variables, and metrics retain that
+name.
 
 ## Contents
 
-- [Connection and medium](#connection-and-medium)
-- [Image](#image)
-- [Metadata plane](#metadata-plane)
-- [Members](#members)
-- [Vendor-specific behavior](#vendor-specific-behavior)
+- [Configuration](#configuration)
+- [Backend images](#backend-images)
+- [Hardware requirements](#hardware-requirements)
 - [Status and conditions](#status-and-conditions)
-- [Resizing a group](#resizing-a-group)
-- [External mode](#external-mode)
-- [Operating notes](#operating-notes)
+- [Group resizing](#group-resizing)
+- [Operations](#operations)
 
-## Connection and medium
+## Configuration
 
-`connection` chooses whether the operator manages the backend or connects to an external service.
-For managed backends, *`members[].medium`* chooses host memory (`DRAM`) or accelerator memory (`VRAM`).
+### Connections and storage media
+
+*`spec.connection`* selects either operator-managed workloads or an external endpoint pair. On
+managed backends, *`members[].medium`* selects host memory (`DRAM`) or device memory (`VRAM`).
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -29,421 +29,135 @@ kind: KVCacheBackend  # cluster-scoped, short name kvcb
 metadata:
   name: mooncake-dram
 spec:
-  type: Mooncake
-  image: docker.io/kvcacheai/mooncake:0.3.13
+  type: Mooncake  # required; enum: Mooncake
+  image: docker.io/kvcacheai/mooncake:0.3.13  # optional; defaults from kv-cache-backend-image Setting
   connection:
-    managed:  # exactly one of managed or external
+    managed:  # required: set exactly one of managed or external
       leader:
-        electionBackend: None  # The upstream image has no Kubernetes Lease backend.
+        electionBackend: None  # upstream image lacks Kubernetes Lease support
       members:
         - nodeSelector:
             kubernetes.io/os: linux
-          medium: DRAM  # memory segment medium: DRAM or VRAM
-          capacityPerMember: 4Gi
+          medium: DRAM  # required, immutable; enum: DRAM, VRAM
+          capacityPerMember: 4Gi  # required per-node segment size
 ```
 
-- **Connection:** Set exactly one of *`connection.managed`* or *`connection.external`*.
-- **Groups:** Multiple member groups are allowed. At most one may have a [local disk tier](local-disk-tier.md).
-- **Medium:** *`members[].medium`* is immutable. Use separate groups for host and device memory.
-- **Image:** Check [Engine Compatibility](../model-deployment/engine-versions.md) before choosing *`spec.image`*.
-- **Election:** The upstream image needs *`electionBackend: None`* and one leader.
-
-The example's Mooncake `0.3.13` is compatible with the documented vLLM client. SGLang needs another version.
-See [Members](#members) for the resulting Pod configuration.
+- **Cluster scope**: `KVCacheBackend` is cluster-scoped because it claims host memory, host paths,
+  and fabric devices. Multiple `KVCachePool`s can share one backend ([Limitations](pool.md#limitations)).
+- **Member groups**: Declare one or more groups; at most one group can configure a
+  [local disk tier](local-disk-tier.md).
+- **Medium immutability**: *`members[].medium`* cannot change in place; add a separate group to mix
+  host and device memory.
 
 | Value | Meaning | Constraints |
 |---|---|---|
-| `DRAM` | Host memory segment | Pod `requests.memory` includes *`capacityPerMember`*; sets vendor visibility variables to `void`. |
-| `VRAM` | Device memory segment | Accounting-only for user `USE_VRAM_SEGMENT=ON` builds; omits *`capacityPerMember`* and visibility hiding. |
+| `DRAM` | Host RAM segment | Adds `capacityPerMember + localBufferSize` to `Pod` `requests.memory` and sets `void` device visibility. |
+| `VRAM` | Device memory segment | Accounting-only for custom `USE_VRAM_SEGMENT=ON` images; charges only *`localBufferSize`* and omits `void` hiding. |
 
-All official `mirrored-mooncake` builds disable `USE_VRAM_SEGMENT` and allocate segments in Host RAM
-(`DRAM`) only. `VRAM` remains in the CRD schema for accounting alignment when users supply a custom
-`USE_VRAM_SEGMENT=ON` image; the operator does not verify whether a custom image allocates VRAM.
+### Metadata discovery
 
-An earlier shape offered five values. Four of them named things that are **not member groups**, and
-each is reached another way:
+The metadata plane always uses peer-to-peer handshakes (`P2PHANDSHAKE`) and needs no external etcd
+or Redis service (*`spec.metadata`* does not exist). Configure leader election separately through
+[`leader.electionBackend`](leader.md#high-availability) (default `Kubernetes`).
 
-| Former `medium` value | Backing tier | Location |
-|---|---|---|
-| `LocalDisk` | a tier on the members that already hold the memory replica | [`members[].localDisks`](local-disk-tier.md) |
-| `NoF` | an NVMe-oF target coordinate, registered once, with no node affinity and no `Pod` | no API surface; it is not a member group |
-| `CXL` | a DAX device the **leader process** allocates from | nowhere in this API: `enable_cxl`, `cxl_path` and `cxl_size` are refused in *`leader.extraArgs`*, because the first replaces *`leader.allocationStrategy`* and then brings the leader up advertising the allocator's size as capacity even where no DAX device exists |
-| `DFS` | a distributed filesystem the **leader process** allocates from | the leader's own environment, which this API does not render |
+### Member groups
 
-> **Why the shape matters more than the names** — the leader routes an offload task to the client
-> holding the key's memory replica. A member group with no memory segment is therefore never chosen,
-> so a group declared as "the disk one" would report its disk capacity to the leader and never
-> receive a single write. The object would say one thing, the running member another, and nothing
-> would report a fault.
+Each *`members[]`* entry reconciles one `OnDelete` `DaemonSet` matching *`members[].nodeSelector`*.
+Two groups can select the same `Node` when their network identities do not collide.
 
-What an object written against that earlier shape can still do depends on the API server's
-`CRDValidationRatcheting` gate, which follows the cluster's **effective** Kubernetes version:
+*`spec.transport.protocol`* accepts `Auto` (default, resolving to `TCP`), `TCP`, `RDMA`, `EFA`,
+`CANN`, `ROCM`, `MUSA`, and `MACA`. *`members[].transport.protocol`* overrides the protocol for one
+group; see [Engine Compatibility](../model-deployment/engine-versions.md#transport-compatibility).
 
-- **v1.33 and later** — the gate is locked on. An update whose invalid field is **unchanged** is
-  admitted, so removing a finalizer works and the object deletes normally.
-- **v1.30 through v1.32** — the gate is on by default; a cluster that switches it off behaves like
-  an older one.
-- **v1.28 and v1.29** — the gate exists but is off by default; turned on, it admits the
-  unchanged-field update.
-- **Earlier** — the gate does not exist. Every write touching the object is refused, **finalizer
-  removal included**, so the object cannot be deleted either. Remove such an object **before**
-  applying a CRD that narrows the enum, not after.
+- **TCP**: Needs no host privileges, but copies payloads through the kernel network stack.
+- **Host fabrics (`RDMA`, `EFA`)**: Enable `hostNetwork: true`, `IPC_LOCK`, `SYS_RESOURCE`, and
+  fabric resource requests (`device.gpustack.ai/rdma.shared` for `1`, `device.gpustack.ai/rdma` for
+  `> 1`, or `vpc.amazonaws.com/efa`) sized by *`members[].fabricInterfaceCount`* (default `1`). Do
+  not mount `/dev/infiniband` manually.
+- **Ports**: Group `<i>` serves HTTP on `8080 + <i>` (bound on the host network when `hostNetwork`
+  is active). Data transfers use ephemeral ports negotiated via `P2PHANDSHAKE`, so open ephemeral
+  port ranges in firewalls and `NetworkPolicy` rules.
+- **Extra flags**: *`members[].extraArgs`* renders as `-D key=value` and *`leader.extraArgs`*
+  renders as `-key=value`; CXL flags are refused. Never place secrets in *`extraArgs`*.
+- **Disk offload retries**: Clients writing to a [local disk tier](local-disk-tier.md) must retry
+  when a memory segment fills ahead of asynchronous bucket eviction.
 
-No released version of this API carried those values, so the question does not arise on a cluster
-that installed a release; this is a development-cluster shape.
+### External Mooncake endpoints
 
-The object is **cluster-scoped**: it names nodes, claims host memory and host paths, and on the RDMA
-and EFA paths needs `hostNetwork` and a fabric device. Only a cluster administrator can legitimately
-declare one.
+*`connection.external`* attaches to an existing Mooncake service without creating workloads. Supply
+both `Client` and `Admin` endpoints as `host:port`:
 
-A pool sets the quota ceiling on a backend; a Binding grants a namespace a share of that quota.
-This mirrors Kueue's `ClusterQueue` and `LocalQueue` split
-(<https://kueue.sigs.k8s.io/docs/concepts/>). Several pools can reference one backend. The grant
-does not enforce access to the store; see [Limitations](pool.md#limitations).
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: external-mooncake
+spec:
+  connection:
+    external:
+      endpoints:
+        - name: Client  # engine RPC endpoint
+          address: mooncake.example:50051
+        - name: Admin  # operator health, metrics, and tenant API endpoint
+          address: mooncake.example:9003
+```
 
-## Image
+- **Immediate error state**: Unreachable external endpoints report `phase: Error` immediately (never
+  `Provisioning`), and HTTP `3xx` redirects from `Admin` are refused.
+- **Single-backend ownership**: Never point two `KVCacheBackend` objects at the same external leader
+  with overlapping *`domain.name`* bindings; ceilings will oscillate and mismatched *`blockSize`* or
+  *`dtype`* values corrupt tensors.
 
-*`spec.image`* is not derived from the operator image. If unset, the `kv-cache-backend-image` `Setting`
-supplies the image. Its default is the project's build. Admission rejects an empty image when both are unset.
+## Backend images
 
-Clearing the `Setting` does not block unrelated updates or finalizer removal. Admission checks the
-fallback again only when *`spec.image`* changes.
+*`members[].image`* overrides *`spec.image`*, which falls back to the `kv-cache-backend-image`
+`Setting` (defaulting to the project's `-cpu` build). Admission refuses create when all three are
+empty; clearing the `Setting` later does not block unrelated updates or deletion.
 
-> **Why** — the master's link-time dependencies differ per published vendor variant, so no single
-> derivation is correct. On a CUDA-less host, for example, the base (CUDA 12) master build needs
-> `libcuda.so.1` and `libcudart.so.12` and cannot load, while the `-rocm` and `-npu` builds need no
-> accelerator library at all and load cleanly.
-
-The engine image's client wheel determines which transports the client can use.
-The master needs no accelerator runtime; a member needs the runtime for its transport.
-An `-npu` master can run on an all-NVIDIA cluster. An `ascend` member needs CANN (`libascendcl.so`).
-A missing CANN library produces a loader error in *`status.phaseMessage`*.
-
-An `EFA` member needs libfabric that supports the node's adapter. `mirrored-mooncake` installs AWS's
-libfabric ahead of the distribution copy in its loader cache.
-
-Without high availability, the example image serves both roles on amd64 and arm64. It contains
-`mooncake_master` and `mc_store_rest_server`. It runs without a GPU: `libcuda.so.1` is a stub and
-`libcudart.so.12` is the real library; neither reaches a driver.
-[High availability](leader.md#high-availability) requires a different image for both roles.
-
-> **Why the stub/real split matters** — the stub alone is enough for the master, but the Python client
-> needs a versioned `cudaFreeHost` from a real runtime. An image carrying two stubs runs the master and
-> fails every member.
-
-The `kv-cache-backend-image` default is the `-cpu` build. It ships RDMA (`libibverbs`) and EFA
-(`libfabric`) for NVIDIA and AMD Host-RAM stores over `DRAM`. For a vendor transport, set
-*`spec.image`*; it overrides the `Setting`. Clearing the `Setting` restores admission refusal when no
-image is set.
+Set *`spec.imagePullSecrets`* and *`spec.imagePullPolicy`* on the backend to apply registry pull
+settings across the leader and all member groups.
 
 ### GPUStack build variants
 
-Beside the `-cpu` default, this project publishes `mirrored-mooncake` in one build target per vendor
-(`cuda`, `cann`, `rocm`). Tags carry the toolchain version: `<mooncake-version>-<variant><toolchain>`,
-such as `0.3.13.post1-cuda13.0`.
+GPUStack publishes `mirrored-mooncake` variants tagged `<mooncake-version>-<variant><toolchain>`
+(such as `0.3.13.post1-cuda13.0`). All official builds set `USE_VRAM_SEGMENT=OFF`, allocate Host RAM
+(`DRAM`) only, and compile Kubernetes `Lease` [high availability](leader.md#high-availability):
 
-All published official `mirrored-mooncake` build targets (`-cpu`, `cuda`, `cann`, `rocm`) disable
-`USE_VRAM_SEGMENT` (`USE_VRAM_SEGMENT=OFF`) and allocate store segments in Host RAM (`DRAM`) only.
-
-- **`-cpu` default**: Links `libibverbs` and AWS `libfabric` for TCP, RDMA, and EFA Host-RAM stores on NVIDIA and AMD nodes.
-- **`-cann` variant**: Required on Ascend because `vllm-ascend` speaks HIXL (`protocol: ascend`), allocating Host RAM via ACL/HIXL.
-- **`0.3.10.post2` variant**: Serves engines below the [supported minimum](../model-deployment/engine-versions.md); set `leader.electionBackend: None` and `leader.multiTenancy: false`.
-
-**`members[].medium: VRAM` is accounting-only for custom `USE_VRAM_SEGMENT=ON` images.** Setting `VRAM`
-omits *`capacityPerMember`* from Pod `requests.memory` and omits `DRAM` device-visibility hiding (`void`),
-relying on the user-supplied image without operator verification of actual device allocation. Setting
-`DRAM` charges *`capacityPerMember`* to Pod `requests.memory` and sets vendor visibility variables to `void`.
-
-Admission does not refuse a `VRAM` group without an image. *`members[].image`* overrides
-*`spec.image`*, which overrides the `Setting`. A custom `USE_VRAM_SEGMENT=ON` image allocates device
-memory when a device is visible, so pairing it with `medium: DRAM` triggers `void` hiding and fails startup.
-
-**A private registry needs *`spec.imagePullSecrets`***, and an explicit policy needs
-*`spec.imagePullPolicy`*. Both are backend-wide: they apply to the leader and to every member group,
-including a group that names its own *`image`*. Left unset, the policy is **resolved from the image
-tag by the same rule the API server would have applied** (`Always` for `:latest` or no tag,
-`IfNotPresent` otherwise), and it is re-resolved whenever the image or the field moves.
-
-> **Why they are fields and not `Setting`s** — the cluster-wide `image-pull-policy` and
-> `image-pull-secrets` `Setting`s are values of the bundled-application chart install. They reach the
-> subcharts and nothing a controller renders, so a `KVCacheBackend` that inherited them would be the
-> only object in this API whose running workloads move when a chart value moves. The service accounts
-> [high availability](leader.md#high-availability) renders carry no registry credentials either (they
-> grant `Lease` access and nothing else), so without these fields no image here could come from a
-> private registry at all.
+- **`-cpu` default**: Bundles `libibverbs` and AWS `libfabric` for `TCP`, `RDMA`, and `EFA` Host-RAM
+  stores on NVIDIA and AMD `Node`s.
+- **`-cann` variant**: Required on Ascend because `vllm-ascend` uses HIXL (`protocol: ascend`) over
+  ACL/HIXL Host RAM.
+- **`-rocm` variant**: Adds ROCm transport support alongside Host-RAM storage.
+- **`0.3.10.post2` variant**: Supports legacy engines below the
+  [supported floor](../model-deployment/engine-versions.md); set `leader.electionBackend: None` and
+  `leader.multiTenancy: false`.
 
 ### Version compatibility
 
-**A store and an engine-embedded Mooncake client interoperate only within one minor line.** The
-criterion is the RPC wire signature, not the version string: the handshake answers `2.0.0` for every
-0.3.x release, so a mismatched pair is not refused at startup. Every probe reads green, and every
-write then fails at transfer time with `RPC_FAIL (-900)`.
+**Match the store image and the engine's embedded Mooncake client to the same minor line.** The wire
+handshake reports `2.0.0` across `0.3.x` releases, so mismatched lines (such as `0.3.12` and
+`0.3.13`) pass probes and fail transfers with `RPC_FAIL (-900)`. Check runner pairings in
+[Engine Compatibility](../model-deployment/engine-versions.md).
 
-Two posts of one minor line share their RPC signatures and interoperate. The 0.3.12 and 0.3.13
-lines do not: the method names are unchanged, so the client reaches the handler and mis-decodes the
-arguments. Multi-tenancy moves neither: with it off (a declared `multiTenancy: false`, the field
-defaulting on) every request resolves to the default tenant.
+Direct *prefill/decode (PD)* transfer (`MooncakeConnector` without *`spec.kvCache`*) runs engine to
+engine and does not use a store. Leader `Lease` election requires Mooncake `0.3.12` or newer.
 
-**The client's version is a property of the engine image, not of anything on this CR.** Which
-client each supported engine's runner image carries, and so which line its store runs, is in the
-[Engine Compatibility](../model-deployment/engine-versions.md); an engine below its minimum there is
-not supported.
-
-For any other image, read the client off the image in hand rather than off an engine version. A
-CUDA build resolves `mooncake-transfer-engine` against a lower bound at build time, so two images of
-one vLLM version built on different days can carry different clients.
-
-Direct *prefill/decode (PD)* transfer (`MooncakeConnector`, no *`spec.kvCache`*) is engine to engine and exempt from this
-matching.
-
-Upstream has **no 0.3.12.post2**; the 0.3.12 line ends at 0.3.12.post1. High availability carries
-its own per-version rule, a master from 0.3.12 on. See
-[High availability](leader.md#high-availability).
-
-## Metadata plane
-
-**The metadata plane is peer-to-peer and has no API field.** The member's `metadata_server` renders as
-the literal `P2PHANDSHAKE`, unconditionally. It needs no etcd or Redis. The default leader election
-does use a Kubernetes `Lease` and its API access, even with one leader replica.
-
-The metadata plane lets clients find one another. Leader election is configured separately.
-The **HA backend store** (`-enable_ha` with `-ha_backend_type`) is how the leader elects, even at
-one replica by default. The Kubernetes `Lease` is selected by
-[`leader.electionBackend`](leader.md#high-availability), and it moves nothing on the metadata plane.
-
-**A manifest that tries to configure the metadata plane is not refused with a helpful message.**
-There is no field, so there is nothing for a webhook to see:
-
-- a strict client (`kubectl apply`'s default) is refused by the schema with
-  `strict decoding error: unknown field "spec.metadata"`;
-- a client with validation turned off has the block **silently pruned**, and the object is admitted
-  and reconciled as though nothing had been written.
-
-The second is indistinguishable from success at the point of apply. The protection against it is the
-API contract: the metadata plane takes no configuration.
-
-## Members
-
-One member group renders **one `DaemonSet`** over *`members[].nodeSelector`*. A member is one node's
-contribution to the store: it holds that node's host memory, or on a VRAM group its device memory,
-plus the node's host paths and, on a host-fabric group, the number of fabric devices the group
-requests.
-
-The member's identity is the node, and a `DaemonSet` is the workload that gives one `Pod` to every
-matching node. Two groups may select the same node (a DRAM group and a VRAM group is the shape the
-second medium exists for), and each still renders its own `DaemonSet`.
-
-The member's whole configuration renders as **environment variables**: no `ConfigMap`, no volume, no init
-container.
-
-The Mooncake configuration keys map to the following environment variables. Values here describe
-their sources, not a YAML file mounted in the container.
-
-```yaml
-local_hostname: <pod-ip>  # MOONCAKE_LOCAL_HOSTNAME, from the downward API
-metadata_server: <metadata-server>  # MOONCAKE_TE_META_DATA_SERVER
-master_server_address: <master-address>  # MOONCAKE_MASTER
-protocol: <protocol>  # MOONCAKE_PROTOCOL
-global_segment_size: <segment-size>  # MOONCAKE_GLOBAL_SEGMENT_SIZE
-local_buffer_size: <buffer-size>  # MOONCAKE_LOCAL_BUFFER_SIZE
-# device_name is deliberately unset: MOONCAKE_DEVICE
-```
-
-**`MOONCAKE_TE_META_DATA_SERVER` carries an underscore inside `META_DATA`.** It is not
-`MOONCAKE_TE_METADATA_SERVER`, and normalising it to the spelling that reads correctly **silently
-degrades the metadata plane** rather than erroring.
-
-**`MOONCAKE_DEVICE` is left unset on purpose, and the documented value `auto-discovery` is a trap.**
-The client splits that key on commas into a device filter and nothing special-cases the string, so
-setting it produces a filter matching a device no host has. **Empty means "use every device found".**
-
-***`members[].extraArgs`* is the exception to the mapping above: it renders into the container's
-argv**, as `-D key=value`, not into an environment variable. *`leader.extraArgs`* does the same on the
-leader, as `-key=value`.
-
-**Either way the value is world-readable through these paths.** It is stored verbatim on the
-`KVCacheBackend` (which is cluster-scoped, so reading it needs no access to any workload), and it is
-rendered into the container's argv, readable again from the `Pod` and from the `DaemonSet` or `Deployment`
-carrying it. **Do not put a credential in *`extraArgs`*.** Nothing refuses one at admission.
-
-*`spec.transport.protocol`* accepts `Auto`, `TCP`, `RDMA`, `EFA`, `CANN`, `ROCM`, `MUSA` and `MACA`,
-and defaults to `Auto` whether or not the *`transport`* block is written at all. **`Auto` resolves to
-`TCP`.** It is not a per-node probe that promotes itself. `MUSA` and `MACA` are intra-node IPC
-transports, not host fabrics, so they take none of the fabric privileges below.
-
-Which engine each value serves, and on which images, is [the transport
-matrix](../model-deployment/engine-versions.md#transport-compatibility).
-
-***`members[].transport.protocol`* overrides that value for one group; left unset, the group inherits
-the backend's.** The override lets one group use a fabric (such as `CANN` or `RDMA`) while another
-group stays on `TCP`.
-
-**`TCP` is complete, not a fallback, and it costs CPU.** Everything the store does works over it:
-the cache fills, cross-instance prefix reuse works, and capacity scales with DRAM and the disk tier.
-What it does not have is the zero-copy path the fabrics take. Every transfer traverses the kernel
-network stack packet by packet, and the CPU that does so is CPU the node is not giving to anything
-else.
-
-So a `TCP` pool under load shows higher CPU on the member nodes and higher transfer latency than the
-same pool on `RDMA`, and **that is the transport behaving as designed**. Read it as a reason to ask
-for a fabric, not as a defect to open a report against.
-
-The fabric privileges below render per group from the group's effective protocol, and an engine is
-handed the protocol of the group it matched. An engine whose constraint no group in the pool
-satisfies is refused at admission rather than started.
-
-**Two readings can mislead an instrument.** *`binding.usage`* and *`pool.usage`* lag the leader's
-counters by a reconcile tick, so a read taken immediately after a successful write can show `0`.
-The synchronous numbers are the leader's `:9003` `/metrics` and `/api/v1/tenant_quotas`.
-
-**The first write to a fresh store can answer `500`, and that is a race.** The signature is a put
-start with no matching put end in the master's counters, because the tenant ledger is not yet
-visible. Wait until the tenant is listed and retry; the store is not failing.
-
-> **Why** — one group is one `Pod` template, which cannot express a per-node transport; and promoting to
-> a host fabric would mean granting `hostNetwork` plus `IPC_LOCK` and `SYS_RESOURCE`. A privilege is
-> requested, never inferred. Naming `RDMA` or `EFA` is also what accepts the security context that
-> comes with it — which is those three things and **not** `privileged`. A `TCP` group sets none of
-> them. `privileged` is reachable, but only by writing it into
-> [Custom VRAM builds](#custom-vram-builds), never by naming a protocol.
-
-**Both host fabrics also grant the member one device, and the protocol names it.** Nothing is
-declared: an `RDMA` group asks for `device.gpustack.ai/rdma.shared`, one of
-[this operator's own RDMA keys](../rdma/network-topology.md#rdma-resource-keys);
-an `EFA` group asks for
-[the key AWS's EFA device plugin advertises](../rdma/network-topology.md#rdma-resource-keys).
-
-The renderer **derives** the RDMA resource name. The [RDMA resource-key contract](../rdma/network-topology.md#rdma-resource-keys)
-defines that name. The request is the permission (a bind mount of a device tree is
-not), so the member that gets one can `open()` the adapter and the member that gets none could not
-have.
-
-***`members[].fabricInterfaceCount`* sets how many interfaces each member asks for on `RDMA`, `EFA`,
-and `CANN`.** Left unset on `RDMA` or `EFA`, it counts as `1` (`device.gpustack.ai/rdma.shared` for
-`1`, exclusive `device.gpustack.ai/rdma` for `> 1`). On `TCP`, `Auto`, `ROCM`, `MUSA`, and `MACA`,
-it requests no device and admission warns so protocol transitions keep the field. On `CANN`, see
-[Ascend](#ascend).
-
-**On a cluster tracking the default branch, this changes what running RDMA members ask for.** No
-release has ever carried this API, so there is no upgrade path to migrate; but a development cluster
-whose `RDMA` backend predates the change will have its members re-rendered against
-`device.gpustack.ai/rdma.shared` on the next reconcile. **Confirm the Device Manager is running on
-those nodes first**, or the members roll and stay `Pending`.
-
-**The cluster therefore needs the plugin that advertises the group's resource**, and a node without
-it never runs that member: the `Pod` stays `Pending`. That refusal is the intended one. A cluster
-whose nodes cannot serve the fabric is a cluster whose backend should say `TCP`, and an operator who
-wants it back says so in *`protocol`* rather than by leaving a field empty.
-
-**No member mounts `/dev/infiniband`.** Each fabric's plugin injects the verbs character device of
-every device it grants, so mounting the tree beside that grant would add every adapter the member
-was **not** granted, visible and unopenable.
-
-**The medium and the transport are independent.** A `DRAM` group is as entitled to a fabric as a
-`VRAM` one, and this rendering reads the medium nowhere: the protocol decides the network, the
-capabilities and the device, while the medium decides only what the segment is made of and what it
-is charged to.
-
-**What a member's `Pod` requests follows the group's medium.** A `DRAM` member charges
-`capacityPerMember + localBufferSize` to Pod `requests.memory` and sets vendor visibility variables
-to `void`. A `VRAM` member charges only *`localBufferSize`* to `requests.memory` and omits `void`
-hiding; see [Custom VRAM builds](#custom-vram-builds).
-
-**The engine sharing that accelerator does not know the member took a slice of it.** Nothing in
-Kubernetes accounts for device memory, so the two are held apart by **sizing *`capacityPerMember`*
-against the engine's own memory fraction**, and by nothing else. Give the engine a
-`gpu_memory_utilization` that leaves *`capacityPerMember`* free, and expect whichever starts second to
-fail on allocation if you do not.
-
-A member group asks for **no** accelerator extended resource, because the claim would not be true: in the tested Mooncake v0.3.13.post1,
-a member allocates its whole segment on one device, so a resource request would take a whole
-accelerator away from inference to account for a slice of one.
-
-**One member's segment is therefore on one device**, whichever the container sees first. An
-eight-accelerator node keeps all eight available to inference, and one member contributes a slice of
-the first.
-
-**A writer against a disk tier must retry.** A put that fails on a full segment means eviction has
-not caught up, not that the tier is full: the offload heartbeat runs on an interval, so a writer that
-abandons on first failure reads "eviction in progress" as "cannot write".
-
-**Reachability is a port range, never a list.** The transfer engine picks its data ports at random,
-and the peer-to-peer plane is what binds them. Write firewall and `NetworkPolicy` rules between member
-nodes, and from engine clients, as a **range**. The rendered `Pod` declares no fixed data-plane
-*`containerPort`*, because a fixed list would be a false statement.
-
-**The management port is fixed, and on a host fabric it lands on the node.** A member serves its HTTP
-API on `8080 + <group index>` (`8080` for the first group, `8081` for a second). A `TCP` group
-holds that port inside its own `Pod` network namespace, whereas `RDMA`, `EFA`, and `CANN` with
-*`fabricInterfaceCount`* hold the host's, so that port must be free on selected nodes. Reserve one
-port from `8080` upward per member group.
-
-> **Why it moves per group** — two host-network groups whose node selectors both match one node place
-> two host-network `Pod`s on it. On a single fixed port only the first binds; the second runs, never
-> passes readiness, and reports nothing about why.
-
-Members advertise their `Pod` IPs for client connections. Target those addresses in data-plane
-network rules. With host networking, the `Pod` IP is the node address.
-
-Every segment mount gets a new identity and transfer port. After a member restarts, clients
-must discover its current endpoint rather than reuse a previous connection address.
-
-Platform-specific transport rules, Ascend A5 topologies, and custom VRAM access live under
-[Vendor-specific behavior](#vendor-specific-behavior).
-
-## Vendor-specific behavior
-
-Platform transports and custom accelerator images add device mounts, network grants, and environment
-defaults beyond generic Host-RAM members.
+## Hardware requirements
 
 ### Ascend
 
-`CANN` is the one value an engine can **require**: vllm-ascend's store client currently raises on
-any other protocol (verified at vLLM-Ascend v0.23.0 and v0.26.0rc1; upstream state, not a contract,
-and it may change), so a pool serving Ascend engines declares `CANN` here, or on one member group,
-rather than settling for the `TCP` default.
+`vllm-ascend` requires `protocol: CANN` and a `-cann` member image (`USE_ASCEND_DIRECT`) with
+`medium: DRAM`. Starting a `-cann` image on `TCP` or `RDMA` fails with
+`cannot allocate local segment, ret: -1`. Idle `CANN` members use zero AICore compute.
 
-The member then needs a `-cann` image (`USE_ASCEND_DIRECT`), which allocates store segments in
-Host RAM (`medium: DRAM`) and registers host memory with ACL/HIXL (`protocol: ascend`). The `-cpu`
-build compiles no `ascend` transport.
-
-**Match the member image to the transport.** A `-cpu` image serves `TCP`, `RDMA`, and `EFA` over
-`DRAM`. A `-cann` image serves `CANN` over `DRAM`.
-
-**A CANN-carrying member over `TCP` or `RDMA` does not start**, and the failure names neither the
-transport nor the image. The store installs `AscendDirectTransport` unconditionally, and without an
-ACL context it ends in `cannot allocate local segment, ret: -1`. The member REST server never
-serves. So a pool that may ever serve an Ascend engine declares `CANN`.
-
-**Members take no accelerator while idle.** Measured with a CANN store serving and no engine
-deployed, every NPU on the nodes read `AICore 0%` and device memory at the driver baseline. The
-member registers device memory regions; it does not compute.
-
-On `CANN`, leaving *`fabricInterfaceCount`* unset keeps the group off Host RDMA (Ascend A2/A3 and
-Ascend A5 UB/UBG/UBoE). Setting `fabricInterfaceCount >= 1` enables Ascend A5 Host RoCE (`roce:host`):
-
-- **Host RDMA grant**: Enables `hostNetwork: true`, `dnsPolicy: ClusterFirstWithHostNet`, `IPC_LOCK` and `SYS_RESOURCE` capabilities, and `device.gpustack.ai/rdma.shared` (`1`) or `device.gpustack.ai/rdma` (`> 1`).
-- **Endpoint mount**: Mounts `/etc/hixlep` read-only (`ascend-hixlep`, `HostPathDirectory`), yielding if any *`members[].hostPaths`* entry overlaps `/etc/hixlep`.
-- **Defaulted env**: Injects `ASCEND_LOCAL_COMM_RES=""` and `ASCEND_GLOBAL_RESOURCE_CONFIG='{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep/ub_endpoint_npu_0.json"}'` unless declared in *`members[].extraEnv`*.
-- **Admission checks**: Suppresses the idle *`fabricInterfaceCount`* warning for `CANN`, while rejecting *`localDisks[].path`* overlapping `/etc/hixlep`.
-
-#### Ascend A5 scenarios
-
-The matrix maps Ascend A2/A3 and Ascend A5 (`950PR`/`950DT`) configurations to rendered member
-behavior:
-
-| Scenario | Configuration | Resulting behavior |
-|---|---|---|
-| **A5 UB (`ub_ctp`)** | `protocol: CANN`, `medium: DRAM`, omit *`fabricInterfaceCount`* | On-die UB path; no Host RDMA grant, no `/etc/hixlep` mount, Mooncake defaults `ASCEND_LOCAL_COMM_RES`. |
-| **A5 UBG (`ub_rtp:device`)** | `protocol: CANN`, omit *`fabricInterfaceCount`*, set *`extraEnv`* `ASCEND_GLOBAL_RESOURCE_CONFIG` | Same non-RDMA Pod template with `'{"comm_resource_config.protocol_desc":["ub_rtp:device"]}'`. |
-| **A5 UBoE (`uboe:device`)** | `protocol: CANN`, omit *`fabricInterfaceCount`*, set *`extraEnv`* `ASCEND_GLOBAL_RESOURCE_CONFIG` | Same non-RDMA Pod template with `'{"comm_resource_config.protocol_desc":["uboe:device"]}'`. |
-| **A5 Host RoCE (`roce:host`)** | `protocol: CANN`, `medium: DRAM`, *`fabricInterfaceCount: 1`* | Grants `hostNetwork`, `IPC_LOCK`+`SYS_RESOURCE`, `rdma.shared`/`rdma`, `/etc/hixlep` RO mount, and defaulted `ASCEND_LOCAL_COMM_RES=""` + `ASCEND_GLOBAL_RESOURCE_CONFIG`. |
-| **A5 Host RoCE override** | `protocol: CANN`, *`fabricInterfaceCount >= 1`*, user *`extraEnv`* or *`hostPaths`* at `/etc/hixlep` | Keeps Host RDMA grant; yields `/etc/hixlep` mount on path overlap and yields `ASCEND_*` defaults when declared. |
-| **Non-A5 Ascend A2/A3** | `910B`/`910C`, `protocol: CANN`, `medium: DRAM`, omit *`fabricInterfaceCount`* | Unchanged legacy `ascend` rendering (`aclrtMallocHost`); no Host RDMA grant or `/etc/hixlep` mount. |
-
-**Ascend A2 (`910B`)** worked example (`medium: DRAM`, `protocol: CANN`, no
-*`fabricInterfaceCount`*). For **Ascend A3 (`910C`)**, substitute a `910C`-built CANN image because
-the SoC family is compiled into the `mirrored-mooncake` CANN target at build time:
+- **Ascend A2/A3 and A5 UB/UBG/UBoE**: Omit *`fabricInterfaceCount`*. For A5 UBG or UBoE, set
+  `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`members[].extraEnv`* with `"comm_resource_config.protocol_desc"`
+  set to `["ub_rtp:device"]` or `["uboe:device"]`.
+- **Ascend A5 Host RoCE (`roce:host`)**: Set `fabricInterfaceCount: 1` (or higher) on
+  `protocol: CANN` after preparing
+  [Ascend host prerequisites](../../getting-started/vendor-prerequisites.md#ascend). The operator
+  grants `hostNetwork`, `IPC_LOCK`, `SYS_RESOURCE`, `device.gpustack.ai/rdma*`, read-only
+  `/etc/hixlep`, and defaulted `ASCEND_LOCAL_COMM_RES=""` plus `ASCEND_GLOBAL_RESOURCE_CONFIG`.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -455,13 +169,14 @@ spec:
     protocol: CANN
   connection:
     managed:
-      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      leader: {}  # uses default replicas, allocationStrategy, and multiTenancy
       members:
         - nodeSelector:
             kvcache-ascend: "true"
           medium: DRAM
-          image: gpustack/mirrored-mooncake:0.3.14-cann9.1-910b  # 910B build; use a 910C build for Ascend A3
+          image: gpustack/mirrored-mooncake:0.3.14-cann9.1-910b  # match 910B, 910C, or A5 SoC
           capacityPerMember: 32Gi
+          # fabricInterfaceCount: 1  # enable for Ascend A5 Host RoCE (roce:host)
           hostPaths:
             - path: /usr/local/Ascend/driver
               mountPath: /usr/local/Ascend/driver
@@ -477,101 +192,18 @@ spec:
               readOnly: true
 ```
 
-**Ascend A5 Host RoCE** worked example (`medium: DRAM`, `protocol: CANN`,
-*`fabricInterfaceCount: 1`*):
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: KVCacheBackend
-metadata:
-  name: ascend-a5-roce-cache
-spec:
-  transport:
-    protocol: CANN
-  connection:
-    managed:
-      leader: {}  # replicas, allocationStrategy and multiTenancy default
-      members:
-        - nodeSelector:
-            kvcache-ascend-a5: "true"
-          medium: DRAM
-          image: gpustack/mirrored-mooncake:0.3.14-cann9.2-a5  # placeholder tag for an A5 (950PR/950DT) build
-          capacityPerMember: 32Gi
-          fabricInterfaceCount: 1  # >=1 enables Host RoCE on CANN
-          hostPaths:  # plus /usr/local/dcmi and /usr/local/bin/npu-smi as above
-            - path: /usr/local/Ascend/driver
-              mountPath: /usr/local/Ascend/driver
-              type: Directory
-              readOnly: true
-```
-
-**Ascend A5 UBG** worked example (*`fabricInterfaceCount`* omitted; set *`extraEnv`* with HIXL's
-flat dotted key `"comm_resource_config.protocol_desc"` for UBG, UBoE, or custom Host RoCE topology
-overrides):
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: KVCacheBackend
-metadata:
-  name: ascend-a5-ubg-cache
-spec:
-  transport:
-    protocol: CANN
-  connection:
-    managed:
-      leader: {}  # replicas, allocationStrategy and multiTenancy default
-      members:
-        - nodeSelector:
-            kvcache-ascend-a5: "true"
-          medium: DRAM
-          image: gpustack/mirrored-mooncake:0.3.14-cann9.2-a5  # placeholder tag for an A5 (950PR/950DT) build
-          capacityPerMember: 32Gi
-          extraEnv:
-            - name: ASCEND_GLOBAL_RESOURCE_CONFIG
-              value: '{"comm_resource_config.protocol_desc":["ub_rtp:device"]}'
-          hostPaths:  # plus /usr/local/dcmi and /usr/local/bin/npu-smi as above
-            - path: /usr/local/Ascend/driver
-              mountPath: /usr/local/Ascend/driver
-              type: Directory
-              readOnly: true
-```
-
 ### AWS EFA
 
-**On `EFA` a `/dev/infiniband` mount breaks a partial grant.** A member granted fewer EFA devices
-than its node has would see the rest through the tree, and `open()` on one returns `EPERM` from the
-device cgroup. libfabric's EFA provider gives up its whole device list on the first `EPERM`, so the
-store reports `No available EFA devices` and the container restarts in a loop.
-
-Nothing is mounted from a host EFA install: the libfabric an `EFA` member runs on is in the image.
-**The engines an `EFA` group serves need an EFA build of Mooncake as well**, which no runner image
-carries. See [what an EFA path needs from the engine image](../rdma/operations.md#efa-engine-images).
-
-EFA capability is a property of the instance size rather than of its family (the largest `i7ie`
-sizes carry it while every smaller one does not), so check the size about to run, with
-`fi_info -p efa` on the node or the instance type's own EFA field, never a family name.
-
-**Cross-node EFA requires both nodes in one cluster placement group.** One availability zone is
-necessary and not sufficient. Two nodes sharing a zone but in different placement groups complete
-the libfabric handshake, and then every work request hangs with the receiving adapter's byte
-counters at zero and no error on either side.
-
-Where nodes sit is outside this operator, so it belongs to whoever builds the cluster. A managed
-node group typically gets a placement group of its own, which makes "members of one pool spread
-across two groups" the default outcome rather than an unusual one. Pin pool members that must reach
-each other to node groups sharing one placement group.
+Verify EFA support on the instance type with `fi_info -p efa` before deploying an `EFA` group, and
+never mount `/dev/infiniband` (partial device visibility causes `No available EFA devices`). Place
+all members and engines in one AWS cluster placement group and build an EFA-capable engine image per
+[RDMA Operations](../rdma/operations.md#efa-engine-images).
 
 ### Custom VRAM builds
 
-`members[].medium: VRAM` is accounting-only for user-supplied custom images compiled with
-`USE_VRAM_SEGMENT=ON`. Official `mirrored-mooncake` builds disable `USE_VRAM_SEGMENT` and run with
-`medium: DRAM`. A custom `VRAM` group needs the node's user-space driver via *`runtimeClassName`*,
-*`extraEnv`*, or *`hostPaths`*; privilege alone opens `/dev` without driver libraries.
-
-*`securityContext`* merges field by field onto protocol grants with `capabilities.add` unioned,
-preserving `IPC_LOCK` and `SYS_RESOURCE` on host fabrics. Each `hostPaths[]` entry declares
-`{path, mountPath, type, readOnly}` (set `type` so missing directories fail mount checks) and cannot
-duplicate another mount, target `/dev/infiniband`, or collide with *`localDisks[].path`*.
+`medium: VRAM` is accounting-only for user-built `USE_VRAM_SEGMENT=ON` images. Grant user-space
+driver access via *`runtimeClassName`*, *`extraEnv`*, or *`hostPaths`*, and deduct
+*`capacityPerMember`* from the engine's `gpu_memory_utilization` budget:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -581,31 +213,28 @@ metadata:
 spec:
   connection:
     managed:
-      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      leader: {}
       members:
         - nodeSelector:
             kvcache-vram: "true"
-          medium: VRAM  # accounting-only for custom USE_VRAM_SEGMENT=ON images
+          medium: VRAM  # custom USE_VRAM_SEGMENT=ON image required
           image: custom-registry.example/mooncake-vram:0.3.14-cuda13.0
-          capacityPerMember: 8Gi  # leave this memory free in the engine's GPU budget
+          capacityPerMember: 8Gi
           extraEnv:
             - name: NVIDIA_VISIBLE_DEVICES
-              value: all
+              value: all  # requires accept-nvidia-visible-devices-envvar-when-unprivileged or runtimeClassName: nvidia
 ```
 
-`NVIDIA_VISIBLE_DEVICES` works only when `accept-nvidia-visible-devices-envvar-when-unprivileged` is
-on; otherwise set *`runtimeClassName: nvidia`*.
-
-**A VRAM group may also carry a [local disk tier](local-disk-tier.md), and that combination is
-measured on NVIDIA.** Objects written past a 256Mi device segment left memory for the tier and read
-back with matching digests. No upstream test covers the pairing, so the reading is this project's own.
-**The equivalent on Ascend (`cann`) and AMD (`rocm`) is still unmeasured.** Treat the pairing as
-verified on NVIDIA and unverified elsewhere.
+Pairing a custom `VRAM` group with a [local disk tier](local-disk-tier.md) is verified on NVIDIA
+and unmeasured on Ascend and AMD.
 
 ## Status and conditions
 
+Inspect backend phase, client endpoint, observed capacity, and conditions:
+
 ```bash
 kubectl get kvcb
+kubectl describe kvcb <name>
 ```
 
 Captured output:
@@ -615,381 +244,68 @@ NAME            TYPE       PHASE   ENDPOINT                                     
 mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051  12Gi
 ```
 
-Phases: `Provisioning`, `Ready`, `Degraded`, `Error`, `Deleting`. `Ready` carries no
-*`phaseMessage`*; every other phase carries one.
+Phases are `Provisioning`, `Ready`, `Degraded`, `Error`, and `Deleting`. Status polls the leader
+every `15 s`; *`status.capacity`* comes from live leader metrics once `service_ready` is `true`,
+never from multiplying *`capacityPerMember`*.
 
-Conditions report independent aspects of backend health: `LeaderAvailable`, `MembersMounted`, `CapacityObserved`, `PoolWrites`, `Deletable` and
-`RolloutComplete`. Two more appear only where they have something to judge: `ElectionObserved`
-when *`leader.electionBackend`* is `Kubernetes` (including at one replica), and
-`TierWasEmpty` when a member group carries a [local disk tier](local-disk-tier.md).
+| Condition | Moves phase | Meaning and action |
+|---|---|---|
+| `LeaderAvailable` | Yes | Leader health check passed. If `False`, inspect leader `Deployment` `Pod`s or external `Admin` reachability. |
+| `MembersMounted` | Yes | Ready member `Pod`s match listed segments. On `AmbiguousMemberIdentity`, move host-network groups onto disjoint `Node`s; pre-`0.3.12` masters report `Unknown/SegmentListingNotServed`. |
+| `CapacityObserved` | Yes | Leader `:9003/metrics` scraped while ready. If `False`, check leader admin port reachability. |
+| `PoolWrites` | Yes | `True` after a put completes or `allocator_used_bytes > 0`; `False` if puts revoke with zero allocated bytes (retry initial writes after tenant ledger propagation). |
+| `Deletable` | Yes | `False` while *`status.usedBy`* names live `KVCachePool` or `KVCachePoolBinding` objects; delete those consumers first. |
+| `RolloutComplete` | No | Informational: `False` while an `OnDelete` member `DaemonSet` rollout is incomplete. |
+| `ElectionObserved` | No | Informational (under `electionBackend: Kubernetes`): confirms `Lease` holder observation. |
+| `TierWasEmpty` | No | Informational (when *`localDisks`* is set): records whether the disk directory started empty. |
 
-**Those last three do not move the phase, and that is deliberate.** A rollout in flight, an election
-that has not happened, and a disk tier found holding data are all states in which the backend serves
-normally. Reporting them as `Degraded` would put a storage arrangement in the same field as a
-leader nobody can reach. Read the conditions for them; the phase will not tell you.
+Pool and binding usage fields lag leader `:9003/metrics` and `/api/v1/tenant_quotas` by one
+reconcile pass. For disk-tier write checks, see [Bucket writes](local-disk-tier.md#bucket-writes).
 
-**A member that is starting is not a shortfall; a member that is stuck is one.** A `Pod` still pulling
-its image is left alone. Holding it against the backend would report `Degraded` for the length of
-every rollout. But one whose container will not start, or that no node will take, is never going to
-arrive, so it reads `Degraded` even while the other members serve, and *`phaseMessage`* carries that
-`Pod`'s own reason.
+## Group resizing
 
-**A member reads Ready only once its segment is mounted.** Its container carries a readiness probe
-that connects to the entrypoint's REST port, and the entrypoint mounts the segment *before* it serves
-that port. Readiness is therefore evidence of the mount, not of the process.
+Widening *`members[].nodeSelector`* adds member `Pod`s without restarting existing ones; existing keys
+do not rebalance (`allocationStrategy: FreeRatioFirst` steers new writes toward emptier members).
+Editing image, argv, environment, resources, or fabric settings updates the `OnDelete` `DaemonSet`,
+requiring manual `Pod` deletion to roll each `Node`.
 
-> **Why the probe is load-bearing** — without it the kubelet reports Ready as soon as the container
-> runs. Every ready member `Pod` is held to the leader's listing, so that window would read as a
-> shortfall and move a healthy backend to `Degraded` for the length of every rollout.
-
-**A listing too large to publish is withheld, never truncated.** Past what *`status.members`* can carry,
-the phase reads `Degraded` with reason `ListingTooLarge` and the previous listing is kept.
-
-> **Why** — every entry is republished on each pass, so publishing past the object size the API server
-> accepts would make every status write fail from then on while the read that produced it reported
-> success. A truncated list would be worse: it reads exactly like a backend that lost members.
-
-**Status is polled every 15 seconds, not only refreshed on events.** Everything above is read over
-HTTP from the leader, and a store whose contents move while its `Pod`s sit still produces no Kubernetes
-event at all. An external backend produces none ever, since this operator owns no workload for it.
-So `kubectl get kvcb -w` moves on its own.
-
-> **15 seconds is an interval, not a maximum age.** The timer starts after a pass finishes, and a
-> pass makes up to three sequential HTTP reads. More importantly, *`status.members`* is **deliberately
-> retained** when a read of the segment listing fails (a stale list plus `MembersMounted=False` is
-> more honest than an empty one), so it has no age bound at all while that read keeps failing. The
-> condition is what says whether the list was refreshed; the list alone never does.
-
-**Capacity is observed, not derived.** *`status.capacity`* is read from the leader's own counters,
-never from what the spec declares. Nothing multiplies *`capacityPerMember`* by a replica count. A
-backend with no disk tier reads `master_total_capacity_bytes`; one **with** a tier reads that plus
-`master_total_file_capacity_bytes`. Adding two **observed** families is not the same thing as
-adding up what members were asked to provide.
-
-***`status.capacity.total`* is capacity, not usage**, and a disk tier contributes the ceiling the
-member declared (published as soon as the member registers, before anything is written there).
-
-`PoolWrites` reports pool-wide write activity. `True` means the leader has seen a put end since
-its current process started, or a member reports positive `allocator_used_bytes`. `False` means
-the leader has seen both a put start and a put revoke while every member reports zero allocated
-bytes. `Unknown` covers no put start, an unfinished put, or a missing reading.
-
-The process lifetime is the observation window because these counters reset when the leader
-restarts; a single status poll could miss a short write.
-
-This condition does not identify which deployment attempted a write, and a previous failure in that
-window does not prove that every current write fails.
-
-To ask whether the **disk** tier is holding data, the figure to read is not on the CR at all. See
-[Bucket writes](local-disk-tier.md#bucket-writes).
-
-**Capacity is absent (not zero) while the leader is starting.** `/metrics` is ungated: a leader
-that is up but not serving answers 200 with a well-formed exposition whose gauges all read zero, and a
-zero is indistinguishable at the parser from a genuinely empty cache. Publishing is therefore gated on
-`service_ready`, not on the scrape succeeding.
-
-*`status.members[]`* is read from the leader's segment listing, one entry per **listed** segment. Each
-row carries the leader's *`segmentID`*, *`clientID`* and advertised *`segmentName`*; the list is keyed by the
-unique segment ID because several members may legitimately share a name.
-
-The leader is what allocation goes through, so a running member `Pod` it does not list holds nothing
-and is counted in `MembersMounted`'s message instead. The fields the listing cannot supply
-(node name and medium) are joined in from the member `Pod` behind that segment, and left **empty**
-rather than guessed when nothing matches.
-
-**Two ready host-network member `Pod`s that share an address make `Pod` attribution ambiguous.** Their
-rows remain publishable because their segment and client IDs are distinct, but neither `Pod` exposes
-the ID that maps a row back to it. `MembersMounted` goes `False` with reason
-`AmbiguousMemberIdentity`; each row still carries the node and the medium its candidates **agree**
-on, neither being a fact about one `Pod`, and leaves empty whichever of the two they dispute.
-
-Two groups on one node do **not** collide by themselves. A `TCP` member advertises its own `Pod` IP, so
-each segment carries a distinct name even though both `Pod`s answer to the node's name; the collision is
-on host-network paths (`RDMA`, `EFA`, and `CANN` with *`fabricInterfaceCount`*), where both `Pod`s
-hold the host's network namespace and advertise the node's address.
-
-The remedy is to give the groups node selectors that keep them on different nodes.
-
-A failed listing scrape **keeps** the previous list and sets `MembersMounted=False`; a failed capacity
-scrape **clears** the figures. That asymmetry is deliberate: capacity is two pointers and has an
-"absent" that means *not observed*, while an empty list is a legible value meaning *no segments*, so
-clearing it would publish a falsehood.
-
-Mooncake masters before 0.3.12 do not report segment membership. They can serve requests and
-report `Ready` while `MembersMounted` is `Unknown/SegmentListingNotServed` and *`status.members`*
-is empty. Waiting does not add a capability missing from that version.
-
-Other listing failures, including server errors or an unreachable master, report `ListingFailed`
-and retain the previous member list.
-
-`PoolWrites` on such a leader is still `True` once it has seen a put end, since that counter is on
-`/metrics`; before that it is `Unknown` with the same reason, because its other verdicts read the
-members' allocations off the listing.
-
-Two states still read `MembersMounted=False` and `Degraded` there: a member `Pod` that will not start,
-read from the `Pod`'s own status, and a *`status.capacity.total`* of zero, reported as `NoSegments`
-(the gauge sums the mounted segments, so zero is every member unmounted).
-
-## Resizing a group
-
-**Widening *`members[].nodeSelector`* adds members without restarting the ones already running.** The
-`DaemonSet` places a `Pod` on each newly matching node; every existing `Pod` keeps its UID and its restart
-count, leader included.
-
-The `DaemonSet` uses `OnDelete`. Widening the selector preserves the other Pod template fields.
-An image, argv, environment, resource or fabric change recreates every member.
-
-A departing `Pod` uses its original template, including its shutdown hook, grace and environment.
-To apply a setting before a shrink, change it first and wait for member recreation.
-Check that the pod-spec-hash annotation changes. Then narrow the selector or remove the group.
-This sequence applies to *`scaleIn.gracePeriodSeconds`*.
-
-**Existing objects are not rebalanced.** How fast the cluster converges onto a new member depends on
-*`allocationStrategy`*: `FreeRatioFirst` (the default) biases new writes toward the emptier member,
-`Random` does not.
-
-### Group identity by position
-
-A group has no name. Its position in *`members`* determines its `DaemonSet` name, selector labels
-and HTTP port. Moving an entry changes its spec without moving those identifiers.
-Admission refuses recognized group moves and names both positions:
+Shrinking a group or narrowing *`nodeSelector`* **discards** cached keys on removed `Node`s. Member
+groups are indexed by list position:
 
 | Edit | Outcome |
 |---|---|
-| swapping two entries | refused |
-| removing a group ahead of others, which shifts the rest up | refused |
-| appending a group | allowed |
-| removing from the **end** of the list | allowed |
-| editing a group in place, including widening its *`nodeSelector`* | allowed |
+| Reordering entries or deleting an entry before the tail | Refused at admission |
+| Appending or removing at the end of *`members`* | Allowed |
+| Editing in place (including narrowing *`nodeSelector`* to zero `Node`s) | Allowed |
 
-To take a group out of service, narrow its *`nodeSelector`* until it matches no node.
-The group keeps its position, later groups keep their `DaemonSet`s, and nothing is rebuilt.
-A `DaemonSet` selector is immutable; changing it requires recreation and loses its cache.
+To retire a middle group without shifting later indices, narrow its *`nodeSelector`* to match zero
+`Node`s. Before shrinking a group with *`localDisks`*, set *`scaleIn.gracePeriodSeconds`* (`0` to
+`3600`, setting `Pod` termination grace to `gracePeriodSeconds + 60`) and roll the `Pod`s so the
+`preStop` hook deregisters segments cleanly:
 
-**The rule recognises a group that arrived unchanged at a position another group left; it does not
-recognise every reorder.** Without a name there is nothing else to recognise a group by, so two shapes
-are knowingly admitted:
-
-- a reorder **combined with an edit** to the same group, which is indistinguishable from two ordinary
-  edits;
-- removing a group when a **later group is identical** to the one taking its place, `[A, B, C]`
-  becoming `[A, C, C]`. That produces the same two lists as editing position 1 to match an unchanged
-  position 2, which is how the second of two look-alike groups is taken out of service, so refusing
-  it would forbid the operation recommended above. `[A, B, C]` to `[A, C]`, with no look-alike to
-  arrive in the gap, is still refused.
-
-Both admitted shapes leave two identical groups in *`members`*. A plain reorder is refused.
-
-Shrinking a group discards the cache held by the removed members. Narrowing the selector or
-removing a node immediately unmounts its segment; the operator does not migrate its cached data.
-The termination grace period gives the process time to finish shutdown and does not preserve
-that data.
-
-***`scaleIn.gracePeriodSeconds`* holds the process, not the tier.** A member with a
-[local disk tier](local-disk-tier.md) gets a `preStop` hook that deregisters the tier with the
-leader and then waits out the grace. A group with no tier renders no hook and the setting is inert.
-
-With the example image, deregistration takes effect when the hook runs. A key held only by that
-tier becomes a clean miss immediately, and the process waits for the full configured period even
-if no reads remain. Size the period for the departing member's local work.
-
-This timing is specific to the example image. *`spec.image`* selects the backend implementation;
-other images may deregister later or wait differently. The operator controls the value sent to
-the endpoint.
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: KVCacheBackend
-metadata:
-  name: mooncake-dram
-spec:
-  connection:
-    managed:
-      leader: {}  # replicas, allocationStrategy and multiTenancy default
-      members:
-        - nodeSelector:
-            kvcache-dram: "true"
-          medium: DRAM
-          capacityPerMember: 64Gi
-      scaleIn:
-        gracePeriodSeconds: 30  # 0 to 3600 seconds
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: KVCacheBackend
+ metadata:
+   name: mooncake-dram
+ spec:
+   connection:
+     managed:
++      scaleIn:
++        gracePeriodSeconds: 30  # 0..3600; applies to localDisks groups
 ```
 
-**The `Pod`'s termination window is derived from it**, as `gracePeriodSeconds + 60`, rather than being
-a second field beside it. That is what makes the relationship hold: two independent fields could be
-set so the kubelet kills the container in the middle of the wait, and no validation makes that
-impossible. It only makes it checkable.
+## Operations
 
-The upper bound of 3600 is the member endpoint's own; above it the call is refused with a `400`, so a
-larger value would render a hook that fails every time it runs. None of it makes a shrink lossless:
-the memory segment is still dropped, and the disk tier stops answering as soon as the hook runs.
-
-Migrating a member's data before it leaves (the store's drain job API) is **not** offered here. It
-is stateful orchestration, and it reaches only the memory and NVMe-oF replicas: it cannot name the
-segments of the disk-backed ones and skips those keys without counting them as blocked, so **a drain
-over a backend with a disk tier reports success while leaving that tier's data where it was**. Its
-own success signal does not tell you that happened.
-
-## External mode
-
-*`connection.external`* points at a backend somebody else runs. The operator creates **nothing**
-(no `Deployment`, no `Service`, no `DaemonSet`) and only observes.
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: KVCacheBackend
-metadata:
-  name: external-mooncake
-spec:
-  connection:
-    external:
-      endpoints:
-        - name: Client
-          address: mooncake.example:50051
-        - name: Admin
-          address: mooncake.example:9003
-```
-
-Both roles are required, so the list holds exactly two entries: entries are keyed by `name`, which
-has two values, and admission refuses a list missing either one. Each address is validated as
-`host:port` at admission. A blank or portless one would otherwise be mirrored into status and
-handed to an engine that cannot dial it.
-
-**`Admin` is what this operator reads** (health, metrics and the segment listing), and **`Client` is
-what an inference engine connects to**. The addresses are mirrored into *`status.endpoints`* unchanged.
-
-Two behaviours differ from the managed mode:
-
-- **An address that does not answer is reported as an `Error`, not as a backend still starting.** A
-  managed leader is excused while its own `Deployment` has no ready replica; an external address was
-  declared to name something that already runs, so there is no `Pod` to wait on and a mistyped endpoint
-  would otherwise sit at `Provisioning` forever.
-- *`status.members[]`* carries **no** node name or medium, because those `Pod`s are not this operator's to
-  look up. Capacity is the **sum of both pools**, since an external object names no medium to pick one
-  by.
-- **A redirect from the `Admin` address is never followed.** That address belongs to whoever wrote
-  the spec, and honouring a `3xx` from it would read some other host with the operator's network
-  identity, then copy an excerpt of the answer into a status readable by anyone who can read the
-  object. The redirect is reported as the response it is.
-
-### Two objects, one leader
-
-**Two `KVCacheBackend` objects may name the same leader, and nothing in the operator notices.** For
-a managed backend the object *is* the leader, so two objects are two leaders. For an external one the
-object is a **declaration of addresses**, and one leader is reachable under more than one spelling:
-by `Service` name in one object and by IP in another, with or without a trailing dot or an explicit
-default port.
-
-> **Why no check** — every identity the operator could compare is either editable or needs the leader
-> reachable at admission. The comparison cheap enough to run (byte-identical addresses) catches the
-> copy-paste case and misses the one a real deployment produces, which is the same leader spelled two
-> ways. A check that catches the easy half invites the reader to trust it for the other half. This is
-> tracked in [issue #288](https://github.com/gpustack/gpustack-operator/issues/288).
-
-**Three consequences follow, and the third is the one to read before deciding the duplication is
-safe.** The reuse-domain uniqueness rule is enforced between Bindings whose pools name the **same
-backend object**, so two Bindings reaching one leader through two objects are both admitted on one
-*`domain.name`*:
-
-1. **The quota of a shared domain flips and never settles.** The leader keeps one ledger entry per
-   tenant, and each pool's reconciler converges that entry toward its own Binding's *`quota.ceiling`*
-   **on every pass**. Each pass reads the other's figure, finds it wrong, and writes its own back.
-2. **The symptom of an undersized quota is a low hit rate and nothing else.** Exceeding a tenant's
-   quota does not refuse the write: the store frees room by dropping that tenant's own older objects
-   and retries, irreversibly and **without any counter moving**. So the flipping above never surfaces
-   as an error. It surfaces as a cache that keeps losing content nobody asked it to lose.
-3. **Two Bindings on one *`domain.name`* with a different *`blockSize`* or `dtype` corrupt each
-   other's blocks.** The reuse identity an engine is handed is the domain **name alone**. Each
-   Binding hands its own [`dtype`](pool.md#engine-dtype) to its own
-   engines, and *`blockSize`* reaches no engine at all. So two differently-shaped caches land under
-   one identity, which is [the silent cache pollution](../model-deployment/configuration.md#inherited-reuse-domain)
-   a wrong *`blockSize`* or `dtype` causes, reached here without either value being wrong.
-
-If you point two objects at one leader, either keep their pools' Bindings on **different**
-*`domain.name`* values, or make sure every Binding that shares a name also shares its *`blockSize`*,
-`dtype` and *`quota.ceiling`*.
-
-## Operating notes
-
-**`replica_num` is engine-side.** How many replicas of a stored object Mooncake keeps is a per-`Put`
-argument the caller supplies through its connector configuration. It is not controllable from this CR.
-
-**One benign startup line, documented so nobody files it as a bug.** It appears on every client start
-and is harmless:
-
-```
-E transfer_metadata.cpp:991] Local segment descriptor not found
-```
-
-**Client-side environment settings**, observed at startup:
-
-```
-MC_TE_METRIC=1                        enable transfer-engine metrics (OFF by default)
-MC_STORE_CLIENT_METRIC_BANDWIDTH      client bandwidth summary
-MC_STORE_MEMCPY                       unset => auto-detected ("TCP-only environment, memcpy enabled")
-MC_METADATA_SERVER / P2PHANDSHAKE     the transfer engine's own low-level metadata knob
-```
-
-**`MC_TE_METRIC` is rendered on every member group and cannot be turned off from the CR.** The other
-three are set on the *workload* and not here. It is reserved in *`members[].extraEnv`* for the reason
-every rendered name is: the environment override appends, and a container carrying one name twice leaves the winner
-to the runtime.
-
-The switch reports throughput and a task-latency distribution to the container log, on an interval
-that prints nothing when nothing moved. The leader's Prometheus surface counts keys and bytes and
-measures no data plane, so without it the receiving end of every transfer is unmeasured while the
-sending end already reports.
-
-`MC_METADATA_SERVER` is **not** the variable this operator renders. The member is configured
-through the store client's key, `MOONCAKE_TE_META_DATA_SERVER`. Two names for the metadata plane is
-exactly the near-miss that gets one of them typed into a template.
-
-**A backend in use cannot be deleted.** While *`status.usedBy`* names a consumer the finalizer holds,
-the object stays at `phase: Deleting` with the claimant named in its message, and the workloads keep
-running. Clearing the last claim lets the teardown complete.
-
-**A backend in use also cannot have *`leader.multiTenancy`* turned off.** The webhook refuses the edit
-while *`status.usedBy`* names a consumer, and the refusal names them. Remove the consumers first. See
-[KV Cache Pools and Bindings](pool.md#operating-notes) for what the withdrawal costs on their side.
-
-> **Why** — the flag decides whether the master keeps a per-tenant ledger, and a consumer's quota is
-> both written and released through that ledger. Withdrawing it under a live consumer therefore takes
-> away the way that consumer is unwound, and the cost only appears when something is deleted. The
-> refusal reads *`status.usedBy`* as it is written, not as it resolves: an entry naming an object that
-> no longer exists refuses the edit too, and that list is where it is cleared.
-
-**The teardown deletes the workloads first, and the object disappears last.** The leader `Deployment`,
-its `Service` and every member `DaemonSet` go before the finalizer comes off. It waits for them to be
-**gone**, not merely for the deletes to be accepted, so the object going away means the backend is
-gone rather than scheduled to be.
-
-> **Why not leave it to ownership** — they are owned dependents, so the collector would reach them
-> either way. But between the finalizer coming off and it running, the leader is still serving on an
-> address nothing accounts for. Ownership is the safety net, not the mechanism.
-
-**That wait is bounded, one workload at a time.** Each gets the termination grace its own `Pod` template
-declares plus a couple of minutes, timed from its own deletion timestamp. Past that it stops being
-waited for, and a warning Event on the workload names the nodes its `Pod`s are still terminating on.
-Deleting a backend therefore finishes even when a node it ran on has stopped answering.
-
-> **Why its own grace and not one number** — a member group with a disk tier derives its `Pod`'s grace
-> from *`scaleIn.gracePeriodSeconds`*, which reaches an hour, so any constant short enough to bound an
-> unreachable node would abandon a group draining exactly as configured. That grace works as the clock
-> because the kubelet treats it as a hard kill deadline: a `Pod` outliving it is not a slow one, it is
-> one whose kubelet is not acting.
-
-**Only objects carrying this backend's own note are deleted.** The names are derived, so an unrelated
-object can hold one, and a delete has to be surer than a name. The member sweep finds its `DaemonSet`s
-by the same note it then checks, rather than by the identity labels. Discovering on one key and
-judging on another is how an object goes missing from its own teardown.
+- **Benign client warning**: `E transfer_metadata.cpp:991] Local segment descriptor not found` logs
+  once on engine startup and is harmless.
+- **Reserved metrics env**: `MC_TE_METRIC=1` is rendered on every member group and refused in
+  *`members[].extraEnv`*. Configure `replica_num` on the engine client, not on `KVCacheBackend`.
+- **Consumer holds**: While *`status.usedBy`* is non-empty, deletion waits in `Deleting` (leaving
+  workloads running) and disabling *`leader.multiTenancy`* is refused.
 
 ---
 
-**See also** — [KV Cache Election and Failover](leader.md) (the metadata process, its probes and its
-`Lease` election) · [KV Cache Local Disk Tier](local-disk-tier.md) (the optional disk layer on a member
-group, and the bucket that is its write unit) · [KV Cache Pools and Bindings](pool.md) (how a namespace is granted
-a quota on this store, and what a quota ceiling buys) · [Admission](../devices/admission.md) (the gates and the four-view status pattern) ·
-[Settings & Environment Variables](../../reference/settings.md) (the `kv-cache-backend-image` `Setting`) ·
-[Installation Modes](../../operate/installation-modes.md) (why the CRD is applied by the worker, not the chart)
+**See also** — [KV Cache Election and Failover](leader.md) (metadata leader, probes, and `Lease` election) · [KV Cache Local Disk Tier](local-disk-tier.md) (disk buckets, cleanup, and disk-heavy `Node`s) · [KV Cache Pools and Bindings](pool.md) (namespace grants and reuse domains) · [Installation Modes](../../operate/installation-modes.md) (chart and worker CRD ownership)
 
-**Next** → [Internals](../../contribute/internals.md) — startup ordering and the invariants that fail silently.
+**Next** → [KV Cache Local Disk Tier](local-disk-tier.md) — add local NVMe offload to a member group.

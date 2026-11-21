@@ -1,27 +1,26 @@
 # KV Cache Pools and Bindings
 
-A `KVCacheBackend` runs a store. A `KVCachePool` publishes one, and a `KVCachePoolBinding` gives a
-namespace a quota on it under one reuse domain.
+A `KVCacheBackend` runs the store, a cluster-scoped `KVCachePool` publishes its capacity, and a
+namespaced `KVCachePoolBinding` grants a namespace a byte ceiling under one reuse domain.
 
-**A Binding provisions capacity; it does not enforce access.** See
-[Limitations](#limitations) before treating it as an isolation boundary.
-
-Two vocabularies meet here, as on the backend page. This API says **reuse domain**; the store says
-**tenant**, and every flag, metric and error keeps the vendor's spelling.
+**A Binding provisions capacity; it does not enforce network isolation.** Review
+[Limitations](#limitations) before sharing one backend across untrusted tenants. In GPUStack APIs,
+the tenant partition is called a *reuse domain*; Mooncake flags, metrics, and errors call it a
+*tenant*.
 
 ## Contents
 
-- [Two kinds by scope](#two-kinds-by-scope)
+- [Pools and bindings](#pools-and-bindings)
+- [Cache reuse domains](#cache-reuse-domains)
 - [Capacity grants](#capacity-grants)
-- [One Binding, one domain](#one-binding-one-domain)
-- [Domain immutability](#domain-immutability)
-- [Ceiling and grant](#ceiling-and-grant)
-- [Full-quota behavior](#full-quota-behavior)
-- [Quota policy file](#quota-policy-file)
-- [Zero grants](#zero-grants)
-- [Operating notes](#operating-notes)
+- [Pod injection](#pod-injection)
+- [Quota and deletion checks](#quota-and-deletion-checks)
+- [Limitations](#limitations)
 
-## Two kinds by scope
+## Pools and bindings
+
+`KVCachePool` and `KVCachePoolBinding` mirror `ClusterQueue` and `LocalQueue`: the cluster object
+owns backend capacity, and the namespaced object grants quota and RBAC scope to one namespace.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -29,10 +28,10 @@ kind: KVCachePool  # cluster-scoped, short name kvcp
 metadata:
   name: shared-dram
 spec:
-  backends:  # exactly one
+  backends:  # required; single-item list naming one KVCacheBackend
     - mooncake-dram
   quota:
-    total: 900Gi
+    total: 900Gi  # optional pool quota target
 ---
 apiVersion: worker.gpustack.ai/v1
 kind: KVCachePoolBinding  # namespaced, short name kvcpb
@@ -40,370 +39,271 @@ metadata:
   name: team-a
   namespace: team-a
 spec:
-  poolRef:
+  poolRef:  # required; immutable
     name: shared-dram
   quota:  # required
-    ceiling: 600Gi
+    ceiling: 600Gi  # requested ceiling; effective grant scales proportionally on oversubscription
   domain:  # required; all fields are immutable
-    name: qwen-72b-v2  # optional; defaults to "default"
-    blockSize: 64
-    dtype: fp8_e4m3
+    name: qwen-72b-v2  # optional, default: "default"
+    blockSize: 64  # required
+    dtype: fp8_e4m3  # required; "auto" refused on new Bindings
 ```
 
-The object split mirrors the scheduling chain: **`ClusterQueue` : `LocalQueue`**. A cluster-scoped
-`KVCachePool` owns capacity, while a namespaced `KVCachePoolBinding` grants namespace quota and RBAC
-scope.
+## Cache reuse domains
 
-- **Pool *`spec.backends`***: Required single-item list naming one `KVCacheBackend`; a pool cannot span multiple stores.
-- **Binding *`spec.poolRef.name`***: Required target `KVCachePool` name that grants capacity to the Binding namespace.
-- **Binding *`spec.quota.ceiling`***: Required requested ceiling in bytes. The effective grant can be lower; enforcement requires a tenant ledger.
-- **Binding *`spec.domain`***: Required immutable reuse domain (`name`, `blockSize`, `dtype`) registered as the store tenant ID.
+Each `KVCachePoolBinding` registers one reuse domain on its backend's leader:
+
+- **Default name**: Omitting *`spec.domain.name`* registers `default`. Two Bindings omitting
+  *`domain.name`* on the same backend collide, so name each domain when multiple Bindings share a
+  leader.
+- **Per-leader uniqueness**: Admission rejects a Binding whose *`domain.name`* is already claimed by
+  another Binding on the same `KVCacheBackend` (even across different `KVCachePool`s). Separate
+  backends keep separate ledgers and can reuse names.
+- **Multi-tenancy requirement**: Admission rejects a second distinct domain when the backend has no
+  tenant ledger (`leader.multiTenancy: false` or observed absent). When ledger support is unconfirmed,
+  admission warns and requires an engine image meeting [Tenant compatibility](#tenant-compatibility).
+- **Admin-only registration**: Workloads cannot mint new tenants at runtime; an unregistered domain
+  receives `TENANT_NOT_REGISTERED`.
+
+The pool lists registered domains in *`status.domains`*. On the Binding, `DomainExclusive` confirms
+name ownership and `QuotaGranted` confirms a positive effective grant.
+
+### Immutable domain fields
+
+*`spec.poolRef`* and every field under *`spec.domain`* (*`name`*, *`blockSize`*, and *`dtype`*) are
+immutable after creation because changing them strands ledger entries or corrupts cached block
+layouts. Delete and recreate the Binding to change them; existing cached blocks do not carry over.
+
+### Engine cache precision
+
+When the `model-deployment-kv-cache-dtype-owned` `Setting` is `true` (default), the operator passes
+*`spec.domain.dtype`* verbatim as `--kv-cache-dtype <dtype>` to every managed `ModelDeployment` role
+and [injected `Pod`](#pod-injection), refusing conflicting user flags
+([Operator-owned keys](../model-deployment/configuration.md#operator-owned-keys)).
+
+> **Why**: Store keys omit the element type, and an engine reading a narrower cached block into a
+> wider buffer receives a partial payload without an error.
+
+- **`auto` refusal**: Admission rejects `dtype: auto` on new Bindings because different models
+  resolve `auto` to different types. Legacy `auto` Bindings remain updatable; see
+  [Upgrading to an Enforced Binding Dtype](../../operate/migration/enforced-binding-dtype.md).
+- **Cross-engine spelling**: When both engines share one Binding, pick a shared spelling
+  (`bfloat16`, `fp8_e4m3`, `fp8_e5m2`, or `nvfp4`).
+
+| Engine | Accepted `dtype` values | Rejected aliases |
+|---|---|---|
+| `vLLM` (including Ascend) | `bfloat16`, `float16`, `fp8`, `fp8_e4m3`, `fp8_e5m2`, `fp8_inc`, `fp8_ds_mla`, `nvfp4` | `bf16` |
+| `SGLang` | `bfloat16`, `bf16`, `fp8_e4m3`, `fp8_e5m2`, `mxfp8`, `nvfp4`, `fp4_mx_block16` | `fp8`, `float16` |
+
+Values above reflect vLLM `v0.29.0` and SGLang `v0.5.18`; the running engine image is authoritative.
 
 ## Capacity grants
 
-**A namespace without a Binding has no quota on the pool.** An administrator creating the Binding is
-the act that provisions the two things a namespace needs, a ceiling and a registered reuse domain,
-which is why it is a separate object rather than a field on the pool or a name a workload types.
+A namespace has no quota on a pool until an administrator creates a `KVCachePoolBinding` in that
+namespace. The Binding registers *`spec.domain.name`* as a tenant ID in the store's ledger and sets
+its ceiling.
 
-A workload reaches the cache by sending the **reuse domain name** its Binding registered: that
-string is the store's tenant id, and it is what the store keys the cache on. Two workloads sending
-the same domain share one cache and one ledger entry; two sending different domains do not. Nothing
-at runtime takes a Binding *name*; the Binding is what put that domain on the store and what
-accounts for it.
+At runtime, workloads send the reuse domain name, not the Binding name. Workloads sharing a domain
+name share cached blocks and one quota ledger; workloads with distinct domains keep separate caches
+and ledgers.
 
-> **Why** — a pool name a workload could type would make its quota a spelling question. Here it is an
-> object an admin has to create in that namespace, so it is RBAC-able on its own.
+### Requested and effective quota
 
-### Limitations
+*`spec.quota.ceiling`* is the requested namespace limit (required because the store rejects tenants
+without a policy). *`status.effectiveQuota`* is the byte grant computed by the store:
 
-**It is not an isolation boundary, and nothing here enforces one.** The store is reached over a
-`Service` any `Pod` in the cluster can dial, no credential is derived from this object, and nothing ties
-a tenant id to the identity of whoever sent it. A workload that knows another namespace's domain name
-**can read and write that domain's cache today**, whether a Binding covers it or not.
+- **Within allocatable capacity**: *`effectiveQuota`* equals *`ceiling`*.
+- **Oversubscribed**: The store scales each domain's grant proportionally to its requested
+  *`ceiling`*.
 
-A tenant id must be *registered*: a multi-tenant master refuses a name absent from its ledger, and a
-Binding is what puts one there (see the next section). That constrains which names **exist**, never
-who may use one.
+On `KVCachePool`, `QuotaWithinTotal` turns `False` (`Oversubscribed`) when Binding ceilings exceed
+*`spec.quota.total`* without blocking writes. `QuotaWithinTotal=True` compares ceilings only against
+*`spec.quota.total`*; if mounted member capacity is smaller, *`effectiveQuota`* still scales down to
+what members mounted.
 
-A managed backend keeps a ledger unless it declares `leader.multiTenancy: false`, which a store image
-older than Mooncake 0.3.12 has to. See [KV Cache Backend](backend.md#gpustack-build-variants).
-An external backend keeps one only if its master was started with multi-tenancy on.
+### Full-quota behavior
 
-A backend running without multi-tenancy has no ledger and makes no such check. A `KVCachePool` over a
-*managed* backend in that state is admitted with a **warning** that no per-tenant quota is in force;
-an external backend is not inspected at admission. Once the pool reports the missing ledger, its
-workloads are configured with no tenant id at all, so every write lands in the store's default tenant.
+Reaching *`effectiveQuota`* triggers per-domain eviction rather than immediate write failures:
 
-A Binding governs who is *granted* capacity, and under which name: provisioning and accounting.
-Real enforcement needs an authenticated proxy or network isolation between workloads and the store,
-and neither exists yet. Do not place two mutually distrusting tenants on one backend and treat their
-separate Bindings as the thing keeping them apart.
+- **Silent replacement**: New writes discard unleased objects in the same domain (in arbitrary shard
+  order) while global eviction counters remain `0` and *`status.usage`* stays at *`effectiveQuota`*.
+- **Lease exhaustion (`TENANT_QUOTA_EXCEEDED`)**: Reading an object leases it (`5m` by default; see
+  [KV Cache Election and Failover](leader.md#leader-configuration)). Writes fail only when every
+  object in a full grant holds an active lease.
+- **`status.overQuota` meaning**: Because writes cannot push usage past the grant, *`overQuota`*
+  turns `true` only when a proportional recalculation cuts *`effectiveQuota`* below bytes the domain
+  already holds. Compare *`status.usage`* against *`status.effectiveQuota`* to detect saturation.
 
-## One Binding, one domain
+Neither `KVCachePool` nor `KVCachePoolBinding` exposes eviction settings or counters because store
+eviction watermarks and metrics are process-global on the leader. Configure global eviction flags in
+*`spec.connection.managed.leader.extraArgs`* ([KV Cache Election and Failover](leader.md)).
 
-*`spec.domain`* declares exactly one reuse domain, and the domain **is** the store's tenant id.
-Everything below is about *registering* a name; using one somebody else registered is a separate
-question, answered in
-[Limitations](#limitations).
+### Quota policy file
 
-- **Leaving `name` out registers `default`.** The API server stores an omitted *`spec.domain.name`*
-  as `default`, the store's own tenant for a writer that names none. On a multi-tenant master, the
-  default for a managed backend, `default` is the tenant the engines are handed, so name each domain
-  once a second Binding shares the master. On a master without multi-tenancy no tenant is forwarded,
-  so the name only records the registration. It is claimed like any other name, so two Bindings that both leave it out collide on a
-  shared master.
-- **A domain name is claimed per master.** Suppose one backend serves two pools, and a Binding on the
-  second pool names a domain the first pool's Binding already holds. Admission **rejects** that
-  Binding with a message naming the holder and the shared backend, wherever in the cluster the
-  colliding namespace lives. The same name against a pool a *different* backend serves is admitted:
-  two masters hold two ledgers, so the claims collide with nothing.
-- **A second *distinct* domain needs a master that can tell the two apart.** When the pool has
-  observed that its master holds no ledger, or a managed backend declares none, every request lands
-  in one default tenant, so a second distinct domain against it is **rejected at admission**.
-  Otherwise the Binding is admitted with a **warning**, including when the master's ledger state
-  is still unknown. The store's support is unproven, so the image must meet the
-  [engine's tenant compatibility floor](injection.md#tenant-compatibility).
-- **A workload may not *register* its own domain.** It sends a domain name at runtime, because that
-  is how the store is addressed, but a multi-tenant master accepts only names an admin already
-  registered through a Binding. Every distinct registered name is a new tenant with its own
-  ceiling, so a workload free to mint them would draw a fresh ceiling for each. Registration stays on
-  the object an admin controls; sending an unregistered name gets `TENANT_NOT_REGISTERED`, not a new
-  quota.
-- **Sharing a pool works; sharing a domain on one master does not.** Two namespaces on one pool is
-  the ordinary case. Two Bindings on one domain over one master would share cache, which is
-  sometimes the intent, but collide on one ledger, which never is.
+The pool controller renders all Binding ceilings on a backend into one seed `ConfigMap`. An init
+container copies that seed onto a writable volume (writing an empty policy document if no pool has
+bound the backend yet) so the leader can atomically rename updated policy files on admin API writes.
 
-*`status.domains`* on the pool lists the domains its Bindings registered. `DomainExclusive` on the
-Binding reports whether this Binding still holds its own name; `QuotaGranted` reports whether the
-grant it observed can serve a write at all.
+If `QuotaPolicyWritable` on `KVCachePool` is `False`, policy updates have stopped reaching the
+leader; inspect the pool condition message and leader logs.
 
-## Domain immutability
+### Unavailable store capacity
 
-Every field of *`spec.domain`* is rejected on update, and so is *`spec.poolRef`*:
+When no member segments are mounted (on initial startup or for `~5–30 s` while members remount after
+a leader restart), allocatable capacity is zero. Both the pool (`CapacityAllocatable=False`, reason
+`NothingToAllocate`) and its Bindings (`QuotaGranted=False`) leave `Ready` until segments remount so
+workloads do not treat a zero-grant store as healthy.
+
+Single-tenant backends (`leader.multiTenancy: false` or external masters without a ledger) are the
+one exception: `QuotaLedgerAvailable` reports `False/MultiTenancyDisabled` while the pool stays
+`Ready` for its single domain.
+
+## Pod injection
+
+Standalone `Pod`s can attach to a `KVCachePoolBinding` via the opt-in mutating webhook. `Pod`s
+without `kvcache.gpustack.ai/inject: "true"` are ignored.
+
+### Pod injection configuration
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: KVCachePoolBinding
+apiVersion: v1
+kind: Pod
 metadata:
-  name: cache-binding
+  name: chat-0
+  namespace: team-a
+  labels:
+    kvcache.gpustack.ai/inject: "true"  # required opt-in label; immutable
+  annotations:
+    kvcache.gpustack.ai/binding: team-a  # required KVCachePoolBinding in this namespace
+    kvcache.gpustack.ai/engine: vLLM  # required; enum: vLLM, SGLang
+    kvcache.gpustack.ai/manufacturer: ascend  # optional; vLLM only (selects vLLM-Ascend)
+    kvcache.gpustack.ai/role: Prefill  # optional; vLLM only (Prefill or Decode; omit for plain server)
+    kvcache.gpustack.ai/container: server  # required when Pod has multiple containers
 spec:
-  poolRef:  # Moving the grant leaves its bytes on the old store.
-    name: cache-pool
-  quota:
-    ceiling: 50Gi  # Required requested ceiling; the effective grant may be lower.
-  domain:
-    name: tenant  # Changing the tenant ID abandons its ledger entry and bytes.
-    blockSize: 16  # A warm cache must be read at the block size it was written with.
-    dtype: bfloat16  # Reading fp8 blocks as bf16 silently corrupts tensors.
+  containers:
+    - name: server
+      image: vllm/vllm-openai:v0.29.0
+      command:
+        - vllm
+      args:
+        - serve
+        - --model
+        - Qwen/Qwen2.5-7B-Instruct
+      resources:
+        requests:
+          memory: 16Gi  # include +128 MiB (vLLM) or +16 MiB (SGLang) staging overhead
+        limits:
+          memory: 16Gi
 ```
 
-To change any immutable field, delete the Binding and create a new one; the cache under the old domain is
-not carried over.
+- **Same-namespace scope**: `kvcache.gpustack.ai/binding` resolves only in the `Pod` namespace (`/`
+  is refused), and `inject`, `injected`, and `client-config` freeze after creation.
+- **Injected flags**: vLLM receives `--kv-transfer-config`, `MOONCAKE_CONFIG_PATH`,
+  `--kv-cache-dtype`, and `/etc/gpustack/kvcache` (never pass `kv_offloading_size`). SGLang receives
+  `--hicache-storage-backend mooncake`, `--enable-hierarchical-cache`, `--kv-cache-dtype`, and
+  `MOONCAKE_*` variables (reserving `hicache_ratio` `2.0` × device KV pool + `10 GiB` host RAM).
 
-### Engine dtype
+### Refused engine launch
 
-*`domain.dtype`* is rendered as `--kv-cache-dtype <dtype>`, **verbatim**, on every engine attached
-through the Binding: each `ModelDeployment` role the operator builds the command line of, and each
-[injected Pod](injection.md). Neither engine's store key carries the dtype, so
-without this two engines on one domain can write two element types under one key.
+The webhook fails closed when injection or pool readiness is invalid. Inspect `Warning` events on
+the owning controller (`Deployment` or `ReplicaSet`) and container logs:
 
-> **Why** — the failure is silent in one direction. A reader whose dtype is narrower than the
-> writer's asks for fewer bytes than the block holds, the store refuses the read, and the engine
-> recomputes. A reader whose dtype is wider gets the block's bytes as a success over a partly stale
-> buffer, because neither engine compares the bytes read with the bytes expected.
-
-- **The spelling is the engine's.** A Binding serving both engines needs a
-  spelling both accept: `bfloat16`, `fp8_e4m3`, `fp8_e5m2` or `nvfp4`.
-- **A spelling the engine rejects stops every new `Pod`** at argument parsing, and the dtype is
-  immutable. The recovery is under
-  [Upgrading to an enforced Binding dtype](../../operate/migration/enforced-binding-dtype.md).
-- **`auto` is refused on a new Binding.** Both engines accept it and resolve it from the model they
-  load, so it binds nothing. A Binding stored with it before the refusal stays usable and updatable.
-- **The engine is not free to disagree.** A role naming `--kv-cache-dtype` itself is refused; the
-  rule and its exceptions are under
-  [Operator-owned keys](../model-deployment/configuration.md#operator-owned-keys).
-
-All of it follows the `Setting` `model-deployment-kv-cache-dtype-owned`, on by default; turning it
-off renders and refuses nothing, as before. See [Settings](../../reference/settings.md).
-
-| Engine | Accepts |
-|---|---|
-| `vllm`, including on Ascend | `auto`, `bfloat16`, `float16`, `fp8`, `fp8_e4m3`, `fp8_e5m2`, `fp8_inc`, `fp8_ds_mla`, `nvfp4` and the rest of vLLM's `CacheDType` — **not** `bf16` |
-| `sglang` | `auto`, `bfloat16`, `bf16`, `fp8_e4m3`, `fp8_e5m2`, `mxfp8`, `nvfp4`, `fp4_mx_block16` — **not** `fp8` or `float16` |
-
-The lists are read from vLLM v0.29.0 and SGLang v0.5.18; the engine image in use is the authority.
-
-## Ceiling and grant
-
-*`spec.quota.ceiling`* is what this namespace **asks for**. *`status.effectiveQuota`* is what the pool
-**granted**, and the two differ whenever the pool is oversubscribed.
-
-- When every ceiling fits inside the pool's allocatable capacity, the grant equals the ceiling.
-- When the ceilings sum past it, the store recomputes each grant **in proportion to what was
-  requested**: a domain asking for twice as much gets twice the share of the shortfall's remainder.
-- The reduction is computed by the store, not by this operator. The operator writes ceilings into the
-  policy file and reads the resulting grants back.
-
-The pool's verdict on the sum is a Condition, not a refusal: `QuotaWithinTotal` on the pool is
-`True` while the ceilings fit within the pool's declared `total`, and turns `False` with reason
-`Oversubscribed` (naming the sum and the `total`) the moment the ceilings pass it. Nothing is
-refused; the store keeps serving, and each Binding's *`status.effectiveQuota`* is the proportional
-share already described.
-
-**`QuotaWithinTotal=True` does not promise a full grant.** It compares the ceilings with the declared
-`total`, not with the master's allocatable capacity, so the grants still fall below the ceilings
-whenever the ceilings sum past what the members have mounted.
-
-*`status.usage`* is what the master reports the domain as holding, republished as read. The operator
-caps nothing. What is bounded is the **store's charge**: it refuses a charge that would overshoot the
-grant, discarding the domain's own objects instead, so usage normally settles *at* the grant rather
-than above it. It genuinely exceeds the grant in the one case the next section describes, a grant
-recut below what the domain already holds, and is reported that way.
-
-> **Why a ceiling is required** — the store has no default quota. A tenant with no policy is refused
-> `TENANT_NOT_REGISTERED` on every write, so a Binding without a ceiling would report Ready and be
-> unusable. The field is required rather than defaulted because a guessed ceiling is a number nobody
-> chose.
-
-## Full-quota behavior
-
-**A quota is not an admission barrier. It is the point at which the store starts discarding this
-domain's own objects to make room for the next write.**
-
-- Writing eight 4 MiB objects into a 16 MiB grant produces **eight successful writes**, four
-  surviving objects, and a charge of exactly 16 MiB. Nothing reports an error.
-- The store's general eviction counters stay at **zero** throughout (this path is not on them), so a
-  dashboard watching evictions sees nothing happen.
-- A write **is** refused, with `TENANT_QUOTA_EXCEEDED`, when nothing can be discarded: reading an
-  object puts it under a lease (five minutes as this operator renders the store, adjustable per
-  backend through *`extraArgs`*; see [The leader](leader.md)), and a write while every object in a
-  filled grant holds one fails.
-
-***`status.overQuota`* does not report this, and cannot.** The store computes it as *charge exceeds
-grant* while refusing any charge that would overshoot, so writing past a grant leaves it `false`
-forever. It reports one situation: **the grant was recut below what the domain already holds**, which
-is what a proportional recomputation does when a pool's members shrink or another Binding joins.
-
-**So: do not wait on *`overQuota`* to learn that writes are being refused.** Watch `usage` against
-*`effectiveQuota`* instead, and treat a domain sitting at its grant as one already discarding objects to
-admit new ones. The order is not predictable: the store scans from an arbitrary shard and
-stops as soon as it has freed enough, so a recently written object can go before an older one, and a
-hit rate cannot be reasoned about from age.
-
-### Eviction
-
-Neither kind has an eviction field, and neither reports an eviction figure.
-
-Ratios are **process-level startup flags on the store**, and one backend may serve several pools. A
-per-pool setting is therefore unimplementable rather than merely awkward. The counter the store does
-export covers the **global** high-water eviction (not the per-domain discarding above, which is on no
-counter at all), and it is process-global, so a per-pool figure would charge a co-tenant's evictions
-here.
-
-Eviction is reached where it lives: the store's own process-level startup flags, which reach it
-through the backend's *`spec.connection.managed.leader.extraArgs`*. See
-[The leader](leader.md) for how that container is assembled. The flag names are the
-store's to document, and are deliberately not restated here.
-
-## Quota policy file
-
-The store reads tenant ceilings from a file, and this operator renders that file **whole** from the
-Bindings of every pool on that backend. A partial write is never emitted: a refused render leaves the
-previous file in place.
-
-The file lives on a **writable** volume, and that is deliberate rather than an oversight:
-
-- the store **rewrites it itself** on every admin-API change, renaming a new file over the old one;
-- a read-only mount would make the store fail that rename, and it does not degrade: it reports the
-  failure and the ledger stops accepting policy updates.
-
-A `ConfigMap` is mounted read-only alongside it as a **seed**, copied into place by an init container
-before the store starts. The pool reconciler renders the `ConfigMap`. On a backend whose multi-tenancy
-is on but that no pool has bound yet, no pool exists to render one, so the mount is optional and the
-init container then writes an **empty policy document** in its place.
-
-**The file itself is never optional**: the store is started with a flag naming it and fails
-without it. What varies is only whether its contents came from a `ConfigMap` or from that empty
-fallback.
-
-`QuotaPolicyWritable` on the pool reports whether the operator can still write that file. False means
-ceilings have stopped propagating, whatever the rest of the status says.
-
-## Zero grants
-
-A pool whose backend has **nothing mounted** has nothing to allocate. Every domain's effective quota
-is then zero and no write can succeed, so this is reported rather than left to look healthy:
-
-```
-CapacityAllocatable   False   NothingToAllocate
-  the master reports nothing to allocate, so every reuse domain's effective quota is zero and no
-  write can succeed. Its members have either not mounted their segments yet, or not finished
-  remounting them after the master restarted
+```bash
+kubectl -n <namespace> get events --field-selector type=Warning
+kubectl -n <namespace> describe rs <replicaset-name>
+kubectl -n <namespace> logs <pod-name> -c <container-name>
 ```
 
-The pool does **not** report `Ready` in this state. A zero grant that looked healthy would send a
-workload to a cache that refuses every byte it writes, with nothing in the status saying so.
+| Symptom | Expected signal | Resolution |
+|---|---|---|
+| Missing required annotation | Refusal naming `binding` or `engine` | Set `kvcache.gpustack.ai/binding` (same namespace) and `kvcache.gpustack.ai/engine` (`vLLM` or `SGLang`). |
+| Invalid role or target container | Refusal naming `Server`, missing `container`, or init container | Omit `role` on standard servers (`Server` is refused); name an app container in `kvcache.gpustack.ai/container`. |
+| Pool or ledger not ready | Refusal naming `QuotaLedgerAvailable` or `status.clientEndpoint` | Restore the `KVCacheBackend` leader and wait for `KVCachePool` *`status.clientEndpoint`*. |
+| Conflicting flag, env, or mount | Refusal naming `--kv-transfer-config`, `MOONCAKE_CONFIG_PATH`, `--hicache-storage-backend`, `--kv-cache-dtype`, or `/etc/gpustack/kvcache` | Remove the duplicate flag, env var, or mount from the `Pod` spec so it matches *`spec.domain.dtype`*. |
+| Shell `-c` or `env -S` launch | Refusal rejecting `sh -c`, `bash -c`, or `env -S` | Put the engine binary in *`command`* and its flags in *`args`*; the forwarding annotation does not override shell `-c` refusals. |
+| Wrapper script or bare `args` | Refusal rejecting bare `args` or a `.sh` wrapper | Launch the engine binary directly, or set `kvcache.gpustack.ai/launch-args-forwarded: "true"` only when the wrapper forwards appended arguments (`"$@"`). |
+| Transport mismatch | Admission `NotSupportedTransport` or vLLM-Ascend `NotImplementedError` for `tcp` | Set `spec.transport.protocol: CANN` on Ascend backends or align member group protocols. |
 
-**The condition names the reading, not a cause, because it cannot tell the two apart.** A first start
-and a restart both present as a zero capacity gauge, and the gauge is all this check reads.
+### Pod binding verification
 
-The restart case is the one that surprises. A restarted master answers its admin API in about two
-seconds and passes its readiness probe there (the probe reads the segment list, not the ledger),
-then reports a **zero** effective quota until its segments have remounted.
+Verify injection on an admitted `Pod` by reading `kvcache.gpustack.ai/injected`:
 
-**How long depends on where the replacement `Pod` lands, and the slow case is the ordinary one.**
-When the master keeps its address or returns to the node its member is on, the window is a few
-seconds. When it changes address *and* lands elsewhere, which is what a deleted `Pod` does in any
-deployment whose leader and member are on separate nodes, it is around half a minute.
+```bash
+kubectl -n <namespace> get pod <pod-name> -o jsonpath='{.metadata.annotations.kvcache\.gpustack\.ai/injected}{"\n"}'
+```
 
-**So expect the pool and every Binding on it to report `Error` for around half a minute after a
-master restarts.** That is the conditions working, not a fault to chase: the phase clears itself and
-nothing needs to be done to it. What it does mean is that a workload admitted in that window would
-have every byte refused, which is why the Bindings stop reporting Ready rather than only the pool.
+Captured output:
 
-**Every Binding on that pool reports it too, on its own `QuotaGranted`.** It is a separate
-condition from `QuotaObserved` because the master answers perfectly throughout: a grant of zero is a
-successful observation, and a Binding that reported Ready on observation alone would send a workload
-to a cache that refuses every byte, which is the reading this whole status exists to prevent.
+```text
+{"binding":"chat","engine":"vllm","vehicle":"file","domain":"team-a-chat",
+ "tenantInjected":true,"launchProgram":"vllm","launchArgsForwarded":false}
+```
 
-The same shape covers a policy file the store cannot rewrite: it cannot receive ceilings, and that
-surfaces as a False condition and a non-Ready pool rather than as a pool that quietly grants nothing.
+Confirm `"binding"` and `"domain"` match your `KVCachePoolBinding` and `"tenantInjected"` is `true`
+(for a `ModelDeployment`, also check `CacheAttached` in *`status.conditions`*). On vLLM `Pod`s,
+confirm the image carries the Mooncake store connector:
 
-A store started without multi-tenancy is the exception. A managed backend that declares
-`leader.multiTenancy: false`, or an external master started without it, has no per-tenant ledger
-at all, which is a declared single-tenant topology rather than a fault: `QuotaLedgerAvailable` reads False with reason
-`MultiTenancyDisabled`, and the pool stays `Ready` with a message saying it serves one reuse domain.
+```bash
+kubectl -n <namespace> exec <pod-name> -- python3 -c \
+  "import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print('reader present')"
+```
 
-## Operating notes
+### Tenant compatibility
 
-**A Binding's deletion can be held for several reasons, and the condition says which.** Read the
-reason on `Releasable=False` before acting. They need different remedies:
+`tenantInjected: true` confirms only that the webhook wrote `tenant_id` (vLLM) or
+`MOONCAKE_TENANT_ID` (SGLang); the engine image must also support tenant arguments:
 
-- `HeldByWorkloads` — a workload in the namespace still references the Binding (it is in
-  *`status.usedBy`*). The message names the **workloads**. Remove them; nothing needs draining.
-- `LedgerNotReleased` — the store refuses to drop the tenant while its domain is non-empty. The
-  message names the **domain**; drain it and the release completes on the next pass.
-- `LedgerRequestFailed` — a ledger request failed, leaving whether the tenant is gone unknown.
-  Draining changes nothing; read the pool's own conditions for what the master reported.
+- **Minor-line match**: Verify `pip show mooncake-transfer-engine` (or `mooncake-transfer-engine-npu`
+  on Ascend) matches the backend store's minor line ([Version compatibility](backend.md#version-compatibility)).
+- **Non-`default` domain floor**: A *`spec.domain.name`* other than `default` requires
+  `mooncake-transfer-engine >= 0.3.13`; older builds fail startup with
+  `TypeError: setup(): incompatible function arguments`.
+- **Legacy image fallback**: Omit *`spec.domain.name`* (or set `default`) when running pre-`0.3.13`
+  engine images.
 
-They are separate because the action differs: removing workloads, draining a domain and restoring
-an unanswering master are three different operations.
+## Quota and deletion checks
 
-The API accepts the deletion request. The Binding remains in `Deleting` until the hold clears.
+Compare *`effectiveQuota`* and *`usage`* with `kubectl get kvcpb` (`EFFECTIVE` and `USAGE` stay
+blank when `multiTenancy` is `false`):
 
-**A master that holds no tenant ledger releases the Binding rather than holding it.** With
-multi-tenancy declared off there is no ledger for a quota entry to be in, so the deletion strands nothing and
-completes, the same answer the pool's own teardown takes. Every other failed ledger request leaves
-whether the entry is gone unknown and holds, because a Binding released over an entry still on the
-master leaves capacity nothing can reclaim: the ledger records no owner.
+```text
+NAME     POOL          DOMAIN        EFFECTIVE   USAGE    PHASE   AGE
+team-a   shared-dram   qwen-72b-v2   450Gi       280Gi    Ready   6d
+```
 
-**A pool is held while a Binding still references it**, and a backend while a pool still claims it.
-Each layer names what to remove in its own condition message.
+When deleting a `KVCachePoolBinding` or `KVCachePool` stays in `Deleting`, inspect `Releasable=False`
+and act on the owner named by its reason:
 
-**A pool's deletion needs its master only when that master can hold a ledger.** A managed backend
-declaring `leader.multiTenancy: false` holds none, so its pools are released without asking the master, and a
-leader that never started does not hold them. On any other backend the pool may still have entries on
-the master; while the master does not answer, the pool stays `Deleting` with `Releasable=False`,
-reason `LedgerNotReleased`, and the pass is retried every 30 seconds.
+| `Releasable` reason | Cause | Resolution |
+|---|---|---|
+| `HeldByWorkloads` | Workloads in *`status.usedBy`* still reference the Binding | Delete or detach the named workloads in the namespace. |
+| `LedgerNotReleased` | Domain still holds bytes on the leader, or leader is unreachable during pool teardown | Drain the domain or restore leader `:9003` reachability (retries every `30 s`). |
+| `LedgerRequestFailed` | Admin API call failed, leaving ledger state unknown | Inspect `KVCachePool` and `KVCacheBackend` conditions and restore the leader. |
 
-**To clear that hold**, restore the master, so that it answers on its admin address,
-and the next pass completes the release. Or, once the master's ledger is known to be gone or its
-entries no longer matter, remove the finalizer by hand:
+If an external or permanently destroyed leader will never return, clear the pool finalizer manually
+(this orphans quota entries if the leader is still live):
 
 ```bash
 kubectl patch kvcp <pool> --type=merge -p '{"metadata":{"finalizers":null}}'
 ```
 
-**Removing it by hand skips what the teardown still owed.** The pool's quota entries stay on the
-master with no record of which pool created them, so nothing reclaims that capacity; the seed policy
-document keeps the pool's tenants until a sibling pool re-renders it, or indefinitely if this was the
-last pool. Its deleting Bindings are released once it is gone, and its claim no longer holds the backend.
+## Limitations
 
-**A claimed backend cannot have its multi-tenancy withdrawn**, which is refused on the backend itself.
-See [KV Cache Backend](backend.md#operating-notes) for the rule and the remedy. What it protects on
-this side is a pool's own exit: releasing a pool means releasing every quota it registered.
+**A Binding is a provisioning and accounting record, not an access boundary.** Any `Pod` in the
+cluster that can reach the leader `Service` and knows a registered domain name can read or write
+that domain's blocks without credentials. Do not place mutually distrusting tenants on a shared
+backend without external network isolation.
 
-**Read the grant, not the ceiling, when diagnosing.** `kubectl get kvcpb` prints both. The output
-below is from a multi-tenant backend, a managed one's default; on one declaring
-`leader.multiTenancy: false` there is no ledger, and
-`EFFECTIVE` and `USAGE` stay empty:
+Managed backends enable the tenant ledger by default unless `leader.multiTenancy: false` is set (required
+below Mooncake `0.3.12`; see [GPUStack build variants](backend.md#gpustack-build-variants)). When a
+backend runs without a tenant ledger:
 
-```
-NAME     POOL          DOMAIN        EFFECTIVE   USAGE    PHASE   AGE
-team-a   shared-dram   qwen-72b-v2   450Gi       280Gi    Ready   6d
-```
-
-A grant well below the ceiling is oversubscription, which is legitimate and reported. A grant of
-zero is the [Zero grants](#zero-grants) case.
+- Admission allows a `KVCachePool` on a managed single-tenant backend with a warning that per-tenant
+  quotas are inactive (external backends are discovered at reconcile time).
+- Workloads omit the tenant ID and share the store's single default tenant.
 
 ---
 
-**See also** — [KV Cache Backend](backend.md) (the store this pool publishes, and where eviction is
-configured) · [KV Cache Injection](injection.md) (how a `Pod` consumes a namespace grant) ·
-[Model Deployment](../model-deployment/configuration.md) (the other half of the
-worked pair: a rendered engine names this Binding through *`spec.kvCache.poolRef`*) ·
-[Admission](../devices/admission.md) (the gates and the four-view status
-pattern) · [Settings & Environment Variables](../../reference/settings.md)
+**See also** — [KV Cache Backend](backend.md) (store configuration and member transports) · [Model Deployment Configuration](../model-deployment/configuration.md) (attaching roles through *`spec.kvCache.poolRef`*) · [Shared Cache Walkthrough](../../walkthroughs/kv-cache/shared-cache.md) (end-to-end setup and verification)
 
-**Next** → [Accelerator Requests](../devices/requests.md) — how a workload asks for the devices it
-runs on.
+**Next** → [Accelerator Requests](../devices/requests.md) — request whole, sliced, or partitioned accelerators.

@@ -1,26 +1,34 @@
 {{- $summary := strings.TrimSpace (.RawContent | replaceRE `\s+` " ") -}}
 {{- $lines := slice (printf "# %s" .Site.Title) "" (printf "> %s" $summary) "" (printf "Documentation version: %s. Source revision: %s." .Site.Params.version .Site.Params.sourceRef) "These pages come from the repository's docs/ sources. For version-specific behavior, use the" "documentation and code for your release. This index routes questions; follow its links for evidence." -}}
 {{- $index := resources.Get "doc-index/README.md" -}}
-{{- $catalog := index (split (index (split $index.Content "## All pages\n") 1) "\n## ") 0 -}}
-{{- $optional := slice -}}
-{{- range split $catalog "\n" -}}
-  {{- if hasPrefix . "### " -}}
-    {{- $lines = $lines | append "" (printf "## %s" (strings.TrimPrefix "### " .)) "" -}}
-  {{- else if hasPrefix . "| [" -}}
-    {{- $fields := split . "|" -}}
-    {{- $link := strings.TrimSpace (index $fields 1) -}}
-    {{- $target := replaceRE `^\[[^\]]*\]\(([^\)]+)\)$` "$1" $link -}}
-    {{- $description := strings.TrimSpace (index $fields 2) -}}
-    {{- with site.GetPage (printf "/docs/%s" $target) -}}
-      {{- $entry := printf "- [%s](%s): %s" (partial "page-title.html" .) (.OutputFormats.Get "Markdown").Permalink $description -}}
-      {{- if hasPrefix $target "contribute/" -}}
-        {{- $optional = $optional | append $entry -}}
-      {{- else -}}
-        {{- $lines = $lines | append $entry -}}
-      {{- end -}}
-    {{- else -}}{{ errorf "docs/README.md indexes a page not mounted in Hugo: %s" $target }}{{- end -}}
+{{- range partial "readme-table-rows.html" (dict "content" $index.Content "heading" "All pages") -}}
+  {{- if eq .kind "heading" -}}
+    {{- $lines = $lines | append "" (printf "## %s" .title) "" -}}
+  {{- else -}}
+    {{- $row := . -}}
+    {{- with site.GetPage (printf "/docs/%s" $row.target) -}}
+      {{- $lines = $lines | append (printf "- [%s](%s): %s" $row.label (.OutputFormats.Get "Markdown").Permalink $row.description) -}}
+    {{- else -}}{{ errorf "docs/README.md indexes a page not mounted in Hugo: %s" $row.target }}{{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $lines = $lines | append "" "## Reference" "" -}}
+{{- range partial "readme-table-rows.html" (dict "content" $index.Content "heading" "Reference") -}}
+  {{- if eq .kind "row" -}}
+    {{- if or (ne (path.Dir .target) "reference") (not (hasSuffix .target ".md")) -}}
+      {{- errorf "docs/README.md Reference entry must be flat reference/*.md: %s" .target -}}
+    {{- end -}}
+    {{- $url := printf "reference/%s" (path.Base .target) | absURL -}}
+    {{- $lines = $lines | append (printf "- [%s](%s): %s" .label $url .description) -}}
   {{- end -}}
 {{- end -}}
 {{- $lines = $lines | append "" "## Optional" "" (printf "- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/%s/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors." .Site.Params.sourceRef) -}}
-{{- range $optional -}}{{ $lines = $lines | append . }}{{- end -}}
+{{- range partial "readme-table-rows.html" (dict "content" $index.Content "heading" "Contribute") -}}
+  {{- if eq .kind "row" -}}
+    {{- if or (not (hasPrefix .target "contribute/")) (not (hasSuffix .target ".md")) -}}
+      {{- errorf "docs/README.md Contribute entry must be under contribute/*.md: %s" .target -}}
+    {{- end -}}
+    {{- $url := printf "https://github.com/gpustack/gpustack-operator/blob/%s/docs/%s" $.Site.Params.sourceRef .target -}}
+    {{- $lines = $lines | append (printf "- [%s](%s): %s" .label $url .description) -}}
+  {{- end -}}
+{{- end -}}
 {{- printf "%s\n" (delimit $lines "\n") -}}

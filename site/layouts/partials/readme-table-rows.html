@@ -1,0 +1,17 @@
+{{- $parts := split .content (printf "\n## %s\n" .heading) -}}
+{{- if lt (len $parts) 2 -}}{{ errorf "docs/README.md is missing '## %s'" .heading }}{{- end -}}
+{{- $section := index (split (index $parts 1) "\n## ") 0 -}}
+{{- $items := slice -}}
+{{- range split $section "\n" -}}
+  {{- if hasPrefix . "### " -}}
+    {{- $items = $items | append (dict "kind" "heading" "title" (strings.TrimPrefix "### " .)) -}}
+  {{- else if hasPrefix . "| [" -}}
+    {{- $fields := split . "|" -}}
+    {{- $link := strings.TrimSpace (index $fields 1) -}}
+    {{- $label := replaceRE `^\[([^\]]*)\]\([^\)]+\)$` "$1" $link -}}
+    {{- $target := replaceRE `^\[[^\]]*\]\(([^\)]+)\)$` "$1" $link -}}
+    {{- $description := strings.TrimSpace (index $fields 2) -}}
+    {{- $items = $items | append (dict "kind" "row" "label" $label "target" $target "description" $description) -}}
+  {{- end -}}
+{{- end -}}
+{{- return $items -}}

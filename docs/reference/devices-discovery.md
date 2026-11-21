@@ -1,8 +1,8 @@
 # Device Discovery
 
-Node Feature Discovery publishes hardware labels, and the Device Manager records each accelerator
+Evidence: contract. Node Feature Discovery publishes hardware labels, and the Device Manager records each accelerator
 in `Devices`. These are stages 1 and 2 of the operator's discovery and scheduling chain.
-[Scheduling Chain](scheduling.md) covers capacity profiling and queue creation in stages 3 and 4.
+[Scheduling Chain](devices-scheduling.md) covers capacity profiling and queue creation in stages 3 and 4.
 
 ## Contents
 
@@ -20,7 +20,7 @@ in `Devices`. These are stages 1 and 2 of the operator's discovery and schedulin
 
 The Device Manager manages `Devices`; Kubernetes consumes them as resources.
 
-![Devices and Kubernetes resources](../../assets/diagrams/device-resource.svg)
+![Devices and Kubernetes resources](../assets/diagrams/device-resource.svg)
 
 <!--
 flowchart LR
@@ -37,12 +37,12 @@ flowchart LR
 - **card** — a manufacturer-hardware term, used only where a manufacturer's SDK models a card as
   something other than exactly one Accelerator: the Ascend DCMI card holding several devices — a level
   the [V2 DCMI API](#ascend-dcmi-generations) drops entirely — and the T-Head device-node
-  ordinal (see [T-Head MIG Operations](thead-mig.md)).
+  ordinal (see [T-Head MIG Operations](../modules/devices/thead-mig.md)).
 - **manufacturer** — the company. Its native code is *the manufacturer's library, SDK or binding*.
 
 ## Stage 1: Node Feature Discovery (NFD)
 
-NFD comes from the `node-feature-discovery` subchart, or from the cluster itself (see [Installation Modes](../../operate/installation-modes.md)). It performs the following jobs.
+NFD comes from the `node-feature-discovery` subchart, or from the cluster itself (see [Installation Modes](../operate/installation-modes.md)). It performs the following jobs.
 
 ### PCI vendor labels
 
@@ -56,7 +56,7 @@ An NVIDIA device gives `feature.node.kubernetes.io/pci-10de.present: "true"`. Th
 are `02`, `03`, `0b` and `12`, set in the chart's
 `node-feature-discovery.worker.config.sources.pci.deviceClassWhitelist`; the Device Manager's own
 scan reads the same classes, overridable through `GPUSTACK_PCI_CLASS_PREFIXES` (see
-[Settings](../../reference/settings.md)).
+[Settings](settings.md)).
 
 ### CPU identity
 
@@ -100,8 +100,8 @@ the node's real CPU identity, as `${cpuManufacturer}-${id}`:
 - The key degrades to `generic` only when NFD reports no CPU identity at all.
 
 Whether that manufacturer subdivides the pools is a separate runtime decision, taken by
-[`instance-type-aware-cpu-manufacturer`](../../reference/settings.md#settings) (see
-[Scheduling Chain](scheduling.md#naming-and-grouping)); the key stays CPU-accurate so the
+[`instance-type-aware-cpu-manufacturer`](settings.md#settings) (see
+[Scheduling Chain](devices-scheduling.md#naming-and-grouping)); the key stays CPU-accurate so the
 finest-grained `ResourceFlavor`s regroup without rewriting.
 
 The key deliberately does not *encode* os/arch. os/arch is appended in full to every `ResourceFlavor`,
@@ -123,7 +123,7 @@ corrects false negatives.
 
 The worker applies the `gpustack-cpu-info` `NodeFeatureRule` at startup in every installation mode.
 It publishes [CPU identity](#cpu-identity) and the [non-accelerated marker](#non-accelerated-marker);
-see [Installation Modes](../../operate/installation-modes.md#deployed-and-applied-resources).
+see [Installation Modes](../operate/installation-modes.md#worker-managed-resources).
 
 The rule marks PCI vendors managed by the worker as acceleratable. The chart's
 `global.manufacturers` map registers each manufacturer for labeling, detection and its Device
@@ -139,7 +139,7 @@ with a node selector on the NFD PCI label: a node labeled
 The Helm chart normally renders them (`deviceManager.enabled=true`, the default). With
 `deviceManager.enabled=false` it renders none and does not hand the install back to the worker: a
 worker deployed by this chart never installs applications at runtime. The worker installs them only
-where no chart deploys it, see [Installation Modes](../../operate/installation-modes.md).
+where no chart deploys it, see [Installation Modes](../operate/installation-modes.md).
 
 ### Detection and accelerator labels
 
@@ -166,7 +166,7 @@ label naming rules:
 `acceleratable.feature.gpustack.ai/` key namespace. `manufacturer` is one of the supported names:
 NVIDIA, AMD, Ascend, Cambricon, Hygon, Iluvatar, MetaX, MThreads, T-Head — their PCI vendor IDs,
 resource names and runtime class names all overridable (see
-[Settings](../../reference/settings.md#per-manufacturer-overrides)).
+[Settings](settings.md#per-manufacturer-overrides)).
 
 ### Devices ledger
 
@@ -187,7 +187,7 @@ For a logically sliced accelerator it also counts the slices it hosts, *`allocat
 container. An accelerator hosts at most its *`logicalSliced.count`* of them — 4 on Hygon — whatever its
 `Remaining` says. This is the **single authoritative accounting** of accelerator occupancy, driving the
 `InstanceType` four-view display *and* feeding the per-accelerator `AdmissionCheck` (see
-[Admission](admission.md)).
+[Admission](devices-admission.md)).
 
 The Device Manager re-detects whenever the device set or health changes, and the worker syncs the
 `gpustack.ai/managed` mark from the `Node` onto the same-named `Devices`, so the per-node Device
@@ -220,7 +220,7 @@ Manager never asserts a node-management decision it does not own.
 `Devices.spec.interfaces` records every network interface on the node, and the RDMA link state that
 decides whether the node carries `rdma.capable`. It is its own subsystem (a NIC belongs to the
 machine rather than to a manufacturer's accelerators) and it has its own page:
-[Network Topology](../rdma/network-topology.md).
+[Network Topology](rdma-network-topology.md).
 
 ### Ascend DCMI generations
 
@@ -264,7 +264,7 @@ For most manufacturers the injection is the device-visibility env (`NVIDIA_VISIB
 `ASCEND_VISIBLE_DEVICES` / …), which their container runtime turns into device nodes. AMD, Cambricon,
 MetaX and Hygon inject the nodes themselves, so a node of theirs needs the vendor driver alone.
 
-A shared grant of N is N [distinct accelerators on one node](requests.md#resource-keys):
+A shared grant of N is N [distinct accelerators on one node](../modules/devices/requests.md#resource-keys):
 the allocation hint offers one token per accelerator, and the ledger charges one share per accelerator.
 `Allocate` refuses a grant the kubelet put two tokens of on one accelerator (`FailedPrecondition`), rather
 than hand the container fewer accelerators than it asked for. The response is the same visibility
@@ -289,7 +289,7 @@ response carries the values below; the injection channel determines which compon
 | `cdi-annotations` | the annotation `cdi.k8s.io/gpustack-<manufacturer>: <kind>=<id>` | the container engine itself, resolving that name against the specifications already on the node and injecting the device nodes *and* the driver libraries — no vendor runtime in the `Pod`'s path |
 
 The channel is chosen per manufacturer through
-[`GPUSTACK_${MANUFACTURER}_DEVICE_INJECTION_STRATEGY`](../../reference/settings.md#per-manufacturer-overrides).
+[`GPUSTACK_${MANUFACTURER}_DEVICE_INJECTION_STRATEGY`](settings.md#per-manufacturer-overrides).
 Its third value, `auto`, answers per container and falls back to the default `envvar` at the first
 of these that holds, logging which one:
 
@@ -321,9 +321,9 @@ differs by vendor: device nodes for T-Head, which has no container-runtime hook,
 own registry file bind-mounted at its host path for Hygon, whose runtime scans that directory by
 absolute path.
 
-See [Accelerator Requests](requests.md), [NVIDIA MIG](nvidia-mig.md),
-[T-Head MIG Operations](thead-mig.md) and [Hygon MIG
-Operations](hygon-mig.md).
+See [Accelerator Requests](../modules/devices/requests.md), [NVIDIA MIG](../modules/devices/nvidia-mig.md),
+[T-Head MIG Operations](../modules/devices/thead-mig.md) and [Hygon MIG
+Operations](../modules/devices/hygon-mig.md).
 
 ### Sliced (logical slicing)
 
@@ -406,7 +406,7 @@ than only a correctness one, because the files predate the allocation being retr
 `device-manager preflight` reads, on a bare host, the allocation-time preconditions the allocator
 reads when a workload lands. It drives each manufacturer's own responder with a synthetic
 allocation request rather than a copy of it, so a preflight answer and the allocation it predicts
-cannot disagree. The runbook is [Preflight Checks](preflight.md).
+cannot disagree. The runbook is [Preflight Checks](../modules/devices/preflight.md).
 
 It asks the following questions per manufacturer, in order, and each is answerable on its own:
 
@@ -649,8 +649,8 @@ CDI request appears here as well.
 
 For a partition-backed owner, the allocator reads the owner's `.partitioned.<kind>-<profile>`
 request and verifies that its durable node-local ownership record still names a live partition.
-See [NVIDIA MIG](nvidia-mig.md#requesting-a-partition), [T-Head
-MIG](thead-mig.md#requesting-a-partition) and [Hygon MIG](hygon-mig.md#requesting-a-partition).
+See [NVIDIA MIG](../modules/devices/nvidia-mig.md#partition-requests), [T-Head
+MIG](../modules/devices/thead-mig.md#partition-requests) and [Hygon MIG](../modules/devices/hygon-mig.md#partition-requests).
 
 A responder lacking that capability, or unable to substantiate the identity, fails the admission
 closed rather than widening the grant back to the accelerator.
@@ -660,7 +660,7 @@ outside the known-acceleratable families. Because the family classifier does not
 never gates scheduling, and admission never reads it as a second accelerator mode. Every accelerator
 backend registers it.
 
-The per-accelerator `AdmissionCheck` ([Admission](admission.md)) re-checks feasibility only **before**
+The per-accelerator `AdmissionCheck` ([Admission](devices-admission.md)) re-checks feasibility only **before**
 admission: an admitted `Workload`'s allocation is already in the ledger, so re-evaluating would count a
 slice against itself.
 
@@ -689,7 +689,7 @@ so when it refuses, no candidate fits that accelerator.
 Both the kubelet lookup and the refusal have
 an off switch, `GPUSTACK_DEVICE_PLUGIN_IDENTIFY_BY_KUBELET` and
 `GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE` (see
-[Settings](../../reference/settings.md#general-variables)).
+[Settings](settings.md#general-variables)).
 
 Reservations key on **(`Pod` UID, container)** and the durable
 `device.gpustack.ai/accelerator.allocated` annotation is a **map keyed by container name**, so two
@@ -701,7 +701,7 @@ A `Pod` that has **finished**, in phase `Succeeded` or `Failed`, is the exceptio
 back its exclusive and shared cards and its logical slices, so the ledger stops charging those. A
 hardware partition and a MetaX or Cambricon slice stay charged until the `Pod` is gone, because the
 reclaimer destroys them only then. `GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS=false` turns the exception
-off ([settings](../../reference/settings.md#general-variables)).
+off ([settings](settings.md#general-variables)).
 
 One thing takes an entry back earlier, and it is the only one: an allocation the manufacturer
 responder refuses **after** the record is written is given back on the spot — the entry and the
@@ -743,6 +743,32 @@ does (see [Container identification](#container-identification)). The call
 is advisory by API contract, so under a restrictive TopologyManager policy the kubelet allocates the
 NUMA-aligned set before consulting the plugin at all.
 
+### Preferred card annotations
+
+`GetPreferredAllocation` reads two optional `Pod`-level annotations for `Exclusive`, `Shared`, and
+`Sliced` requests (`Partitioned` and `Visibility` return an empty response):
+
+- `device.gpustack.ai/accelerator.preferred-id`: comma-separated `Devices.spec.groups[].accelerators[].id`
+  values in priority order (trimmed and deduplicated). When this key is present on
+  `Pod.metadata.annotations` — even with an empty value — `preferred-index` is ignored.
+- `device.gpustack.ai/accelerator.preferred-index`: comma-separated
+  `Devices.spec.groups[].accelerators[].index` integers resolved to `acc.ID` in declared order when
+  `preferred-id` is absent.
+
+Matching accelerators are ranked with kubelet `must-include` tokens first and declared preference
+order second, truncated to `AllocationSize`, and sorted in ascending `Devices.spec.groups` hardware
+order before returning.
+
+Unknown or cross-node IDs are skipped safely; if eligible preferred cards do not cover
+`AllocationSize`, the response fills remaining slots from unselected node cards and returns an empty
+hint when total available cards are insufficient.
+
+On `Sliced` requests, cards lacking the requested per-accelerator units also enter the unselected
+fallback list, so `GetPreferredAllocation` may still hint one when no card fits and `Allocate`
+enforces the final room check. See
+[Preferred accelerator placement](../modules/devices/requests.md#preferred-accelerator-placement) for
+the operator example.
+
 ### Fungible partition tokens
 
 The `Partitioned` family is the one exception to accelerator-bound tokens. Its allocation treats the
@@ -760,7 +786,7 @@ CPU and memory to an accelerator the plugin may not use.
 
 One residual remains: a partition an administrator carves out of band is invisible to every
 annotation-derived key, so hand-carving on a managed node is unsupported (see
-[Accelerator Requests](requests.md#limitations)).
+[Accelerator Requests](../modules/devices/requests.md#limitations)).
 
 ## Driver stack per node
 
@@ -781,10 +807,7 @@ allocation loudly instead of silently mounting an incompatible library.
 
 ---
 
-**See also** — [Accelerator Requests](requests.md) (the resource keys these families
-serve) · [NVIDIA MIG Operations](nvidia-mig.md) · [T-Head MIG
-Operations](thead-mig.md) · [Hygon MIG Operations](hygon-mig.md) ·
-[Settings](../../reference/settings.md)
-
-**Next** → [Scheduling Chain](scheduling.md) — how these labels and the ledger become Kueue
-objects.
+**See also** — [Accelerator Requests](../modules/devices/requests.md) (the resource keys these families
+serve) · [NVIDIA MIG Operations](../modules/devices/nvidia-mig.md) · [T-Head MIG
+Operations](../modules/devices/thead-mig.md) · [Hygon MIG Operations](../modules/devices/hygon-mig.md) ·
+[Settings](settings.md)

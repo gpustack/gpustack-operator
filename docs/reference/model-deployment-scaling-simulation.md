@@ -1,14 +1,14 @@
 # Model Deployment Scaling Simulation
 
-A deterministic local simulation compares the three `ModelDeploymentScaler` algorithms on identical
-synthetic traffic. It records replica adjustments, request outcomes, *time to first token (TTFT)*,
-*time per output token (TPOT)* and *inter-token latency (ITL)*. These results are not hardware
-measurements and are not tuning or purchasing recommendations.
+Evidence: synthetic simulation. A deterministic local simulation compares the three
+`ModelDeploymentScaler` algorithms on identical synthetic traffic. It records replica adjustments,
+request outcomes, *time to first token (TTFT)*, *time per output token (TPOT)* and *inter-token
+latency (ITL)*. These results are not hardware measurements or tuning recommendations.
 
 The measured hardware comparison — including a four-node H200 sensitivity wave scored against the
 same true-SLO and goodput metrics — lives in
-[Model Deployment Scaling Benchmark](scaling-benchmark.md#algorithm-sensitivity); the scaler
-contract lives in [Model Deployment Scaling](scaling.md).
+[Model Deployment Scaling Benchmark](../modules/model-deployment/scaling-benchmark.md#algorithm-sensitivity); the scaler
+contract lives in [Model Deployment Scaling](../modules/model-deployment/scaling.md).
 
 ## Contents
 
@@ -186,10 +186,7 @@ quota raise, so recovery from an enlarged quota is not exercised and remains unv
 
 ---
 
-**See also** — [Model Deployment Scaling](scaling.md) (the scaler contract, algorithms and guards) ·
-[Model Deployment Scaling Benchmark](scaling-benchmark.md) (the measured hardware comparison) ·
-[Model Deployment Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) (configure
+**See also** — [Model Deployment Scaling](../modules/model-deployment/scaling.md) (the scaler contract, algorithms and guards) ·
+[Model Deployment Scaling Benchmark](../modules/model-deployment/scaling-benchmark.md) (the measured hardware comparison) ·
+[Model Deployment Scaling Walkthrough](../walkthroughs/model-deployment/scaling.md) (configure
 and observe the scaler on a cluster).
-
-**Next** → [Model Deployment Scaling Benchmark](scaling-benchmark.md) — the measured hardware
-comparison for the same three algorithms.

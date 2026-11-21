@@ -1,7 +1,8 @@
 # Heterogeneous Devices
 
-GPUStack makes GPUs, NPUs, MLUs, DCUs and PPUs available to workloads. The manufacturer
-controls the resource name and runtime isolation method.
+GPUStack discovers GPUs, NPUs, MLUs, DCUs, and PPUs across nodes and exposes them through Kueue
+pool queues. Each manufacturer governs its extended resource name and slicing or partitioning
+mechanism.
 
 ## Contents
 
@@ -12,9 +13,10 @@ controls the resource name and runtime isolation method.
 
 ## Overview
 
-Device Manager detects hardware and publishes capacity. `AcceleratorType` selects accelerated pools
-for serving and prefetch; `InstanceType` sizes interactive workspaces. Both share the canonical pool
-`ClusterQueue`. Kueue admits queued requests, and the device plugin allocates devices to containers.
+Device Manager detects node hardware and updates the `Devices` ledger. The worker builds
+`AcceleratorType` pools (for serving and prefetch) and `InstanceType` pools (for interactive
+workspaces) over shared canonical `ClusterQueue`s, while Kueue and the device plugin enforce quota
+and container isolation.
 
 ![Device discovery and allocation flow](../../assets/diagrams/devices-flow.svg)
 
@@ -33,30 +35,37 @@ flowchart TD
 
 ### Accelerator requests
 
-Choose a resource family in [Accelerator Requests](requests.md#resource-keys). The guide includes
-request examples and validation rules. [Device Discovery](discovery.md) explains the inventory and
-allocation boundary.
+Choose whole-card, shared, logically sliced, or hardware-partitioned resource keys in
+[Accelerator Requests](requests.md#resource-keys). Review the seven `Pod` validation rules in
+[Request rules](requests.md#request-rules) and pool capabilities in
+[Isolation mode selection](requests.md#isolation-mode-selection).
 
 ## Operations
 
-### Device operations
+### Step 1: Run host preflight
 
-1. **Step 1: Check the node.** Run [Preflight Checks](preflight.md) before installation.
-2. **Step 2: Request devices.** Follow the [device walkthrough](../../walkthroughs/devices/scheduling.md).
-3. **Step 3: Verify allocation.** Check the `Workload`, `Pod` and device inventory in the walkthrough.
+Run [Preflight Checks](preflight.md) on bare hosts before installing workloads.
 
-For physical partitions, use the [NVIDIA](nvidia-mig.md), [T-Head](thead-mig.md), or
-[Hygon](hygon-mig.md) runbook. The [scheduling chain](scheduling.md) describes queue status.
+### Step 2: Request devices
+
+Submit queued workloads following the
+[Heterogeneous Devices Walkthrough](../../walkthroughs/devices/scheduling.md).
+
+### Step 3: Verify allocation
+
+Inspect pool capacity and `Workload` reservations in
+[Pool troubleshooting](requests.md#pool-troubleshooting). For hardware partitions, follow the
+[NVIDIA](nvidia-mig.md), [Hygon](hygon-mig.md), or [T-Head](thead-mig.md) MIG runbooks.
 
 ## Troubleshooting
 
-For a rejected request, check the [admission gates](admission.md#gates) and request rules.
-For node checks and their results, see [Preflight Checks](preflight.md#reading-the-result).
-For partition recovery, use the runbook for the manufacturer.
+Resolve webhook rejections, queued demand, and per-card fragmentation in
+[Diagnosing Pending workloads](requests.md#diagnosing-pending-workloads). Interpret host probe
+verdicts in [Result format](preflight.md#result-format), and follow each vendor MIG runbook for
+partition recovery.
 
 ---
 
-**See also** — [GPU Instances](../instances/_index.md) (accelerator workspaces) ·
-[Architecture](../../getting-started/architecture.md) (the scheduling chain)
+**See also** — [GPU Instances](../instances/_index.md) (interactive accelerator workspaces) · [Architecture](../../getting-started/architecture.md) (end-to-end scheduling chain)
 
-**Next** → [Accelerator Requests](requests.md) — choose a request shape.
+**Next** → [Accelerator Requests](requests.md) — select resource keys and verify admission rules.

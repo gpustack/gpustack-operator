@@ -1,6 +1,6 @@
 # Model Deployment Shutdown
 
-A `ModelDeployment` replica drains during the interval between `Pod` deletion and engine exit.
+Evidence: contract. A `ModelDeployment` replica drains during the interval between `Pod` deletion and engine exit.
 The grace period bounds how long it can wait for running requests and engine shutdown.
 
 ## Contents
@@ -60,7 +60,7 @@ for that scheduler before killing it.
 > either way. The replica is idle by then, so the kill at 30 s cuts no request.
 
 The hook sums these gauges from the listener the `Pod`'s
-[scrape annotations](metrics.md#scraping-the-pods) name. On a direct decoder that is
+[scrape annotations](model-deployment-metrics.md#scraping-the-pods) name. On a direct decoder that is
 the engine behind the routing proxy, not the port the `Service` fronts.
 
 | Engine | Gauges summed |
@@ -74,7 +74,7 @@ sample the hook cannot parse.
 
 Adding the hook and the grace changed every replica's `Pod` spec, so upgrading to the release that
 carries them turns each existing replica over once; see
-[Rollout behavior](configuration.md#rollout-behavior).
+[Rollout behavior](../modules/model-deployment/configuration.md#rollout-behavior).
 
 Changing a role's *`terminationGracePeriodSeconds`* turns its replicas over the same way, and each
 replica that leaves in that rollout leaves with the grace it was created with. Writing 30 onto a
@@ -85,7 +85,7 @@ role that set none renders the same `Pod`s, so it turns nothing over.
 **A replica the spec takes capacity away from is withdrawn and drained before it is deleted, and
 the deletion waits for that to finish.** The protocol covers a *`replicas`* reduction, a shed of
 surplus replicas, and a replica of a role the spec has dropped. Its progress is the
-[`status.retirement` field](status.md#status), and the replica stays in place, still counted,
+[`status.retirement` field](model-deployment-status.md#status), and the replica stays in place, still counted,
 for as long as the protocol holds it.
 
 A replica that was never scheduled and never admitted is the one exception: it has nothing to drain,
@@ -110,7 +110,7 @@ first and still spends the second.
 
 The read is one bounded, read-only `pods/exec` into the member's own `main` container, which
 fetches that engine's `/metrics` over loopback on the port the member's own
-[scrape annotations](metrics.md#scraping-the-pods) name. Reading it from inside the member is what
+[scrape annotations](model-deployment-metrics.md#scraping-the-pods) name. Reading it from inside the member is what
 makes the answer per-member: a scrape through the `Service` would land on whichever replica answered
 and could not say which one was idle.
 
@@ -253,9 +253,7 @@ ordinary retirement instead.
 
 ---
 
-**See also** — [Model Deployment](configuration.md) for what turns a replica over ·
-[Model Deployment Scaling](scaling.md) for the count changes that start a retirement ·
-[Model Deployment Metrics](metrics.md) for the scrape endpoints the hook
+**See also** — [Model Deployment](../modules/model-deployment/configuration.md) for what turns a replica over ·
+[Model Deployment Scaling](../modules/model-deployment/scaling.md) for the count changes that start a retirement ·
+[Model Deployment Metrics](model-deployment-metrics.md) for the scrape endpoints the hook
 reads.
-
-**Next** → [Model Deployment Status](status.md)

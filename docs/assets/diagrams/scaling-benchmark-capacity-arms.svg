@@ -1,0 +1,187 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 566" role="img" aria-labelledby="title desc">
+<title id="title">Suite 2 (H200): Capacity-arm feedback and Ready replicas</title>
+<desc id="desc">Two-panel line chart comparing TokenThroughput tuned-manual, TokenThroughput catalog (0.75 headroom) and Predictive catalog across checkpoints B1 to C3 on H200. Unmargined TokenThroughput stayed at 1 replica throughout; TokenThroughput catalog triggered at R2 but reached Ready only at S3 (no sustain TTFT gain, 343.842 vs 321.352 ms); Predictive catalog reached Ready at R3 and lowered sustain TTFT p50 to 189.511 ms. All scaled rounds returned to 1 replica at C3 with zero failed requests.</desc>
+<style>
+:root{color-scheme:light dark;--bg:#f8fbff;--card:#fff;--ink:#12233d;--muted:#52677f;--line:#c9d9e7;--grid:#e4edf5;--axis:#8aa0b6;--c1:#2563eb;--c2:#c2410c;--c3:#0f766e;--c4:#7c3aed}
+@media(prefers-color-scheme:dark){:root{--bg:#101d30;--card:#1a2c43;--ink:#f1f6ff;--muted:#bdcde0;--line:#526b83;--grid:#2a4058;--axis:#7f97ae;--c1:#80adff;--c2:#ffa36b;--c3:#58d6c8;--c4:#c4b5fd}}
+text{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:var(--ink)}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:1.2px;fill:var(--muted)}
+.title{font-size:26px;font-weight:750;letter-spacing:-.3px}
+.sub{font-size:14px;fill:var(--muted)}
+.legend{font-size:13px;font-weight:600}
+.panel{fill:var(--card);stroke:var(--line);stroke-width:1.2}
+.shape{font-size:15px;font-weight:700}
+.cap{font-size:11px;fill:var(--muted)}
+.val{font:600 11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.tick{font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:var(--muted)}
+.axis-title{font-size:13px;font-weight:700;fill:var(--ink)}
+.x-title{font-size:12px;fill:var(--muted)}
+.note{font-size:12px;fill:var(--muted)}
+.grid{stroke:var(--grid);stroke-width:1}
+.base{stroke:var(--axis);stroke-width:1.2}
+.s1{stroke:var(--c1);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s2{stroke:var(--c2);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s3{stroke:var(--c3);fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-dasharray:7 4}
+.s3-solid{stroke:var(--c3);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s4{stroke:var(--c4);fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-dasharray:4 3}
+.s1-dash{stroke:var(--c1);fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:6 4}
+.s2-dash{stroke:var(--c2);fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:6 4}
+.m1{fill:var(--card);stroke:var(--c1);stroke-width:2.1}
+.m2{fill:var(--c2);stroke:var(--card);stroke-width:1}
+.m3{fill:var(--card);stroke:var(--c3);stroke-width:2.0;stroke-linejoin:miter}
+.m4{fill:var(--c4);stroke:var(--card);stroke-width:1}
+.v1{fill:var(--c1)}
+.v2{fill:var(--c2)}
+.v3{fill:var(--c3)}
+.v4{fill:var(--c4)}
+</style>
+<rect width="1200" height="566" fill="var(--bg)"/>
+<text class="eyebrow" x="40" y="42">MODEL DEPLOYMENT · SCALING BENCHMARK · SUITE 2 CAPACITY ARMS</text>
+<text class="title" x="40" y="78">Suite 2 (H200): Capacity-arm feedback and Ready replicas</text>
+<text class="sub" x="40" y="104">Eighteen alternating serial rounds (3 repeats × 6 arms); 0 failed requests and full return to 1-replica baseline.</text>
+<line class="s4" x1="40" y1="136" x2="74" y2="136"/>
+<path class="m4" d="M57.0 130.0L63.0 140.8L51.0 140.8Z"/>
+<text class="legend" x="84" y="141">TokenThroughput (tuned-manual, 17,135.159 tok/s)</text>
+<line class="s2" x1="445" y1="136" x2="479" y2="136"/>
+<rect class="m2" x="459.5" y="133.5" width="5.0" height="5.0"/>
+<text class="legend" x="489" y="141">TokenThroughput (catalog, 12,851.37 tok/s)</text>
+<line class="s3" x1="830" y1="136" x2="864" y2="136"/>
+<path class="m3" d="M847.0 128.9L854.1 136.0L847.0 143.1L839.9 136.0Z"/>
+<text class="legend" x="874" y="141">Predictive (catalog, 12,851.37 tok/s)</text>
+<rect class="panel" x="86.0" y="166.0" width="514.0" height="326.0" rx="12"/>
+<text class="shape" x="100.0" y="190.0">rawRecommendedReplicas</text>
+<text class="cap" x="586.0" y="189.0" text-anchor="end">peak across B1–C3</text>
+<path class="m4" d="M106.0 200.0L111.0 209.0L101.0 209.0Z"/>
+<text class="val v4" x="120.0" y="209.0">TT tuned-manual: max 1 (never scales)</text>
+<rect class="m2" x="103.9" y="220.9" width="4.2" height="4.2"/>
+<text class="val v2" x="120.0" y="227.0">TT catalog (0.75): max 2 (triggers at R2)</text>
+<path class="m3" d="M106.0 235.1L111.9 241.0L106.0 246.9L100.1 241.0Z"/>
+<text class="val v3" x="120.0" y="245.0">Predictive catalog: max 4 (triggers at R2)</text>
+<line class="base" x1="100.0" y1="458.0" x2="586.0" y2="458.0"/>
+<text class="tick" x="78.0" y="462.0" text-anchor="end">0</text>
+<line class="grid" x1="100.0" y1="421.6" x2="586.0" y2="421.6"/>
+<text class="tick" x="78.0" y="425.6" text-anchor="end">1</text>
+<line class="grid" x1="100.0" y1="385.2" x2="586.0" y2="385.2"/>
+<text class="tick" x="78.0" y="389.2" text-anchor="end">2</text>
+<line class="grid" x1="100.0" y1="348.8" x2="586.0" y2="348.8"/>
+<text class="tick" x="78.0" y="352.8" text-anchor="end">3</text>
+<line class="grid" x1="100.0" y1="312.4" x2="586.0" y2="312.4"/>
+<text class="tick" x="78.0" y="316.4" text-anchor="end">4</text>
+<line class="grid" x1="100.0" y1="276.0" x2="586.0" y2="276.0"/>
+<text class="tick" x="78.0" y="280.0" text-anchor="end">5</text>
+<text class="tick" x="106.0" y="476.0" text-anchor="middle">B1</text>
+<text class="tick" x="153.4" y="476.0" text-anchor="middle">B2</text>
+<text class="tick" x="200.8" y="476.0" text-anchor="middle">R1</text>
+<text class="tick" x="248.2" y="476.0" text-anchor="middle">R2</text>
+<text class="tick" x="295.6" y="476.0" text-anchor="middle">R3</text>
+<text class="tick" x="343.0" y="476.0" text-anchor="middle">S1</text>
+<text class="tick" x="390.4" y="476.0" text-anchor="middle">S2</text>
+<text class="tick" x="437.8" y="476.0" text-anchor="middle">S3</text>
+<text class="tick" x="485.2" y="476.0" text-anchor="middle">C1</text>
+<text class="tick" x="532.6" y="476.0" text-anchor="middle">C2</text>
+<text class="tick" x="580.0" y="476.0" text-anchor="middle">C3</text>
+<path class="s4" d="M106.0 421.6L153.4 421.6L200.8 421.6L248.2 421.6L295.6 421.6L343.0 421.6L390.4 421.6L437.8 421.6L485.2 421.6L532.6 421.6L580.0 421.6"/>
+<path class="s2" d="M106.0 421.6L153.4 421.6L200.8 421.6L248.2 385.2L295.6 385.2L343.0 421.6L390.4 421.6L437.8 385.2L485.2 421.6L532.6 421.6L580.0 421.6"/>
+<path class="s3" d="M106.0 421.6L153.4 421.6L200.8 421.6L248.2 385.2L295.6 312.4L343.0 421.6L390.4 312.4L437.8 348.8L485.2 421.6L532.6 421.6L580.0 421.6"/>
+<path class="m3" d="M106.0 414.2L113.4 421.6L106.0 429.0L98.6 421.6Z"/>
+<path class="m3" d="M153.4 414.2L160.8 421.6L153.4 429.0L146.0 421.6Z"/>
+<path class="m3" d="M200.8 414.2L208.2 421.6L200.8 429.0L193.4 421.6Z"/>
+<path class="m3" d="M248.2 377.8L255.6 385.2L248.2 392.6L240.8 385.2Z"/>
+<path class="m3" d="M295.6 305.0L303.0 312.4L295.6 319.8L288.2 312.4Z"/>
+<path class="m3" d="M343.0 414.2L350.4 421.6L343.0 429.0L335.6 421.6Z"/>
+<path class="m3" d="M390.4 305.0L397.8 312.4L390.4 319.8L383.0 312.4Z"/>
+<path class="m3" d="M437.8 341.4L445.2 348.8L437.8 356.2L430.4 348.8Z"/>
+<path class="m3" d="M485.2 414.2L492.6 421.6L485.2 429.0L477.8 421.6Z"/>
+<path class="m3" d="M532.6 414.2L540.0 421.6L532.6 429.0L525.2 421.6Z"/>
+<path class="m3" d="M580.0 414.2L587.4 421.6L580.0 429.0L572.6 421.6Z"/>
+<path class="m4" d="M106.0 415.4L112.2 426.6L99.8 426.6Z"/>
+<path class="m4" d="M153.4 415.4L159.7 426.6L147.2 426.6Z"/>
+<path class="m4" d="M200.8 415.4L207.1 426.6L194.6 426.6Z"/>
+<path class="m4" d="M248.2 415.4L254.4 426.6L241.9 426.6Z"/>
+<path class="m4" d="M295.6 415.4L301.9 426.6L289.4 426.6Z"/>
+<path class="m4" d="M343.0 415.4L349.2 426.6L336.8 426.6Z"/>
+<path class="m4" d="M390.4 415.4L396.6 426.6L384.1 426.6Z"/>
+<path class="m4" d="M437.8 415.4L444.0 426.6L431.5 426.6Z"/>
+<path class="m4" d="M485.2 415.4L491.5 426.6L479.0 426.6Z"/>
+<path class="m4" d="M532.6 415.4L538.9 426.6L526.4 426.6Z"/>
+<path class="m4" d="M580.0 415.4L586.2 426.6L573.8 426.6Z"/>
+<rect class="m2" x="103.4" y="419.0" width="5.2" height="5.2"/>
+<rect class="m2" x="150.8" y="419.0" width="5.2" height="5.2"/>
+<rect class="m2" x="198.2" y="419.0" width="5.2" height="5.2"/>
+<rect class="m2" x="245.6" y="382.6" width="5.2" height="5.2"/>
+<rect class="m2" x="293.0" y="382.6" width="5.2" height="5.2"/>
+<rect class="m2" x="340.4" y="419.0" width="5.2" height="5.2"/>
+<rect class="m2" x="387.8" y="419.0" width="5.2" height="5.2"/>
+<rect class="m2" x="435.2" y="382.6" width="5.2" height="5.2"/>
+<rect class="m2" x="482.6" y="419.0" width="5.2" height="5.2"/>
+<rect class="m2" x="530.0" y="419.0" width="5.2" height="5.2"/>
+<rect class="m2" x="577.4" y="419.0" width="5.2" height="5.2"/>
+<rect class="panel" x="662.0" y="166.0" width="508.0" height="326.0" rx="12"/>
+<text class="shape" x="676.0" y="190.0">Ready replicas by checkpoint</text>
+<text class="cap" x="1156.0" y="189.0" text-anchor="end">18 serial rounds (0 errors)</text>
+<path class="m4" d="M682.0 200.0L687.0 209.0L677.0 209.0Z"/>
+<text class="val v4" x="696.0" y="209.0">TT tuned-manual: 1 throughout (sustain TTFT 321.352 ms)</text>
+<rect class="m2" x="679.9" y="220.9" width="4.2" height="4.2"/>
+<text class="val v2" x="696.0" y="227.0">TT catalog: Ready at S3 (sustain TTFT 343.842 ms)</text>
+<path class="m3" d="M682.0 235.1L687.9 241.0L682.0 246.9L676.1 241.0Z"/>
+<text class="val v3" x="696.0" y="245.0">Predictive catalog: Ready at R3 (sustain TTFT 189.511 ms)</text>
+<line class="base" x1="676.0" y1="458.0" x2="1156.0" y2="458.0"/>
+<text class="tick" x="654.0" y="462.0" text-anchor="end">0</text>
+<line class="grid" x1="676.0" y1="397.3" x2="1156.0" y2="397.3"/>
+<text class="tick" x="654.0" y="401.3" text-anchor="end">1</text>
+<line class="grid" x1="676.0" y1="336.7" x2="1156.0" y2="336.7"/>
+<text class="tick" x="654.0" y="340.7" text-anchor="end">2</text>
+<line class="grid" x1="676.0" y1="276.0" x2="1156.0" y2="276.0"/>
+<text class="tick" x="654.0" y="280.0" text-anchor="end">3</text>
+<text class="tick" x="682.0" y="476.0" text-anchor="middle">B1</text>
+<text class="tick" x="728.8" y="476.0" text-anchor="middle">B2</text>
+<text class="tick" x="775.6" y="476.0" text-anchor="middle">R1</text>
+<text class="tick" x="822.4" y="476.0" text-anchor="middle">R2</text>
+<text class="tick" x="869.2" y="476.0" text-anchor="middle">R3</text>
+<text class="tick" x="916.0" y="476.0" text-anchor="middle">S1</text>
+<text class="tick" x="962.8" y="476.0" text-anchor="middle">S2</text>
+<text class="tick" x="1009.6" y="476.0" text-anchor="middle">S3</text>
+<text class="tick" x="1056.4" y="476.0" text-anchor="middle">C1</text>
+<text class="tick" x="1103.2" y="476.0" text-anchor="middle">C2</text>
+<text class="tick" x="1150.0" y="476.0" text-anchor="middle">C3</text>
+<path class="s4" d="M682.0 397.3L728.8 397.3L775.6 397.3L822.4 397.3L869.2 397.3L916.0 397.3L962.8 397.3L1009.6 397.3L1056.4 397.3L1103.2 397.3L1150.0 397.3"/>
+<path class="s2" d="M682.0 397.3L728.8 397.3L775.6 397.3L822.4 397.3L869.2 397.3L916.0 397.3L962.8 397.3L1009.6 336.7L1056.4 336.7L1103.2 336.7L1150.0 397.3"/>
+<path class="s3" d="M682.0 397.3L728.8 397.3L775.6 397.3L822.4 397.3L869.2 336.7L916.0 336.7L962.8 336.7L1009.6 336.7L1056.4 336.7L1103.2 336.7L1150.0 397.3"/>
+<path class="m3" d="M682.0 389.9L689.4 397.3L682.0 404.7L674.6 397.3Z"/>
+<path class="m3" d="M728.8 389.9L736.2 397.3L728.8 404.7L721.4 397.3Z"/>
+<path class="m3" d="M775.6 389.9L783.0 397.3L775.6 404.7L768.2 397.3Z"/>
+<path class="m3" d="M822.4 389.9L829.8 397.3L822.4 404.7L815.0 397.3Z"/>
+<path class="m3" d="M869.2 329.3L876.6 336.7L869.2 344.1L861.8 336.7Z"/>
+<path class="m3" d="M916.0 329.3L923.4 336.7L916.0 344.1L908.6 336.7Z"/>
+<path class="m3" d="M962.8 329.3L970.2 336.7L962.8 344.1L955.4 336.7Z"/>
+<path class="m3" d="M1009.6 329.3L1017.0 336.7L1009.6 344.1L1002.2 336.7Z"/>
+<path class="m3" d="M1056.4 329.3L1063.8 336.7L1056.4 344.1L1049.0 336.7Z"/>
+<path class="m3" d="M1103.2 329.3L1110.6 336.7L1103.2 344.1L1095.8 336.7Z"/>
+<path class="m3" d="M1150.0 389.9L1157.4 397.3L1150.0 404.7L1142.6 397.3Z"/>
+<path class="m4" d="M682.0 391.1L688.2 402.3L675.8 402.3Z"/>
+<path class="m4" d="M728.8 391.1L735.0 402.3L722.5 402.3Z"/>
+<path class="m4" d="M775.6 391.1L781.9 402.3L769.4 402.3Z"/>
+<path class="m4" d="M822.4 391.1L828.6 402.3L816.1 402.3Z"/>
+<path class="m4" d="M869.2 391.1L875.5 402.3L863.0 402.3Z"/>
+<path class="m4" d="M916.0 391.1L922.2 402.3L909.8 402.3Z"/>
+<path class="m4" d="M962.8 391.1L969.0 402.3L956.5 402.3Z"/>
+<path class="m4" d="M1009.6 391.1L1015.8 402.3L1003.3 402.3Z"/>
+<path class="m4" d="M1056.4 391.1L1062.7 402.3L1050.2 402.3Z"/>
+<path class="m4" d="M1103.2 391.1L1109.5 402.3L1097.0 402.3Z"/>
+<path class="m4" d="M1150.0 391.1L1156.2 402.3L1143.8 402.3Z"/>
+<rect class="m2" x="679.4" y="394.7" width="5.2" height="5.2"/>
+<rect class="m2" x="726.2" y="394.7" width="5.2" height="5.2"/>
+<rect class="m2" x="773.0" y="394.7" width="5.2" height="5.2"/>
+<rect class="m2" x="819.8" y="394.7" width="5.2" height="5.2"/>
+<rect class="m2" x="866.6" y="394.7" width="5.2" height="5.2"/>
+<rect class="m2" x="913.4" y="394.7" width="5.2" height="5.2"/>
+<rect class="m2" x="960.2" y="394.7" width="5.2" height="5.2"/>
+<rect class="m2" x="1007.0" y="334.1" width="5.2" height="5.2"/>
+<rect class="m2" x="1053.8" y="334.1" width="5.2" height="5.2"/>
+<rect class="m2" x="1100.6" y="334.1" width="5.2" height="5.2"/>
+<rect class="m2" x="1147.4" y="394.7" width="5.2" height="5.2"/>
+<text class="x-title" x="343.0" y="514.0" text-anchor="middle">Phase checkpoints (B = baseline, R = ramp, S = sustain, C = cooldown)</text>
+<text class="x-title" x="916.0" y="514.0" text-anchor="middle">Phase checkpoints (all scaled arms returned to 1 replica at C3)</text>
+<text class="note" x="40" y="530">Suite 2 hardware rounds on 4 × single-H200 nodes (Qwen3-8B Server, baseline 30 s c=2, ramp 45 s c=24, sustain 45 s c=24, cooldown 30 s c=0).</text>
+<text class="note" x="40" y="548">vLLM startup took ~76 s: TokenThroughput catalog became Ready at S3 (too late for 45 s sustain TTFT); Predictive scaled earlier and reached Ready at R3.</text>
+</svg>

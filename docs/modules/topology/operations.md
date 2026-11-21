@@ -1,43 +1,37 @@
 # Topology-Aware Scheduling Operations
 
-This runbook starts with fresh managed queues and also covers changes to their live topology profile.
-Queues created by a previously published version are outside that transition path.
+Configure `TopologySource` inventories for fresh managed queues, constrain replica placement with
+Kueue *topology-aware scheduling (TAS)*, update live hierarchies safely, and diagnose `Pending`
+PodSets. Legacy non-*TAS* queues from earlier releases are not migrated automatically.
 
 ## Contents
 
-- [Choose the inventory path](#choose-the-inventory-path)
-- [Enable Topograph](#enable-topograph)
-- [Observe existing Node labels](#observe-existing-node-labels)
-- [Publish a ConfigMap snapshot](#publish-a-configmap-snapshot)
-- [Publish by webhook](#publish-by-webhook)
-- [Request a level](#request-a-level)
+- [Topology inventory sources](#topology-inventory-sources)
+- [Topology level requests](#topology-level-requests)
+- [Live hierarchy changes](#live-hierarchy-changes)
 - [Verification](#verification)
-- [Change a live hierarchy](#change-a-live-hierarchy)
 - [Troubleshooting](#troubleshooting)
 
-## Choose the inventory path
+## Topology inventory sources
 
-Use one source of truth for each selected `Node`. See [profile selection](scheduling.md#hierarchy-profiles)
-for how overlapping Ready sources are handled.
+Assign at most one `Ready` `TopologySource` per `Node`. Zero or multiple matching `Ready` sources
+fall back to the hostname-only profile so conflicting hierarchies never merge.
 
-| Situation | Inventory path |
+| Scenario | Inventory source |
 |---|---|
-| Topograph supports the cloud, fabric, DRA, or on-premises source | Enable the bundled Topograph chart, then select its labels with a read-only `TopologySource` |
-| The cloud provider or administrator already labels `Node`s | Use *`nodeLabels`* |
-| Inventory is exported as a versioned file | Store it in a `ConfigMap` and use *`configMap`* |
-| Inventory is maintained by an external service | Expose the snapshot through authenticated HTTPS and use `webhook` |
+| Bundled Topograph supports your cloud, fabric, DRA, or on-prem topology | Enable `topograph` in Helm values and read its labels with *`nodeLabels`*. |
+| Cloud provider or admin already labels `Node`s | Use *`nodeLabels`* (read-only). |
+| Inventory is exported as a versioned document | Publish YAML/JSON in a `ConfigMap` and use *`configMap`*. |
+| External inventory service serves snapshots | Serve authenticated HTTPS JSON/YAML and use *`webhook`*. |
 
-List only a real nested hierarchy. Region → zone → rack is valid when every rack value belongs to
-one zone and every zone value belongs to one region. Two independent dimensions, such as rack and
-accelerator partition, are not an ordered hierarchy merely because both are labels.
+Declare only strictly nested trees (every rack belongs to one zone, and every zone to one region);
+independent axes such as rack and MIG partition do not form a valid hierarchy.
 
-## Enable Topograph
+### Topograph setup
 
-Topograph is silently disabled by default: the chart renders no Topograph workload or `ServiceAccount`
-and pulls no Topograph image. A private deployment may stay in that state and use `TopologySource`;
-with no source at all, the [default profile](scheduling.md#hierarchy-profiles)
-applies. Enable Topograph only on
-Kubernetes 1.27 or later, with a production provider and the `k8s` engine:
+Topograph is disabled by default. Enable it on Kubernetes `1.27+` with a supported provider and the
+`k8s` engine. For private clusters, override `topograph.image.repository`, *`imagePullSecrets`*, and
+`topograph.config.credentialsSecret`:
 
 ```yaml
 topograph:
@@ -48,62 +42,41 @@ topograph:
   engine:
     name: k8s
     params: {}
-```
-
-The parent chart pins and vendors the dependency and defaults its image to the GPUStack Docker Hub
-mirror. Override `topograph.image.repository` and set *`imagePullSecrets`* when a private cluster uses
-an internal registry. Provider credentials may be supplied with
-`topograph.config.credentialsSecret`; the exact data is provider-specific.
-
-The Topograph API server and `Node` observer are shared control-plane workloads. The node-data-broker
-is a `DaemonSet` and can be restricted independently. For an NVIDIA-only broker path, use the NFD PCI
-presence label rather than scheduling every Topograph component onto accelerator `Node`s:
-
-```yaml
-topograph:
   nodeDataBroker:
     enabled: true
-    nodeSelector:
+    nodeSelector:  # optional; restrict DaemonSet to NVIDIA PCI Nodes
       feature.node.kubernetes.io/pci-10de.present: "true"
 ```
 
-On AWS, the broker reads instance and region identity from node-local IMDSv2, so the EC2 metadata
-response hop limit must be at least 2. The API `ServiceAccount`, not the broker `ServiceAccount`, needs
-`ec2:DescribeInstanceTopology`; EKS `Pod` Identity can provide a separate role containing only that
-action. The test Terraform module enables both requirements with
-`topograph_aws_pod_identity_enabled=true`.
+On AWS, set the EC2 IMDSv2 hop limit to `>= 2` for `node-data-broker` and grant
+`ec2:DescribeInstanceTopology` to the Topograph API `ServiceAccount` (`topograph_aws_pod_identity_enabled=true`
+in the repository EKS Terraform module).
 
-After Topograph writes labels, create a read-only source that chooses the hierarchy to expose to
-Kueue. This example combines Kubernetes cloud labels with a Topograph fabric tier:
+Once Topograph labels `Node`s, expose the actual published tiers from broadest to narrowest via a
+read-only `TopologySource`:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
-kind: TopologySource
+kind: TopologySource  # cluster-scoped
 metadata:
   name: cloud-fabric
 spec:
-  nodeSelector: {}
-  levels:
+  nodeSelector: {}  # {} matches every Node
+  levels:  # 1..16 unique keys, broadest to narrowest; kubernetes.io/hostname appended automatically
     - topology.kubernetes.io/region
     - topology.kubernetes.io/zone
     - fabric.topograph.run/tier-2
     - fabric.topograph.run/tier-1
-  nodeLabels: {}
+  nodeLabels: {}  # read-only inventory mode
 ```
 
-- **Selector**: An empty *`nodeSelector`* selects every node.
-- **Levels**: List the published labels from broadest to narrowest.
-- **Inventory**: *`nodeLabels`* reads existing labels without modifying them.
+The worker takes the longest populated prefix on each `Node`, normalizes contiguous Topograph tiers
+coarsest-to-finest, appends `kubernetes.io/hostname`, and hashes the key list into
+`topology.gpustack.ai/profile`.
 
-Do not copy a tier list from another cluster; inspect the labels actually published on these `Node`s.
-The [profile rules](scheduling.md#hierarchy-profiles)
-define tier normalization.
+### Existing Node labels
 
-## Observe existing Node labels
-
-Configure the chosen inventory path with *`nodeLabels`* below, [a ConfigMap snapshot](#publish-a-configmap-snapshot),
-or [a webhook](#publish-by-webhook). Use *`nodeLabels`* when another trusted component already owns the values. It validates the hierarchy
-but never modifies those labels:
+Use *`nodeLabels`* when another controller or cloud provider already writes `Node` labels:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -114,28 +87,21 @@ spec:
   nodeSelector:
     matchLabels:
       node-role.kubernetes.io/worker: ""
-  levels:  # Ordered from the broadest domain to the narrowest.
+  levels:
     - topology.kubernetes.io/region
     - topology.kubernetes.io/zone
-  nodeLabels: {}  # Read labels already present on the selected nodes.
+  nodeLabels: {}
 ```
-
-- **`nodeSelector`**: Required; select the nodes that provide the hierarchy.
-- **`levels`**: Required; list one to 16 unique label keys in hierarchy order.
-- **`nodeLabels`**: Selects the read-only inventory path.
 
 | Condition | Reason | Resolution |
 |---|---|---|
-| A level is repeated | Each level must name a distinct label | Remove the duplicate key. |
-| A child has no declared parent | The hierarchy must have a complete parent chain | Add the parent label or remove the child. |
-| `kubernetes.io/hostname` is listed | The operator appends this level | Remove it from `levels`. |
+| Duplicate key in *`levels`* | Levels must be unique | Remove the repeated label key. |
+| Child label present without parent | Broken parent chain on `Node` | Populate every ancestor label (missing fine suffixes are allowed). |
+| `kubernetes.io/hostname` in *`levels`* | Reserved implicit leaf level | Remove `kubernetes.io/hostname` from *`levels`*. |
 
-A `Node` may omit a fine suffix and receive a shorter profile, as long as every child level has its declared parent chain.
+### ConfigMap snapshot
 
-## Publish a ConfigMap snapshot
-
-The `ConfigMap` and its `TopologySource` reference must be in the worker namespace. The snapshot key
-contains YAML or JSON with this schema:
+Store a `TopologySourceConfiguration` YAML or JSON document in the worker namespace (`gpustack-system`):
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -150,11 +116,7 @@ nodes:
     topology.gpustack.ai/region: region-a
     topology.gpustack.ai/zone: zone-a
     topology.gpustack.ai/rack: rack-02
-```
-
-Reference that key and declare the same ordered levels:
-
-```yaml
+---
 apiVersion: worker.gpustack.ai/v1
 kind: TopologySource
 metadata:
@@ -167,35 +129,21 @@ spec:
     - topology.gpustack.ai/rack
   configMap:
     configMapRef:
-      namespace: gpustack-system
+      namespace: gpustack-system  # must be the worker namespace
       name: topology-inventory
     key: snapshot.yaml
-    maxStaleness: 10m
+    maxStaleness: 10m  # retains last valid NodeFeature on read failure until expiry
 ```
 
-- **Selector**: Choose the nodes covered by the snapshot.
-- **ConfigMap**: Reference a snapshot in the worker namespace.
-- **Staleness**: Expiry removes the last valid `NodeFeature` after a read failure.
+Snapshots validate atomically: unknown `Node`s, undeclared keys, broken parent chains, or read-only
+`topology.kubernetes.io/{region,zone}` mismatches reject the revision. Valid snapshots write one NFD
+`NodeFeature` per `Node`; set *`additionalWritePrefix`* (`topology.example.com/`) for custom DNS
+prefixes (reserved prefixes are refused).
 
-The snapshot is atomic: one unknown `Node`, undeclared level, invalid value, broken parent chain, or
-contradictory child rejects the whole revision. The source reconciles one NFD `NodeFeature` per
-described `Node`; NFD publishes its writable labels onto the `Node`. On read failure, the last valid
-`NodeFeature` remains until *`maxStaleness`*; after expiry it is removed.
+### Webhook snapshot
 
-For a cloud cluster, use *`nodeLabels`* to consume the existing standard region and zone keys.
-If a snapshot includes those keys as parents of a private rack, follow the [standard-label
-boundary](scheduling.md#topologysource-contract).
-Use the private region and zone keys above when the inventory itself owns those facts.
-
-Use *`additionalWritePrefix`* when the data center owns another DNS prefix. It must be one DNS prefix
-with a trailing slash, for example `topology.example.com/`. Reserved Kubernetes, GPUStack,
-Topograph, and device-feature prefixes cannot be delegated.
-
-## Publish by webhook
-
-The webhook is an authenticated `GET` that returns the same snapshot. It requires an absolute HTTPS
-URL, does not follow redirects or use proxy-derived destinations, accepts at most 1 MiB, and requires
-exactly one of bearer-token or client-certificate authentication.
+Serve the `TopologySourceConfiguration` payload (`<= 1 MiB`) over authenticated `HTTPS` (`GET`,
+redirects and proxies disabled) using worker-namespace credentials:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -207,40 +155,32 @@ spec:
   levels:
     - topology.gpustack.ai/rack
   webhook:
-    url: https://topology-inventory.gpustack-system.svc/snapshot
-    pollInterval: 1m
-    timeout: 10s
-    maxStaleness: 5m
+    url: https://topology-inventory.gpustack-system.svc/snapshot  # required HTTPS URL without embedded auth
+    pollInterval: 1m  # positive duration; must be >= timeout
+    timeout: 10s  # positive duration
+    maxStaleness: 5m  # positive duration
     caBundleConfigMapRef:
       namespace: gpustack-system
-      name: topology-inventory-ca
-    bearerTokenSecretRef:
+      name: topology-inventory-ca  # key: ca.crt
+    bearerTokenSecretRef:  # set exactly one of bearerTokenSecretRef (key: token) or tlsClientCertificateSecretRef (tls.crt/tls.key)
       namespace: gpustack-system
       name: topology-inventory-token
 ```
 
-- **URL**: Use an absolute HTTPS endpoint.
-- **Credentials**: Provide exactly one bearer token or client certificate.
-- **Timing**: Set positive durations. The timeout must not exceed the polling interval.
+Restrict `TopologySource` and credential RBAC to cluster administrators and scope egress to the
+inventory endpoint.
 
-The CA `ConfigMap` key is `ca.crt`; the bearer `Secret` key is `token`. For mTLS, replace the bearer
-reference with *`tlsClientCertificateSecretRef`*; that `Secret` uses `tls.crt` and `tls.key`. All
-references are restricted to the worker namespace.
+## Topology level requests
 
-Only a cluster administrator should create a `TopologySource` or its credentials. Restrict RBAC for
-these objects, allow egress only to the intended endpoint and DNS path, and rotate referenced
-`Secret`s without embedding credentials in the URL. `timeout` must not exceed *`pollInterval`*, and all
-three durations must be positive.
-
-## Request a level
-
-Set *`requiredLevel`* on an existing role to require each replica's `Pod` group to fit in one domain:
+Set *`roles[].topology.requiredLevel`* to a configured label key (never a bare word like `zone` or a
+concrete zone value) so all *`size`* `Pod`s of each replica fit inside one domain:
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
  kind: ModelDeployment
  metadata:
    name: zoned-deployment
+   namespace: team-a
  spec:
    roles:
      - name: decode
@@ -250,19 +190,26 @@ Set *`requiredLevel`* on an existing role to require each replica's `Pod` group 
 +        requiredLevel: topology.kubernetes.io/zone
 ```
 
-The value is a label key, not `region`, `zone`, or a concrete zone name. Valid examples include
-`topology.kubernetes.io/zone`, `topology.gpustack.ai/rack`, and a selected Topograph tier. Omit the
-field for unconstrained *topology-aware scheduling (TAS)* placement; the [field contract](../model-deployment/configuration.md#topology-placement)
-defines the implicit hostname level.
+Omit *`requiredLevel`* for unconstrained placement (`kubernetes.io/hostname` is implicit; see
+[Topology placement](../model-deployment/configuration.md#topology-placement)). Editing
+*`requiredLevel`* updates the role hash and rolls only that role's replicas.
 
-Changing or removing the field participates in the existing render hash and replaces only affected
-replica groups. It does not move an admitted group in place.
+## Live hierarchy changes
+
+Updating *`levels`* creates a new profile and `Topology`. Once `Node`s and `Devices` converge, the
+operator creates replacement `ResourceFlavor`s, drains the `ClusterQueue` (`HoldAndDrain`), swaps
+flavors at zero reservations, and restores the stop policy.
+
+If `TopologyReady=False`, inspect its reason and migration annotations before editing again. Missing
+flavors, quota mismatches, or exceeding 64 flavors per resource group preserve the previous queue
+plan.
 
 ## Verification
 
-Read the produced objects rather than inferring success from a Ready `Node`:
+Inspect the source, `Node` profile labels, Kueue `Topology` objects, `ResourceFlavor`s, and
+`ClusterQueue` conditions:
 
-```sh
+```bash
 kubectl get topologysources.worker.gpustack.ai
 kubectl get nodes -L topology.gpustack.ai/profile,topology.kubernetes.io/zone
 kubectl get topologies.kueue.x-k8s.io
@@ -270,98 +217,47 @@ kubectl get resourceflavors.kueue.x-k8s.io -o yaml
 kubectl get clusterqueues.kueue.x-k8s.io -o yaml
 ```
 
-For a `ConfigMap` or webhook source, inspect its NFD output before checking the projected `Node` labels:
+For `ConfigMap` or webhook sources, also verify generated NFD `NodeFeature` objects (refresh the
+snapshot if `Node` selector labels change later):
 
-```sh
+```bash
 source_uid=$(kubectl get topologysource data-center -o jsonpath='{.metadata.uid}')
 kubectl -n gpustack-system get nodefeatures -l "topology.gpustack.ai/source-uid=$source_uid" -o yaml
-kubectl get nodes -L topology.gpustack.ai/region,topology.gpustack.ai/zone,topology.gpustack.ai/rack
 ```
 
-The `NodeFeature.spec.labels` map contains private inventory labels only. Standard cloud region and
-zone keys may be read as parents but must not appear there. Refresh the `ConfigMap` snapshot after
-changing selector labels on an existing `Node`; writing sources do not watch `Node` label drift.
+Confirm `TopologySource` is `Ready` and every managed `Node` and `Devices` object shares one
+`topology.gpustack.ai/profile`. Verify each `ResourceFlavor` ends in `kubernetes.io/hostname` and
+`ClusterQueue` `TopologyReady` is `True`; inspect *`topologyRequest.required`* and
+*`topologyAssignment`* on `Workload`s.
 
-The source must be Ready, every managed `Node` must have one profile, every generated flavor must pin
-that profile and reference a `Topology`, and the `ClusterQueue` `TopologyReady` condition must be True.
-The `Topology`'s final level must be `kubernetes.io/hostname`.
+### EKS zone verification
 
-For a submitted `ModelDeployment`, inspect the generated `Workload` rather than creating one by hand:
-
-```sh
-kubectl get workloads.kueue.x-k8s.io -A -o yaml
-kubectl get modeldeployments.worker.gpustack.ai -A -o yaml
-```
-
-Confirm the `Workload` PodSet carries *`topologyRequest.required`* when requested and inspect its
-`topologyAssignment` after admission. Then compare assigned domain values with the `Node`s on which
-the `Pod`s actually run. An assignment may name the hostname level even when a one-`Pod` `Workload`
-requested zone; verify the request and the admitted `ResourceFlavor`'s `topologyName` separately.
-
-## Change a live hierarchy
-
-Publish a complete replacement hierarchy, such as region → zone → rack, through the selected
-`TopologySource`. Its ordered level keys produce a new profile and `Topology`. The `Node` and its
-`Devices` ledger must converge on the same `topology.gpustack.ai/profile` before accelerator
-admission can use the replacement flavor.
-
-Record the managed `ClusterQueue`'s name, UID, stop policy, *`status.reservingWorkloads`*, and flavor
-references before and after the change. GPUStack creates replacement flavors first, sets
-`HoldAndDrain`, waits for zero reservations, switches the flavor set on the same queue, then restores
-the previous stop policy. Kueue evicts and later readmits affected `Workload`s, so plan for a service
-interruption. Old flavors and their `Topology` disappear only after references clear.
-
-If `TopologyReady=False`, read its reason and the queue's migration annotations before changing
-anything else. A missing replacement flavor, immutable object drift, too many required flavors,
-or quota that cannot be conserved leaves the last complete queue plan in place. An old non-*TAS* queue
-from a previous release is not adopted; use fresh managed objects.
+The repository EKS fixture provisions two CPU node groups across two zones (two `Node`s per zone)
+with `topograph_aws_pod_identity_enabled=true`. A size-2 PodSet schedules within one zone, while a
+size-3 PodSet stays `Pending` across four total `Node`s. Review AWS pricing before apply, test on
+fresh queues, and destroy all billable resources afterward.
 
 ## Troubleshooting
 
 ### Diagnose Pending workloads
 
-Pending is the safe result when no single domain satisfies the full PodSet. Check in this order:
+```bash
+kubectl -n <ns> get modeldeployments.worker.gpustack.ai <name> -o jsonpath='{.status}' | jq
+kubectl -n <ns> get workloads.kueue.x-k8s.io -o yaml
+kubectl get clusterqueues.kueue.x-k8s.io <cq> -o jsonpath='{.status.conditions}' | jq
+kubectl get nodes -L topology.gpustack.ai/profile
+```
 
-1. Read the `ModelDeployment` progress message for the role and replica.
-2. Read the generated `Workload` conditions and topology request/assignment.
-3. Check the `ClusterQueue` `TopologyReady` condition and resource-group flavor count.
-4. Check every referenced `ResourceFlavor`'s profile label and `topologyName`.
-5. Compare the requested level with each Kueue `Topology` and the actual `Node` labels.
-6. Count CPU, memory, and requested extended resources inside one domain, not cluster-wide.
-
-A four-node cluster with two `Node`s per zone can admit a three-`Pod` request cluster-wide but cannot
-admit it at zone level. Likewise, capacity split between a zone profile and a hostname-only profile
-cannot satisfy one zone-constrained PodSet.
-
-A multi-role deployment can show one `Workload` with `QuotaReserved=True` and a topology assignment,
-counted in the queue's *`status.reservingWorkloads`*, while its joint check reads `Pending` and no role
-`Pod` is bound. That group fits and is [held for its set](scheduling.md#per-replica-topology-requests);
-the other roles are the ones short of a domain. Free their capacity or delete the deployment.
-
-If the [flavor limit](scheduling.md#capacity-and-lifecycle-limits)
-is exceeded, reduce profile fragmentation or hardware identity variants, then let reconciliation
-retry the complete plan.
-
-### Temporary EKS validation
-
-The repository EKS fixture can create two CPU node groups pinned to different availability zones.
-Use two inexpensive `Node`s per zone to prove both positive and negative placement: a size-two PodSet
-fits one zone, while a size-three PodSet remains Pending although total cluster capacity is four.
-
-Enabling `topograph_aws_pod_identity_enabled` also configures the broker's IMDSv2 hop limit and the
-minimal API `Pod` Identity permission. Verify four Ready `Node`s, two distinct zone labels, broker and
-API readiness, source reconciliation, *TAS* assignments, and the negative Pending observation.
-
-This is paid infrastructure. Review current AWS prices, quotas, and instance availability before
-apply. Use fresh queues for every test. After validation, destroy the fixture and verify the state
-and charge-bearing resources are gone, or explicitly transfer the Terraform state to the next owner
-before leaving the cluster running. The test does not prove an upgrade of previously published queues.
+| Symptom | Signal | Next action |
+|---|---|---|
+| Replica stays `Pending` | `Workload` `QuotaReserved=False` with *`topologyRequest.required`* set | Free capacity inside a single domain at that level (e.g., 2 `Node`s/zone cannot fit a 3-`Pod` zone group) or relax *`requiredLevel`*. |
+| Aggregate capacity exists, no fit | Mixed `topology.gpustack.ai/profile` labels across candidate `Node`s | Align `TopologySource` selectors so all pool `Node`s publish the same profile. |
+| One role reserved, `Pod`s gated | `Workload` `QuotaReserved=True`, joint check `Pending` (or `Parked` after `30m`) | Free sibling role capacity in a valid domain, or recreate/reactivate `Parked` deployments. |
+| Queue blocks admission | `ClusterQueue` `TopologyReady=False` or `Unknown` (`AwaitingQueueStatus`) | Check flavor profiles, Kueue `Active` status, and keep flavors `<= 64` per resource group. |
+| Source not applied | `TopologySource` `Ready=False` (`Valid` or `OwnershipConflict`) | Fix broken parent chains, snapshot errors, or overlapping `TopologySource` selectors. |
 
 ---
 
-**See also** — [Topology-Aware Scheduling](scheduling.md) (mechanism
-and boundaries) · [Model Deployment](../model-deployment/configuration.md) (field contract) ·
-[Installation Modes](../../operate/installation-modes.md) (chart ownership)
+**See also** — [Hierarchical Placement Walkthrough](../../walkthroughs/topology/hierarchical-placement.md) (end-to-end zone and rack placement) · [Model Deployment Configuration](../model-deployment/configuration.md) (*`roles[].topology.requiredLevel`* contract) · [Installation Modes](../../operate/installation-modes.md) (bundled Topograph chart ownership)
 
-**Next** → [Model Deployment](../model-deployment/configuration.md) — configure the serving
-roles that consume topology-aware admission.
+**Next** → [Model Deployment Configuration](../model-deployment/configuration.md) — configure multi-member serving roles for topology-aware placement.

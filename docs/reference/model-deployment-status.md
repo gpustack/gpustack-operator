@@ -1,11 +1,12 @@
 # Model Deployment Status
 
-A `ModelDeployment` reports its phase, ready replicas and serving endpoint in *`status`*. Use these
+Evidence: contract. A `ModelDeployment` reports its phase, ready replicas and serving endpoint in *`status`*. Use these
 fields and its conditions to diagnose a deployment that is still starting or has lost capacity.
 
 ## Contents
 
 - [Status](#status)
+- [Conditions](#conditions)
 - [Scaler annotations](#scaler-annotations)
 - [Group status](#group-status)
 
@@ -25,7 +26,7 @@ Ready instances by kind: `R` is managed router `Pod`s, `S` is ordinary servers, 
 servers; `1R1E1P1D` means one Ready router, one Ready encoder, one Ready prefiller and one Ready decoder.
 
 **During a replacement, status combines desired and observed fields.** See
-[Rollout behavior](configuration.md#rollout-behavior). `desired` and *`parallelism`* describe the current
+[Rollout behavior](../modules/model-deployment/configuration.md#rollout-behavior). `desired` and *`parallelism`* describe the current
 spec; they can differ from running replicas while replacement waits. `ready` counts replicas still
 serving their deployed configuration. `unmanaged` and cache conditions read deployed command mode.
 
@@ -47,7 +48,7 @@ the effective kind, selector, direct endpoint and any dialable KV-event endpoint
 are absent when the corresponding rendered `Pod`s do not carry publisher configuration.
 
 This router contract names metrics sources for routing; it is not a live utilization sample.
-The separate [Model Deployment Metrics](metrics.md) subresource reads the current
+The separate [Model Deployment Metrics](model-deployment-metrics.md) subresource reads the current
 router and engine `Pod` endpoints and reports partial coverage explicitly.
 
 Only `--ssl-certfile` or `--ssl-keyfile` turn the scheme to `https`. The rest of the `--ssl-*`
@@ -70,7 +71,7 @@ engine's own `GET /health` on the port the `Service` targets, so `ready == desir
 answers" are one fact rather than two.
 
 The KV cache store's leader answers a route of the same name that is deliberately **not** a readiness
-signal; see [KV Cache Election and Failover](../kv-cache/leader.md). They are different programs, and only the
+signal; see [KV Cache Election and Failover](../modules/kv-cache/leader.md). They are different programs, and only the
 engine's route is read here.
 
 **The startup gate allows thirty minutes per attempt, not in total.** A replica that has not
@@ -265,15 +266,15 @@ one state that clears the field, because a reservation left behind would keep ho
 operation occupies.
 
 The drain step is where a replica still holding requests is caught before anything is cut; it is
-described in [Model Deployment Shutdown](shutdown.md#retirement-protocol).
+described in [Model Deployment Shutdown](model-deployment-shutdown.md#retirement-protocol).
 
-### Conditions
+## Conditions
 
 Conditions describe states that a single phase cannot represent. They are independent: "quota reserved but
 cache not attached" is a real and actionable state. Most conditions are described below; `WeightsReady` is
-described with the artifact it reports on, in [Model Artifact](../model-delivery/artifact.md#status).
+described with the artifact it reports on, in [Model Artifact](../modules/model-delivery/artifact.md#status).
 
-#### DomainRegistered
+### DomainRegistered
 
 Whether the referenced Binding resolved and its domain was read.
 
@@ -285,7 +286,7 @@ Whether the referenced Binding resolved and its domain was read.
 | `False` | `BindingNotReady` | wait for it, or look at the pool it points at |
 | `False` | `BindingDeleting` | find who deleted it; the replicas keep writing to the domain they attached to |
 
-#### QuotaReserved
+### QuotaReserved
 
 Whether **every one of** the deployment's `Workload`s holds Kueue quota. Every
 replica is its own group with its own `Workload`, so a deployment of N replicas is N `Workload`s. `True`
@@ -341,7 +342,7 @@ What to do about it:
   to; giving the roles different types keeps one preemption from reclaiming both halves out of the
   same queue.
 
-#### CacheAttached
+### CacheAttached
 
 Whether the cache is observed to be in effect, which is a different question
 from whether it was configured. It is judged downstream of the engine and **never** on a rendered flag
@@ -362,7 +363,7 @@ simply idle looks exactly like an unread one: no supported engine signals "the c
 initialized" before any traffic, so silence is the most common steady state. A connector that
 cannot come up keeps its replica from ever becoming Ready, which is reported there.
 
-#### ReplicasUpToDate
+### ReplicasUpToDate
 
 Whether the running replicas match the desired explicit spec hash and meet
 the deployment's minimum `modeldeployment.gpustack.ai/render-version`. The explicit spec hash
@@ -409,7 +410,7 @@ condition on the object that names a held rollout.
 > connector — deletes every replica of every deployment on a pool for a few seconds of store
 > unavailability. Measured, a withheld edit lands within seconds of the store returning.
 
-#### RoleKindsReady
+### RoleKindsReady
 
 Whether every role **kind** the deployment declares has at least one ready
 replica. It is deliberately **not** replica completeness: "every role has all the replicas it asked
@@ -438,7 +439,7 @@ Read this condition alongside *`phase`*: it reports readiness by role kind, whil
 replica completeness. Neither guarantees that an inference request succeeds; that also depends on
 the engine and `Service` connectivity.
 
-#### KVEventsPublishing
+### KVEventsPublishing
 
 Whether every role that produces cache blocks has publisher configuration
 in its rendered `Pod`s. It reports configuration, not live traffic: a configured publisher that later
@@ -452,7 +453,7 @@ crashes remains `True`. *Encode* holds no KV cache and produces no cache blocks,
 | `False` | `NoRouter` | a *prefill/decode* pair has no router to consume events |
 | `Unknown` | `RoleUnmanaged` | a producing role replaced its command line, so the operator cannot inspect what it does |
 
-#### RouterReady
+### RouterReady
 
 Whether the managed router rendered and has a ready replica. A render refusal is
 reported here rather than returned as an error, so the rest of the status (phase, the other
@@ -466,7 +467,7 @@ conditions, the role counts) keeps computing with the cause named.
 | `False` | `NoReadyReplicas` | the router's `Deployment` exists but no replica is ready |
 | `Unknown` | `NotDeployed` | the router's `Deployment` has not been created yet |
 
-#### EndpointEligibility
+### EndpointEligibility
 
 Whether the deployment's endpoints have been qualified at all. It
 answers for the reading, not for the endpoints: until endpoint qualification exists it is
@@ -477,10 +478,10 @@ saw, and no pass that reports this has seen any.
 |---|---|---|
 | `Unknown` | `NotObserved` | no endpoint qualification has been observed for any role yet; the per-role *`endpoints.eligible`* counts are `null`, not zero |
 
-#### ElasticResize
+### ElasticResize
 
 Whether an elastic scale stands blocked or terminally refused. It is
-written only for a deployment with an `elastic.dataParallelWidth` role; [Elastic EP](elastic-ep.md) owns the
+written only for a deployment with an `elastic.dataParallelWidth` role; [Elastic EP](../modules/model-deployment/elastic-ep.md) owns the
 resize lifecycle it reports on.
 
 | Value | Reason | Meaning |
@@ -492,9 +493,9 @@ resize lifecycle it reports on.
 A refusal still inside its retry bound stays `True`: it is not terminal yet. `WorldUnprovable`
 levels back to `True` on its own once a later pass proves the live world again.
 
-#### RuntimeControlSynced
+### RuntimeControlSynced
 
-Reports live convergence across answering `Pod`s and per-role status (`observedGeneration`, `synced`, `reason`, `message`, `paused`, `appliedConfigDigest`, `convergedPods`, `totalAnsweringPods`, `unsupportedFields`) in *`status.roles[*].runtimeControl`*; see [Online Runtime Control](runtime-control.md#step-3-verify-convergence-status) for condition reasons and troubleshooting.
+Reports live convergence across answering `Pod`s and per-role status (`observedGeneration`, `synced`, `reason`, `message`, `paused`, `appliedConfigDigest`, `convergedPods`, `totalAnsweringPods`, `unsupportedFields`) in *`status.roles[*].runtimeControl`*; see [Online Runtime Control](../modules/model-deployment/runtime-control.md#step-3-verify-runtime-settings) for condition reasons and troubleshooting.
 
 ## Scaler annotations
 
@@ -504,13 +505,13 @@ replica count and which decision last changed it. They sit in *`metadata.annotat
 *`status`*, because the single-writer fence is enforced at admission and a status field cannot
 refuse a write.
 
-[Binding fence](scaling.md#binding-fence) owns the payload of both annotations, the
+[Scaler ownership rules](../modules/model-deployment/scaling.md#scaler-ownership-rules) owns the payload of both annotations, the
 admission rules for bound and unbound deployments, and the escape hatch when a scaler is gone;
-[GitOps sync](scaling.md#gitops-sync) covers how a GitOps agent
+[GitOps sync](../modules/model-deployment/scaling.md#gitops-sync) covers how a GitOps agent
 ignores the fields the scaler owns.
 
 The scaler's own `status` reports what it observed, what it recommends and what blocks it;
-[Scaler status](scaling.md#status) owns that contract.
+[Scaler status](../modules/model-deployment/scaling.md#status) owns that contract.
 
 ## Group status
 
@@ -602,10 +603,8 @@ a reader asks about when a rank fails.
 
 ---
 
-**See also** — [Model Deployment Configuration](configuration.md) (the contract this status reports on) ·
-[Model Deployment Scaling](scaling.md) (the scaler that owns a bound replica count) ·
-[Prefill and Decode](prefill-decode.md) (pairing *prefill* and *decode* roles) ·
-[Encode, Prefill and Decode](encode-prefill-decode.md) (*encode*, *prefill* and *decode* disaggregation) ·
-[KV Cache Election and Failover](../kv-cache/leader.md) (the leader process the conditions distinguish from the operator's own).
-
-**Next** → [Model Deployment Configuration](configuration.md)
+**See also** — [Model Deployment Configuration](../modules/model-deployment/configuration.md) (the contract this status reports on) ·
+[Model Deployment Scaling](../modules/model-deployment/scaling.md) (the scaler that owns a bound replica count) ·
+[Prefill and Decode](../modules/model-deployment/prefill-decode.md) (pairing *prefill* and *decode* roles) ·
+[Encode, Prefill and Decode](../modules/model-deployment/encode-prefill-decode.md) (*encode*, *prefill* and *decode* disaggregation) ·
+[KV Cache Election and Failover](../modules/kv-cache/leader.md) (the leader process the conditions distinguish from the operator's own).

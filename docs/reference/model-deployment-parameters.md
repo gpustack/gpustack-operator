@@ -1,7 +1,9 @@
 # Parameters
 
-`ModelDeployment` synthesizes engine and router arguments, environment variables, files and volume
-mounts from its fields and bound `AcceleratorType`, `KVCachePoolBinding` and `ModelArtifact` resources.
+Evidence: contract. `ModelDeployment` synthesizes engine and router arguments, environment
+variables, files and volume mounts from its fields and bound `AcceleratorType`,
+`KVCachePoolBinding` and `ModelArtifact` resources.
+
 The tables describe managed engine roles, routers, sidecars and remote weight clients (`Engine` in
 the `Component` column means both `vLLM` and `SGLang`). Rendering establishes configuration; it
 does not establish hardware or image qualification.
@@ -23,7 +25,7 @@ does not establish hardware or image qualification.
 | Defaulted | Managed role and absent user value | User `roles[].env` or applicable `roles[].extraArgs` take precedence without admission error. This includes listen flags, compile caches, transfer defaults and tuning variables. |
 | Take-over | Non-empty `roles[].command` | User owns the command line; engine CLI and KV/transfer client environment synthesis are skipped. `status.roles[].unmanaged` is `true`. |
 
-See [Operator-owned keys](configuration.md#operator-owned-keys) for conditions, exceptions and existing
+See [Operator-owned keys](../modules/model-deployment/configuration.md#operator-owned-keys) for conditions, exceptions and existing
 workloads. Ownership of a flag depends on the engine and its context.
 
 ## Serving parameters
@@ -40,13 +42,13 @@ workloads. Ownership of a flag depends on the engine and its context.
 | Engine | Defaulted | Managed role | `VLLM_CACHE_ROOT` or `SGLANG_CACHE_DIR` | Set `roles[].env` to override. |
 | Engine | Defaulted | Managed role | `HF_HUB_CACHE`, `HF_XET_CACHE`, `PIP_CACHE_DIR`, `TORCH_HOME`, `FLASHINFER_WORKSPACE_BASE`, `TORCHINDUCTOR_CACHE_DIR`, `TRITON_CACHE_DIR` | Set `roles[].env` to override each path. |
 
-[Compilation cache and timeout](configuration.md#compilation-cache-and-timeout) lists the cache
+[Compilation cache and timeout](../modules/model-deployment/configuration.md#compilation-cache-and-timeout) lists the cache
 paths and startup budget. A take-over role receives neither the default mount nor cache variables.
 
 ## Shared cache parameters
 
 A `spec.kvCache` binding supplies the shared-store connection and dtype. Its tenant and transport
-rules are described in [KV Cache Injection](../kv-cache/injection.md).
+rules are described in [KV Cache Injection](kv-cache-injection.md).
 
 | Component | Tier | Trigger | Injected | Note |
 |---|---|---|---|---|
@@ -67,10 +69,10 @@ rules are described in [KV Cache Injection](../kv-cache/injection.md).
 ## Transfer parameters
 
 The table applies to managed *Prefill* and *Decode* roles behind a router. See
-[Direct transfer transport](prefill-decode.md#direct-transfer-transport) for admission and image
+[Direct KV transports](../modules/model-deployment/prefill-decode.md#direct-kv-transports) for admission and image
 requirements.
 
-![KV transfer parameter decision flow](../../assets/diagrams/model-deployment-transfer-decision.svg)
+![KV transfer parameter decision flow](../assets/diagrams/model-deployment-transfer-decision.svg)
 
 <!--
 flowchart TD
@@ -127,7 +129,7 @@ The operator resolves transfer parameters in two steps:
 
 - **A5 KV exclusions**: `RoleEncode`, `SGLang` KV-only legs, and Ascend A2/A3 (`Family != "950"`) never receive `/etc/hixlep` or `ASCEND_LOCAL_COMM_RES` for KV transfer.
 - **Scaler neutrality**: `ASCEND_LOCAL_COMM_RES`, `ASCEND_GLOBAL_RESOURCE_CONFIG`, and `ASCEND_MF_TRANSFER_PROTOCOL` are capacity-neutral for `ModelDeploymentScaler` priors.
-- **UBG and UBoE override**: `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`roles[].env`* is accepted without owned-env refusal; see [Ascend A5 topologies](prefill-decode.md#ascend-a5-topologies).
+- **UBG and UBoE override**: `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`roles[].env`* is accepted without owned-env refusal; see [Ascend A5 topologies](../modules/model-deployment/prefill-decode.md#ascend-a5-topologies).
 
 ## Router parameters
 
@@ -150,15 +152,15 @@ The operator resolves transfer parameters in two steps:
 `routing-proxy` is the `llm-d` sidecar injected into managed `decode` Pods when `llm-d-router`
 fronts a pair; it intercepts the decode service port, runs the first-stage prefill-to-decode KV
 handshake, and forwards to the local engine (`vllm-router` and `sglang-gateway` handle this in the
-standalone router Deployment instead). [Router configuration](prefill-decode.md#router-configuration)
-lists router compatibility and [Routing](routing.md) describes routing policies.
+standalone router Deployment instead). [Router configuration](../modules/model-deployment/prefill-decode.md#router-configuration)
+lists router compatibility and [Routing](../modules/model-deployment/routing.md) describes routing policies.
 
 ## Weight delivery parameters
 
 | Component | Tier | Trigger | Injected | Note |
 |---|---|---|---|---|
 | Engine | Owned | Remote `ModelArtifact` delivery | `GPUSTACK_MODEL_TRANSFER_BACKEND=nixl` or `hixl`, `GPUSTACK_MODEL_TRANSFER_ARTIFACT`, `GPUSTACK_MODEL_TRANSFER_ARTIFACT_UID`, `GPUSTACK_MODEL_TRANSFER_MANIFEST_DIGEST`, `GPUSTACK_MODEL_TRANSFER_MODEL_PATH`, `GPUSTACK_MODEL_TRANSFER_TOKEN`, `GPUSTACK_MODEL_TRANSFER_WHEEL_DIR`, `GPUSTACK_MODEL_TRANSFER_LOAD_FORMAT`, `GPUSTACK_MODEL_TRANSFER_CONFIG` | Operator supplies the delivery identity, staged wheel path and session credentials. |
-| Engine | Owned | ModelExpress peer delivery | `MX_SERVER_ADDRESS` (metadata sidecar), `MX_WORKER_HOST` from `status.podIP`, `MX_ARTIFACT_TRANSFER=1`, `MX_LOAD_PLUGIN=gpustack`, `MX_LOAD_PLUGIN_BEFORE`, `MX_ARTIFACT_COMPILE_CONFIG_DIGEST`, `MX_ARTIFACT_READY_URL`, `GPUSTACK_MODEL_TRANSFER_DELIVERY_POLICY=Prefer` or `Require` | See [Remote Weight Delivery](../model-delivery/remote.md) for eligibility and fallback. |
+| Engine | Owned | ModelExpress peer delivery | `MX_SERVER_ADDRESS` (metadata sidecar), `MX_WORKER_HOST` from `status.podIP`, `MX_ARTIFACT_TRANSFER=1`, `MX_LOAD_PLUGIN=gpustack`, `MX_LOAD_PLUGIN_BEFORE`, `MX_ARTIFACT_COMPILE_CONFIG_DIGEST`, `MX_ARTIFACT_READY_URL`, `GPUSTACK_MODEL_TRANSFER_DELIVERY_POLICY=Prefer` or `Require` | See [Remote Weight Delivery](../modules/model-delivery/remote.md) for eligibility and fallback. |
 | Engine | Defaulted | Remote `ModelArtifact` delivery | `--load-format=model-transfer` | An existing supported load format is preserved; conflicting formats are refused. |
 | Engine | Defaulted | NIXL remote delivery | `GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND=UCX` or `LIBFABRIC` on EFA | User environment wins. |
 | Engine | Defaulted | Ascend A5 (`Family == "950"`), HIXL remote delivery, `interface: 0` | `ASCEND_LOCAL_COMM_RES='{"version":"1.3"}'` | Deduplicated with KV connector defaults; user `roles[].env` wins. |
@@ -167,7 +169,5 @@ lists router compatibility and [Routing](routing.md) describes routing policies.
 
 ---
 
-**See also** — [Model Deployment Configuration](configuration.md) for role ownership and
-[Prefill and Decode](prefill-decode.md) for pairing and transport.
-
-**Next** → [Engine Compatibility](engine-versions.md)
+**See also** — [Model Deployment Configuration](../modules/model-deployment/configuration.md) for role ownership and
+[Prefill and Decode](../modules/model-deployment/prefill-decode.md) for pairing and transport.

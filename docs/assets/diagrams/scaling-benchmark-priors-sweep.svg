@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 568" role="img" aria-labelledby="title desc">
+<title id="title">Suite 2 (H200): Single-replica throughput sweep and TTFT percentiles</title>
+<desc id="desc">Two-panel chart of the H200 single-replica Qwen3-8B sweep across concurrency 2, 4, 8, 16, 24 and 32. Left panel plots measured total throughput rising from 1,882.56 to 17,135.159 tok/s against the tuned manual saturation seed (17,135.159 tok/s) and the 0.75-headroom catalog effective target (12,851.37 tok/s), which crosses measured throughput between c=16 and c=24. Right panel plots TTFT p50 (48.084 to 490.591 ms), p90 (50.489 to 689.956 ms) and p99 (120.712 to 736.115 ms), all well below the 2,000 ms P95 target.</desc>
+<style>
+:root{color-scheme:light dark;--bg:#f8fbff;--card:#fff;--ink:#12233d;--muted:#52677f;--line:#c9d9e7;--grid:#e4edf5;--axis:#8aa0b6;--c1:#2563eb;--c2:#c2410c;--c3:#0f766e;--c4:#7c3aed}
+@media(prefers-color-scheme:dark){:root{--bg:#101d30;--card:#1a2c43;--ink:#f1f6ff;--muted:#bdcde0;--line:#526b83;--grid:#2a4058;--axis:#7f97ae;--c1:#80adff;--c2:#ffa36b;--c3:#58d6c8;--c4:#c4b5fd}}
+text{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:var(--ink)}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:1.2px;fill:var(--muted)}
+.title{font-size:26px;font-weight:750;letter-spacing:-.3px}
+.sub{font-size:14px;fill:var(--muted)}
+.legend{font-size:13px;font-weight:600}
+.panel{fill:var(--card);stroke:var(--line);stroke-width:1.2}
+.shape{font-size:15px;font-weight:700}
+.cap{font-size:11px;fill:var(--muted)}
+.val{font:600 11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.tick{font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:var(--muted)}
+.axis-title{font-size:13px;font-weight:700;fill:var(--ink)}
+.x-title{font-size:12px;fill:var(--muted)}
+.note{font-size:12px;fill:var(--muted)}
+.grid{stroke:var(--grid);stroke-width:1}
+.base{stroke:var(--axis);stroke-width:1.2}
+.s1{stroke:var(--c1);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s2{stroke:var(--c2);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s3{stroke:var(--c3);fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-dasharray:7 4}
+.s3-solid{stroke:var(--c3);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s4{stroke:var(--c4);fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-dasharray:4 3}
+.s1-dash{stroke:var(--c1);fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:6 4}
+.s2-dash{stroke:var(--c2);fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:6 4}
+.m1{fill:var(--card);stroke:var(--c1);stroke-width:2.1}
+.m2{fill:var(--c2);stroke:var(--card);stroke-width:1}
+.m3{fill:var(--card);stroke:var(--c3);stroke-width:2.0;stroke-linejoin:miter}
+.m4{fill:var(--c4);stroke:var(--card);stroke-width:1}
+.v1{fill:var(--c1)}
+.v2{fill:var(--c2)}
+.v3{fill:var(--c3)}
+.v4{fill:var(--c4)}
+</style>
+<rect width="1200" height="568" fill="var(--bg)"/>
+<text class="eyebrow" x="40" y="42">MODEL DEPLOYMENT · SCALING BENCHMARK · SUITE 2 (H200)</text>
+<text class="title" x="40" y="78">Suite 2 (H200): Single-replica throughput sweep and TTFT percentiles</text>
+<text class="sub" x="40" y="104">Offline capacity-prior construction from one Qwen3-8B BF16 Server replica on NVIDIA H200 140 GB.</text>
+<line class="s1" x1="40" y1="136" x2="74" y2="136"/>
+<circle class="m1" cx="57.0" cy="136.0" r="4.8"/>
+<text class="legend" x="84" y="141">Measured total tok/s</text>
+<line class="s3" x1="250" y1="136" x2="284" y2="136"/>
+<text class="legend" x="294" y="141">Catalog 0.75 (12,851.37)</text>
+<line class="s3-solid" x1="490" y1="136" x2="524" y2="136"/>
+<path class="m3" d="M507.0 128.9L514.1 136.0L507.0 143.1L499.9 136.0Z"/>
+<text class="legend" x="534" y="141">TTFT p50</text>
+<line class="s2" x1="650" y1="136" x2="684" y2="136"/>
+<rect class="m2" x="664.5" y="133.5" width="5.0" height="5.0"/>
+<text class="legend" x="694" y="141">TTFT p90</text>
+<line class="s4" x1="810" y1="136" x2="844" y2="136"/>
+<path class="m4" d="M827.0 130.0L833.0 140.8L821.0 140.8Z"/>
+<text class="legend" x="854" y="141">TTFT p99 / Tuned manual seed</text>
+<rect class="panel" x="104.0" y="166.0" width="496.0" height="328.0" rx="12"/>
+<text class="shape" x="118.0" y="190.0">Total throughput (tok/s)</text>
+<text class="cap" x="586.0" y="189.0" text-anchor="end">single H200 replica</text>
+<circle class="m1" cx="124.0" cy="205.0" r="4.0"/>
+<text class="val v1" x="138.0" y="209.0">Measured peak (c=32): 17,135.159 tok/s</text>
+<text class="val v4" x="138.0" y="227.0">Tuned manual seed: 17,135.159 tok/s</text>
+<text class="val v3" x="138.0" y="245.0">Catalog (0.75 headroom): 12,851.37 tok/s</text>
+<line class="base" x1="118.0" y1="460.0" x2="586.0" y2="460.0"/>
+<text class="tick" x="96.0" y="464.0" text-anchor="end">0</text>
+<line class="grid" x1="118.0" y1="411.6" x2="586.0" y2="411.6"/>
+<text class="tick" x="96.0" y="415.6" text-anchor="end">5,000</text>
+<line class="grid" x1="118.0" y1="363.2" x2="586.0" y2="363.2"/>
+<text class="tick" x="96.0" y="367.2" text-anchor="end">10,000</text>
+<line class="grid" x1="118.0" y1="314.7" x2="586.0" y2="314.7"/>
+<text class="tick" x="96.0" y="318.7" text-anchor="end">15,000</text>
+<line class="grid" x1="118.0" y1="276.0" x2="586.0" y2="276.0"/>
+<text class="tick" x="96.0" y="280.0" text-anchor="end">19,000</text>
+<line class="s4" x1="118.0" y1="294.1" x2="586.0" y2="294.1"/>
+<text class="val v4" x="122.0" y="288.1" text-anchor="start">Tuned manual: 17,135.159</text>
+<line class="s3" x1="118.0" y1="335.5" x2="586.0" y2="335.5"/>
+<text class="val v3" x="122.0" y="329.5" text-anchor="start">Catalog 0.75: 12,851.37</text>
+<text class="tick" x="124.0" y="478.0" text-anchor="middle">c=2</text>
+<text class="tick" x="215.2" y="478.0" text-anchor="middle">c=4</text>
+<text class="tick" x="306.4" y="478.0" text-anchor="middle">c=8</text>
+<text class="tick" x="397.6" y="478.0" text-anchor="middle">c=16</text>
+<text class="tick" x="488.8" y="478.0" text-anchor="middle">c=24</text>
+<text class="tick" x="580.0" y="478.0" text-anchor="middle">c=32</text>
+<path class="s1" d="M124.0 441.8L215.2 424.6L306.4 397.9L397.6 348.8L488.8 319.3L580.0 294.1"/>
+<circle class="m1" cx="124.0" cy="441.8" r="5.0"/>
+<circle class="m1" cx="215.2" cy="424.6" r="5.0"/>
+<circle class="m1" cx="306.4" cy="397.9" r="5.0"/>
+<circle class="m1" cx="397.6" cy="348.8" r="5.0"/>
+<circle class="m1" cx="488.8" cy="319.3" r="5.0"/>
+<circle class="m1" cx="580.0" cy="294.1" r="5.0"/>
+<rect class="panel" x="674.0" y="166.0" width="496.0" height="328.0" rx="12"/>
+<text class="shape" x="688.0" y="190.0">Single-replica TTFT percentiles (ms)</text>
+<text class="cap" x="1156.0" y="189.0" text-anchor="end">P95 target = 2,000 ms</text>
+<path class="m3" d="M694.0 199.1L699.9 205.0L694.0 210.9L688.1 205.0Z"/>
+<text class="val v3" x="708.0" y="209.0">TTFT p50 at c=32: 490.591 ms</text>
+<rect class="m2" x="691.9" y="220.9" width="4.2" height="4.2"/>
+<text class="val v2" x="708.0" y="227.0">TTFT p90 at c=32: 689.956 ms</text>
+<path class="m4" d="M694.0 236.0L699.0 245.0L689.0 245.0Z"/>
+<text class="val v4" x="708.0" y="245.0">TTFT p99 at c=32: 736.115 ms</text>
+<line class="base" x1="688.0" y1="460.0" x2="1156.0" y2="460.0"/>
+<text class="tick" x="666.0" y="464.0" text-anchor="end">0</text>
+<line class="grid" x1="688.0" y1="414.0" x2="1156.0" y2="414.0"/>
+<text class="tick" x="666.0" y="418.0" text-anchor="end">200</text>
+<line class="grid" x1="688.0" y1="368.0" x2="1156.0" y2="368.0"/>
+<text class="tick" x="666.0" y="372.0" text-anchor="end">400</text>
+<line class="grid" x1="688.0" y1="322.0" x2="1156.0" y2="322.0"/>
+<text class="tick" x="666.0" y="326.0" text-anchor="end">600</text>
+<line class="grid" x1="688.0" y1="276.0" x2="1156.0" y2="276.0"/>
+<text class="tick" x="666.0" y="280.0" text-anchor="end">800</text>
+<text class="tick" x="694.0" y="478.0" text-anchor="middle">c=2</text>
+<text class="tick" x="785.2" y="478.0" text-anchor="middle">c=4</text>
+<text class="tick" x="876.4" y="478.0" text-anchor="middle">c=8</text>
+<text class="tick" x="967.6" y="478.0" text-anchor="middle">c=16</text>
+<text class="tick" x="1058.8" y="478.0" text-anchor="middle">c=24</text>
+<text class="tick" x="1150.0" y="478.0" text-anchor="middle">c=32</text>
+<path class="s3-solid" d="M694.0 448.9L785.2 446.5L876.4 421.7L967.6 408.3L1058.8 378.9L1150.0 347.2"/>
+<path class="s2" d="M694.0 448.4L785.2 438.3L876.4 416.1L967.6 376.7L1058.8 338.8L1150.0 301.3"/>
+<path class="s4" d="M694.0 432.2L785.2 437.3L876.4 415.5L967.6 371.5L1058.8 334.0L1150.0 290.7"/>
+<path class="m3" d="M694.0 441.5L701.4 448.9L694.0 456.3L686.6 448.9Z"/>
+<path class="m3" d="M785.2 439.1L792.6 446.5L785.2 453.9L777.8 446.5Z"/>
+<path class="m3" d="M876.4 414.3L883.8 421.7L876.4 429.1L869.0 421.7Z"/>
+<path class="m3" d="M967.6 400.9L975.0 408.3L967.6 415.7L960.2 408.3Z"/>
+<path class="m3" d="M1058.8 371.5L1066.2 378.9L1058.8 386.3L1051.4 378.9Z"/>
+<path class="m3" d="M1150.0 339.8L1157.4 347.2L1150.0 354.6L1142.6 347.2Z"/>
+<path class="m4" d="M694.0 426.0L700.2 437.2L687.8 437.2Z"/>
+<path class="m4" d="M785.2 431.1L791.5 442.3L779.0 442.3Z"/>
+<path class="m4" d="M876.4 409.2L882.6 420.5L870.1 420.5Z"/>
+<path class="m4" d="M967.6 365.3L973.8 376.5L961.3 376.5Z"/>
+<path class="m4" d="M1058.8 327.8L1065.0 339.0L1052.5 339.0Z"/>
+<path class="m4" d="M1150.0 284.4L1156.2 295.7L1143.8 295.7Z"/>
+<rect class="m2" x="691.4" y="445.8" width="5.2" height="5.2"/>
+<rect class="m2" x="782.6" y="435.7" width="5.2" height="5.2"/>
+<rect class="m2" x="873.8" y="413.5" width="5.2" height="5.2"/>
+<rect class="m2" x="965.0" y="374.1" width="5.2" height="5.2"/>
+<rect class="m2" x="1056.2" y="336.2" width="5.2" height="5.2"/>
+<rect class="m2" x="1147.4" y="298.7" width="5.2" height="5.2"/>
+<text class="x-title" x="352.0" y="516.0" text-anchor="middle">Concurrency (60 s windows, 1,024/256 shape)</text>
+<text class="x-title" x="922.0" y="516.0" text-anchor="middle">Concurrency (60 s windows, 1,024/256 shape)</text>
+<text class="note" x="40" y="532">Suite 2 hardware sweep on 1 × NVIDIA H200 (Qwen3-8B BF16, vLLM, TP = 1, 0 failed requests across all six 60-second windows).</text>
+<text class="note" x="40" y="550">All points met P95 TTFT &lt;= 2,000 ms and ITL &lt;= 33 ms (ExplicitSaturation); 0.75 headroom crosses between c=16 (11,477.608) and c=24 (14,527.811 tok/s).</text>
+</svg>

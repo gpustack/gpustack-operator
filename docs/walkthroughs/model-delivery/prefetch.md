@@ -1,26 +1,21 @@
 # Model Prefetch Walkthrough
 
-Cache DeepSeek-V2-Lite-Chat on one GPU node before starting inference.
-This shared preparation serves both the Elastic EP and External DP walkthroughs.
-The output below was captured with node model delivery enabled.
+Cache DeepSeek-V2-Lite-Chat on one GPU node before you start inference. The Elastic EP and External
+DP walkthroughs start from the namespace and artifact you create here.
 
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Create artifact and prefetch](#step-1-create-artifact-and-prefetch)
-- [Step 2: Verify the cached model](#step-2-verify-the-cached-model)
-- [Step 3: Start a serving workload](#step-3-start-a-serving-workload)
-- [Step 4: Pin weights against eviction](#step-4-pin-weights-against-eviction)
-- [Step 5: Release the cache](#step-5-release-the-cache)
+- [Cache preparation](#cache-preparation)
+- [Step 3: Pin cached weights](#step-3-pin-cached-weights)
+- [Cleanup](#cleanup)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
 ## Summary
 
-`NodeModelStore`, `ModelArtifact` and `ModelPrefetch` verify and cache Hugging Face weights on the
-node's disk before a serving `Pod` starts. A serving `Pod` on that node can use the verified cache
-while the weights remain available. This preparation serves the Elastic EP and External DP walkthroughs.
+Prefetching verifies Hugging Face weights on disk and records the result in `NodeModelStore` so
+serving `Pod`s mount the warm cache without re-downloading:
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
@@ -30,9 +25,13 @@ while the weights remain available. This preparation serves the Elastic EP and E
 | `ModelPrefetch` | namespace | user | warming the artifact onto the store's nodes |
 | `ModelDeployment` | namespace | user | the serving workload that finds the weights warm |
 
-## Environment
+### Prerequisites
 
-The captured run used this setup:
+- [Node model delivery](../../modules/model-delivery/operations.md) is enabled on the GPU node.
+- You have `kubectl`, `jq` and access to cluster-scoped model stores.
+- The node has enough free disk for the weights: 31,418,807,311 bytes for this model.
+
+### Environment
 
 | Item | Value |
 |---|---|
@@ -40,17 +39,18 @@ The captured run used this setup:
 | Node | one GPU node, named `gpu-node` in the manifests, with disk for the weights |
 | Model | `deepseek-ai/DeepSeek-V2-Lite-Chat` at revision `85864749cd611b4353ce1decdb286193298f64c7` |
 
-## Step 1: Create artifact and prefetch
+## Cache preparation
 
-Enable [node model delivery](../../modules/model-delivery/operations.md) and select the GPU node.
-Before applying the manifest, ensure you have `kubectl`, `jq` and access to cluster-scoped model stores.
-The node also needs enough disk space for the weights.
+### Step 1: Create artifact and prefetch
 
-Save the following as `model-delivery.yaml`. Replace both `gpu-node` values with your GPU node's
-`kubernetes.io/hostname` label. The store grant and the prefetch placement must select that same node.
-The fixed file list resolves to 12 files and 31,418,807,311 bytes.
-For another model, remove the DeepSeek-specific *`allowPatterns`* or replace them with a complete file list.
-Size the binding quota and node disk space for the resolved weights.
+Save the manifest below as `model-delivery.yaml`. Replace both `gpu-node` values with your GPU
+node's `kubernetes.io/hostname` label. The store and the prefetch placement must select the same
+node.
+
+Keep the pinned `revision`: the explicit *`allowPatterns`* list matches that commit and resolves to
+12 files and 31,418,807,311 bytes. For another model, remove the DeepSeek-specific patterns or
+replace them with a complete file list. Then size the binding quota and the node disk for the
+resolved weights.
 
 ```yaml
 apiVersion: v1
@@ -119,16 +119,26 @@ spec:
   minReady: 1
 ```
 
-## Step 2: Verify the cached model
+Apply it:
 
 ```bash
 kubectl apply -f model-delivery.yaml
-kubectl -n gpustack-elastic get modelartifacts,modelprefetches
-kubectl -n gpustack-elastic get modelprefetch deepseek-v2-lite-chat -o yaml
-kubectl get nodemodelstores -o json
 ```
 
-Captured `kubectl get modelartifacts,modelprefetches` output:
+If admission rejects the prefetch, check the binding quota and the store name against
+[Troubleshooting](#troubleshooting).
+
+### Step 2: Verify the cached model
+
+Wait for the artifact to resolve and the prefetch to become available, then confirm their status:
+
+```bash
+kubectl -n gpustack-elastic wait --for=condition=Resolved modelartifact/deepseek-v2-lite-chat --timeout=5m
+kubectl -n gpustack-elastic wait --for=condition=Available modelprefetch/deepseek-v2-lite-chat --timeout=20m
+kubectl -n gpustack-elastic get modelartifacts,modelprefetches
+```
+
+Captured output:
 
 ```text
 NAME                                                     SOURCE                              REVISION       SIZE          READY   DOWNLOADING   RESOLVED
@@ -138,41 +148,55 @@ NAME                                                     ARTIFACT               
 modelprefetch.worker.gpustack.ai/deepseek-v2-lite-chat   deepseek-v2-lite-chat   rtx6000-models   1       1         True
 ```
 
-Check the matching node's model entry as well:
+A healthy run shows `RESOLVED` as `True` and `AVAILABLE` as `True`, with one ready node out of one
+desired. If either wait times out or reports `False`, inspect the conditions and match the reason in
+[Troubleshooting](#troubleshooting):
 
 ```bash
-kubectl get nodemodelstores -o json |
-  jq '.items[] | .status.models[]? | {digest, sizeBytes, state}'
+kubectl -n gpustack-elastic get modelprefetch deepseek-v2-lite-chat \
+  -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}'
 ```
 
-Captured projection:
+Then confirm that the selected node holds this artifact's resolved digest:
+
+```bash
+HOST=$(kubectl -n gpustack-elastic get modelprefetch deepseek-v2-lite-chat -o json |
+  jq -r '.spec.placement.nodeSelector["kubernetes.io/hostname"]')
+NODE=$(kubectl get nodes -l "kubernetes.io/hostname=$HOST" -o jsonpath='{.items[0].metadata.name}')
+DIGEST=$(kubectl -n gpustack-elastic get modelartifact deepseek-v2-lite-chat \
+  -o jsonpath='{.status.resolved.manifestDigest}')
+kubectl get nodemodelstore "$NODE" -o json |
+  jq --arg d "$DIGEST" '.status.models[]? | select(.digest == $d) | {sizeBytes, state}'
+```
+
+Captured output:
 
 ```json
 {
-  "digest": "sha256:1369aae0b5cc2d0e260557bcea04b0d6aad40f8bb6accdac60f1ee543887d9f7",
   "sizeBytes": 31418807311,
   "state": "Ready"
 }
 ```
 
-The validation also retained the successful warm-up `Pod` and compared its 12 SHA-256 results with
-the resolved manifest. Warm-up `Pod`s are transient; collect their logs before completion if you need
-that evidence. See [Model Prefetch](../../modules/model-delivery/prefetch.md).
-Wait for the required content before creating the serving workload.
+The matched entry is `Ready`, and its size equals the artifact's `SIZE`. If the output is empty or
+`state` is not `Ready`, inspect `kubectl get nodemodelstore "$NODE" -o yaml` for the digest's
+*`reason`*, *`message`* and *`retryTime`*.
 
-## Step 3: Start a serving workload
+Warm-up `Pod`s verify the SHA-256 digest of all 12 files against the resolved manifest and terminate
+on completion; collect their logs while running if you need per-file output. Wait for `Ready` before
+you create a serving workload.
 
-Continue with [Elastic EP](../model-deployment/elastic-ep.md) to grow one collective,
-or [External DP](../model-deployment/external-dp.md) to route requests across fixed DP ranks.
-Use the namespace and artifact created here in either manifest.
+Continue with [Elastic EP](../model-deployment/elastic-ep.md) to grow one collective, or with
+[External DP](../model-deployment/external-dp.md) to route requests across fixed *DP* ranks. Use the
+namespace and artifact from Step 1 in either manifest.
 
-## Step 4: Pin weights against eviction
+## Step 3: Pin cached weights
 
-The node cache removes unreferenced weights, oldest first, when usage passes the high watermark.
-Pinning keeps a digest out of that collection. Admission refuses *`retention.pinned`* on a prefetch
-whose `ModelStoreBinding` does not set *`allowPinned`*, so the administrator grants the right first.
+When usage passes the high watermark, the node cache removes unreferenced weights, oldest first. A
+pin keeps the digest out of that collection. If the `ModelStoreBinding` does not set *`allowPinned`*,
+admission refuses *`retention.pinned`*, so the administrator grants it first.
 
-Edit `model-delivery.yaml`. The grant changes as follows:
+In `model-delivery.yaml`, add the grant to the binding:
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -188,7 +212,7 @@ Edit `model-delivery.yaml`. The grant changes as follows:
 +  allowPinned: true
 ```
 
-The prefetch then asks for the pin:
+Then request the pin on the prefetch:
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -210,15 +234,28 @@ The prefetch then asks for the pin:
 +    pinned: true
 ```
 
-Run `kubectl apply -f model-delivery.yaml` again. The file lists the grant before the prefetch, so
-the grant is in place when the prefetch is admitted. A pinned digest is never a collection candidate
-on the target nodes, though it still counts toward the store's usage. See
-[Pinning and expiry](../../modules/model-delivery/prefetch.md#pinning-and-expiry).
+Apply the file again. The binding comes before the prefetch in the file, so the grant exists when
+admission checks the pin:
 
-## Step 5: Release the cache
+```bash
+kubectl apply -f model-delivery.yaml
+kubectl -n gpustack-elastic get modelprefetch deepseek-v2-lite-chat -o jsonpath='{.spec.retention.pinned}'
+```
 
-Keep the prefetch while a serving application needs the cached weights.
-After deleting those consumers, remove the dedicated resources:
+Example output (illustrative):
+
+```text
+true
+```
+
+If admission still rejects the prefetch, confirm that the binding shows `allowPinned: true`. A
+pinned digest is never a collection candidate on the target nodes, but it still counts toward the
+store's usage. See [Pinning and expiry](../../modules/model-delivery/prefetch.md#pinning-and-expiry).
+
+## Cleanup
+
+Keep the prefetch while a serving application needs the cached weights. After you delete those
+consumers, remove the dedicated resources:
 
 ```bash
 kubectl -n gpustack-elastic delete modelprefetch deepseek-v2-lite-chat
@@ -227,37 +264,39 @@ kubectl -n gpustack-elastic delete modelartifact deepseek-v2-lite-chat
 kubectl delete modelstore rtx6000-models
 ```
 
-Cache collection follows the [retention rules](../../modules/model-delivery/prefetch.md).
-Deleting these CRs does not delete the Kubernetes cluster or its disks.
+Deleting these objects does not delete the Kubernetes cluster or its disks. Cached weights then
+follow the [retention rules](../../modules/model-delivery/prefetch.md).
 
 ## Limitations
 
-The prefetch warms one node (`minReady: 1`); serving `Pod`s scheduled onto nodes outside
-*`placement.nodeSelector`* find no warmed cache. High-watermark eviction order, pin behavior
-([Step 4](#step-4-pin-weights-against-eviction)), and *`retention.ttlAfterLastUse`* expiry are
-covered in [Pinning and expiry](../../modules/model-delivery/prefetch.md#pinning-and-expiry) and
-[References, restart, collection](../../modules/model-delivery/node-store.md#references-restart-collection).
+The hostname selector in *`placement.nodeSelector`* targets one node, and `minReady: 1` marks the
+prefetch `Available` once that node holds the weights. A serving `Pod` scheduled on another node
+finds no warm cache.
+
+High-watermark eviction order, pin behavior and *`retention.ttlAfterLastUse`* expiry are covered in
+[Pinning and expiry](../../modules/model-delivery/prefetch.md#pinning-and-expiry) and
+[Cache collection rules](../../modules/model-delivery/operations.md#cache-collection-rules).
 
 ## Troubleshooting
 
-| Symptom | Signal | Check & Mitigation |
+| Symptom | Signal | Resolution |
 |---|---|---|
-| `ModelArtifact` resolution failed | Condition: `Resolved=False/AccessDenied` | Private or gated repository; check namespace `Secret` token and inspect `InvalidToken` event |
-| `ModelArtifact` resolution failed | Condition: `Resolved=False/RevisionNotFound` | Branch, tag, or commit hash misspelled (ModelScope does not default silently to master) |
-| `ModelArtifact` resolution failed | Condition: `Resolved=False/SourceUnavailable` | Hub endpoint unreachable, large directory enumeration timeout, or 5xx network error |
-| `ModelArtifact` resolution failed | Condition: `Resolved=False/EmptyManifest` | Allow/ignore pattern filters excluded all files; review the glob patterns |
-| Model deployment blocked at `Starting` | Condition: `WeightsReady=False/NodeDeliveryUnavailable` | CSI driver `model.csi.gpustack.ai` missing or `modelManager.enabled: false` in Helm values |
-| `ModelDeployment` blocked with pattern filters | Condition: `WeightsReady=False/FilterNeedsNodeDelivery` | Pattern filtering requires `Node` delivery mode; set `model-artifact-delivery-mode: Node` |
-| `Pod` stuck in `ContainerCreating` | Condition: `WeightsReady=False/Materializing` | The node plugin is actively downloading; check `Pod` `FailedMount` event for downloaded byte count |
-| Weight download failed on node | Condition: `WeightsReady=False/MaterializationFailed` | Check `kubectl get nodemodelstore <node> -o yaml` for digest failure *`reason`*, *`message`*, and *`retryTime`* |
-| `ModelPrefetch` fails to reach `Available` | Condition: `Degraded=True/NodeFailed` | One or more target nodes failed download; check node disk capacity and logs |
-| `ModelPrefetch` shows fewer ready nodes than *`minReady`* | Condition: `Lapsed=True/RetentionTTLExpired` | `Node` copies went unused past *`retention.ttlAfterLastUse`*, left *`readyNodes`* and released any pin, and nothing re-warms them; raise or remove the TTL |
-| New `ModelPrefetch` rejected at admission | Over quota or unauthorized | Prefetch exceeds `ModelStoreBinding` *`quota.bytes`*, sets *`retention.pinned`* without `allowPinned: true`, or targets undeclared store |
-| Peer sync downloads continuously from Hub | `modelManager.port: 0` or peer sync disabled | Verify setting `model-store-peer-sync: true` and node `spec.peerSyncEnabled: true` |
+| `ModelArtifact` resolution failed | Condition: `Resolved=False/AccessDenied` | Private or gated repository. Check the namespace `Secret` token and inspect the `InvalidToken` event. |
+| `ModelArtifact` resolution failed | Condition: `Resolved=False/RevisionNotFound` | Branch, tag or commit hash misspelled. ModelScope does not silently default to master. |
+| `ModelArtifact` resolution failed | Condition: `Resolved=False/SourceUnavailable` | Hub endpoint unreachable, large directory enumeration timeout, or 5xx network error. |
+| `ModelArtifact` resolution failed | Condition: `Resolved=False/EmptyManifest` | Allow or ignore patterns excluded every file. Review the glob patterns. |
+| `ModelDeployment` blocked at `Starting` | Condition: `WeightsReady=False/NodeDeliveryUnavailable` | CSI driver `model.csi.gpustack.ai` is missing, or Helm values set `modelManager.enabled: false`. |
+| `ModelDeployment` blocked with pattern filters | Condition: `WeightsReady=False/FilterNeedsNodeDelivery` | Pattern filtering needs `Node` delivery mode. Set `model-artifact-delivery-mode: Node`. |
+| `Pod` stuck in `ContainerCreating` | Condition: `WeightsReady=False/Materializing` | The node plugin is downloading. The `Pod` `FailedMount` event shows the downloaded byte count. |
+| Weight download failed on node | Condition: `WeightsReady=False/MaterializationFailed` | Run `kubectl get nodemodelstore <node> -o yaml` and read the digest's *`reason`*, *`message`* and *`retryTime`*. |
+| `ModelPrefetch` does not reach `Available` | Condition: `Degraded=True/NodeFailed` | One or more target nodes failed the download. Check node disk capacity and logs. |
+| `ModelPrefetch` shows fewer ready nodes than *`minReady`* | Condition: `Lapsed=True/RetentionTTLExpired` | `Node` copies went unused past *`retention.ttlAfterLastUse`*. They left *`readyNodes`*, released any pin and are not re-warmed. Raise or remove the TTL. |
+| New `ModelPrefetch` rejected at admission | Over quota or unauthorized | The prefetch exceeds `ModelStoreBinding` *`quota.bytes`*, sets *`retention.pinned`* without `allowPinned: true`, or targets an undeclared store. |
+| Peer sync downloads continuously from Hub | `modelManager.port: 0` or peer sync disabled | Restore a positive `modelManager.port` in Helm values if peer sync is intended, enable the `model-store-peer-sync` `Setting`, and verify that `NodeModelStore` *`spec.peerSyncEnabled`* reconciles to `true`. |
 
 ---
 
-**See also** — [Model Delivery](../../modules/model-delivery/_index.md) ·
+**See also** — [Model Delivery](../../modules/model-delivery/_index.md) (capability overview) ·
 [Model Prefetch](../../modules/model-delivery/prefetch.md) (configuration and retention)
 
 **Next** → [Model Deployment Walkthroughs](../model-deployment/_index.md)

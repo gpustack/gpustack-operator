@@ -1,7 +1,9 @@
 # Model Deployment Scaling
 
-A `ModelDeploymentScaler` plans replica counts for one `ModelDeployment` from engine metrics. It reports its observations and recommendations in *`status`*. In `Active` mode, it
-also writes *`spec.roles[].replicas`* on the target. The `ModelDeployment` reconciler creates and retires the serving instances that count requires.
+A `ModelDeploymentScaler` computes target replica counts for one `ModelDeployment` from live engine
+metrics and publishes recommendations in *`status`*. In `Active` mode, it writes
+*`spec.roles[].replicas`* on the target so the `ModelDeployment` controller scales and retires
+instances.
 
 ![Model deployment scaling flow](../../assets/diagrams/model-deployment-scaling.svg)
 
@@ -15,149 +17,105 @@ flowchart LR
 
 ## Contents
 
-- [Resource](#resource)
+- [Configuration](#configuration)
 - [Algorithms](#algorithms)
-- [Bounds and ratios](#bounds-and-ratios)
-- [Pacing and guards](#pacing-and-guards)
-- [Resource rebalancing](#resource-rebalancing)
-- [Binding fence](#binding-fence)
-- [GitOps sync](#gitops-sync)
+- [Scaling policy](#scaling-policy)
+- [Replica ownership](#replica-ownership)
 - [Status](#status)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
-## Resource
+## Configuration
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
-kind: ModelDeploymentScaler  # required; namespaced, short name mds
+kind: ModelDeploymentScaler  # namespaced, short name mds
 metadata:
   name: llm-serving
+  namespace: team-a
 spec:
   targetRef:
     name: llm-serving  # required, immutable; ModelDeployment in this namespace
-  mode: Shadow        # default; Active commits the recommendation
-  suspend: false      # default; true stops planning and releases the binding
+  mode: Shadow  # default; enum: Shadow, Active
+  suspend: false  # default; true stops planning and releases binding
   sampling:
-    intervalSeconds: 15        # default; 5 to 300 seconds
-    pendingTimeoutSeconds: 300  # default; 60 to 1200 seconds
-  roles:  # at least one entry; provide bounds for every target role
-    - name: server  # unique role name on the target
-      minReplicas: 2  # 1 to 1024; defaults to 1
-      maxReplicas: 16  # required; 1 to 1024, at least minReplicas
-  algorithm:  # one algorithm and only its matching parameter block
+    intervalSeconds: 15  # default; range 5..300
+    pendingTimeoutSeconds: 300  # default; range 60..1200
+  roles:  # required; include every target role
+    - name: server
+      minReplicas: 2  # optional, default: 1; range 1..1024 (no scale-to-zero)
+      maxReplicas: 16  # required; range 1..1024, >= minReplicas
+  algorithm:  # one type and its matching parameter block only
     type: Proportional
     proportional:
-      metric: QueueDepth  # required; running requests plus waiting requests
-      tolerance: "0.1"   # default when omitted; positive and at most 1
+      metric: QueueDepth  # required; running + waiting requests
+      tolerance: "0.1"  # optional, default: 0.1; range (0, 1]
       roleTargets:
-        - name: server  # unique scaled role name
-          target: "8"   # required positive quantity; requests per ready replica
-    # Alternative for a Server role; replace type and proportional above.
-    # type: TokenThroughput
-    # tokenThroughput:
-    #   serverTargetTokensPerSecond: "2000"  # required for a Server role
-    # Alternative with a forecast; replace type and proportional above.
-    # type: Predictive
-    # predictive:
-    #   tokenThroughput:
-    #     serverTargetTokensPerSecond: "2000"  # fallback capacity
-    #   serverTokenCapacityPerReplica: "2000"  # forecast capacity
-    # Optional offline catalog resolution for missing TokenThroughput or Predictive
-    # capacities. An absent capacityPrior is manual; a present one resolves missing
-    # fields from the catalog (explicit fields always win; failures fail closed).
-    # capacityPrior:
-    #   catalogRef:
-    #     name: llm-serving-priors  # optional ConfigMap in this namespace
-    #     key: priors.yaml          # default when catalogRef is present; YAML or JSON
-    #   headroom: "0.75"  # default; (0, 1], applies only to catalog-derived fields
+        - name: server
+          target: "8"  # required positive quantity; requests per ready replica
   behavior:
     scaleUp:
-      stabilizationWindowSeconds: 0  # default; 0 to 600, zero disables the wait
-      maxStepReplicas: 4   # default; zero or omission stores 4
-      maxStepPercent: 100  # default; zero or omission stores 100
-      # Optional: replace both bounds with one unit; zero prevents scale-up.
+      stabilizationWindowSeconds: 0  # default; range 0..600
+      maxStepReplicas: 4  # default; 0 or omitted stores 4
+      maxStepPercent: 100  # default; 0 or omitted stores 100
+      # Optional: replace both bounds with one unit; value 0 disables scale-up.
       # stepPolicy:
-      #   type: Pods  # Pods or Percent
+      #   type: Pods  # enum: Pods, Percent
       #   value: 2    # required, nonnegative
     scaleDown:
-      stabilizationWindowSeconds: 300  # default; 0 to 1800
-      cooldownAfterAbortSeconds: 300   # default; 0 to 3600
-      decodePostScaleUpGraceSeconds: 120  # default; 0 to 3600, Decode roles only
-      # Optional: replace the default limit of one replica per pass.
+      stabilizationWindowSeconds: 300  # default; range 0..1800
+      cooldownAfterAbortSeconds: 300  # default; range 0..3600
+      decodePostScaleUpGraceSeconds: 120  # default; range 0..3600, Decode only
+      # Optional: replace default 1 replica per pass; value 0 disables scale-down.
       # stepPolicy:
-      #   type: Percent  # Pods or Percent
-      #   value: 10      # required, nonnegative; zero prevents scale-down
+      #   type: Percent  # enum: Pods, Percent
+      #   value: 10      # required, nonnegative
   rebalance:
-    policy: Opposing  # default; Opposing, Priority or Disabled
+    policy: Opposing  # default; enum: Opposing, Priority, Disabled
 ```
 
-- **Target**: Set *`targetRef.name`* to a `ModelDeployment` in the same namespace; the reference is immutable.
-- **Roles**: Provide bounds for every target role; each role name must be unique.
-- **Algorithm**: Select one algorithm and provide only its matching parameter block.
-- **Mode**: `Shadow` plans changes; `Active` commits recommendations after acquiring the binding.
-
-*`targetRef.name`* selects a target in the scaler's namespace. A scaler can precede its target;
-admission skips target-dependent checks while it is absent. The controller reports `TargetNotFound`
-until the target appears. Retargeting requires a new scaler because the reference is immutable.
-
-`Shadow` computes recommendations without owning the target or writing replica counts.
-`Active` acquires the [Binding fence](#binding-fence) and commits decisions.
-Setting *`suspend: true`* stops planning and releases an owned binding. `kubectl get mds` shows the
-target, mode, algorithm, and `Bound`, `Active` and `Blocked` conditions.
-
-*`sampling.intervalSeconds`* sets the sampling cadence and limits ordinary reaction speed.
-The sampler does not scrape a target again before the interval has passed, so a shorter interval increases scrape load. *`pendingTimeoutSeconds`* bounds the wait for scale-up
-admission; [Pacing and guards](#pacing-and-guards) explains the rollback when that wait expires.
+- **Target ordering**: A scaler may be created before its target; it reports `TargetNotFound` until
+  the `ModelDeployment` exists.
+- **Mode and suspend**: `Shadow` plans without claiming ownership; `Active` acquires the
+  [Scaler ownership rules](#scaler-ownership-rules) and commits counts. `suspend: true` pauses planning and releases
+  ownership.
+- **Quick check**: Run `kubectl get mds` to read mode, algorithm and `Bound`, `Active` and
+  `Blocked` conditions.
 
 ## Algorithms
 
-*`algorithm.type`* selects `Proportional`, `TokenThroughput` or `Predictive`. Only its matching
-parameter block is accepted. If the type is omitted, admission infers it from a *`proportional`*
-or *`predictive`* block; otherwise it selects `TokenThroughput`.
+*`algorithm.type`* selects `Proportional`, `TokenThroughput` or `Predictive` (inferred from a
+present *`proportional`* or *`predictive`* block; otherwise defaults to `TokenThroughput`).
 
-The three algorithms differ in the signal they read and the timescale they react on. `Proportional` compares one live measurement against a fixed target, `TokenThroughput`
-averages token rates over two windows, and `Predictive` forecasts those rates ahead of the peak. The workload decides which one fits: a request count that tracks GPU load, a
-compute load that request counts misstate, or traffic that climbs before the capacity arrives.
+In a deterministic **synthetic simulation** (model output, not a hardware run) on identical
+open-loop seeds, `Predictive` reached `99.4%` true SLO compliance on `ramp` versus `76.1%` for
+reactive algorithms, and `quota-shortfall` verified *`pendingTimeoutSeconds`* rollback.
 
-A deterministic local simulation compares all three on identical synthetic traffic and records replica adjustments, request outcomes and true per-token latencies in [Model
-Deployment Scaling Simulation](scaling-simulation.md). For H100 and H200 hardware results and practical tuning guidance, see [Scaling Benchmark](scaling-benchmark.md) and [Step
-3: Choose an algorithm](../../walkthroughs/model-deployment/scaling.md#step-3-choose-an-algorithm).
+Online `Auto` calibration remains deferred. See [Scaling Benchmark](scaling-benchmark.md) for live
+H100 and H200 measurements and
+[Step 3: Choose an algorithm](../../walkthroughs/model-deployment/scaling.md#step-3-choose-an-algorithm).
 
-| Algorithm | Mechanism | Suitable workload | Main constraint |
+| Algorithm | Mechanism | Best fit | Main constraint |
 |---|---|---|---|
-| `Proportional` | One instantaneous metric (`QueueDepth`, `RunningRequests`, `WaitingRequests` or a token rate) over a fixed per-replica target, with a *`tolerance`* deadband. | Uniform-length requests (fixed-template classification, extraction, short chat) whose concurrency maps predictably to GPU load, or simple single-metric scaling. | Bursts and changing capacity can make the target inaccurate. |
-| **`TokenThroughput`** | **Default** when admission does not infer another type. Two sliding windows (*`stableWindowSeconds`*, *`panicWindowSeconds`*) over prefix-cache-adjusted prompt and generation token rates, a *`panicThreshold`* burst mode, and p95 *time to first token (TTFT)* and *inter-token latency (ITL)* guards. | General LLM and *prefill/decode (PD)*-disaggregated serving with variable prompt and output lengths and prefix caching, where request count alone misstates compute load. | Sampling windows react after demand changes. |
-| `Predictive` | A causal local-linear-trend Kalman filter forecasting token demand *`horizonSeconds`* ahead, taking the larger of the forecast count and the `TokenThroughput` fallback. | Sustained traffic ramps (scheduled business peaks, batch onset, multi-minute climbs) where replica initialization and weight loading ahead of the peak arrival offsets cold-start latency. | A new predictor uses the token result until enough observations arrive. |
+| `Proportional` | Instantaneous metric over fixed per-replica target with *`tolerance`* deadband | Uniform-length requests | Bursts and shifting lengths skew fixed targets |
+| **`TokenThroughput`** | **Default**. Stable and panic sliding windows over cache-adjusted token rates plus p95 *TTFT*/*ITL* guards | General LLM and *PD* workloads with prefix caching | Reacts after demand changes |
+| `Predictive` | Causal Kalman filter forecasting *`horizonSeconds`* ahead, floored by `TokenThroughput` | Sustained ramps where pre-warming offsets startup latency | Falls back to `TokenThroughput` until *`minPoints`* arrive |
 
 ### Proportional
 
-The [Resource](#resource) example scales a *server* role on `QueueDepth`. The algorithm divides the observed role total by the ready replica count, then compares that load with
-*`roleTargets[].target`*. Outside *`tolerance`*, the recommendation is the ceiling of the role total divided by its target, with a minimum of one replica. Inside the tolerance,
-it holds the count.
-
-*`metric`* accepts `QueueDepth`, `RunningRequests`, `WaitingRequests`, `PromptTokensPerSecond`,
-`GenerationTokensPerSecond` or `TotalTokensPerSecond`. `QueueDepth` adds running and waiting
-requests. `TotalTokensPerSecond` adds prompt and generation rates. Rate targets are tokens per
-second; request targets are counts per ready replica.
-
-Each entry in *`roleTargets[]`* names a scaled role and supplies a positive target. Names must be
-unique. Every scaled role needs its own target or a direct ratio to a targeted role.
-*`tolerance`* defaults to `0.1` when omitted. A supplied value must be positive and at most `1`.
-
-The proportional ratio, the tolerance deadband and the scale-down stabilization window follow the
-[Kubernetes Horizontal Pod Autoscaler](https://github.com/kubernetes/website/blob/1ffcdb2a3c3a4a3ebfc23473929072262a1bfaea/content/en/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale.md).
+Recommends `ceil(total / target)` (minimum `1`) when observed load per ready replica leaves the
+*`tolerance`* band. *`metric`* accepts `QueueDepth`, `RunningRequests`, `WaitingRequests`,
+`PromptTokensPerSecond`, `GenerationTokensPerSecond` or `TotalTokensPerSecond`. Every scaled role
+needs a target or a direct ratio to a targeted role.
 
 ### Token throughput
-
-This example scales an SGLang *prefill* and *decode* pair, with an *encode* role coupled to *prefill*.
-It also works with vLLM: the scaler reads the target engine and needs no engine selector.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: ModelDeploymentScaler
 metadata:
   name: llm-serving
+  namespace: team-a
 spec:
   targetRef:
     name: llm-serving
@@ -185,51 +143,33 @@ spec:
     type: TokenThroughput
     tokenThroughput:
       prefillTargetTokensPerSecond: "2000"  # prompt capacity per Prefill replica
-      decodeTargetTokensPerSecond: "800"   # generation capacity per Decode replica
-      # serverTargetTokensPerSecond: "2000"  # combined capacity for a Server role
-      stableWindowSeconds: 180  # default; 30 to 600 seconds
-      panicWindowSeconds: 60    # default; 10 to 300 seconds
-      panicThreshold: "2"       # default; positive quantity
+      decodeTargetTokensPerSecond: "800"  # generation capacity per Decode replica
+      # serverTargetTokensPerSecond: "2000"  # combined capacity for Server role
+      stableWindowSeconds: 180  # default; range 30..600
+      panicWindowSeconds: 60  # default; range 10..300, < stableWindowSeconds
+      panicThreshold: "2"  # default; positive quantity
       ttftTargetMilliseconds: "500"  # default; positive quantity
-      itlTargetMilliseconds: "50"    # default; positive quantity
-      latencyQuantile: "0.95"       # default; P95
+      itlTargetMilliseconds: "50"  # default; positive quantity
+      latencyQuantile: "0.95"  # default; P95
 ```
 
-- **Token targets**: Set positive per-replica capacities for each scaled non-*encode* role.
-- **Role capacity**: Set prompt capacity for *prefill*, generation for *decode*, and combined capacity for *server*.
-- **Encode**: Couple *encode* to another role with a ratio.
-- **Windows**: Keep *`panicWindowSeconds`* shorter than *`stableWindowSeconds`*. Admission validates each range independently without enforcing their order.
-- **Panic**: Demand at *`panicThreshold`* times ready capacity starts panic and blocks scale-down. A value at or below `1` triggers panic at or before capacity.
-- **Latency quantile**: Set *`latencyQuantile`* in `(0, 1]`. It defaults to P95 (`0.95`), with nanounit precision.
-- **Latency guard**: A *TTFT* or *ITL* breach holds scale-down. Above 1.2 times the target, it recommends growth.
-
-The window design draws on [AIBrix KPA](https://github.com/vllm-project/aibrix/blob/52b8834e6223eac7ca5c050b44486aa29b44a1a6/pkg/controller/podautoscaler/algorithm/kpa.go),
-[Knative KPA](https://github.com/knative/serving/blob/knative-v1.23.0/pkg/autoscaler/scaling/autoscaler.go),
-[HeteroScale](https://arxiv.org/abs/2508.19559), and [TokenScale](https://arxiv.org/abs/2512.03416).
-
-### Engine signals
-
-- **Queue depth**: Both engines report running and waiting requests.
-- **SGLang decode**: The waiting count includes `sglang:num_decode_transfer_queue_reqs`.
-- **SGLang prefill**: The waiting count includes `sglang:num_prefill_inflight_queue_reqs`.
-- **Prompt rate**: Uses rank-0 effective-prefill deltas when available. Otherwise, it subtracts prefix-cache hits from prompt deltas.
-- **Generation rate**: Uses rank-0 generation counter deltas without subtracting cache hits.
-- **Latency**: Reads histogram bucket deltas at the configured quantile. When buckets are absent or the quantile lands in `+Inf`, the reading is unavailable without mean fallback.
-- **KV usage**: Averages *`kvCacheUsage`*. See [Model Deployment Metrics](metrics.md).
-
-SGLang reports *`sglang:prefill_effective_tokens_total`* with an `input` mode. Its hit modes are
-`device_hit`, `host_hit` and `storage_hit`.
+- **Role capacity**: Supply prompt rate for *Prefill*, generation rate for *Decode*, combined rate
+  for *Server*; couple *Encode* through a ratio.
+- **Panic and latency guards**: Demand at *`panicThreshold`* × ready capacity enters panic and
+  blocks scale-down. A *time to first token (TTFT)* or *inter-token latency (ITL)* breach holds
+  scale-down; above `1.2×` target triggers growth.
 
 ### Predictive
 
-This example forecasts the same *prefill* and *decode* demand. The nested *`tokenThroughput`* block accepts all the fields described under [Token throughput](#token-throughput),
-with the same defaults and rules. Both fallback targets and forecast capacities are required for each scaled non-*encode* kind.
+Forecasts token demand *`horizonSeconds`* ahead via a Kalman filter, floored by nested
+*`tokenThroughput`*:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: ModelDeploymentScaler
 metadata:
   name: llm-serving
+  namespace: team-a
 spec:
   targetRef:
     name: llm-serving
@@ -247,35 +187,57 @@ spec:
       tokenThroughput:
         prefillTargetTokensPerSecond: "2000"
         decodeTargetTokensPerSecond: "800"
-      horizonSeconds: 300  # default; 30 to 600 seconds
-      prefillTokenCapacityPerReplica: "2000"  # prompt capacity per Prefill replica
-      decodeTokenCapacityPerReplica: "800"   # generation capacity per Decode replica
-      # serverTokenCapacityPerReplica: "2000"  # combined capacity for a Server role
-      qLevel: "1"             # default process noise for demand level
-      qTrend: "0.1"           # default process noise for demand trend
+      horizonSeconds: 300  # default; range 30..600
+      prefillTokenCapacityPerReplica: "2000"
+      decodeTokenCapacityPerReplica: "800"
+      # serverTokenCapacityPerReplica: "2000"
+      qLevel: "1"  # default level process noise
+      qTrend: "0.1"  # default trend process noise
       measurementNoise: "10"  # default observation noise
-      minPoints: 6  # default; 1 to 64 observations
+      minPoints: 6  # default; range 1..64
 ```
 
-- **Kalman forecast**: Forecasts demand over *`horizonSeconds`* ([Dynamo Planner](https://github.com/ai-dynamo/dynamo/blob/4f42be7bebd96ea0199088840549397809f80a92/docs/fern/pages/developer-guide/knowledge-base/modular-components/planner/planner-design.md)), bounded below by the token-throughput fallback (`PredictorWarmingUp` until *`minPoints`* samples).
-- **Noise tuning**: Positive *`qLevel`* (default `1`), *`qTrend`* (`0.1`), and *`measurementNoise`* (`10`) tune level, trend, and observation weights.
-- **Panic guard**: After warm-up, panic recommends at least one replica above the current count.
-- **Warm-up**: Before enough samples, panic uses the token-throughput recommendation and blocks scale-down.
-- **Latency guard**: Latency above 1.2 times the target recommends at least one additional replica.
-- **Consolidation**: Scale-down requires surviving replicas to stay at or below 80% capacity.
+Before *`minPoints`* arrive (`PredictorWarmingUp`), `Predictive` uses the `TokenThroughput`
+fallback. After warm-up, panic or latency above `1.2×` target adds at least one replica, and
+scale-down requires survivors to stay at or below `80%` capacity.
+
+### Engine signals
+
+Both engines report running and waiting queues (SGLang adds `sglang:num_decode_transfer_queue_reqs`
+and `sglang:num_prefill_inflight_queue_reqs`). Prompt rate adjusts for prefix-cache hits; generation
+rate reads rank-0 deltas; latency reads histogram quantiles with no mean fallback if buckets hit
+`+Inf`.
+
+Inspect live samples, partial scrapes and missing series through the `ModelDeployment` `/metrics`
+subresource (requires RBAC `get` on `modeldeployments/metrics`):
+
+```bash
+kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/<namespace>/modeldeployments/<name>/metrics" \
+  | jq '{partial, missing, processing, queueing, latency}'
+```
+
+The subresource scrapes up to `64` owned `Pod`s (`prometheus.io/scrape: "true"`,
+`prometheus.io/port`, `prometheus.io/scheme`; take-over *`roles[].command`* roles omit scrape
+annotations) and returns `503 Service Unavailable` when no owned `Pod` answers.
+
+- **`partial: true`**: Marks unreadable or TLS-untrusted endpoints, first counter reads, counter
+  resets, missing *TTFT* histograms or `> 64` `Pod`s.
+- **`missing[]` with `partial: false`**: Normal for zero-count error counters, idle windows or
+  unconfigured cache tiers.
 
 ### Capacity priors
 
-*`spec.algorithm.capacityPrior`* resolves missing token capacities for `TokenThroughput` and
-`Predictive` from an immutable catalog of measured profiles. Admission rejects *`capacityPrior`*
-on `Proportional`. Omit it for manual mode, where every scaled non-*encode* kind requires explicit
-positive token capacities. Catalog resolution fails closed, with no online fallback.
+*`spec.algorithm.capacityPrior`* fills omitted token capacities for `TokenThroughput` and
+`Predictive` (`Proportional` rejects it) from an offline catalog (embedded `priors.yaml` or a
+same-namespace `ConfigMap`). Missing or incompatible profiles fail closed
+(`CapacityPriorUnresolved`, `InsufficientLoadCoverage`, `IncompatibleMetric`).
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: ModelDeploymentScaler
 metadata:
   name: qwen-scaler
+  namespace: team-a
 spec:
   targetRef:
     name: llm-serving
@@ -285,334 +247,88 @@ spec:
     - name: decode
       maxReplicas: 8
   algorithm:
-    type: TokenThroughput  # capacityPrior serves TokenThroughput and Predictive; Proportional rejects it.
+    type: TokenThroughput  # also supported on Predictive
     tokenThroughput:
-      latencyQuantile: "0.90"  # resolve the prior at P90, not the P95 default
-      ttftTargetMilliseconds: "2000"  # explicit while the target does not exist yet
-      itlTargetMilliseconds: "33"  # explicit while the target does not exist yet
-    capacityPrior:  # Omit for manual mode; Proportional rejects this field.
-      catalogRef:  # Optional; omit for the embedded catalog.
-        name: capacity-priors  # Same-namespace ConfigMap; sole source, no merge or fallback.
-        key: priors.yaml  # Default; the parser accepts YAML and JSON.
-      headroom: "0.75"  # Default when capacityPrior is present; quantity in (0, 1].
+      latencyQuantile: "0.90"  # resolve prior at P90 instead of P95
+      ttftTargetMilliseconds: "2000"  # required explicitly for catalog Prefill/Server
+      itlTargetMilliseconds: "33"  # required explicitly for catalog Decode/Server
+    capacityPrior:
+      catalogRef:  # optional; omit for embedded catalog (no fallback when set)
+        name: capacity-priors  # same-namespace ConfigMap
+        key: priors.yaml  # default (falls back to priors.json)
+      headroom: "0.75"  # default in (0, 1]; multiplies catalog seed only
 ```
 
-- **Target**: Reference a deployment in the scaler's namespace.
-- **Catalog**: Omit *`catalogRef`* to use the embedded catalog.
-- **Headroom**: Set a value in `(0, 1]`; the default is `0.75`.
-- **Capacity**: Explicit values override catalog values.
+- **Explicit latency targets**: Required when using the catalog (*TTFT* for *Prefill*, *ITL* for
+  *Decode*, both for *Server*); default `500 ms` / `50 ms` values are suppressed.
+- **Disaggregated ratios**: *PD* and *EPD* catalog resolution requires fixed connected *`ratios`*
+  (`min == max`) across all roles; partial manual overrides are refused.
+- **Admission behavior**: `CREATE` rejects unresolved priors when the target exists (warns if
+  absent for GitOps ordering); `UPDATE` warns so you can suspend, switch to `Shadow` or fix fields.
+  See [Suite 2: Capacity priors](scaling-benchmark.md#suite-2-capacity-priors) and
+  [Resolving a catalog prior](../../walkthroughs/model-deployment/scaling.md#catalog-prior-resolution).
 
-| Value | Meaning | Constraints |
-|---|---|---|
-| `TokenThroughput` | Token demand scaling | Supports capacity priors. |
-| `Predictive` | Forecast-based scaling | Supports capacity priors. |
-| `Proportional` | Single-metric scaling | Rejects capacity priors. |
+### Catalog matching requirements
 
-The catalog may resolve missing capacity fields for `TokenThroughput` and `Predictive`. Explicit capacities win; headroom multiplies only catalog seed capacity. The default is an initial configurable engineering margin, not a universal optimum. [Scaling Benchmark](scaling-benchmark.md#suite-2-capacity-priors) compares `0.75` catalog headroom against unmargined manual capacities on H200 hardware, with no warranty.
+The resolver infers model, hardware and precision from *`spec.model`* (`ModelArtifact`),
+`AcceleratorType` and `--quantization`. Pin or cross-check identities with optional
+`ModelDeployment` annotations:
 
-Omit *`catalogRef`* with `capacityPrior: {}` or set only *`headroom`* to use the embedded catalog. With `catalogRef: {name: my-priors}`, admission defaults *`key`* to `priors.yaml`.
-If `priors.yaml` is absent, the loader checks the legacy `priors.json` key. A referenced catalog is the sole source; it never falls back to the embedded catalog.
-
-An empty `catalogRef: {}` also defaults the key, but admission rejects it because *`name`* is required. A whitespace-only key fails admission on `spec.algorithm.capacityPrior.catalogRef.key`.
-
-The committed catalog, `pkg/worker/scaling/priors/priors.yaml`, is human-editable YAML. The parser also accepts JSON, so a hand-written `ConfigMap` catalog can use either format. Profiles have no provenance, serving configuration or workload details. Evidence pins live in `pkg/worker/scaling/priors/records.md`.
-The illustrative schema below has one point per profile; resolution needs at least two distinct load levels.
-
-```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
-kind: ModelDeploymentScalerCapacityPriorCatalog
-profiles:
-  - mode: aggregated
-    model: deepseek-ai/DeepSeek-R1-0528  # verified Hugging Face org/repo ID
-    quantization: fp8                    # canonical lowercase token
-    engine: vllm                         # vllm or sglang
-    hardware: amd-mi325x                 # canonical Family identifier
-    topology:                            # measured replica shape
-      gpusPerReplica: 8
-      tensorParallel: 8
-    points:                              # fixed units; values illustrative
-      - concurrency: 4
-        totalTokensPerSecond: 2130       # per-replica tokens/s
-        inputTokensPerSecond: 1840       # per-replica tokens/s
-        outputTokensPerSecond: 290       # per-replica tokens/s
-        ttftMilliseconds:                # any canonical p<N> quantile in (0, 100]
-          p95: 455
-        itlMilliseconds:                 # milliseconds per token
-          p95: 27
-  - mode: disaggregated
-    model: deepseek-ai/DeepSeek-R1-0528
-    quantization: fp8
-    engine: vllm
-    prefill:
-      replicas: 1
-      hardware: amd-mi325x
-      topology:
-        gpusPerReplica: 8
-        tensorParallel: 8
-    decode:
-      replicas: 1
-      hardware: amd-mi325x
-      topology:
-        gpusPerReplica: 8
-        tensorParallel: 8
-    points:
-      - concurrency: 4
-        totalTokensPerSecond: 3000
-        inputTokensPerSecond: 2600
-        outputTokensPerSecond: 400
-        ttftMilliseconds:
-          p95: 455
-        itlMilliseconds:
-          p95: 27
-```
-
-The normalized profile shape includes mode, model, quantization and engine. Aggregated shapes also include hardware and topology; disaggregated shapes include both stage shapes and their reduced replica ratio. `ParseCatalog` rejects duplicate shapes; `gen/priors --merge` upserts one canonical sweep.
-
-Throughput is `tokens/s` per replica for aggregated profiles and per minimal coupled unit for disaggregated profiles; latencies are milliseconds (`itlMilliseconds` per token). Both latency maps accept any canonical `p<N>` quantile key in `(0, 100]` (`p25`, `p50`, `p70`, `p95`, `p99`, `p99.9`), and unmeasured quantiles stay absent.
-
-When any serving role omits a capacity field under a present *`capacityPrior`*, the webhook suppresses the `500` ms and `50` ms latency defaults. Each catalog-backed role must set explicit positive latency targets: *`ttftTargetMilliseconds`* for *Prefill*, *`itlTargetMilliseconds`* for *Decode*, and both for *Server*. Manual mode retains the defaults.
-
-For a single `Server`, `Predictive` resolves forecast capacity (*`predictive.*TokenCapacityPerReplica`*) and fallback capacity (*`predictive.tokenThroughput.*TargetTokensPerSecond`*) independently per field.
-An explicit field stays `Explicit`; a missing sibling resolves from `Catalog` with *`headroom`*.
-
-For PD and EPD targets, explicit manual capacities on both `Prefill` and `Decode` bypass catalog lookup. Otherwise, partial per-role overrides are refused. Catalog resolution requires fixed connected *`spec.ratios`* across all roles: every edge has `min == max` and reduces to a consistent positive integer unit vector `u` with `gcd == 1`. Replica bounds must permit a non-empty multiplier interval `[k_min, k_max]`. Both *`ttftTargetMilliseconds`* and *`itlTargetMilliseconds`* must be positive.
-
-1. **Disaggregated primary**: Match `mode: disaggregated` by model, quantization, engine, stage hardware and topology, and reduced P:D ratio `(u_P/g, u_D/g)`, where `g = gcd(u_P, u_D)`. Scale minimal-unit capacity by `g`. Ambiguity, configuration mismatch or infeasible SLOs fail closed without fallback.
-2. **Aggregated fallback**: Only when zero disaggregated profiles match, resolve each LLM stage against `mode: aggregated` in the same catalog. Let `eff_P` and `eff_D` be effective per-replica capacities after headroom, and `g_P` and `g_D` GPUs per replica. Compute `c_gpu = min(eff_P / g_P, eff_D / g_D)` and `C_unit = max(1, floor((u_P * g_P + u_D * g_D) * c_gpu))`.
-
-This is an initial GPU-time-balanced estimate, not a mathematical lower bound for arbitrary input-to-output sequence length (`ISL:OSL`) splits.
-Runtime unit demand adds `PromptTokensPerSecond` from `Prefill` to `GenerationTokensPerSecond` from `Decode`.
-
-The latency guard reads TTFT from `Prefill` and ITL from `Decode`. A latency ratio above `1.2x` recommends one more whole unit (`LatencyGuardScaleUp`); a ratio in `(1.0x, 1.2x]` holds scale-down (`LatencyGuardHold`).
-`Encode` scales strictly by the fixed ratio (`RatioCoupled`); TTFT reflects the `Prefill` engine histogram, not encoder latency.
-
-### Target eligibility
-
-`Catalog` requires a verifiable target identity and a single-serving-`Pod` replica shape before deriving capacity. The
-controller infers the model and hardware identity from the target itself — *`spec.model`* (the `ModelArtifact` repository from *`spec.model.artifactRef`*, or *`spec.model.name`*)
-and the role's `AcceleratorType` — so the identity annotations below are optional and resolve through [identity normalization](#identity-normalization):
-
-| Annotation | Accepted values |
+| Annotation | Purpose |
 |---|---|
-| `worker.gpustack.ai/model-id` | Optional model identity guard; accepts natural model names and normalized aliases. |
-| `worker.gpustack.ai/hardware-id` | Optional hardware identity guard; accepts natural accelerator names or slugs. |
-| `worker.gpustack.ai/prefill-hardware-id` | Optional *Prefill* hardware identity guard for heterogeneous targets. |
-| `worker.gpustack.ai/decode-hardware-id` | Optional *Decode* hardware identity guard for heterogeneous targets. |
-| `worker.gpustack.ai/precision` | Optional precision selector; compared with engine flags and catalog profiles. |
+| `worker.gpustack.ai/model-id` | Model identity guard (natural name or normalized alias) |
+| `worker.gpustack.ai/hardware-id` | Hardware identity guard (accelerator name or slug) |
+| `worker.gpustack.ai/prefill-hardware-id` | *Prefill* hardware guard for heterogeneous targets |
+| `worker.gpustack.ai/decode-hardware-id` | *Decode* hardware guard for heterogeneous targets |
+| `worker.gpustack.ai/precision` | Precision selector (`fp8`, `bf16`, `fp4`, etc.) |
 
-Model name and weight revision must match *`spec.model`* (or the resolved Hugging Face or ModelScope
-`ModelArtifact` repository and *`status.resolved.revision`*) and any `--revision`, `--quantization`,
-`--tokenizer`, `--tokenizer-path` or `--tokenizer-revision` flags. The role's `AcceleratorType` must be
-acceleratable and match the declared product and `memoryGB` (`Gi` by semantic `Quantity` equality).
+Catalog resolution supports single-`Pod` managed *Server*, *PD* and *EPD* roles with whole-card
+resources (no slicing, *Elastic EP*, *External DP*, *`spec.kvCache`* or *`roles[].command`*).
 
-The resolver reads `ModelArtifact` *`spec.source.huggingFace.repository`* or *`spec.source.modelScope.repository`*, and *`status.resolved.revision`*. It also reads `AcceleratorType` *`status.detail.manufacturer`* and *`status.detail.product`*, and the engine's `--quantization`.
-If exactly one quantization matches the role, model, engine, hardware and topology, no `ModelDeployment` annotations are needed.
+## Scaling policy
 
-If multiple quantizations match, select one with `--quantization` or `worker.gpustack.ai/precision`.
-The precision annotation also pins precision without an `extraArgs` flag. For example, `Qwen/Qwen3-32B` and `DeepSeek-R1-0528` can have `bf16`, `fp8` or `fp4` profiles.
-The optional model and hardware annotations cross-check the resolved identities; a mismatch is refused.
+### Replica bounds and ratios
 
-The effective engine image (*`role.image`* or *`spec.engine.image`*) matches the profile by engine
-family (`vllm` / `sglang`); registry or model aliases are never inferred.
+*`roles[]`* defines `minReplicas` and `maxReplicas` for every target role. *`ratios[]`* couples
+distinct roles with `min`, `max` and preferred `target` (equal values fix a ratio). The planner
+projects recommendations onto one feasible vector; if current replicas violate bounds or ratios,
+planning stops (`BoundsConflict` or `RatioConflict`) until the policy includes them.
 
-Catalog resolution supports a single `Server`, PD `Prefill` / `Decode`, and EPD `Encode` / `Prefill` / `Decode` targets with managed *`spec.router`* and *`spec.kvTransfer`*.
-Each catalog-backed role needs a managed single-serving-`Pod` replica and explicit whole-accelerator resources without slicing.
+### Scaling rates and safeguards
 
-External *`spec.kvCache`*, Elastic EP (`elastic.dataParallelWidth`), external DP and custom commands remain gated unless the profile explicitly matches the configuration.
-Unknown injected environment variables fail closed. Supported engines use internal load balance, `DP = 1`, `localDP <= 1`, and a complete single-`Pod` metric denominator.
+- **Scale-up step**: Without *`stepPolicy`*, each pass adds up to
+  `max(maxStepReplicas, ceil(current * maxStepPercent))`. Set `stepPolicy` (`type: Pods` or
+  `type: Percent`; `value: 0` blocks movement) to enforce one bound.
+- **Scale-down step and holds**: Defaults to `1` replica per pass without *`stepPolicy`*. Scale-down
+  holds when any role lacks ready replicas or full metrics, during panic/missing signals, during
+  active retirement or abort cooldown, or during *Decode* post-scale-up grace.
+- **Pending timeout and abort rollback**: Unadmitted scale-up cohorts hold growth and revert to
+  baseline after *`pendingTimeoutSeconds`* (`ResourceExhausted`). An `Aborted` retirement restores
+  pre-scale-down counts (`ScaleDownAborted`), cancels rebalance and starts
+  *`cooldownAfterAbortSeconds`*.
+- **Retirement versus pause**: Unlike *`roles[].pause: true`* (holds `Pod`s and quota under
+  `RolePaused`), retirement withdraws `endpoint-eligible` (`30 s`), drains (`240 s`, after `60 s`
+  disaggregated handoff grace) and deletes `Pod`s and `Workload` (`30 s`; `300 s` total).
+  Re-declaring the ordinal before `Deleting` cancels retirement (`RetirementAdopted`); see
+  [Pause and retirement](runtime-control.md#pause-and-retirement).
 
-### Catalog qualification
+### Resource rebalancing
 
-All prior acquisition and qualification is offline. Admission and reconciliation read only the embedded catalog or the referenced same-namespace `ConfigMap` (`ModelDeploymentScalerCapacityPriorCatalog`, up to 4 MiB, 2048 profiles and 128 points per profile) plus live engine metrics. The operator never calls external benchmark services or profiles live traffic to create a prior.
+When a scale-up times out and reverts while the receiver still needs capacity, *`rebalance.policy`*
+decides whether a donor on the same nonempty *`acceleratorType`* retires one replica first:
 
-A profile qualifies when its normalized mode-specific shape matches the target and its points carry the concurrency, token rates and latency quantiles the resolver needs.
-
-The throughput numerator follows the sampler's token convention — cache-missed input tokens/s for
-*Prefill*, output tokens/s for *Decode*, their sum for *Server* — and a latency quantile the
-source did not publish stays missing; it is never reconstructed from a different metric.
-
-An unresolved match fails closed with `CapacityPriorUnresolved`, `InsufficientLoadCoverage` or
-`IncompatibleMetric`; a missing or incompatible profile never supplies borrowed or zero capacity.
-
-Resolving a prior walks one measured sweep along its two axes. As concurrency rises, replica or unit throughput climbs toward saturation, while per-user interactivity (`tokens/s/user` ≈ `1000 / ITL` milliseconds) falls and *TTFT* grows.
-
-The role's `latencyQuantile` (default `0.95`) and its `ttftTargetMilliseconds` /
-`itlTargetMilliseconds` set the interactivity floor and split `points[]` into feasible and failed:
-a point is feasible when the measured quantile meets both targets, interpolating bracketing
-quantiles linearly or bounding conservatively from a single higher measured quantile.
-
-Among the feasible points of a sweep with at least two distinct concurrency levels, the resolver selects the highest per-replica or per-unit `tokens/s` — the maximum of `tokens/s/MW` under
-the interactivity and *TTFT* targets — as the seed, and *`headroom`* multiplies it into the effective capacity.
-
-A higher concurrency point that breaches a target establishes `HigherLoadSLOFailure`; when every measured point passes, the resolver never extrapolates beyond the measured
-concurrency and caps conservatively at the highest measured point (`ExplicitSaturation`). The [Scaling
-Walkthrough](../../walkthroughs/model-deployment/scaling.md#resolving-a-catalog-prior) traces this selection on a shipped InferenceX sweep.
-
-The embedded catalog carries the verified public sweeps imported from InferenceX; the `gpustack-operator-priors` skill's provenance records list every upstream dataset, its
-digest and the refused sources. To use other evidence, provide a reviewed offline `ConfigMap` catalog whose profiles match the deployment.
-
-### Public data sources
-
-Public benchmark sources (InferenceX and similar) qualify into *`priors.yaml`* under the following contract. Every import pins its upstream evidence; unattributed numbers are
-refused. The pins — source URLs, capture dates, artifact digests and refusal records — live in the `gpustack-operator-priors` skill's provenance records
-(`pkg/worker/scaling/priors/records.md`), not inside the catalog file.
-
-| Data point | Requirement | Fallback handling |
-|---|---|---|
-| Model and hardware identity | Verified Hugging Face repository; canonical accelerator `Family` | Normalized by the [identity normalization](#identity-normalization) rules; source slugs, mirror orgs and vendor checkpoints adapt to the canonical identity. |
-| Load points | `concurrency`, per-replica or per-unit `tokens/s` and latency quantiles in milliseconds | Quantiles the source did not publish stay absent; chunk-gap percentiles normalize to per-token *ITL* at import. |
-| Source attribution | Upstream URL, capture date and artifact SHA-256 per dataset | Recorded in the skill's provenance records; unattributed numbers are refused. |
-
-### Identity normalization
-
-One yardstick normalizes identity on both sides — when importing any public source into
-*`priors.yaml`* and when matching a `ModelDeployment` at runtime.
-
-The canonical model name trims whitespace, preserves organization and variant suffixes (`-Instruct`, `-0528`, `-Thinking`, a parameter size such as `70B`) and compares
-case-insensitively; distinct model variants or parameter sizes are never merged.
-
-The canonical model identity recorded in *`priors.yaml`* is the verified Hugging Face `<org>/<repo>` repository —
-`deepseek-ai/DeepSeek-R1-0528`, `Qwen/Qwen3.5-397B-A17B`, `meta-llama/Llama-3.3-70B-Instruct`, `openai/gpt-oss-120b`,
-`moonshotai/Kimi-K2.5`, `moonshotai/Kimi-K3`, `MiniMaxAI/MiniMax-M2.5`, `MiniMaxAI/MiniMax-M3`, `zai-org/GLM-5`,
-`zai-org/GLM-5.2`, `deepseek-ai/DeepSeek-V4-Pro` and `Qwen/Qwen3.8-Flash-Next` are examples.
-
-Source-internal slugs (`dsr1`, `qwen3.5`, `llama70b`), ModelScope mirror orgs (`ZhipuAI/`, `MiniMax/`, `LLM-Research/`) and vendor-repackaged checkpoint names
-(`amd/DeepSeek-R1-0528-MXFP4`, `nvidia/Llama-3.3-70B-Instruct-FP8`) are automatically adapted to that canonical Hugging Face ID; a vendor repackaging shows up in the quantization
-token, not the model name. A source with no verified upstream repository is refused rather than guessed.
-
-Source-specific precision labels fold into canonical lowercase tokens: `fp8` (also `fp8_e4m3`,
-`fp8-e4m3`, `w8a8-fp8`), `bf16` (`bfloat16`), `fp16` (`float16`, `half`), `fp4` (`nvfp4`,
-`mxfp4`), `int8` (`w8a8`, `smoothquant`), and `int4`, `awq` and `gptq` kept distinct. An unpinned
-revision resolves as `unspecified`; an omitted tokenizer defaults to the model name.
-
-`hardware-id` normalization reuses the accelerator `Family` rules and table from
-[Instance Type Unit Resources](../../reference/instance-type-unit-resources.md)
-(`pkg/nodefeature/unit_resources_preset.yaml`).
-
-Product strings tokenize on `-`, `_` and `.`, leading vendor and marketing tokens (`tesla`, `geforce`, `quadro`,
-`radeon`, `instinct`) are stripped, whole-token prefixes are matched per vendor, and capacity tokens (`80gb`, `40gb`,
-`32gb`) refine multi-capacity families such as `nvidia-a100-80gb` versus `nvidia-a100-40gb`.
-
-At runtime the same yardstick applies: the `worker.gpustack.ai/model-id` and
-`worker.gpustack.ai/hardware-id` annotations accept the natural names above and are inferred from
-*`spec.model`*, the engine flags and the role's `AcceleratorType` when omitted. See
-[Target eligibility](#target-eligibility) for the full resolution order.
-
-### Prior lifecycle
-
-When the target `ModelDeployment` is absent, admission allows the scaler with a warning so GitOps manifests can apply in
-any order. When the target exists, `CREATE` rejects an unresolved catalog prior; API read errors propagate directly.
-
-`UPDATE` admission returns a warning without writing `status` so operators can suspend, switch to `Shadow`, remove
-*`capacityPrior`* or repair capacity fields. On reconciliation, the controller sets `CapacityPriorsReady=False`,
-`Active=False` and `Blocked=True` (eventual consistency) and stops new replica commits.
-
-On an already-owned binding, *`pendingCohort`* timeout rollback and aborted retirement restoration still run before the capacity-prior gate so in-flight recovery can finish.
-Before committing an `Active` replica write, the reconciler re-reads the scaler, target and catalog to verify that the compatibility fingerprint is unchanged.
-
-Each resolved role records a *`compatibilityFingerprint`* covering target UID, role configuration (excluding ordinary replica count changes), model, engine, router/cache/transfer
-specs, identity annotations, effective algorithm, catalog digest, latency targets and headroom.
-
-Any fingerprint change or unresolved prior clears both the in-memory sampler window and persisted
-*`status.predictors`* and *`stabilizationHistory`* across restarts. Steady passes compare resolved
-prior quantities by semantic `Quantity` equality, keep the 256-sample `RingBuffer` in memory, and
-suppress `status` writes until control-plane state changes or a predictor advances by 16 samples.
-
-### Local evaluation
-
-The [capacity priors and local evaluation spec](../../../specs/2026-10-26-inferencex-model-deployment-scaling.md) records 48 deterministic synthetic result rows across eight
-tuning traces (`manual`, `resolved` and one `passive` candidate at seed factor `1`) plus two open-loop versus closed-loop examples.
-
-It also evaluates two held-out traces (`heldout_bursts` and `heldout_length_cache_shift`, 11 rows each across `manual` at factor `1` plus `resolved` and one `passive` candidate
-at seed factors `0.5`, `0.75`, `1`, `1.5` and `2`). Those rows are synthetic simulation outputs, not live hardware measurements.
-
-Online capacity calibration (`Auto`) is deferred from the production API. In the synthetic evaluation, the passive candidate showed mixed latency-SLO and cost trade-offs, and on
-`steady_noise` plus `heldout_length_cache_shift` at seed factors `1.5` and `2` it exceeded the `10%` paired replica-seconds tolerance against the static seed control (paired
-excess is reported against the named static manual control with no optimal oracle claimed).
-
-For offline validation or live execution of the single-*Server* comparison across `frozen-manual`,
-`tuned-manual` and `catalog` (`case-5-autoscaling.sh --capacity-comparison`), see
-[Capacity comparison](../../walkthroughs/model-deployment/scaling.md#capacity-comparison).
-
-## Bounds and ratios
-
-*`roles[]`* gives each target role a unique *`name`*, a *`minReplicas`* floor and a *`maxReplicas`* ceiling. Every
-target role needs bounds; an incomplete set blocks planning with `BoundsConflict`. The minimum defaults to `1`. Both
-counts range from `1` to `1024`, with the minimum no greater than the maximum. The scaler cannot scale to zero.
-
-*`ratios[]`* connects roles through *`numeratorRole`* and *`denominatorRole`*.
-Both must name distinct scaled roles, and each ordered pair must be unique. Optional *`min`* and
-*`max`* bound the numerator count divided by the denominator count. Optional *`target`* is the
-preferred ratio. Supplied quantities must be positive; the target must lie within any supplied bounds.
-
-Setting *`min`*, *`target`* and *`max`* to the same value fixes a ratio. A target without bounds is a preference; bounds without a target are constraints. The [Token
-throughput](#token-throughput) example allows *prefill* to *decode* ratios from `0.5` to `2`, prefers `1`, and couples *encode* to *prefill* with a preferred ratio of `0.5`.
-
-The planner applies bounds, pacing, guards and ratios to one replica vector and commits it atomically. For connected roles, it seeks a feasible vector close to the
-recommendations and uses ratio targets to break ties. An upward recommendation gives the component an upward direction; otherwise it may shrink. If no feasible vector is found,
-that component holds its current counts.
-
-The ratio comparison tolerates small rounding differences at a boundary. Admission checks feasibility with exact integer ratios and rejects configurations it proves impossible. A
-search that reaches its limit can admit an undecided configuration. Admission success therefore does not guarantee that planning can find a feasible vector for every combination
-of pacing and guards.
-
-The current replica vector must already satisfy the bounds and ratio bands. If it does not, planning stops with `BoundsConflict` or `RatioConflict`; adjust the policy to include
-the current vector before expecting the scaler to move it.
-
-## Pacing and guards
-
-*`behavior.scaleUp.stabilizationWindowSeconds`* waits for recommendation history spanning the window
-before allowing growth. Zero disables that wait. The scale-down window holds the highest recent recommendation as its floor and prevents shrinkage until enough history exists.
-Recommendation history is kept in memory and reported in status, with at most 256 samples per role.
-
-Without an upward *`stepPolicy`*, one pass can add the larger of *`maxStepReplicas`* replicas and
-*`maxStepPercent`* of the current count, rounded up. The former accepts nonnegative integers; the
-latter ranges from `0` to `1000`. Omission or zero stores defaults of `4` and `100`, respectively.
-Setting one to zero does not disable that bound. Use a step policy to select one unit alone.
-
-A *`stepPolicy`* under either *`scaleUp`* or *`scaleDown`* requires *`type`* (`Pods` or `Percent`)
-and a nonnegative *`value`*. `Pods` counts serving replicas, even when each replica has several
-`Pod`s. `Percent` uses the current replica count and rounds up. Zero prevents movement in that
-direction. Without a downward policy, a pass removes at most one replica per role.
-
-The downward *`stabilizationWindowSeconds`*, *`cooldownAfterAbortSeconds`* and
-*`decodePostScaleUpGraceSeconds`* use their defaults when omitted or zero: `300`, `300` and `120`
-seconds. Zero does not disable these guards. Their accepted ranges are shown in the
-[Resource](#resource) example.
-
-The post-scale-up grace keeps a *decode* role's replica count stable while added replicas settle, which matters in the disaggregated arrangements described by
-[Mooncake](https://arxiv.org/abs/2407.00079).
-
-Scale-down also waits when any of these conditions holds:
-
-- The role has no ready replica or the observation has incomplete coverage.
-- The algorithm holds scale-down, including for panic or missing required signals.
-- A retirement is active anywhere in the target, or an abort cooldown is active.
-- A *decode* role is within its post-scale-up grace period.
-
-A pending unadmitted workload prevents further growth. While a committed scale-up cohort is pending, that ceiling applies across the target. If any added ordinal remains
-unadmitted past *`sampling.pendingTimeoutSeconds`*, the scaler restores the whole cohort's baseline vector in one write and reports `ResourceExhausted`.
-
-If a removed ordinal's retirement ends as `Aborted`, the scaler restores the pre-scale-down vector.
-It reports `ScaleDownAborted`, cancels any associated donor transaction, and starts
-*`cooldownAfterAbortSeconds`*. This cooldown prevents further scale-down across the target.
-
-## Resource rebalancing
-
-Rebalancing starts after a scale-up times out and restores its baseline. If the receiver still
-needs to grow, *`rebalance.policy`* decides whether another role can release capacity.
-
-| Policy | Donor selection |
+| Policy | Donor rule |
 |---|---|
-| `Opposing` | Default. A donor's own recommendation must be to shrink. |
-| `Priority` | A lower-priority role may donate even when its own recommendation is to hold. |
-| `Disabled` | No donation is attempted. |
+| `Opposing` | Default. Donor's own recommendation must be to shrink. |
+| `Priority` | Lower-priority role in *`rebalance.priority[]`* may donate while holding. |
+| `Disabled` | No donation attempted. |
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: ModelDeploymentScaler
 metadata:
   name: qwen-scaler
+  namespace: team-a
 spec:
   targetRef:
     name: llm-serving
@@ -626,8 +342,8 @@ spec:
   algorithm:
     type: Proportional
     proportional:
-      metric: WaitingRequests  # the queue signal the algorithm scales on
-      roleTargets:  # what one replica of each role is expected to carry
+      metric: WaitingRequests
+      roleTargets:
         - name: prefill
           target: "8"
         - name: decode
@@ -636,59 +352,34 @@ spec:
           target: "4"
   rebalance:
     policy: Priority
-    priority:  # unique scaled role names, highest priority first
+    priority:  # highest first; unlisted roles neither donate nor receive
       - decode
       - prefill
       - encode
 ```
 
-*`priority[]`* only affects `Priority`. A receiver may take from roles after it in the list,
-starting with the next listed role. Unlisted roles neither donate nor receive through this policy;
-they retain their ordinary recommendations. The donor and receiver must use the same nonempty
-*`acceleratorType`*, and the donor must remain above its minimum before donation.
+`RebalanceNotApplicable` means no donor shares the pool; `RebalanceBlocked` means an intermediate
+vector violates policy or a `Priority` donation already ran in this exhaustion episode.
 
-The `Opposing` policy follows the [Dynamo Budget
-Guard](https://github.com/ai-dynamo/dynamo/blob/4f42be7bebd96ea0199088840549397809f80a92/components/src/dynamo/planner/core/budget.py), which moves both legs of an opposing
-rebalance together or leaves both in place.
+## Replica ownership
 
-The transaction removes one donor replica first. It waits for retirement to finish and the donor's
-`Workload` to disappear before adding one receiver replica. Both intermediate vectors must satisfy
-bounds and ratios. An aborted donor retirement restores the previous vector and cancels the transaction.
+### Scaler ownership rules
 
-`RebalanceNotApplicable` means no eligible donor was found, including when pools differ.
-`RebalanceBlocked` means an intermediate vector violates policy or a `Priority` donation was already
-attempted during the exhaustion episode. A scaler spec edit or an external target generation change
-can start a new episode; the scaler's own committed generation does not reset that protection.
-
-## Binding fence
-
-An active scaler owns the target's replica counts through two annotations:
+An `Active` scaler claims target replicas with two annotations on the `ModelDeployment`:
 
 | Annotation | Payload |
 |---|---|
-| `modeldeployment.gpustack.ai/scaler-binding` | *`scalerName`*, *`scalerUID`* and the binding *`term`*. |
-| `modeldeployment.gpustack.ai/scaler-decision` | *`decisionID`*, *`term`* and the committed replica *`vector`*. |
+| `modeldeployment.gpustack.ai/scaler-binding` | *`scalerName`*, *`scalerUID`* and monotonic *`term`* |
+| `modeldeployment.gpustack.ai/scaler-decision` | *`decisionID`*, *`term`* and committed *`vector`* |
 
-The webhook refuses user changes to a bound target's replica counts or either annotation. Other fields remain editable. On an unbound deployment, users may change counts but
-cannot install either ownership annotation. An operator commit writes the vector and its decision together under the binding's term. Terms start at one and cannot move backwards.
+Admission rejects user edits to replica counts or either annotation on a bound target while allowing
+other edits. A competing scaler reports `AlreadyBound`; target recreation reports `TargetReplaced`
+until acknowledged by a scaler edit; corrupt annotations report `InvalidBinding`. To clear an
+orphaned binding after scaler deletion, remove the annotation without editing replica counts.
 
-A second scaler cannot take over an existing binding. It reports `AlreadyBound` and leaves the owner in place. `Shadow` and suspended scalers release bindings they own. If a
-target is deleted and recreated with a new UID, `TargetReplaced` stops planning until a scaler spec edit acknowledges the replacement. The scaler then clears target-specific
-state and can bind the new deployment.
+### GitOps sync
 
-A binding annotation that cannot be parsed leaves the target unclaimed. The scaler reports
-`InvalidBinding` on `Bound` and `Active` and plans nothing, because it cannot tell which scaler
-owns the target. Fix or remove the annotation to let a scaler bind again.
-
-Deleting a scaler normally releases its binding through its finalizer and leaves the target serving. If an orphaned binding remains, a user may remove that annotation only when
-the named scaler is absent or has a different UID. That recovery write must leave replica counts unchanged.
-
-## GitOps sync
-
-Configure the GitOps controller to ignore the target's replica counts and both scaler annotations. Otherwise, admission rejects attempts to restore the counts from Git. Each role
-needs its own replica pointer; `~1` escapes the slash inside an annotation key.
-
-Argo CD reads *`ignoreDifferences`* from the `Application`:
+Ignore each role's *`replicas`* and both scaler annotations (`~1` escapes `/`) in GitOps tools:
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -711,10 +402,7 @@ spec:
       - RespectIgnoreDifferences=true
 ```
 
-`RespectIgnoreDifferences=true` also applies the exclusions during sync. Without it, differences
-can be hidden in the comparison while a sync still attempts to restore the declared counts.
-
-Flux versions that support *`spec.ignore`* on `Kustomization` use these paths:
+Flux `Kustomization` uses the same paths under *`spec.ignore[].paths`*:
 
 ```yaml
 apiVersion: kustomize.toolkit.fluxcd.io/v1
@@ -737,209 +425,10 @@ spec:
 
 ## Status
 
-Status records observations, decisions and recovery state. The following fragments illustrate the field shapes; they are
-not captured output or configuration to apply. Optional entries appear only when the scaler has corresponding state.
-*`observedGeneration`* identifies the scaler spec generation used for the report.
-
-The scaler writes its status when its control plane moves: a decision, a binding, a condition or the replica counts of a role. A scaler that is steady writes nothing, so the
-sliding windows it holds are a snapshot rather than a live feed. The windows themselves are kept in memory and grow on every sampling pass, whether the status was written or not,
-and the scaler reads them back from the status when it starts planning again.
-
-### Role observations
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: ModelDeploymentScaler
-metadata:
-  name: qwen-scaler
-status:
-  observedGeneration: 1
-  binding:
-    targetUID: "<target UID>"  # distinguishes a replacement with the same name
-    targetName: llm-serving
-    term: 1  # term used for active commits; Shadow may have no term
-  roles:
-    - name: prefill
-      currentReplicas: 2  # desired count currently on the target
-      readyReplicas: 2   # ready serving replicas used to calculate capacity
-      signalState: Fresh
-      promptTokensPerSecond: "2400"  # cache-missed rate across sampled replicas
-      generationTokensPerSecond: "0"
-      runningRequests: 8
-      waitingRequests: 2
-      kvCacheUsage: "0.5"  # mean reported cache fraction
-      ttftMilliseconds: "400"
-      itlMilliseconds: "0"
-      rawRecommendedReplicas: 2  # algorithm result
-      constrainedReplicas: 2     # result after bounds, ratios, pacing and guards
-      reason: TokenThroughput    # algorithm or constraint explanation
-      lastScaleUpTime: "<last growth time>"
-      stabilizationHistory:  # at most 256 recommendations
-        - timestamp: "<sample time>"
-          replicas: 2
-```
-
-*`signalState`* is `Fresh` for current readings, `Idle` for a successfully observed role with no work, `Missing` for
-unavailable signals or an unestablished window, and `Stale` for expired readings. A missing signal differs from a
-measured zero. Incomplete coverage prevents scale-down, although usable partial observations can still justify growth.
-
-*`reason`* can explain an algorithm decision, such as `WithinTolerance`, `Panic`, `NoReadyReplicas`,
-`LatencyGuardHold`, `LatencyGuardScaleUp`, `PredictorWarmingUp`, `PredictiveConsolidationHold` or
-`RatioCoupled`. A constraint reason can replace it. Compare *`rawRecommendedReplicas`* and
-*`constrainedReplicas`* to see how the planner changed the algorithm's request.
-
-### Decisions and recovery
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: ModelDeploymentScaler
-metadata:
-  name: qwen-scaler
-status:
-  lastCommit:
-    decisionID: "<decision ID>"
-    term: 1
-    vector:  # committed replica counts by role
-      prefill: 3
-      decode: 2
-    baselineVector:  # counts before this commit
-      prefill: 2
-      decode: 2
-    timestamp: "<commit time>"
-    targetGeneration: 2  # target generation expected after the write
-  pendingCohort:
-    decisionID: "<scale-up decision ID>"
-    term: 1
-    baselineVector:  # restored if admission times out
-      prefill: 2
-      decode: 2
-    targetVector:
-      prefill: 3
-      decode: 2
-    startedAt: "<scale-up commit time>"
-  rebalance:
-    receiverRole: prefill
-    donorRole: decode
-    donorTargetReplicas: 2
-    receiverTargetReplicas: 3
-    startedAt: "<transaction start time>"
-    exhaustionEpisodeGeneration: 1  # identifies the exhaustion episode
-    donationAttempted: true        # guards repeated donations
-    reason: ReceiverAcquire
-  lastScaleDown:
-    role: decode
-    ordinal: 2  # zero-based ordinal removed from this role
-    preScaleDownVector:  # restored after an aborted retirement
-      prefill: 2
-      decode: 3
-    outcome: Committed  # Aborted after a failed retirement is restored
-    abortedAt: "<abort time, when applicable>"
-    cooldownUntil: "<cooldown end, when applicable>"
-```
-
-*`lastCommit`* identifies the latest actual write and the target generation it expects. *`pendingCohort`* tracks added
-ordinals until admission or rollback. *`lastScaleDown.outcome`* is `Committed` while retirement runs and becomes
-`Aborted` after a failed retirement is restored. The abort and cooldown times record that recovery.
-
-*`rebalance.reason`* records `ResourceExhausted`, `DonorRelease`, `ReceiverAcquire` or
-`DonationAttempted`, or an applicability/blocking reason. Its donor and receiver targets describe
-the two-step transaction. *`exhaustionEpisodeGeneration`* identifies the episode, and
-*`donationAttempted`* records whether it has already used a donation attempt.
-
-### Predictor state
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: ModelDeploymentScaler
-metadata:
-  name: qwen-scaler
-status:
-  predictors:
-    - name: prefill  # role this state belongs to
-      level: "2400"  # estimated demand in tokens per second
-      trend: "10"    # demand change per second
-      covariance:
-        p00: "1"  # level variance
-        p01: "0"  # covariance of level with trend
-        p10: "0"  # covariance of trend with level
-        p11: "1"  # trend variance
-      sampleCount: 6  # observations processed by the predictive filter
-      history:  # recent demand samples within the active window, at most 256
-        - timestamp: "<observation time>"
-          tokensPerSecond: "2400"
-```
-
-*`predictors[]`* persists demand history for `TokenThroughput` and filter state for `Predictive`.
-The *`level`*, *`trend`* and *`covariance`* fields describe the filter estimate and its uncertainty. The scaler restores this state from status when it resumes planning, keeps
-the 256-sample window in memory while it plans, and checkpoints steady predictor progress to `status` every 16 samples.
-
-### Resolved priors
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: ModelDeploymentScaler
-metadata:
-  name: qwen-scaler
-status:
-  resolvedCapacityPriors:
-    - name: server
-      profileDigest: "sha256:<profile digest>"
-      compatibilityFingerprint: "sha256:<fingerprint>"
-      metric: CacheMissedTotalTokensPerSecond
-      quantile: "0.9500"
-      headroom: "0.75"
-      seedTokensPerSecond: "2400"
-      latencyBounds:
-        - metric: TTFT
-          quantile: "0.9500"
-          conservative: false
-        - metric: ITL
-          quantile: "0.9500"
-          conservative: false
-      fields:
-        - field: predictive.serverTokenCapacityPerReplica
-          source: Catalog
-          effectiveTokensPerSecond: "1800"
-        - field: predictive.tokenThroughput.serverTargetTokensPerSecond
-          source: Explicit
-          effectiveTokensPerSecond: "1200"
-```
-
-*`resolvedCapacityPriors[]`* records per-role catalog provenance and per-field effective capacities whenever `Catalog`
-is active. *`fields[]`* distinguishes `Explicit` spec fields from `Catalog` fields derived by multiplying
-*`seedTokensPerSecond`* by *`headroom`*. *`latencyBounds[]`* records the quantile statistic used for each required
-latency metric and whether a higher quantile bounded `0.95` conservatively.
-
-In whole-unit fallback, *`status.resolvedCapacityPriors`* has one entry for each LLM role, `prefill` and `decode`. Each *`seedTokensPerSecond`* is that role's own `Server` profile seed per replica.
-The *`tokenThroughput.unitTargetTokensPerSecond`* field records `C_unit`. For `Predictive`, *`predictive.unitTokenCapacityPerReplica`* also records `C_unit`. These unit fields are not per-role replica capacities.
-
-Quantities in *`resolvedCapacityPriors[]`* (*`headroom`*, *`seedTokensPerSecond`* and
-*`effectiveTokensPerSecond`*) compare by semantic `Quantity` equality (`1.5k` equals `1500`).
-All sample status numbers, capacities and digests above are illustrative schema examples and do
-not represent measured hardware capacity.
-
-### Conditions
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: ModelDeploymentScaler
-metadata:
-  name: qwen-scaler
-status:
-  conditions:
-    - type: MetricsReady  # Bound, Active, MetricsReady, CapacityPriorsReady or Blocked
-      status: "True"      # True, False or Unknown
-      reason: Observed
-      message: all required role signals are available
-      observedGeneration: 1  # scaler generation used for this condition
-      lastTransitionTime: "<last condition transition time>"
-```
-
-`Bound=True` means the target is available to this scaler. In `Active` mode, it also holds the
-binding. A `Shadow` scaler can report `Bound=True` without an ownership annotation.
-`Active` reports permission to commit, `MetricsReady` reports live engine signal coverage,
-`CapacityPriorsReady` reports catalog capacity resolution, and `Blocked` reports planning
-constraints. Inspect each condition's generation because early exits can leave older conditions.
+Compare *`status.roles[].rawRecommendedReplicas`* against *`constrainedReplicas`* and *`reason`*
+(`WithinTolerance`, `Panic`, `NoReadyReplicas`, `LatencyGuardHold`, `LatencyGuardScaleUp`,
+`PredictorWarmingUp`, `PredictiveConsolidationHold`, `RatioCoupled`). *`signalState`* reports
+`Fresh`, `Idle`, `Missing` or `Stale`.
 
 | Condition | Success reason | Other reasons |
 |---|---|---|
@@ -949,51 +438,39 @@ constraints. Inspect each condition's generation because early exits can leave o
 | `CapacityPriorsReady` | `Resolved`, `Disabled` | `CapacityPriorUnresolved`, `InsufficientLoadCoverage`, `IncompatibleMetric`, `TargetNotFound`, `TargetReplaced`, `InvalidBinding`, `Suspended` |
 | `Blocked` | `Ready` (`False`) | `BoundsConflict`, `RatioConflict`, `PacingBounded`, `ResourceExhausted`, `ScaleDownAborted`, `RebalanceNotApplicable`, `RebalanceBlocked`, `CapacityPriorUnresolved`, `InsufficientLoadCoverage`, `IncompatibleMetric`, `RolePaused` |
 
-`BoundsConflict` means bounds are missing, inconsistent or exclude the current vector.
-`RatioConflict` means the current vector violates a ratio band or no feasible projection was found.
-`PacingBounded` means a step limit or guard held the recommendation.
-`RolePaused` holds replica writes while a target role's desired or observed pause state is `true`; see [Online Runtime Control](runtime-control.md#scaler-pause-guard).
-
-`WaitingForMetrics` means required readings or complete coverage are unavailable, and
-`PredictorWarmingUp` is a role reason. `CapacityPriorUnresolved`, `InsufficientLoadCoverage` and
-`IncompatibleMetric` report why a catalog prior could not be resolved.
+`RolePaused` holds replica writes while a target role is paused
+([Scaling during pause](runtime-control.md#scaling-during-pause)). Check *`observedGeneration`*,
+*`lastCommit`*, *`pendingCohort`*, *`rebalance`*, *`lastScaleDown`* and *`resolvedCapacityPriors`*.
 
 ## Limitations
 
-Admission refuses roles with a custom *`command`* because their serving signals are unmanaged. It also refuses roles setting `elastic.dataParallelWidth`, whose width grows one collective rather than
-adding independent replicas. At *`maxReplicas`*, generated group and member names must still fit the 63-character Kubernetes label limit. Shorten the deployment or role name if
-that maximum cannot be represented.
-
-The sampler reads at most 64 ready answering engine `Pod`s per role. Above that cap, coverage is incomplete and scale-down is held. New token and latency windows also need
-successive valid samples; a first observation alone cannot establish rates.
-
-A disaggregated scale-down follows the [Retirement protocol](shutdown.md#retirement-protocol) and [Disaggregated replicas](shutdown.md#disaggregated-replicas) handoff window.
-That window bounds the handoff wait; it does not wait indefinitely for every prefill request to finish.
-
-If a prefill lasts longer than the handoff window, a *decode* replica can leave while that prefill
-is still running, losing its request. For workloads with prefills that run for minutes, keep the
-*decode* *`minReplicas`* high enough to preserve the required serving capacity.
-
-Both resource webhooks use `failurePolicy: Fail`. If the webhook `Pod` is unavailable, writes that require it fail and are retried. Existing replicas keep serving. A webhook
-outage does not allow unchecked writes through the binding fence.
+- Admission rejects roles using *`roles[].command`* or `elastic.dataParallelWidth`, and requires
+  generated group names at *`maxReplicas`* to fit Kubernetes's 63-character label limit.
+- The sampler scrapes at most `64` ready `Pod`s per role (incomplete coverage holds scale-down), and
+  rate/latency windows need at least two valid samples.
+- Deployments without *`spec.router`* cannot prove direct `Service` withdrawal and abort retirement
+  at `30 s`. On SGLang *PD*, set *`terminationGracePeriodSeconds: 45`*.
+- Both webhooks use `failurePolicy: Fail`; a webhook outage rejects fenced writes while existing
+  replicas keep serving.
 
 ## Troubleshooting
 
-| Symptom | Signal | Check & Mitigation |
+| Symptom | Signal | Owner & action |
 |---|---|---|
-| Counts never change | Condition: `Active` | Use `Active` mode and clear suspension when ready to commit. Resolve missing, replaced or already-owned targets. |
-| Counts never change | Condition: `MetricsReady`, Status: role `signalState` | Check engine metrics and allow a valid sampling window to form. |
-| Counts never change | Condition: `CapacityPriorsReady` | Verify `catalogRef`, the target identity (annotations or inferred model/hardware identity), engine-family image, single-`Pod` topology and explicit latency targets, or supply explicit capacities / remove *`capacityPrior`*. |
-| Counts never change | Condition: `Blocked`, Status: role `reason` | Correct bounds or ratios, or wait for the named pacing or retirement guard. |
-| Recommendation differs from counts | Status: *`rawRecommendedReplicas`* and *`constrainedReplicas`* | Check the role bounds, ratios and pacing limits that changed the request. |
-| Counts return to a baseline | Status: *`pendingCohort`*, Reason: `ResourceExhausted` | Check admission and available quota before retrying growth. |
-| Counts return after shrinking | Status: *`lastScaleDown`* | Resolve the aborted retirement before its cooldown expires. |
-| A write is refused | Admission message | Check [Binding fence](#binding-fence) and [GitOps sync](#gitops-sync). An orphan recovery requires the named scaler to be gone or replaced. |
+| Counts never change | `Active=False` (`ShadowMode`, `Suspended`, `TargetNotFound`, `AlreadyBound`, `TargetReplaced`) | On the `ModelDeploymentScaler`, set `mode: Active`, clear `suspend`, or resolve the duplicate/replaced target binding. |
+| Counts never change | `MetricsReady=False` (`WaitingForMetrics`), `signalState: Missing`/`Stale` | Query the `ModelDeployment` `/metrics` subresource (`jq '{partial,missing}'`), repair unreadable `Pod`s and wait two intervals. |
+| Counts never change | `CapacityPriorsReady=False` | Fix `catalogRef` `ConfigMap`, target identity annotations, single-`Pod` topology and explicit latency targets, or supply explicit capacities on the scaler. |
+| Counts never change | `Blocked=True` (`BoundsConflict`, `RatioConflict`, `RolePaused`, `PacingBounded`) | Adjust scaler bounds/ratios, clear *`roles[].pause`* on the `ModelDeployment`, or wait for pacing/retirement windows. |
+| Counts revert after growth | *`pendingCohort`*, `ResourceExhausted` | Inspect Kueue `ClusterQueue` quota and `Workload` status on the target's pool before retrying growth. |
+| Counts revert after shrinking | *`lastScaleDown`* (`Aborted`), target *`status.retirement`* | Inspect `kubectl -n <ns> get md <name> -o json \| jq '.status.retirement'`: add *`spec.router`* if aborted at `30 s`, or fix stuck/busy `Pod`s before cooldown ends. |
+| Write refused by webhook | Admission error on `ModelDeployment` | Configure [GitOps sync](#gitops-sync) ignore paths or clear an orphaned binding annotation after deleting the scaler. |
 
 ---
 
-**See also** — [Configuration](configuration.md) (roles and counts) · [Benchmark](scaling-benchmark.md) (H100 and H200 results) ·
-[Simulation](scaling-simulation.md) (synthetic comparison) · [Walkthrough](../../walkthroughs/model-deployment/scaling.md) (configure and observe) · [Status](status.md) (phase
-and conditions) · [Shutdown](shutdown.md) (retirement) · [Metrics](metrics.md) (engine signals).
+**See also** — [Model Deployment Configuration](configuration.md) (role fields, readiness and rollout) ·
+[Scaling Benchmark](scaling-benchmark.md) (H100 and H200 measurements) ·
+[Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) (configure and observe) ·
+[Online Runtime Control](runtime-control.md) (role pause guard and retirement budgets) ·
+[Model Deployment Routing](routing.md) (router withdrawal and endpoint eligibility)
 
-**Next** → [Model Deployment Status](status.md) — the target's status and scaler annotations.
+**Next** → [Model Deployment Scaling Benchmark](scaling-benchmark.md) — review H100 and H200 scaling measurements.

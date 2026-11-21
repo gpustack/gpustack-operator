@@ -1,8 +1,9 @@
 # Online Runtime Control
 
-A `ModelDeployment` can tune engine parameters live, pause individual roles, and resize Elastic EP collectives without restarting worker `Pod`s or altering `--load-format`.
-
-See [Online Runtime Control Walkthrough](../../walkthroughs/model-deployment/runtime-control.md) for a recorded NVIDIA H200 deployment covering vLLM and SGLang live tuning, role pause, and Elastic EP resizing.
+A `ModelDeployment` tunes engine parameters live, pauses roles and resizes *Elastic EP* collectives
+without restarting worker `Pod`s or changing `--load-format`. See
+[Online Runtime Control Walkthrough](../../walkthroughs/model-deployment/runtime-control.md) for
+end-to-end vLLM and SGLang examples.
 
 ![Online runtime control architecture and isolation flow](../../assets/diagrams/model-deployment-runtime-control.svg)
 
@@ -18,16 +19,16 @@ flowchart LR
 
 - [Configuration](#configuration)
 - [Supported parameters](#supported-parameters)
-- [Isolation and safety](#isolation-and-safety)
-- [Step 1: Configure boot ceilings](#step-1-configure-boot-ceilings)
-- [Step 2: Tune or pause roles](#step-2-tune-or-pause-roles)
-- [Step 3: Verify convergence status](#step-3-verify-convergence-status)
+- [Runtime safeguards](#runtime-safeguards)
+- [Pause and retirement](#pause-and-retirement)
+- [Operations](#operations)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
 ## Configuration
 
-Declare static boot ceilings in *`spec.roles[].extraArgs`*, live-tunable parameters in *`spec.roles[].runtimeControl.parameters`*, and role traffic state in *`spec.roles[].pause`*.
+Declare static boot ceilings in *`roles[].extraArgs`*, live-tunable values in
+*`roles[].runtimeControl.parameters`* and role traffic state in *`roles[].pause`*:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -51,10 +52,10 @@ spec:
       acceleratorType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 1
-      extraArgs:  # optional; boot ceilings stay in extraArgs and roll Pods on edit
+      extraArgs:  # static boot ceilings; edits roll worker Pods
         - --max-num-seqs=64
         - --max-num-batched-tokens=8192
-      runtimeControl:  # optional; excluded from pod-spec-hash, reconciled live over HTTP
+      runtimeControl:  # excluded from pod-spec-hash; reconciled live over HTTP
         parameters:
           scheduling.maxActiveRequests: "32"
           scheduling.maxBatchedTokens: "4096"
@@ -63,16 +64,16 @@ spec:
           scheduling.cacheAwareThreshold: "0.5"
 ```
 
-- **Boot ceilings**: Set static startup limits in *`roles[].extraArgs`*; changing *`extraArgs`* rolls affected worker `Pod`s.
-- **Live parameters**: Set canonical string pairs in *`roles[].runtimeControl.parameters`* without changing `pod-spec-hash`.
-- **Role pause**: Set *`roles[].pause: true`* on any role to withdraw eligibility, drain requests, and gate arrivals.
-- **Reserved LoRA adapters**: Leave *`spec.model.loraAdapters`* unset; non-empty entries fail admission pending `ModelArtifact` LoRA support.
-- **Host sentinel package**: Managed accelerated non-*Encode* roles mount read-only `gpustack-engine-sentinel` at `/var/lib/gpustack/operator/lib/engine-sentinel`.
-- **Owned environment**: Never set `GPUSTACK_ENGINE_SENTINEL_ENABLE`, `GPUSTACK_ENGINE_SENTINEL_REQUIRE_ACK`, or `GPUSTACK_ENGINE_SENTINEL_ENGINE` in *`roles[].env`*.
+- **Owned environment**: Never set `GPUSTACK_ENGINE_SENTINEL_ENABLE`,
+  `GPUSTACK_ENGINE_SENTINEL_REQUIRE_ACK` or `GPUSTACK_ENGINE_SENTINEL_ENGINE` in *`roles[].env`*.
+- **Host staging**: Managed accelerated non-*Encode* roles mount read-only `gpustack-engine-sentinel`
+  at `/var/lib/gpustack/operator/lib/engine-sentinel`.
 
 ## Supported parameters
 
-Admission validates *`runtimeControl.parameters`* against the translator registry, accelerator manufacturer, topology prerequisites, and declared *`extraArgs`* boot ceilings.
+Admission validates *`runtimeControl.parameters`* against engine support, manufacturer, topology
+prerequisites and declared *`extraArgs`* boot ceilings. All values are strings; decimal keys accept
+Kubernetes decimal quantities and reject binary suffixes.
 
 | Parameter | Type | Valid range | Engine support | Boot ceiling |
 |---|---|---|---|---|
@@ -90,83 +91,136 @@ Admission validates *`runtimeControl.parameters`* against the translator registr
 | `speculative.acceptThresholdSingle` | Decimal | `[0.0, 1.0]` | `SGLang` | None |
 | `speculative.acceptThresholdAcc` | Decimal | `[0.0, 1.0]` | `SGLang` | None |
 | `speculative.draftBudgetFraction` | Decimal | `(0.0, 1.0]` (strictly `> 0.0`, up to `1.0`) | `SGLang` | None |
-| `elastic.dataParallelWidth` | Integer | `[2, 64]` | `vLLM` (NVIDIA, Ascend) | `<= --elastic-ep-max-dp-size` when declared; immutable presence, monotonic non-decreasing, `replicas: 1`, `size: 1` |
+| `elastic.dataParallelWidth` | Integer | `[2, 64]` | `vLLM` (NVIDIA, Ascend) | `<= --elastic-ep-max-dp-size` when declared; immutable presence, non-decreasing, `replicas: 1`, `size: 1` |
 
-All parameter values are strings. Decimal parameters accept standard Kubernetes decimal quantities and reject binary suffixes.
-
-In `vLLM`, lowering `scheduling.maxActiveRequests` updates `scheduler.max_num_active_reqs` instead of `scheduler.max_num_running_reqs`. In `SGLang`, it updates a live admission gate without resizing worker pools.
-
-Clearing *`runtimeControl`* or removing keys restores modified sentinel parameters to engine boot defaults before reporting `Synced` or `NotConfigured`.
+In vLLM, `scheduling.maxActiveRequests` updates `scheduler.max_num_active_reqs` (not
+`max_num_running_reqs`); in SGLang, it updates a live admission gate. Removing keys or clearing
+*`runtimeControl`* restores engine boot defaults before reporting `Synced` or `NotConfigured`.
 
 ### Role pause
 
-*`spec.roles[].pause`* works on any role, including CPU-only, *Encode*, SGLang Ray, and unmanaged *`roles[].command`* roles.
-
-Setting `pause: true` withdraws `modeldeployment.gpustack.ai/endpoint-eligible`, observes router withdrawal, and drains in-flight requests for the current container incarnation. On sentinel-injected roles, it also enables the ASGI `503` pause gate on direct `Pod` inference arrivals and `/gpustack/v1/ready`.
-
-Returning `pause: false` clears sentinel pause mode, replays configured parameters, re-acknowledges `/gpustack/v1/ack`, and restores endpoint eligibility.
+*`spec.roles[].pause`* works on every role, including CPU-only, *Encode*, SGLang Ray and unmanaged
+*`roles[].command`* roles. Setting `pause: true` revokes `endpoint-eligible`, waits for router
+withdrawal, drains in-flight requests and (on sentinel roles) enables the ASGI `503` pause gate on
+inference routes and `/gpustack/v1/ready`. Setting `pause: false` clears pause mode, replays
+parameters, re-acknowledges `/gpustack/v1/ack` and restores eligibility.
 
 ### Elastic EP integration
 
-`elastic.dataParallelWidth` configures *elastic expert parallelism (Elastic EP)* inside *`runtimeControl.parameters`*.
-
-Its presence is immutable after creation and hashed into `pod-spec-hash`, while numeric updates (`2` to `64`) remain monotonic non-decreasing without replacing surviving `Pod`s. Elastic resizes serialize against role `pause` and replay all non-elastic parameters onto the master after rank expansion.
+`elastic.dataParallelWidth` enables *elastic expert parallelism (Elastic EP)* inside
+*`runtimeControl.parameters`* ([Elastic EP](elastic-ep.md)). Presence is frozen in `pod-spec-hash`;
+numeric increases (`2`–`64`) serialize against *`pause`* and replay non-elastic parameters onto the
+master after expansion.
 
 ### Reserved LoRA adapters
 
-*`spec.model.loraAdapters`* (`name`, `artifactRef`, `subPath`, `pinned`) reserves a deployment-level LoRA contract beside *`spec.model.artifactRef`*. Non-empty slices fail admission pending `ModelArtifact` LoRA weight delivery.
+*`spec.model.loraAdapters`* (`name`, `artifactRef`, `subPath`, `pinned`) reserves a deployment-level
+LoRA contract; admission currently rejects non-empty values pending `ModelArtifact` LoRA support.
 
-### Router hash decoupling
+### Router rollout effects
 
-Worker `pod-spec-hash` reads only whether *`spec.router`* is set and *`spec.router.name`*. Editing `replicas`, `image`, `imagePullPolicy`, `imagePullSecrets`, `extraArgs`, `requestTimeoutSeconds`, or `disaggregationThresholdTokens` reconciles the router `Deployment` without rolling worker `Pod`s.
+Worker `pod-spec-hash` reads only *`spec.router`* presence and *`spec.router.name`*. Editing
+`replicas`, `image`, `imagePullPolicy`, `imagePullSecrets`, `extraArgs`, `requestTimeoutSeconds` or
+`disaggregationThresholdTokens` updates the router `Deployment` without rolling worker `Pod`s.
+Pre-existing `render-version <= 5` `Pod`s roll at most once if a router field changes before
+replacement.
 
-An existing `render-version <= 5` `Pod` keeps dual-hash currency and rolls at most once if a router field changes before replacement.
-
-## Isolation and safety
-
-Default engine sentinel injection, Envoy router allowlists, and boot-local latches isolate control routes without operator-managed API keys or auth `Secret`s.
+## Runtime safeguards
 
 ### Engine sentinel injection
 
-Managed accelerated non-*Encode* roles inject `gpustack-engine-sentinel` by default, leaving CPU-only, *Encode*, unmanaged *`roles[].command`*, and SGLang Ray roles untouched.
+Managed accelerated non-*Encode* roles inject `gpustack-engine-sentinel` automatically (CPU-only,
+*Encode*, unmanaged *`roles[].command`* and SGLang Ray roles are skipped):
 
-- **Flat host staging**: The package is version-locked to `gpustack-operator` and mounted read-only from `/var/lib/gpustack/operator/lib/engine-sentinel`.
-- **Zero intrusion**: `sitecustomize.py` post-import hooks load via `PYTHONPATH` without mutating `VLLM_PLUGINS`, container `argv`, or developer modes.
-- **Universal ASGI fallback**: Hooks cover `vLLM`, `SGLang`, and `uvicorn.Config` fallback for `vllm-omni` and `sglang-omni`.
-- **Unified PreStop drain**: Injected roles run `python3 -m gpustack_engine_sentinel.drain` for graceful `PreStop` draining.
+- **Zero intrusion**: Loads via `PYTHONPATH` (`sitecustomize.py`) without altering `VLLM_PLUGINS`,
+  container `argv` or developer modes.
+- **ASGI coverage**: Hooks vLLM, SGLang and `uvicorn.Config` fallback (`vllm-omni`, `sglang-omni`).
+- **PreStop drain**: Runs `python3 -m gpustack_engine_sentinel.drain` on `Pod` deletion.
 
-### Router allowlist
+### Router API allowlist
 
-All three managed routers enforce a shared Envoy method/path inference allowlist on port `8000` and reject non-inference routes with `403`.
+All three managed routers enforce a shared Envoy method/path allowlist on port `8000` (including
+`vllm-omni` and `sglang-omni` multimodal endpoints) and return `403` on non-inference routes:
 
-- **Multimodal routes**: The shared allowlist covers standard LLM endpoints plus `vllm-omni` and `sglang-omni` audio, image, and video endpoints.
-- **Sidecar proxy**: `vllm-router` and `sglang-gateway` front loopback `127.0.0.1:8001` with Envoy on `0.0.0.0:8000` and expose `/observer/endpoints` on `:9091`.
-- **Forbidden router flags**: Admission rejects `--enable-igw`, `--admin-port`, `--admin-host`, `--control-plane-port`, `--control-plane-host`, `--enable-admin-api`, and `--enable-control-plane` in *`spec.router.extraArgs`*.
-- **Router-first gate**: Reconcile holds `GPUSTACK_ENGINE_SENTINEL_ENABLE=1` (`WaitingForRouterIsolation`) until the router `Deployment` converges onto the allowlist revision.
+- **Envoy sidecar**: `vllm-router` and `sglang-gateway` front loopback `127.0.0.1:8001` with Envoy
+  on `0.0.0.0:8000` and expose `/observer/endpoints` on `:9091`.
+- **Forbidden flags**: Admission rejects `--enable-igw`, `--admin-port`, `--admin-host`,
+  `--control-plane-port`, `--control-plane-host`, `--enable-admin-api` and `--enable-control-plane`
+  in *`spec.router.extraArgs`*.
+- **Router-first gate**: Reconcile holds `GPUSTACK_ENGINE_SENTINEL_ENABLE=1`
+  (`WaitingForRouterIsolation`) until the router `Deployment` converges on the allowlist revision.
 
-### Readiness latch and drain
+### Startup readiness and drain
 
-Every sentinel-injected engine mints a fresh `boot_id` UUID at startup and fails `GET /gpustack/v1/ready` (`503`) until replay and `POST /gpustack/v1/ack` succeed.
+Each sentinel-injected engine generates a per-boot `boot_id` UUID and returns `503` on
+`GET /gpustack/v1/ready` until replay and `POST /gpustack/v1/ack` succeed:
 
-- **Liveness and startup**: `startupProbe` and `livenessProbe` poll `GET /gpustack/v1/live` (`200` while alive including paused; `503` on engine failure).
-- **Incarnation-relative drain**: Before pausing, drain reading binds to `(podUID, bootID)` across container restarts after withdrawing `endpoint-eligible`.
-- **Sharded ledger**: Per-role `ConfigMap` ledgers (`runtime-control-<deploymentUID>-<roleHash>`) fence `5s` mutating `POST` timeouts (`AmbiguousOperation`) for live readback recovery.
+- **Liveness and startup**: Poll `GET /gpustack/v1/live` (`200` while alive including paused; `503`
+  on failure).
+- **Incarnation-bound drain**: Binds pre-pause draining to `(podUID, bootID)` across restarts.
+- **Sharded ledger**: Per-role `ConfigMap` (`runtime-control-<deploymentUID>-<roleHash>`) fences
+  `5 s` `POST` timeouts (`AmbiguousOperation`) for readback recovery.
 
-### Scaler pause guard
+### Scaling during pause
 
-A `ModelDeploymentScaler` coexists with *`pause`* and *`runtimeControl`* because `scaler-binding` restricts only *`spec.roles[].replicas`*. The scaler holds all replica writes (`Blocked=True`, reason `RolePaused`) while desired or current-generation observed pause state is `true`.
+`ModelDeploymentScaler` coexists with *`pause`* and *`runtimeControl`* because `scaler-binding`
+fences only *`replicas`*. While desired or observed *`pause`* is `true`, the scaler holds writes
+with `Blocked=True` (`RolePaused`).
 
-## Step 1: Configure boot ceilings
+## Pause and retirement
 
-Apply a `ModelDeployment` declaring any static ceilings in *`roles[].extraArgs`*. If a managed router is present, wait for the router `Deployment` to converge onto its Envoy allowlist.
+Role pause, replica retirement and `Pod` deletion drain follow separate lifecycles:
+
+| Mode | Trigger | Capacity and quota | Signal and recovery |
+|---|---|---|---|
+| **Paused** | *`roles[].pause: true`* | Keeps `Pod`s, weights and Kueue `Workload` quota | `RuntimeControlSynced=True`, `paused: true`, `/ready=503`, `/live=200`, scaler `RolePaused`; set `pause: false` to resume |
+| **Retiring** | *`replicas`* decrease, surplus shed or dropped role | Holds `Pod`s and `Workload` until drained, then deletes both | *`status.retirement.state`* steps to `Deleting`; re-declaring the ordinal before `Deleting` cancels (`RetirementAdopted`) |
+| **`Pod` drain** | Rollout, eviction or post-retirement delete | Holds devices up to *`terminationGracePeriodSeconds`* (`G`, default `30 s`) | `preStop` drains in-flight work before `SIGTERM` |
+
+### Retirement budgets
+
+At most one retirement runs per deployment (*`status.retirement`*); unscheduled or unadmitted
+replicas delete immediately without running the protocol:
+
+| Retirement step | Budget | Behavior |
+|---|---|---|
+| `Withdrawing` | `30 s` | Revokes `endpoint-eligible` and awaits Router withdrawal (requires *`spec.router`*) |
+| `Draining` | `240 s` | Waits `60 s` on disaggregated (*PD* / *External DP*) replicas, then requires two idle `pods/exec` `/metrics` reads |
+| `Settling` | `30 s` | Deletes UID-preconditioned `Pod`s and `Workload` (`300 s` total operation cap) |
+
+Exceeding any budget before `Deleting` sets `state: Aborted` and keeps the `Pod`s and quota.
+Inspect active or stalled retirement:
+
+```bash
+kubectl -n <namespace> get modeldeployment <name> -o json \
+  | jq '{retirement: .status.retirement, roles: [.status.roles[] | {name, ready, desired, runtimeControl}]}'
+```
+
+### Drain window and grace
+
+On `Pod` deletion, `preStop` serves normally for `0`–`5 s` so late-routed traffic lands, polls
+in-flight gauges (`vllm:num_requests_running` + `vllm:num_requests_waiting`, or SGLang running,
+queue, bootstrap and transfer gauges) from `5 s` to `G - 5` (`G` in `15`–`3600 s`), and exits on
+two idle reads so `SIGTERM` arrives by `G - 3`.
+
+Set *`roles[].terminationGracePeriodSeconds: 45`* on SGLang *Prefill* and *Decode* roles because
+SGLang's split-role scheduler waits ~15 s after `SIGTERM` even when idle. Take-over
+*`roles[].command`* roles receive no `preStop` hook.
+
+## Operations
+
+### Step 1: Set startup limits
+
+Apply a `ModelDeployment` with static ceilings in *`roles[].extraArgs`* and wait for any managed
+router to converge:
 
 ```bash
 kubectl apply -f model-deployment.yaml
 ```
 
-## Step 2: Tune or pause roles
+### Step 2: Tune or pause roles
 
-Patch *`spec.roles[].runtimeControl.parameters`* or *`spec.roles[].pause`* without recreating worker `Pod`s.
+Patch *`runtimeControl.parameters`* or *`pause`* without recreating worker `Pod`s:
 
 ```bash
 kubectl -n team-a patch modeldeployment qwen-tuned --type=json \
@@ -176,9 +230,9 @@ kubectl -n team-a patch modeldeployment qwen-tuned --type=json \
   -p '[{"op":"replace","path":"/spec/roles/0/pause","value":true}]'
 ```
 
-## Step 3: Verify convergence status
+### Step 3: Verify runtime settings
 
-Inspect the `RuntimeControlSynced` condition and *`status.roles[].runtimeControl`* on the `ModelDeployment`, and check `ModelDeploymentScaler` for `RolePaused` holds during pause.
+Inspect `RuntimeControlSynced`, *`status.roles[].runtimeControl`* and scaler `Blocked` conditions:
 
 ```bash
 kubectl -n team-a get modeldeployment qwen-tuned -o jsonpath='{.status.conditions[?(@.type=="RuntimeControlSynced")]}{"\n"}{.status.roles[*].runtimeControl}{"\n"}'
@@ -187,40 +241,47 @@ kubectl -n team-a get modeldeploymentscaler -o jsonpath='{range .items[*]}{.meta
 
 | Condition | Reason | Meaning |
 |---|---|---|
-| `True` | `Synced` | All answering `Pod`s converged on desired `runtimeControl` and `pause` |
-| `True` | `NotConfigured` | No role configures `runtimeControl` or `pause` and prior state is restored |
-| `Unknown` | `WaitingForRouterIsolation` | Router `Deployment` has not converged onto the inference allowlist |
-| `Unknown` | `Draining` | Eligible endpoints are draining before role pause |
-| `Unknown` | `Reconciling` | Replay, pause toggle, or `/gpustack/v1/ack` is in progress |
-| `Unknown` | `EndpointUnreachable` | One or more answering `Pod`s cannot be reached |
-| `False` | `UnsupportedEngineVersion` | Engine rejected fields listed in `unsupportedFields` |
-| `False` | `DrainFailed` | Incarnation-relative drain failed before role pause |
-| `False` | `AmbiguousOperation` | Mutating `POST` timed out; live readback did not settle |
+| `True` | `Synced` | All answering `Pod`s match desired `runtimeControl` and `pause` |
+| `True` | `NotConfigured` | No role sets `runtimeControl` or `pause` and prior state is restored |
+| `Unknown` | `WaitingForRouterIsolation` | Router `Deployment` has not converged on Envoy allowlist |
+| `Unknown` | `Draining` | Eligible endpoints are draining before pause |
+| `Unknown` | `Reconciling` | Replay, pause toggle or `/gpustack/v1/ack` in progress |
+| `Unknown` | `EndpointUnreachable` | One or more answering `Pod`s unreachable |
+| `False` | `UnsupportedEngineVersion` | Engine rejected fields in `unsupportedFields` |
+| `False` | `DrainFailed` | Pre-pause incarnation drain failed |
+| `False` | `AmbiguousOperation` | Mutating `POST` timed out; readback did not settle |
 | `False` | `ReconcileFailed` | Engine returned a validation or apply error |
 
 ## Limitations
 
-Operations that require static restart orchestration or cluster-level GPU reclaim are not applied live:
-
-- **GPU sleep states**: Weight offload and KV eviction power states are deferred until cluster GPU reclaim or sharing is settled.
-- **Static topology changes**: `TP`, `PP`, context parallelism, quantization, `--gpu-memory-utilization`, `--kv-cache-dtype`, `--load-format ipc_cache`, and Elastic EP scale-down are not applied live.
-- **Excluded `runtimeControl` shapes**: Unmanaged (`roles[].command`), *Encode*, CPU-only, and SGLang Ray roles reject *`runtimeControl`*; *`pause`* remains supported on all roles.
-- **Reserved LoRA adapters**: Non-empty *`spec.model.loraAdapters`* is rejected until `ModelArtifact` supports LoRA weights.
-- **Gateway authentication**: North-south caller auth belongs to the external Gateway; if user `--api-key` flags block sentinel probes, the controller reports the failure without managing `--api-key`.
+- **Deferred power states**: GPU sleep / weight offload and KV eviction states are not applied live.
+- **Static parameters**: *TP*, *PP*, context parallelism, quantization, `--gpu-memory-utilization`,
+  `--kv-cache-dtype`, `--load-format ipc_cache` and *Elastic EP* scale-down require restart or
+  recreation.
+- **Excluded shapes**: Unmanaged (`roles[].command`), *Encode*, CPU-only and SGLang Ray roles reject
+  *`runtimeControl`*; *`pause`* works on all roles.
+- **Gateway auth**: Put caller auth at the external gateway; engine `--api-key` blocks sentinel
+  probes.
 
 ## Troubleshooting
 
-| Symptom | Cause | Action |
+| Symptom | Owner | Action |
 |---|---|---|
-| `WaitingForRouterIsolation` persists | Router `Deployment` lacks Envoy sidecar or ready replicas | Inspect `<deployment>-router` `Deployment` pods and events |
-| `UnsupportedEngineVersion` reported | Engine build lacks required scheduler attributes | Read `status.roles[*].runtimeControl.unsupportedFields` and remove unsupported keys |
-| `AmbiguousOperation` reported | Control-plane `POST` timed out mid-transition | Check worker `Pod` logs and `/gpustack/v1/runtime_config` state |
-| `Pod` stays unready after restart | Engine failed startup replay or `/gpustack/v1/ack` | Inspect operator worker logs and `Pod` `/gpustack/v1/ready` response |
-| `RolePaused` blocks scaler | Desired or observed `pause` state is `true` | Set `spec.roles[*].pause: false` and wait for `RuntimeControlSynced` |
-| Admission rejects `loraAdapters` | Dynamic LoRA execution is not yet supported | Omit `spec.model.loraAdapters` until `ModelArtifact` LoRA support lands |
+| `WaitingForRouterIsolation` persists | `<deployment>-router` `Deployment` | Inspect router `Pod`s and events for Envoy sidecar or image failures. |
+| `UnsupportedEngineVersion` reported | `ModelDeployment` / engine image | Read *`status.roles[*].runtimeControl.unsupportedFields`* and remove unsupported keys or upgrade the engine image. |
+| `AmbiguousOperation` reported | Worker `Pod` | Inspect worker `Pod` logs and `/gpustack/v1/runtime_config` state before retrying. |
+| `Pod` stays unready after restart | Worker `Pod` / operator worker | Check `/gpustack/v1/ready` response and operator worker logs for replay or `/ack` errors. |
+| `RolePaused` blocks scaler | `ModelDeployment` | Set *`spec.roles[*].pause: false`* and wait for `RuntimeControlSynced=True`. |
+| Retirement `Aborted` at `30 s` | `ModelDeployment` | Add *`spec.router`* for active scale-down (unrouted `Service` withdrawal cannot be proved), or scale down before admission. |
+| Disaggregated retirement stays `Draining` | `ModelDeployment` / member `Pod`s | Wait out the normal `60 s` handoff grace, inspect *`status.retirement.reason`* and `/metrics`, or raise *`replicas`* before `Deleting` (`RetirementAdopted`). |
+| Admission rejects `loraAdapters` | `ModelDeployment` | Omit *`spec.model.loraAdapters`* until `ModelArtifact` LoRA support ships. |
 
 ---
 
-**See also** — [Online Runtime Control Walkthrough](../../walkthroughs/model-deployment/runtime-control.md) (recorded NVIDIA H200 run) · [Configuration](configuration.md) (role fields and rollout hash) · [Routing](routing.md) (router policies and allowlist isolation) · [Status](status.md) (deployment conditions) · [Scaling](scaling.md) (`ModelDeploymentScaler` behavior) · [Elastic EP](elastic-ep.md) (collective resize serialization)
+**See also** — [Online Runtime Control Walkthrough](../../walkthroughs/model-deployment/runtime-control.md) (end-to-end vLLM and SGLang examples) ·
+[Model Deployment Configuration](configuration.md) (role fields, readiness and rollout hash) ·
+[Model Deployment Routing](routing.md) (router policies and endpoint eligibility) ·
+[Model Deployment Scaling](scaling.md) (`ModelDeploymentScaler` behavior) ·
+[Elastic EP](elastic-ep.md) (collective resize serialization)
 
 **Next** → [Model Deployment Routing](routing.md) — inspect router policies and traffic targets.

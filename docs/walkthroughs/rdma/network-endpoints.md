@@ -1,50 +1,45 @@
 # RDMA Networking Walkthrough
 
-Request and verify *remote direct memory access (RDMA)* endpoints for workloads, align network adapters with GPUs on *non-uniform memory access (NUMA)* nodes,
-and configure multi-tenant and cache fabric interconnects.
+Request and verify *remote direct memory access (RDMA)* endpoints alongside accelerators, align NICs
+and GPUs on the same *non-uniform memory access (NUMA)* socket through kubelet, and attach fabric
+interfaces to *prefill/decode (PD)* roles and KV cache backends.
 
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Request RDMA](#step-1-request-rdma)
-- [Step 2: Align NUMA with kubelet](#step-2-align-numa-with-kubelet)
-- [Step 3: Request interfaces per role](#step-3-request-interfaces-per-role)
-- [Step 4: KV cache over RDMA](#step-4-kv-cache-over-rdma)
-- [Step 5: Apply AWS EFA differences](#step-5-apply-aws-efa-differences)
+- [Node configuration](#node-configuration)
+- [Workload configuration](#workload-configuration)
+- [AWS EFA configuration](#aws-efa-configuration)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
 ## Summary
 
-Device Manager discovers network interfaces from `/sys/class/net` and verbs devices from
-`/sys/class/infiniband`, including devices without a netdev. It verifies link status and advertises
-shared, exclusive and *single-root I/O virtualization (SR-IOV)* partitioned resource keys.
-A workload can request network fabric beside its accelerators.
-
-When at least one endpoint is active, the node carries `feature.gpustack.ai/rdma.capable=true` (see
-[Network Topology](../../modules/rdma/network-topology.md) and
-[RDMA resource keys](../../modules/rdma/network-topology.md#rdma-resource-keys)).
-
-The steps verify interface discovery, container injection, *NUMA* alignment, and deployment
-integration.
+Device Manager discovers NICs from `/sys/class/net` and InfiniBand verbs devices from
+`/sys/class/infiniband`, checks link health, and advertises shared (`rdma.shared`), exclusive (`rdma`),
+and *single-root I/O virtualization (SR-IOV)* resource keys. Nodes with at least one healthy endpoint
+carry `feature.gpustack.ai/rdma.capable=true` ([RDMA Operations](../../modules/rdma/operations.md#rdma-resource-requests)).
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
-| `Pod` | namespace | user | a workload that requests *RDMA* endpoints beside its accelerator |
-| `ModelDeployment` | namespace | user | per-role interface requests under *`roles[].resources.interface`* |
-| `KVCacheBackend` | cluster | administrator | the cache transport carried over *RDMA* or EFA |
+| `Pod` | namespace | user | Standalone workload requesting *RDMA* endpoints alongside GPUs |
+| `ModelDeployment` | namespace | user | Managed serving roles requesting fabric counts via *`roles[].resources.interface`* |
+| `KVCacheBackend` | cluster | administrator | Shared Mooncake cache configured for `RDMA` or `EFA` transport |
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
-| Cluster | Kubernetes with GPUStack installed |
-| Hardware | *RDMA*-capable network adapters on the workload nodes |
+| Cluster | Kubernetes with GPUStack installed (illustrative configuration examples) |
+| Hardware | Workload `Node`s equipped with active *RDMA*-capable NICs (or AWS EFA adapters) |
+| Tools | `kubectl`, `jq`, and node SSH access for Step 2 kubelet configuration |
 
-## Step 1: Request RDMA
+## Node configuration
 
-Inspect discovered interfaces and allocatable capacities on the target node first:
+### Step 1: Request RDMA endpoints
+
+Inspect discovered *RDMA* interfaces in `Devices` and verify positive allocatable `rdma` keys on your
+target `Node`:
 
 ```bash
 kubectl get devices <node> -o json |
@@ -55,10 +50,20 @@ kubectl get node <node> -o json |
   jq '.status.allocatable | with_entries(select(.key | contains("gpustack.ai/rdma")))'
 ```
 
-A workload requests whole accelerators and *RDMA* endpoints within the same container.
-`Pod`s must carry the `kueue.x-k8s.io/queue-name` label to participate in admission.
-Name the entrance `LocalQueue` of the pool that holds the accelerators.
-`LocalQueue` names look like `gpustack-fnv64-<hash>`. List them with `kubectl -n team-a get localqueues`:
+Example output (illustrative):
+
+```json
+{
+  "device.gpustack.ai/rdma": "2",
+  "device.gpustack.ai/rdma.shared": "200"
+}
+```
+
+If allocatable counts are `"0"` or absent, inspect link states and any `DevicesRDMASelectionPolicy`
+in [Troubleshooting](#troubleshooting).
+
+Next, look up the pool's `LocalQueue` in `team-a` (`kubectl -n team-a get localqueues`), substitute
+its `gpustack-fnv64-<hash>` name, and apply `trainer-0.yaml`:
 
 ```yaml
 apiVersion: v1
@@ -67,41 +72,46 @@ metadata:
   name: trainer-0
   namespace: team-a
   labels:
-    kueue.x-k8s.io/queue-name: gpustack-fnv64-<hash>
+    kueue.x-k8s.io/queue-name: gpustack-fnv64-<hash>  # required for Kueue admission
 spec:
   restartPolicy: Never
   containers:
     - name: trainer
       image: ubuntu:24.04
       command:
-        - "sleep"
+        - sleep
         - "3600"
       resources:
         limits:
           nvidia.com/gpu: "1"
-          device.gpustack.ai/rdma.shared: "1"
+          device.gpustack.ai/rdma.shared: "1"  # prefer rdma.shared unless exclusive HCA ownership is needed
 ```
 
-The allocated container receives character devices, an exact `NCCL_IB_HCA` filter and
-`GPUSTACK_RDMA_DEVICES`, the plain list of granted HCA names in every resource mode.
-See [Injected devices](../../modules/rdma/operations.md#injected-devices) for variable values,
-mixed-family limits and application startup requirements.
+```bash
+kubectl apply -f trainer-0.yaml
+kubectl -n team-a wait --for=condition=Ready pod/trainer-0 --timeout=120s
+kubectl -n team-a exec trainer-0 -- sh -c 'env | grep -E "^(GPUSTACK_RDMA_DEVICES|NCCL_IB_HCA)=" && ls /dev/infiniband'
+```
 
-Prefer `device.gpustack.ai/rdma.shared` unless the workload needs exclusive-family endpoint ownership.
-`GetPreferredAllocation` distributes shared tokens across distinct eligible HCAs in round-robin
-order before assigning a second token on one HCA. The exclusive key `device.gpustack.ai/rdma`
-reserves whole endpoints within its family; shared workloads can still use those HCAs.
+Example output (illustrative):
 
-Fewer `uverbs` devices than requested shared units occur when the request exceeds the number of
-eligible HCAs, or when policy excludes granted endpoints. Inspect the
-[selection policy status](../../modules/rdma/operations.md#selection-policy) if grants change
-after a policy update.
+```text
+GPUSTACK_RDMA_DEVICES=mlx5_0
+NCCL_IB_HCA==mlx5_0
+rdma_cm
+uverbs0
+```
 
-## Step 2: Align NUMA with kubelet
+Confirm `GPUSTACK_RDMA_DEVICES` is non-empty and `/dev/infiniband/uverbs*` exists; see
+[Injected devices](../../modules/rdma/operations.md#injected-devices). `GetPreferredAllocation` spreads
+`rdma.shared` tokens across distinct eligible HCAs before repeating an HCA, so requesting more shared
+units than eligible HCAs yields one `uverbs` node per HCA.
 
-Kubernetes does not pair specific accelerators with adjacent network adapters by default.
-Enable *NUMA* alignment by setting the TopologyManager policy in `/var/lib/kubelet/config.yaml`
-(see [Enabling NUMA alignment](../../modules/rdma/operations.md#enabling-numa-alignment)):
+### Step 2: Configure kubelet alignment
+
+By default, kubelet allocates GPUs and NICs independently across sockets. Enforce *NUMA* co-location
+in `/var/lib/kubelet/config.yaml` on each GPU node
+([Enabling NUMA alignment](../../modules/rdma/operations.md#enabling-numa-alignment)):
 
 ```diff
  apiVersion: kubelet.config.k8s.io/v1beta1
@@ -110,23 +120,35 @@ Enable *NUMA* alignment by setting the TopologyManager policy in `/var/lib/kubel
 +topologyManagerScope: container
 ```
 
-Restart the kubelet after saving the configuration:
+Restart `kubelet` on the host and verify the active policy from the API server:
 
 ```bash
 systemctl restart kubelet
 kubectl get --raw /api/v1/nodes/<node>/proxy/configz |
-  jq -r '.kubeletconfig | {topologyManagerPolicy, topologyManagerScope}'
+  jq '.kubeletconfig | {topologyManagerPolicy, topologyManagerScope}'
 ```
 
-`restricted` ensures that single-socket requests land on one *NUMA* node, while multi-GPU workloads
-spanning multiple sockets are packed into the minimum number of *NUMA* nodes.
+Example output (illustrative):
 
-## Step 3: Request interfaces per role
+```json
+{
+  "topologyManagerPolicy": "restricted",
+  "topologyManagerScope": "container"
+}
+```
 
-In a `ModelDeployment`, roles do not declare raw resource keys. Specify the number of network
-interfaces under *`roles[].resources.interface`*.
-The operator refuses an interface request when no *RDMA* or EFA transfer path uses it.
-A managed *prefill* and *decode* pair with interface requests on both roles is such a path:
+With `restricted` and `container` scope, single-socket requests bind GPUs and NICs on one *NUMA* node,
+and multi-socket requests pack into the fewest *NUMA* nodes. If a `Pod` fails placement with
+`TopologyAffinityError`, free co-located GPU/NIC pairs or verify both resources sit in the same
+container.
+
+## Workload configuration
+
+### Step 3: Request interfaces per role
+
+In `ModelDeployment`, request fabric adapters through *`roles[].resources.interface`* rather than raw
+extended resource keys. Admission accepts *`interface`* only when an active *RDMA* or EFA transfer path
+uses it (such as a managed *PD* pair or an *RDMA*/*EFA* `KVCacheBackend`). Save and apply `qwen-pd.yaml`:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -151,7 +173,7 @@ spec:
       acceleratorType: gpustack--nvidia-a10g-linux-amd64
       resources:
         accelerator: "2"
-        interface: "2"
+        interface: "2"  # 1 -> rdma.shared: 1; >1 -> rdma: N distinct physical HCAs
     - name: decode
       kind: Decode
       replicas: 1
@@ -161,20 +183,29 @@ spec:
         interface: "2"
 ```
 
-For the `RDMA` protocol, the operator translates `interface: 1` into `device.gpustack.ai/rdma.shared: 1`.
-When `interface` is greater than 1, it renders `device.gpustack.ai/rdma: N`.
-Each allocated endpoint then corresponds to an independent physical adapter
-(see [A minimal deployment](../../modules/model-deployment/configuration.md#minimal-deployment)).
+```bash
+kubectl apply -f qwen-pd.yaml
+kubectl -n team-a get pods -l app.kubernetes.io/instance=qwen-pd,app.kubernetes.io/component=prefill \
+  -o json | jq '.items[0].spec.containers[0].resources.limits'
+```
 
-The same request without *`router`* or a cache backend that uses *RDMA* fails at admission with
-`no effective RDMA or EFA transfer leg uses the requested interfaces`.
-A cache backend on *RDMA* is the other path, and Step 4 sets it up.
+Example output (illustrative):
 
-## Step 4: KV cache over RDMA
+```json
+{
+  "device.gpustack.ai/rdma": "2",
+  "nvidia.com/gpu": "2"
+}
+```
 
-To route KV cache transport over an *RDMA* fabric instead of TCP, edit the `mooncake-dram` backend
-from [Step 1 of the Shared Cache walkthrough](../kv-cache/shared-cache.md#step-1-create-the-store).
-The transport is editable on a running backend:
+If admission rejects the manifest with `no effective RDMA or EFA transfer leg uses the requested interfaces`,
+ensure both *Prefill* and *Decode* roles are managed (no custom *`command`*) with a router, or attach
+an *RDMA* KV cache pool from Step 4.
+
+### Step 4: Configure RDMA cache
+
+Switch `mooncake-dram` from [Step 1 of Shared Cache](../kv-cache/shared-cache.md#step-1-create-cache-backend)
+from TCP to `RDMA` and allocate two fabric interfaces per member:
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -196,13 +227,20 @@ The transport is editable on a running backend:
 +          fabricInterfaceCount: 2
 ```
 
-Member `DaemonSet` `Pod`s automatically receive the network devices, host privileges, and limits
-required for high-performance transport (see [Members](../../modules/kv-cache/backend.md#members)).
+Verify that the backend rolls its member `DaemonSet` and returns to `Ready` with expected capacity:
 
-## Step 5: Apply AWS EFA differences
+```bash
+kubectl get kvcb mooncake-dram
+```
 
-On AWS Elastic Fabric Adapter (EFA) instances, *RDMA* devices bypass `/sys/class/net` and do not expose
-standard verbs completion queues. Declare the `EFA` protocol explicitly on a backend for those nodes:
+If `MembersMounted` turns `False`, check that every node matched by *`nodeSelector`* advertises at
+least two healthy `device.gpustack.ai/rdma` endpoints ([Member groups](../../modules/kv-cache/backend.md#member-groups)).
+
+## AWS EFA configuration
+
+AWS Elastic Fabric Adapter (EFA) devices expose `vpc.amazonaws.com/efa` rather than standard verbs
+completion queues, so `device.gpustack.ai/rdma*` stays zero on EFA nodes. Set `transport.protocol: EFA`
+on `KVCacheBackend`:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -224,36 +262,40 @@ spec:
           fabricInterfaceCount: 2
 ```
 
-Enable the `aws-efa-enabled` Setting for `ModelDeployment` and specify custom runner images containing
-`libfabric` and EFA-enabled Mooncake builds.
+For `ModelDeployment` roles on EFA, enable `Setting/aws-efa-enabled` in `gpustack-system` and supply
+runner images built with `libfabric` and EFA-enabled Mooncake:
+
+```bash
+kubectl -n gpustack-system patch setting aws-efa-enabled --type merge -p '{"spec":{"value":"true"}}'
+kubectl -n gpustack-system get setting aws-efa-enabled -o jsonpath='{.spec.value}{"\n"}'
+```
 
 ## Limitations
 
-- Kubelet *NUMA* alignment policies (`none`, `restricted`, `single-numa-node`) and
-  `TopologyAffinityError` admission behavior are covered in
-  [Enabling NUMA alignment](../../modules/rdma/operations.md#enabling-numa-alignment)
-  and [Reading the result](../../modules/devices/preflight.md#reading-the-result).
-- Kueue network-resource metering and over-admission behavior are covered in
-  [RDMA Operations](../../modules/rdma/operations.md) and [Troubleshooting](#troubleshooting).
-- AWS EFA discovery and transport configuration are covered in
-  [Step 5](#step-5-apply-aws-efa-differences) and [Troubleshooting](#troubleshooting).
+- Kueue does not meter `device.gpustack.ai/rdma*` or `vpc.amazonaws.com/efa` in `ClusterQueue` quotas,
+  so Kueue can admit a `Workload` that then waits `Pending` until node fabric frees up
+  ([RDMA Operations](../../modules/rdma/operations.md)).
+- Kubelet *NUMA* policy trade-offs (`none`, `restricted`, `single-numa-node`) are detailed in
+  [Enabling NUMA alignment](../../modules/rdma/operations.md#enabling-numa-alignment) and
+  [Result format](../../modules/devices/preflight.md#result-format).
 
 ## Troubleshooting
 
-| Symptom | Signal | Check & Mitigation |
+| Symptom | Signal | Resolution |
 |---|---|---|
-| *RDMA* resource keys present but all `Unhealthy` | Status: links `Failed` or HCAs unselected by policy | Inspect `kubectl get devices <node> -o json` for link verdicts and [selection policy status](../../modules/rdma/operations.md#selection-policy); verify physical cable, subnet manager and policy filters |
-| `Workload` admitted by Kueue but `Pod` remains `Pending` | Over-admission: Kueue does not meter network resources | Inspect cluster allocatable *RDMA* keys (`device.gpustack.ai/rdma*`); add nodes or wait for active `Pod`s to finish |
-| `Pod` rejected at placement | Reason: `TopologyAffinityError` — free GPUs and NICs reside on mismatched *NUMA* nodes | Ensure kubelet has `topologyManagerPolicy: restricted`; verify GPU and NIC requests are declared in the same container |
-| Fewer `uverbs` devices inside container than requested shared units | Request exceeds eligible HCA count, or policy excludes granted endpoints | `GetPreferredAllocation` spreads `rdma.shared` tokens across distinct eligible HCAs first, then repeats HCAs. Check eligible capacity and [policy status](../../modules/rdma/operations.md#selection-policy). Use `device.gpustack.ai/rdma` for whole-endpoint ownership within the exclusive family |
-| `Node` unexpectedly loses `feature.gpustack.ai/rdma.capable` | Status: every endpoint on the node reports `Failed` or lacks a bound *RDMA* device | Check kernel dmesg and interface carrier status; operator removes the label when every endpoint reports `Failed` or lacks a bound *RDMA* device. See [Network Topology](../../modules/rdma/network-topology.md#three-node-labels) |
-| AWS EFA workload remains `Pending` indefinitely | `Workload` requested `device.gpustack.ai/rdma` instead of EFA | EFA nodes expose 0 allocatable for standard *RDMA* keys; configure `transport.protocol: EFA` or `TCP` |
-| `ModelDeployment` rejected with `no effective RDMA or EFA transfer leg uses the requested interfaces` | Interface requested with no *RDMA* or EFA path | Request interfaces on both roles of a managed *prefill* and *decode* pair, or use a `KVCacheBackend` on that transport. A role with its own *`command`* has no managed direct path |
+| `rdma` keys report `0` allocatable | Links `Failed` or filtered out by policy | Inspect `kubectl get devices <node> -o json` and `DevicesRDMASelectionPolicy` ([Selection policy](../../modules/rdma/operations.md#selection-policy)); fix cabling, subnet manager, or policy filters (never hand-edit `Devices` status). |
+| `Workload` admitted by Kueue, `Pod` stays `Pending` | Insufficient free node `device.gpustack.ai/rdma*` | Kueue does not meter network keys; check `Node.status.allocatable` and active `Pod` requests, then free endpoints or lower *`resources.interface`*. |
+| `Pod` fails placement with `TopologyAffinityError` | Free GPUs and NICs sit on different *NUMA* sockets | Confirm `topologyManagerPolicy: restricted` in `/var/lib/kubelet/config.yaml` and keep GPU and *RDMA* requests in the same container. |
+| Fewer `uverbs` devices mounted than `rdma.shared` count | Shared units exceed eligible HCA count | Expected round-robin behavior; switch to `device.gpustack.ai/rdma` (`interface > 1`) when each unit requires its own physical HCA. |
+| `Node` loses `feature.gpustack.ai/rdma.capable` | Every endpoint on the host is `Failed` or unbound | Check host `dmesg` and NIC carrier state ([NIC record inspection](../../modules/rdma/operations.md#nic-record-inspection)); Device Manager restores the label automatically once a link recovers. |
+| AWS EFA `Pod` stays `Pending` | Requested `device.gpustack.ai/rdma*` on EFA host | Patch `Setting/aws-efa-enabled` to `"true"` for `ModelDeployment`, or set `transport.protocol: EFA` on `KVCacheBackend`. |
+| `ModelDeployment` rejected: `no effective RDMA or EFA transfer leg uses the requested interfaces` | *`resources.interface`* set without an active fabric leg | Pair managed *Prefill* and *Decode* roles behind a router, attach an `RDMA`/`EFA` KV cache pool, or remove *`resources.interface`*. |
 
 ---
 
-**See also** — [Network Topology](../../modules/rdma/network-topology.md) (discovery and link states) ·
-[RDMA Operations](../../modules/rdma/operations.md) (resource keys, limits, and EFA configuration) ·
-[Heterogeneous Devices Walkthrough](../devices/scheduling.md)
+**See also** — [RDMA Operations](../../modules/rdma/operations.md) (resource keys, selection policies,
+and EFA setup) · [Accelerator Requests](../../modules/devices/requests.md#rdma-resource-requests)
+(combining accelerator and fabric requests) · [Heterogeneous Devices Walkthrough](../devices/scheduling.md)
+(pool scheduling run)
 
-**Next** → [Hierarchical Placement Walkthrough](../topology/hierarchical-placement.md)
+**Next** → [Hierarchical Placement Walkthrough](../topology/hierarchical-placement.md) — constrain serving replicas across zones and racks.

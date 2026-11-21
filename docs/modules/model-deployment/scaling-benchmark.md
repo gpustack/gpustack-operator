@@ -1,14 +1,13 @@
 # Model Deployment Scaling Benchmark
 
 Two hardware suites evaluate `ModelDeploymentScaler`. Suite 1 ran five disaggregated configurations
-on one node with eight H100 GPUs. Suite 2 evaluated offline capacity priors, three-arm serial
-comparisons, algorithm sensitivity, embedded InferenceX priors and multi-node disaggregation on
-four nodes with one H200 GPU each.
+on one eight-H100 node. Suite 2 evaluated offline capacity priors, 18 serial capacity-arm rounds,
+360-second algorithm sensitivity, embedded InferenceX priors and multi-node disaggregation across
+four single-H200 nodes.
 
-In these runs, `ModelDeploymentScaler` observed load changes, resolved offline capacity priors and
-updated `ModelDeployment` *`replicas`* promptly. Production scale-out times also depend on model
-weight loading, engine startup, compute-graph compilation and accelerator queueing, all outside the
-scaler's control.
+`ModelDeploymentScaler` observed load shifts, resolved offline priors and updated *`replicas`*
+promptly. End-to-end scale-out latency still depends on weight loading, engine startup, graph
+compilation (~76 s on H200 vLLM) and accelerator queueing outside the scaler's control.
 
 ## Contents
 
@@ -18,23 +17,53 @@ scaler's control.
 - [Suite 1: Scaling comparison](#suite-1-scaling-comparison)
 - [Suite 2: Capacity priors](#suite-2-capacity-priors)
 - [Verification](#verification)
-- [Benefits](#benefits)
-- [Trade-offs](#trade-offs)
 - [Limitations](#limitations)
 
 ## Summary
 
-A *prefill/decode (PD)* pair separates prompt processing from token generation.
-An *encode/prefill/decode (EPD)* deployment adds a separate image encoder.
-Suite 1 compared `Proportional`, `TokenThroughput` and `Predictive` scaling on an eight-H100 node.
-Suite 2 evaluated `Server` capacity priors and multi-node *PD*/*EPD* scaling across four H200 nodes.
-[Model Deployment Scaling](scaling.md) defines the algorithms, capacity priors and replica guards.
+A *prefill/decode (PD)* pair splits prompt processing from token generation; an
+*encode/prefill/decode (EPD)* deployment adds an image encoder. Suite 1 compared `Proportional`,
+`TokenThroughput` and `Predictive` on H100; Suite 2 evaluated `Server` capacity priors and
+multi-node *PD*/*EPD* on H200. [Model Deployment Scaling](scaling.md) defines the algorithms,
+priors and guards.
 
-In Suite 1, four vLLM configurations completed every measured request, while a separate lifecycle
-check lost requests during scale-out. In Suite 2, all 18 single-*Server* capacity-comparison rounds,
-all three 360-second sensitivity runs, the embedded `openai/gpt-oss-120b` catalog check, and the
-vLLM *PD* `Proportional` and *EPD* `Predictive` runs completed with zero failed requests or full
-retirement recovery.
+- **Choose catalog-backed `Predictive`** for sustained traffic ramps where startup latency (~76 s)
+  otherwise outlasts reactive scale-out; pair *`horizonSeconds`* with *`maxStepReplicas`* because
+  ramp slopes amplify `rawRecommendedReplicas`.
+- **Choose `TokenThroughput` with `0.75` catalog headroom** for steady workloads where unmargined
+  saturation capacities stay under-triggered.
+
+Failures and caveats remain: Suite 1 SGLang *PD* hit Mooncake TCP port exhaustion (4,421 errors);
+the standalone lifecycle check lost 7/13,073 requests during scale-out; Suite 2 `TokenThroughput`
+failed 11/1,272 requests in 360 s `sustain`; and multi-node H200 vLLM *PD* prefill scale-out hit
+transient Router 503s during worker registration.
+
+All 18 H200 single-`Server` rounds, the embedded `openai/gpt-oss-120b` check, and H200 vLLM *PD*
+`Proportional` and *EPD* `Predictive` completed with zero failed requests.
+
+### Benefits
+
+- In Suite 2 on H200 from an equal 1-replica baseline, `0.75` catalog headroom triggered
+  `TokenThroughput` (`1 → 2` at `c = 24`) where unmargined saturation (`17135.159` tok/s) stalled,
+  and the embedded `openai/gpt-oss-120b` (`fp4`) prior matched sustain throughput within **1.2%**
+  (`4862.388` versus `4804.08` tok/s).
+- Pairing the catalog with `Predictive` offset ~76 s vLLM startup, cutting 45 s `sustain` *TTFT* p50
+  from `343.842` to **189.511 ms** (`maxReplicas: 2`) and 90 s `sustain` *TTFT* p50 from
+  `145.939–190.555` to **120.59 ms** (`maxReplicas: 4`, `3886.136` output tok/s, zero errors).
+- In Suite 1 on H100, predictive *PD* cut `ramp` *TTFT* p50 (`467.906` versus `2540.853` ms) and
+  raised output (`2109.251` versus `1117.481` tok/s), though low manual targets scaled it during
+  baseline.
+
+### Trade-offs
+
+- In Suite 1, 90 s cooldown sat below the 300 s downward stabilization window, leaving final
+  snapshots at two replicas.
+- In Suite 2's 45 s `sustain` rounds, `TokenThroughput` `catalog` spent `317.04` median
+  `readyReplicaSeconds` (`+33.7%` over manual's `237.094` s) without lowering `sustain` *TTFT* p50
+  because ~76 s startup consumed most of the window.
+- `Predictive` amplifies initial ramp slopes (`rawRecommendedReplicas` 4–75), so production configs
+  pair *`horizonSeconds`* (`180–300` s) with *`behavior.scaleUp.maxStepReplicas`*; see
+  [Step 3: Choose an algorithm](../../walkthroughs/model-deployment/scaling.md#step-3-choose-an-algorithm).
 
 ## Environment
 
@@ -51,14 +80,12 @@ retirement recovery.
 | Load driver | In-cluster `default/bench-driver`; `case129-probe` for lifecycle | In-cluster `default/bench-driver` on the dedicated CPU node |
 | GPU allocation | `bench-gpu` `InstanceType`; 1 GPU per replica, *TP* = 1 | `gpustack--nvidia-h200-linux-amd64`; 1 GPU per replica, *TP* = 1 |
 
-Requests went directly from the driver to the Router's cluster-internal endpoint.
-No `kubectl port-forward` carried inference traffic. vLLM roles set
-`VLLM_HTTP_TIMEOUT_KEEP_ALIVE=3600`; the separate lifecycle check still observed scale-out failures.
+Traffic went directly from the in-cluster driver to cluster-internal `Service` endpoints with no
+`kubectl port-forward`. vLLM roles set `VLLM_HTTP_TIMEOUT_KEEP_ALIVE=3600`.
 
 ## Configuration
 
-Each role started with one replica and had bounds of one to two.
-The scaler used `Active` mode and a 10 s sampling interval.
+Suite 1 roles started at 1 replica with bounds `1..2`, `Active` mode and a 10 s sampling interval.
 
 | Configuration | Model | Algorithm | Capacity settings |
 |---|---|---|---|
@@ -68,16 +95,10 @@ The scaler used `Active` mode and a 10 s sampling interval.
 | `sglang-pd-token-throughput` | Qwen3-8B | `TokenThroughput` | *Prefill* `1200` tok/s; *decode* `300` tok/s per replica |
 | `vllm-epd-predictive` | Qwen2.5-VL-7B-Instruct | `Predictive` | Same fallback and forecast capacities; *encode* coupled to *prefill* |
 
-Both predictive configurations used a 30 s horizon, two minimum observations, *`qLevel: "0.5"`*
-and *`qTrend: "0.3"`*. Token-based configurations retained the default 180 s stable and 60 s panic
-windows, panic threshold `2`, and latency targets of 500 ms and 50 ms.
-
-Each configuration preferred a *prefill*/*decode* ratio of `1`.
-The *EPD* configuration also preferred an *encode*/*prefill* ratio of `1`.
-Only *`target`* was set, so these were preferences rather than fixed ratio bands.
-The observed *EPD* maxima were one *encode*, two *prefill* and two *decode* replicas.
-
-The `vllm-pd-proportional` scaler took this form.
+Predictive runs set *`horizonSeconds: 30`*, *`minPoints: 2`*, *`qLevel: "0.5"`* and
+*`qTrend: "0.3"`*. Token-based runs kept default 180 s stable / 60 s panic windows, panic threshold
+`2`, and latency targets 500 ms / 50 ms. All preferred a *prefill*/*decode* ratio of `1` (*EPD*
+also preferred *encode*/*prefill* `1`, reaching 1 *encode*, 2 *prefill*, 2 *decode*).
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -111,12 +132,12 @@ spec:
           target: "3"  # requests per ready replica
         - name: decode
           target: "3"  # requests per ready replica
-    # The token throughput configurations replaced the proportional block.
+    # TokenThroughput replaced proportional:
     # type: TokenThroughput
     # tokenThroughput:
     #   prefillTargetTokensPerSecond: "1200"
     #   decodeTargetTokensPerSecond: "300"
-    # The predictive configurations kept those token targets and added a forecast.
+    # Predictive kept those token targets and added a forecast:
     # type: Predictive
     # predictive:
     #   tokenThroughput:
@@ -130,28 +151,26 @@ spec:
     #   decodeTokenCapacityPerReplica: "2000"
 ```
 
-The target `ModelDeployment` manifest is in
-[Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md#step-1-prepare-the-target).
+See [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md#step-1-deploy-scaling-target)
+for the target `ModelDeployment` manifest.
 
-### Parallel schedule
+### Benchmark run order
 
-The two waves shared an eight-GPU ceiling. Allocations describe maximum capacity reserved for each
-concurrent sequence; they do not assert that eight GPUs served throughout every phase.
+Two waves shared an eight-GPU ceiling (maximum reserved capacity per sequence, not continuous use):
 
 | Wave | First sequence | Second sequence | GPU ceiling |
 |---|---|---|---|
 | 1 | vLLM *PD*: `Proportional`, reset, then `Predictive`; up to 4 GPUs | SGLang *PD*: `TokenThroughput`, release, then a separate vLLM *PD* `TokenThroughput` deployment; up to 4 GPUs | 4 + 4 = 8 |
 | 2 | vLLM *EPD* `Predictive`; up to 6 GPUs | Single-role live lifecycle check; up to 2 GPUs | 6 + 2 = 8 |
 
-The admission check ran once before Wave 1. It created its own targets and did not overlap either wave.
-Between configurations that shared a deployment, the runner deleted the scaler, waited for binding
-release, then restored one replica per role.
+Admission checks ran separately before Wave 1. Between configurations on a shared deployment, the
+runner deleted the scaler, waited for binding release and restored one replica per role.
 
 ### Workload
 
-Text configurations used a continuous streaming client with a target input of 1024 tokens and
-up to 256 output tokens. Phase durations are requested load durations; recorded wall time includes
-completion of outstanding requests.
+Text runs streamed 1,024-input / up-to-256-output-token requests; multimodal runs sent fixed
+request counts with unique 560-pixel images (`shared_image: false`), 1,024 text tokens and up to
+256 output tokens.
 
 | Phase | Duration (s) | Concurrency | Multimodal requests |
 |---|---:|---:|---:|
@@ -160,60 +179,20 @@ completion of outstanding requests.
 | Sustain | 75 | 24 | 180 |
 | Cooldown | 90 | 2 | 18 |
 
-The multimodal client used those fixed request counts, a 560-pixel generated image,
-*`shared_image: false`*, a target text length of 1024 tokens and up to 256 output tokens.
-Its phases were request-count bounded, so their wall times differ from the text load durations.
-
-*Time to first token (TTFT)* measures delay before the first streamed token.
-*Inter-token latency (ITL)* measures gaps between streamed tokens.
-Latency percentiles use successful requests and the client's percentile calculation.
-Output throughput divides successful output tokens by the phase's recorded wall time.
-Failed requests remain in the request and error columns.
+*Time to first token (TTFT)* and *inter-token latency (ITL)* percentiles use successful requests;
+output throughput divides successful output tokens by recorded phase wall time.
 
 ## Suite 1: Scaling comparison
 
-The charts trace algorithm feedback sensitivity (`rawRecommendedReplicas`), Ready serving replicas
-(`readyReplicas`) across phase checkpoints (`B1–B2` baseline, `R1–R3` ramp, `S1–S3` sustain,
-`C1–C3` cooldown) and resulting *TTFT* p50 for **blue** (`vllm-pd-proportional`), **amber**
-(`vllm-pd-token-throughput`) and **green** (`vllm-pd-predictive`).
+![Suite 1 H100 vLLM PD rawRecommendedReplicas, Ready replicas and TTFT p50 across baseline, ramp, sustain and cooldown](../../assets/diagrams/scaling-benchmark-suite1.svg)
 
-```mermaid
-%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2563eb, #f59e0b, #16a34a"}}}}%%
-xychart-beta
-    title "Feedback sensitivity (rawRecommendedReplicas)"
-    x-axis "Blue: Proportional | Amber: TokenThroughput | Green: Predictive" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
-    y-axis "rawRecommendedReplicas" 0 --> 80
-    line "Proportional" [1, 1, 1, 2, 2, 2, 2, 2, 1, 1, 1]
-    line "TokenThroughput" [1, 2, 2, 12, 25, 25, 23, 23, 19, 1, 1]
-    line "Predictive" [1, 7, 1, 47, 75, 22, 22, 24, 3, 1, 1]
-```
+On H100 vLLM *PD* (zero errors across all three algorithms), `Predictive` held `ramp` *TTFT* p50 to
+**467.906 ms** versus 2,325.222 ms (`TokenThroughput`) and 2,540.853 ms (`Proportional`), with
+**2,109.251 tok/s** ramp output versus 1,230.879 and 1,117.481 tok/s.
 
-```mermaid
-%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2563eb, #f59e0b, #16a34a"}}}}%%
-xychart-beta
-    title "Ready replicas by checkpoint"
-    x-axis "Blue: Proportional | Amber: TokenThroughput | Green: Predictive" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
-    y-axis "readyReplicas" 0 --> 3
-    line "Proportional" [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]
-    line "TokenThroughput" [1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2]
-    line "Predictive" [1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2]
-```
-
-```mermaid
-%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2563eb, #f59e0b, #16a34a"}}}}%%
-xychart-beta
-    title "TTFT p50 by phase"
-    x-axis "Blue: Proportional | Amber: TokenThroughput | Green: Predictive" ["baseline", "ramp", "sustain", "cooldown"]
-    y-axis "TTFT p50 (ms)" 0 --> 3000
-    line "Proportional" [298.564, 2540.853, 506.734, 188.231]
-    line "TokenThroughput" [284.481, 2325.222, 480.418, 182.044]
-    line "Predictive" [164.044, 467.906, 447.864, 60.883]
-```
-
-Both `ramp` and `sustain` run at concurrency 24. Because manual token targets sat below baseline
-traffic, `vllm-pd-token-throughput` (`raw = 2`) and `vllm-pd-predictive` (`raw = 7`) requested scale-out
-at `B2`, so `vllm-pd-predictive` entered `ramp` (`R1`) with two Ready replicas and held *TTFT* p50
-below 470 ms while `vllm-pd-proportional` waited until `R2` (`2540.853` ms in `ramp`, `506.734` ms in `sustain`).
+Confounder: manual token targets sat below baseline load, so `TokenThroughput` (`raw = 2`) and
+`Predictive` (`raw = 7`) scaled at `B2` before `ramp` (`Predictive` entered `R1` with 2 Ready
+replicas), which does not isolate forecasting alone.
 
 ### vLLM proportional PD
 
@@ -270,23 +249,27 @@ Configuration: `vllm-epd-predictive`.
 | sustain | 180 | 0 | 479.805 | 2502.224 | 7.527 | 16.049 | 1951.521 |
 | cooldown | 18 | 0 | 208.498 | 266.302 | 5.968 | 10.166 | 266.625 |
 
-The SGLang failure signature was `Failed to get kvcache from prefill instance, it might be dead`.
-Its error-heavy phases do not establish healthy serving capacity. The recorded investigation
-associated the failures with the documented [TCP port exhaustion](engine-versions.md#limitations)
-limitation. The [TIME-WAIT reuse setting](../../reference/settings.md#sglang-time-wait-reuse) needs
-kubelet configuration before use; a successful rerun with that setting was not captured.
+SGLang failed with `Failed to get kvcache from prefill instance, it might be dead`, consistent with
+[TCP port exhaustion](engine-versions.md#limitations). Its error-heavy phases do not measure
+healthy capacity, and no rerun with `model-deployment-tcp-tw-reuse` was captured.
 
 ## Suite 2: Capacity priors
 
-Suite 2 ran across four single-GPU H200 nodes and a dedicated CPU load-driver node. It evaluated
-offline capacity priors on unrouted single-`Pod` `Server` deployments before re-running the
-five disaggregated *PD* and *EPD* configurations across multiple nodes.
+Suite 2 ran across four single-GPU H200 nodes plus a dedicated CPU driver node, testing offline
+priors on single-`Pod` `Server` deployments before re-running the five disaggregated configurations
+across multiple nodes.
 
 ### Single-replica sweep
 
-One `Qwen/Qwen3-8B` (`bf16`, `vllm`, `gpusPerReplica: 1`, `tensorParallel: 1`) `Server` replica
-served six 60-second concurrency levels (`1024` input and `256` output tokens, zero failed
-requests) to construct the offline `ConfigMap` catalog profile:
+One `Qwen/Qwen3-8B` (`bf16`, `vllm`, `1 × H200`, *TP* = 1) `Server` replica ran six 60-second
+concurrency levels (`1,024/256` tokens, zero errors) to build the offline `ConfigMap` catalog.
+
+![Suite 2 H200 single-replica total throughput vs capacity targets and TTFT percentiles by concurrency](../../assets/diagrams/scaling-benchmark-priors-sweep.svg)
+
+Every point met P95 *TTFT* <= `2000` ms and *ITL* <= `33` ms (`ExplicitSaturation`).
+`Catalog.Resolve` picked `17135.159` tok/s at `c = 32` as the seed and applied *`headroom: "0.75"`*
+to derive `12851.37` tok/s, crossing measured throughput between `c = 16` (`11477.608` tok/s) and
+`c = 24` (`14527.811` tok/s).
 
 | Concurrency | Requests | Total (`tok/s`) | Output (`tok/s`) | *TTFT* p50 / p90 / p99 (ms) | *ITL* p50 / p90 / p99 (ms) | `tok/s/user` |
 |---:|---:|---:|---:|---|---|---:|
@@ -297,41 +280,31 @@ requests) to construct the offline `ConfigMap` catalog profile:
 | 24 | 672 | 14527.811 | 2857.152 | 352.587 / 527.173 / 547.8 | 6.346 / 6.556 / 9.713 | 119.205 |
 | 32 | 800 | 17135.159 | 3369.918 | 490.591 / 689.956 / 736.115 | 6.576 / 6.824 / 20.012 | 105.395 |
 
-```mermaid
-%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2563eb, #dc2626, #16a34a"}}}}%%
-xychart-beta
-    title "Single-replica total throughput vs capacity targets (tok/s)"
-    x-axis "Blue: Measured tok/s | Red: Tuned Manual (17135.2) | Green: Catalog 0.75 (12851.4)" ["c=2", "c=4", "c=8", "c=16", "c=24", "c=32"]
-    y-axis "Total throughput (tok/s)" 0 --> 18000
-    line "Measured tok/s" [1882.56, 3653.261, 6414.232, 11477.608, 14527.811, 17135.159]
-    line "Tuned Manual (17135.2)" [17135.159, 17135.159, 17135.159, 17135.159, 17135.159, 17135.159]
-    line "Catalog 0.75 (12851.4)" [12851.37, 12851.37, 12851.37, 12851.37, 12851.37, 12851.37]
-```
+### Capacity estimate comparison
 
-```mermaid
-%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#16a34a, #f59e0b, #dc2626"}}}}%%
-xychart-beta
-    title "Single-replica TTFT percentiles by concurrency (ms)"
-    x-axis "Green: TTFT p50 | Amber: TTFT p90 | Red: TTFT p99" ["c=2", "c=4", "c=8", "c=16", "c=24", "c=32"]
-    y-axis "TTFT (ms)" 0 --> 800
-    line "TTFT p50" [48.084, 58.658, 166.364, 224.723, 352.587, 490.591]
-    line "TTFT p90" [50.489, 94.228, 190.725, 362.343, 527.173, 689.956]
-    line "TTFT p99" [120.712, 98.486, 193.563, 384.708, 547.8, 736.115]
-```
+Eighteen serial rounds (3 alternating repeats × 6 arms) compared `frozen-manual` (`20000` tok/s),
+`tuned-manual` (`17135.159` tok/s) and `catalog` (`12851.37` tok/s) across nominal phase windows
+`baseline` (30 s, `c = 2`), `ramp` (45 s, `c = 24`), `sustain` (45 s, `c = 24`) and `cooldown`
+(30 s, `c = 0`). All 18 rounds finished with **zero failed requests**, verified UID-preconditioned
+cleanup and return to 1 replica.
 
-Under the P95 targets of *`ttftTargetMilliseconds: "2000"`* and *`itlTargetMilliseconds: "33"`*,
-every measured point passed (`ExplicitSaturation`). `Catalog.Resolve` selected `17135.159`
-tokens/s at concurrency `32` (**red**) as the seed capacity and applied *`headroom: "0.75"`*
-to derive `12851.37` tokens/s (**green**), which crosses the measured throughput curve (**blue**)
-between `c = 16` (`11477.608` tok/s) and `c = 24` (`14527.811` tok/s).
+![Suite 2 H200 capacity-arm rawRecommendedReplicas and Ready replicas across checkpoints B1 to C3](../../assets/diagrams/scaling-benchmark-capacity-arms.svg)
 
-### Capacity-arm rounds
+Checkpoints (`B1`–`C3`) record phase progress, while scale-up elapsed times track wall clock from
+ramp start (in-flight drain and harness transitions extend actual wall time past the nominal `45` s
+`ramp` + `45` s `sustain` windows).
 
-Eighteen serial rounds (`3` alternating repeats per arm for `TokenThroughput` and `3` for
-`Predictive`) compared `frozen-manual` (`20000` tok/s), `tuned-manual` (`17135.159` tok/s) and
-`catalog` (`12851.37` effective tok/s from the sweep `ConfigMap`) across `baseline` (`30` s,
-`c = 2`), `ramp` (`45` s, `c = 24`), `sustain` (`45` s, `c = 24`) and `cooldown` (`30` s, `c = 0`).
-Latency columns show p50/p99:
+Starting from one replica on H200, unmargined `TokenThroughput` manual arms stayed at 1 replica
+(`~14.5k` tok/s at `c = 24` sat below `17135.159` tok/s). `TokenThroughput` `catalog` triggered at
+`R2`, and after ~76 s of vLLM startup became Ready at `S3` (`99.6–105.6` s from ramp start), costing
+`+33.7%` median `readyReplicaSeconds` (`317.04` versus `237.094` s) with no `sustain` *TTFT* win
+(`343.842` versus `321.352` ms).
+
+`Predictive` triggered earlier (`15.1–21.9` s from ramp start) and reached Ready by checkpoint `R3`
+(`81.9–94.6` s elapsed from ramp start), cutting `sustain` *TTFT* p50 to **189.511 ms** (`catalog`),
+`194.733` ms (`frozen-manual`) and `206.453` ms (`tuned-manual`).
+
+Latency columns show p50 / p99:
 
 | Algorithm | Arm | Valid repeats | Ready replica-s (median/min–max) | Peak Ready | Ramp *TTFT* (ms) | Sustain *TTFT* (ms) | Sustain *ITL* (ms) |
 |---|---|---:|---|---:|---|---|---|
@@ -342,52 +315,24 @@ Latency columns show p50/p99:
 | `Predictive` | `tuned-manual` | 3 / 3 | 392.089 (370.123–392.919) | 2 | 350.769 / 564.252 | 206.453 / 370.607 | 5.744 / 8.301 |
 | `Predictive` | `catalog` | 3 / 3 | 423.031 (392.662–679.002) | 2 | 349.685 / 554.122 | 189.511 / 364.141 | 5.741 / 9.839 |
 
-```mermaid
-%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#dc2626, #f59e0b, #16a34a"}}}}%%
-xychart-beta
-    title "Capacity-arm feedback sensitivity (rawRecommendedReplicas)"
-    x-axis "Red: TT (tuned-manual) | Amber: TT (catalog) | Green: Predictive (catalog)" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
-    y-axis "rawRecommendedReplicas" 0 --> 5
-    line "TT (tuned-manual)" [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-    line "TT (catalog)" [1, 1, 1, 2, 2, 1, 1, 2, 1, 1, 1]
-    line "Predictive (catalog)" [1, 1, 1, 2, 4, 1, 4, 3, 1, 1, 1]
-```
-
-```mermaid
-%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#dc2626, #f59e0b, #16a34a"}}}}%%
-xychart-beta
-    title "Capacity-arm Ready replicas by checkpoint"
-    x-axis "Red: TT (tuned-manual) | Amber: TT (catalog) | Green: Predictive (catalog)" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
-    y-axis "readyReplicas" 0 --> 3
-    line "TT (tuned-manual)" [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-    line "TT (catalog)" [1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 1]
-    line "Predictive (catalog)" [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 1]
-```
-
-The three lines in both checkpoint charts plot **red** (`TokenThroughput` `tuned-manual`),
-**amber** (`TokenThroughput` `catalog`) and **green** (`Predictive` `catalog`).
-All 18 rounds completed with zero failed requests, verified UID-preconditioned cleanup and full
-return to the one-replica baseline.
-
-Under `TokenThroughput`, both unmargined manual arms stayed at one replica (`raw = 1` throughout)
-because single-replica throughput at concurrency 24 (`~14.5k` tok/s) sat below the `17135.159`
-tok/s saturation seed.
-
-The `TokenThroughput` `catalog` arm (`0.75` headroom) grew to two replicas (`raw = 2` at `R2`) in
-all three repeats, but vLLM startup and CUDA graph compilation took ~76 s (`99.6–105.6` s from ramp
-start), so the second replica became Ready at `S3` near the end of the 45 s `sustain` window and
-produced no `sustain` *TTFT* reduction (`343.842` ms vs `321.352` ms).
-
-Under `Predictive`, the 300 s Kalman linear-trend forecast scaled all three arms early (`15.1–21.9`
-s from ramp start; Ready at `R3`, `81.9–94.6` s), cutting `sustain` median *TTFT* p50 to `189.511`
-ms (`catalog`), `194.733` ms (`frozen-manual`) and `206.453` ms (`tuned-manual`).
-
 ### Algorithm sensitivity
 
-A longer 360-second wave (`baseline` 60 s at `c = 2`, `ramp` 90 s at `c = 24`, `sustain` 90 s at
-`c = 24`, `cooldown` 120 s at `c = 0`, `maxReplicas: 4`) compared `Proportional` (`RunningRequests`
-target `8`), `TokenThroughput` (`14000` tok/s) and catalog-backed `Predictive` (`12851.37`
-effective tok/s) against the [Scaling Simulation](scaling-simulation.md) metrics (*TTFT* <= `2000` ms, *ITL* <= `33` ms):
+A 360-second H200 hardware wave (`baseline` 60 s `c = 2`, `ramp` 90 s `c = 24`, `sustain` 90 s
+`c = 24`, `cooldown` 120 s `c = 0`, `maxReplicas: 4`) compared `Proportional` (`RunningRequests`
+target `8`), `TokenThroughput` (`14000` tok/s) and catalog-backed `Predictive` (`12851.37` tok/s)
+using `True SLO` (*TTFT* <= `2000` ms and adjacent *ITL* <= `33` ms) and `Goodput`.
+
+Those metric definitions match the deterministic **synthetic simulation** (model output, not GPU
+hardware), where `Predictive` reached `99.4%` true SLO on a five-step synthetic `ramp` seed against
+`76.1%` for reactive configurations.
+
+![Suite 2 H200 360-second hardware wave Ready replicas and TTFT p50 across Proportional, TokenThroughput and Predictive](../../assets/diagrams/scaling-benchmark-sensitivity.svg)
+
+On the H200 hardware wave, catalog-backed `Predictive` reached 3 Ready replicas by `R2` and 4 by
+`R3`, cutting `ramp` *TTFT* p50 from `347.282–350.591` ms to **192.093 ms** and `sustain` *TTFT*
+p50 to **120.59 ms** (**3886.136** output tok/s, zero failed requests). Exception: `TokenThroughput`
+recorded **11 failed requests** out of 1,272 in `sustain` (`True SLO 0.9914`), while `Proportional`
+and `Predictive` kept `1.0` with zero failures.
 
 | Algorithm | Phase | Requests | Failed | True SLO | Goodput (`req/s`) | *TTFT* p50 / p90 / p99 (ms) | *ITL* p50 / p90 / p99 (ms) | Output (`tok/s`) |
 |---|---|---:|---:|---:|---:|---|---|---:|
@@ -401,51 +346,22 @@ effective tok/s) against the [Scaling Simulation](scaling-simulation.md) metrics
 | `Predictive` | `ramp` | 1244 | 0 | 1.0 | 13.625 | 192.093 / 325.727 / 340.679 | 5.746 / 6.004 / 7.8 | 3487.99 |
 | `Predictive` | `sustain` | 1383 | 0 | 1.0 | 15.18 | 120.59 / 187.599 / 195.3 | 5.596 / 5.847 / 7.21 | 3886.136 |
 
-```mermaid
-%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2563eb, #f59e0b, #16a34a"}}}}%%
-xychart-beta
-    title "360 s wave Ready replicas by checkpoint"
-    x-axis "Blue: Proportional | Amber: TokenThroughput | Green: Predictive (catalog)" ["B1", "B2", "R1", "R2", "R3", "S1", "S2", "S3", "C1", "C2", "C3"]
-    y-axis "readyReplicas" 0 --> 5
-    line "Proportional" [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]
-    line "TokenThroughput" [1, 1, 1, 1, 3, 3, 4, 4, 4, 4, 4]
-    line "Predictive (catalog)" [1, 1, 1, 3, 4, 4, 4, 4, 4, 4, 4]
-```
-
-```mermaid
-%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2563eb, #f59e0b, #16a34a"}}}}%%
-xychart-beta
-    title "360 s wave TTFT p50 by phase (ms)"
-    x-axis "Blue: Proportional | Amber: TokenThroughput | Green: Predictive (catalog)" ["baseline", "ramp", "sustain"]
-    y-axis "TTFT p50 (ms)" 0 --> 400
-    line "Proportional" [49.439, 347.282, 190.555]
-    line "TokenThroughput" [49.263, 350.591, 145.939]
-    line "Predictive (catalog)" [49.742, 192.093, 120.59]
-```
-
-In the 360-second wave (**blue** `Proportional`, **amber** `TokenThroughput`, **green**
-`Predictive`), catalog-backed `Predictive` brought three replicas Ready by `R2`
-and all four Ready by `R3`, lowering `ramp` *TTFT* p50 from `347.282–350.591` ms to `192.093` ms
-and `sustain` *TTFT* p50 to `120.59` ms (`3886.136` output tok/s, zero failed requests).
-
 ### Embedded catalog
 
-To verify zero-configuration resolution against the embedded `pkg/worker/scaling/priors/priors.yaml`
-catalog, an `openai/gpt-oss-120b` (`fp4`, `vllm`, `1 × H200`) `Server` deployment ran with
-*`capacityPrior: {}`* and no `catalogRef` or identity annotations.
+An `openai/gpt-oss-120b` (`fp4`, `vllm`, `1 × H200`) `Server` deployment ran with *`capacityPrior: {}`*
+and no `catalogRef` or identity annotations against the embedded catalog. It inferred
+`Server/openai/gpt-oss-120b/fp4/vllm/nvidia-h200/gpus=1,tp=1,ep=1,pp=1,dp=1,ldp=1,cp=1`
+(`profileDigest: sha256:47d96f0e...`), resolved `seedTokensPerSecond: "6405.44"` (`ExplicitSaturation`,
+P95 *TTFT* `2000` ms, *ITL* `33` ms) and set `effectiveTokensPerSecond: "4804.08"`.
 
-The controller inferred `Server/openai/gpt-oss-120b/fp4/vllm/nvidia-h200/gpus=1,tp=1,ep=1,pp=1,dp=1,ldp=1,cp=1`
-(`profileDigest: sha256:47d96f0e...`), selected `seedTokensPerSecond: "6405.44"` (`ExplicitSaturation`
-under P95 *TTFT* `2000` ms and *ITL* `33` ms) and set `effectiveTokensPerSecond: "4804.08"`.
+A 60-second concurrency-8 check completed `176` requests with zero errors at `4862.388` total tok/s
+(`915.002` output tok/s; *TTFT* p50 / p90 / p95 `96.185 / 225.437 / 238.947` ms; *ITL* p50 / p90 /
+p95 `10.958 / 11.713 / 12.014` ms), within **1.2%** of the embedded effective prior.
 
-A 60-second sustain check at concurrency 8 completed `176` requests with zero errors at `4862.388`
-total tokens/s (`915.002` output tokens/s, *TTFT* p50 / p90 / p95 `96.185 / 225.437 / 238.947` ms,
-*ITL* p50 / p90 / p95 `10.958 / 11.713 / 12.014` ms) — within 1.2% of the embedded effective prior.
+### H200 serving comparison
 
-### Disaggregated H200 rerun
-
-Re-running the five disaggregated configurations across the four single-GPU H200 nodes (`Qwen3-8B`
-for *PD* and `Qwen3-VL-8B-Instruct` in `1R1E2P1D` for *EPD*) produced these phase summaries:
+Re-running the five disaggregated configurations across four single-GPU H200 nodes (`Qwen3-8B` for
+*PD*; `Qwen3-VL-8B-Instruct` in `1R1E2P1D` for *EPD*) yielded:
 
 | Configuration | Phase | Requests | Errors | *TTFT* p50 / p99 (ms) | *ITL* p50 / p99 (ms) | Output (`tok/s`) |
 |---|---|---:|---:|---|---|---:|
@@ -455,19 +371,18 @@ for *PD* and `Qwen3-VL-8B-Instruct` in `1R1E2P1D` for *EPD*) produced these phas
 | `sglang-pd-token-throughput` | `ramp` / `sustain` | 1245 / 2904 | 906 / 2904 | 2203.669 / - (p99: 3620.957 / -) | 5.723 / - (p99: 22.806 / -) | 1151.088 / 0 |
 | `vllm-epd-predictive` | `ramp` / `sustain` | 180 / 180 | 0 / 0 | 943.066 / 1044.397 (p99: 3678.427 / 3493.704) | 8.285 / 8.215 (p99: 15.968 / 16.934) | 1617.037 / 1475.286 |
 
-On four 1-GPU nodes, `vllm-pd-proportional` scaled *decode* (`1 -> 2`, lead `24` s) and
-`vllm-epd-predictive` scaled *prefill* (`1 -> 2`) with zero errors across all four phases.
-When `vllm-pd-token-throughput` and `vllm-pd-predictive` added a second *prefill* replica during
-high-rate text `ramp`, the Router returned fast HTTP 503s until the new prefill worker finished
-registration, then served `sustain` and `cooldown` with zero errors.
+`vllm-pd-proportional` scaled *decode* (`1 → 2`, lead `24` s) and `vllm-epd-predictive` scaled
+*prefill* (`1 → 2`) with zero errors across all four phases. When `vllm-pd-token-throughput` and
+`vllm-pd-predictive` added a second *prefill* replica during high-rate text `ramp`, the Router
+returned fast HTTP 503s until registration finished, then served `sustain` and `cooldown` with zero
+errors.
 
 ## Verification
 
 ### Scale-out timing
 
-Scale-out lead measures the interval from ramp start to the first sampled desired count above one.
-It uses deployment status, so it does not measure when a newly added replica first became Ready
-or served a request. A count already above one at ramp start is reported as zero with an explicit flag.
+Scale-out lead measures ramp start to the first sampled desired count above 1 (not Ready time). A
+count already above 1 at ramp start reports `0` with `Pre-ramp count >1` set to `Yes`.
 
 | Configuration | Lead (s) | Pre-ramp count >1 | Maximum desired counts | Maximum Ready counts |
 |---|---:|---|---|---|
@@ -479,16 +394,13 @@ or served a request. A count already above one at ramp start is reported as zero
 | `Server` `TokenThroughput` `catalog` (H200) | 22–28 | No | *Server* 2 | *Server* 2 |
 | `Server` `Predictive` `catalog` (H200) | 15–22 | No | *Server* 2 | *Server* 2 |
 
-In Suite 1, both token throughput and predictive configurations scaled during baseline, so the zero
-lead does not isolate a forecasting benefit. In Suite 2, all single-`Server` configurations started
-`ramp` at one Ready replica; `Predictive` committed growth at `15.1–21.9` s into `ramp` against
-`22.2–28.2` s for `TokenThroughput` `catalog`.
+In Suite 2, every single-`Server` run started `ramp` at 1 Ready replica: `Predictive` committed
+growth at `15.1–21.9` s versus `22.2–28.2` s for `TokenThroughput` `catalog`.
 
 ### Retirement
 
-The separate single-role lifecycle check confirmed a new Ready replica served requests, then reduced
-the desired count from two to one. It observed `Disqualified` and `Draining`, followed by one Ready survivor.
-Its scale-down and post-retirement phases completed with zero failed requests.
+The standalone single-role lifecycle check verified scale-out, serving at two replicas, `Disqualified`
+and `Draining` during scale-down, and serving on one survivor:
 
 | Lifecycle phase | Requests | Errors | Observation |
 |---|---:|---:|---|
@@ -497,97 +409,43 @@ Its scale-down and post-retirement phases completed with zero failed requests.
 | Scale-down (`down`) | 1880 | 0 | Retirement observed while traffic continued |
 | One replica (`one`) | 942 | 0 | One Ready survivor served requests |
 
-These values come from the standalone lifecycle rerun. The earlier check embedded in Wave 2 also
-failed during scale-out, with 3 failures among 10579 requests. Admission passed all 45 checks;
-the standalone lifecycle check passed 10 checks and failed its all-phases completion check.
+The earlier Wave 2 check also recorded 3 failures in 10,579 scale-out requests. Admission passed all
+45 checks; the standalone lifecycle check passed 10 checks and failed its all-phases check.
 
-The benchmark configuration timelines sampled `Disqualified` for the proportional and token-based
-*PD* configurations. Predictive *PD* also sampled `Admitted` and `Aborted`.
-The *EPD* timeline captured no retirement state. These sets do not establish complete retirement sequences.
+Suite 1 timelines sampled `Disqualified` on proportional and token-based *PD* (plus `Admitted` and
+`Aborted` on predictive *PD*) and no retirement state on *EPD*. The
+[retirement protocol](runtime-control.md#pause-and-retirement) transitions `Draining` → `Deleting`
+(distinct from Kubernetes `Terminating`). Before trusting live recommendations, verify `partial: false`
+and *`missing[]`* via `/metrics` ([Engine signals](scaling.md#engine-signals)).
 
-The [retirement protocol](shutdown.md#retirement-protocol) uses `Draining` followed by `Deleting`
-before release completes. Kubernetes can display a deleting `Pod` as `Terminating`.
-`Terminating` is not a retirement state. The captures do not include every transition, and zero client
-errors in the two scale-down phases do not prove every in-flight request survives every retirement.
+Additional runtime-acceptance runs verified:
 
-A later runtime-acceptance run scaled a *vLLM* multi-Server deployment by hand through one to two
-to one replicas. The Router's worker set followed every edit, the pinned `round_robin` policy
-split sixteen requests eight and eight across the two workers at two replicas, both workers
-stayed healthy, and the deployment still served after the scale-back. The run completed 21
-checks with zero failures.
-
-A second run retired one of two replica groups of a *vLLM* [External DP](external-dp.md) deployment
-at data parallelism 2. The Router's worker set held every member throughout — two workers for one
-group of two, four for two groups of two, and two again after the scale-down.
-
-The endpoint withdrawal reached the Router in 21 seconds, and the retired members were deleted 70
-seconds after the patch, past the 60-second disaggregated handoff grace window, which the
-retirement honored. Eight checks passed; the one failing row had timed the endpoint withdrawal
-against that window, a measurement defect in the case rather than a product finding.
-
-A third run drove a *SGLang* *PD* deployment of one *prefill* and one *decode* replica with the
-scaler active: 29 checks passed with zero failures, warnings or blocked rows. The deployment
-published each role's group independently, the four content classes served through the
-`sglang-gateway`, the thinking switch held on the arithmetic, Chinese and JSON requests, and the
-Mooncake transfer over the direct leg moved 54 MB across six transfers with zero failures.
-
-The scaler read the engine's waiting-request counter during a transfer and recorded 24 waiting
-requests on the *decode* role; under load the *decode* role grew to two replicas, and both roles
-returned to their floor of one with no retirement outstanding.
-
-In Suite 2, all 12 single-`Server` rounds that scaled to two replicas (`3` `TokenThroughput`
-`catalog` rounds and all `9` `Predictive` rounds) completed retirement and returned to one Ready
-replica with zero failed requests before cleanup.
-
-## Benefits
-
-In Suite 1, predictive *PD* had lower ramp median *TTFT* than proportional *PD* (`467.906` vs
-`2540.853` ms) and higher ramp throughput (`2109.251` vs `1117.481` tok/s), though low manual
-targets caused it to enter `ramp` already scaled.
-
-In Suite 2, starting from an equal one-replica baseline on H200, applying the `0.75` catalog
-headroom resolved both manual-threshold failure modes: `TokenThroughput` scaled `1 -> 2` at `c = 24`
-where unmargined saturation capacities (`17135.159` tok/s) stayed at one replica, and the embedded
-`openai/gpt-oss-120b` (`fp4`) prior matched measured sustain throughput within 1.2% (`4862.388` vs
-`4804.08` tok/s).
-
-When paired with `Predictive`, the 300 s Kalman forecast offset the ~76 s vLLM startup to cut
-45-second `sustain` *TTFT* p50 from `343.842` ms to `189.511` ms (`maxReplicas: 2`) and 90-second
-`sustain` *TTFT* p50 from `145.939–190.555` ms to `120.59` ms (`maxReplicas: 4`, `3886.136` output
-tok/s, zero failed requests).
-
-## Trade-offs
-
-In Suite 1, cooldown lasted 90 s while downward stabilization was 300 s, so several final snapshots
-still requested two replicas. In Suite 2's 45-second `sustain` rounds, `TokenThroughput` `catalog`
-expended `317.04` median `readyReplicaSeconds` (`+33.7%` over manual's `237.094` s) without
-lowering `sustain` *TTFT* p50 because vLLM startup (~76 s) consumed most of the short load window.
-
-Because `Predictive` amplifies initial ramp slopes (`rawRecommendedReplicas` reaching `4–75` during
-`ramp`), production configurations pair *`horizonSeconds`* (`180–300` s) with
-*`behavior.scaleUp.maxStepReplicas`* to bound single-pass growth; see
-[Step 3: Choose an algorithm](../../walkthroughs/model-deployment/scaling.md#step-3-choose-an-algorithm).
+- **vLLM multi-Server manual scaling (`1 → 2 → 1`)**: Router worker set followed every edit,
+  `round_robin` split 16 requests 8/8 at two replicas, and 21/21 checks passed.
+- **vLLM *External DP* retirement (*DP* = 2)**: Router held 2 → 4 → 2 workers; withdrawal reached
+  the Router in 21 s and retired members deleted at 70 s (honoring the 60 s handoff window). Eight
+  checks passed; one check failed from timing withdrawal against the 60 s window (case bug).
+- **SGLang *PD* active scaling**: 29/29 checks passed; Mooncake moved 54 MB across six direct
+  transfers with zero failures; the scaler read 24 waiting requests on *decode*, scaled *decode* to
+  2, and returned both roles to 1.
+- **Suite 2 single-`Server` rounds**: All 12 rounds that scaled to 2 (`3` `TokenThroughput` `catalog`
+  and `9` `Predictive`) returned to 1 Ready replica with zero failed requests.
 
 ## Limitations
 
-Suite 1 covers one eight-H100 node and one recorded comparison per configuration. Suite 2 covers
-four single-H200 nodes (`Qwen3-8B`, `gpt-oss-120b`, `Qwen3-VL-8B-Instruct`). Neither suite
-establishes a universal algorithm ranking or an optimal headroom margin across workloads.
-
-The text and multimodal clients perform different work and use different phase stopping rules.
-Their throughput values cannot establish a serving-mode speedup. Image tags identify the configured
-builds; the capture does not establish identical installed engine package versions across configurations.
-
-Zero errors in the single-`Server` rounds and selected *PD*/*EPD* runs describe those measured
-requests only. Multi-node *PD* prefill scale-out under high-rate text traffic produced transient
-Router HTTP 503s during worker registration, and SGLang *PD* reproduced Mooncake KV transfer errors.
-The [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) distinguishes configuration
-examples from captured lifecycle evidence.
+- Suite 1 (one 8-H100 node) and Suite 2 (four 1-H200 nodes) do not establish a universal algorithm
+  ranking or optimal headroom margin across workloads.
+- Text and multimodal clients run different work and stopping rules, so throughput values are not
+  comparable across modes. Image tags do not prove identical internal engine packages.
+- Zero errors apply only to those measured requests: multi-node H200 *PD* prefill scale-out hit
+  transient Router 503s during registration, and SGLang *PD* reproduced Mooncake KV transfer errors.
+- See [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) for the boundary between
+  configuration examples and captured lifecycle evidence.
 
 ---
 
-**See also** — [Model Deployment Scaling](scaling.md) (algorithm and guard contracts) ·
+**See also** — [Model Deployment Scaling](scaling.md) (algorithm, metrics, and guard contracts) ·
 [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) (configuration and observation) ·
-[Model Deployment Shutdown](shutdown.md) (retirement and drain limits)
+[Online Runtime Control](runtime-control.md) (retirement budgets, drain window, and role pause)
 
 **Next** → [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md)

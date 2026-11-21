@@ -26,7 +26,7 @@
 #              gpustack--nvidia-h100-80gb-hbm3-linux-amd64, operator
 #              <dev>/gpustack-operator:<tag> (a development image; tests pull gpustack/gpustack-operator unless a dev image is named).
 # Inputs:      The manifest is written by this script into OUT_DIR/sedp.yaml, from the shape
-#              documented in docs/modules/model-deployment/external-dp.md#sglang-external-dp. The
+#              documented in docs/modules/model-deployment/external-dp.md#sglang-rank-configuration. The
 #              operator stamps GPUSTACK_MEMBER_INDEX and GPUSTACK_REPLICA_LEADER_ADDRESS, so the
 #              manifest is identical for every member.
 # Expected:    - the role derives parallelism.loadBalance External and every member answers;

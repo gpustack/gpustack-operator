@@ -1,34 +1,172 @@
-{{- $lines := slice -}}
+{{- $out := slice -}}
+{{- $para := slice -}}
 {{- $fence := "" -}}
 {{- $comment := false -}}
-{{- range split .RawContent "\n" -}}
-  {{- $line := . -}}
-  {{- $markers := findRE "^ {0,3}(`{3,}|~{3,})" $line 1 -}}
-  {{- if $markers -}}
-    {{- $marker := strings.TrimSpace (index $markers 0) -}}
-    {{- if eq $fence "" -}}
-      {{- $fence = $marker -}}
-    {{- else if and (hasPrefix $marker (substr $fence 0 1)) (ge (len $marker) (len $fence)) -}}
-      {{- $fence = "" -}}
+{{- $prevBlank := true -}}
+{{- $container := "" -}}
+{{- $inIndentCode := false -}}
+{{- $rawLines := split .RawContent "\n" -}}
+{{- $total := len $rawLines -}}
+{{- range $idx, $line := $rawLines -}}
+  {{- $trimmed := strings.TrimSpace $line -}}
+  {{- $isBlank := eq $trimmed "" -}}
+  {{- $flush := false -}}
+  {{- $passthrough := false -}}
+  {{- if and (not $comment) (not $inIndentCode) -}}
+    {{- $noBq := replaceRE `^( {0,3}> ?)+` "" $line -}}
+    {{- $markers := findRE "^ {0,3}(`{3,}|~{3,})" $noBq 1 -}}
+    {{- if $markers -}}
+      {{- $marker := strings.TrimSpace (index $markers 0) -}}
+      {{- $afterMarker := strings.TrimPrefix $marker (strings.TrimLeft " " $noBq) -}}
+      {{- if eq $fence "" -}}
+        {{- if not (and (hasPrefix $marker "`") (in $afterMarker "`")) -}}
+          {{- $fence = $marker -}}
+          {{- $flush = true -}}
+          {{- $passthrough = true -}}
+        {{- end -}}
+      {{- else if and (hasPrefix $marker (substr $fence 0 1)) (ge (len $marker) (len $fence)) (eq (strings.TrimSpace $afterMarker) "") -}}
+        {{- $fence = "" -}}
+        {{- $passthrough = true -}}
+      {{- else -}}
+        {{- $passthrough = true -}}
+      {{- end -}}
+    {{- else if ne $fence "" -}}
+      {{- $passthrough = true -}}
     {{- end -}}
-  {{- else if eq $fence "" -}}
-    {{- /* Mirrors without_link_urls() in hack/check/agent-index.py; check_prose_html() forbids prose on comment lines. */ -}}
+  {{- end -}}
+  {{- if not $passthrough -}}
     {{- if $comment -}}
       {{- if in $line "-->" -}}
         {{- $comment = false -}}
       {{- end -}}
-    {{- else if hasPrefix (strings.TrimSpace $line) "<!--" -}}
+      {{- $passthrough = true -}}
+    {{- else if hasPrefix $trimmed "<!--" -}}
       {{- if not (in $line "-->") -}}
         {{- $comment = true -}}
       {{- end -}}
+      {{- $flush = true -}}
+      {{- $passthrough = true -}}
+    {{- else if $isBlank -}}
+      {{- $flush = true -}}
+      {{- $passthrough = true -}}
+      {{- $prevBlank = true -}}
     {{- else -}}
-      {{- range findRE `!?\[[^\]\n]*\]\([^\)\n]+\)` $line -}}
-        {{- $target := replaceRE `^!?\[[^\]]*\]\(([^\)]+)\)$` "$1" . -}}
-        {{- $destination := partial "link-destination.html" (dict "page" $ "destination" $target "markdown" true) -}}
-        {{- $line = replace $line . (replace . (printf "(%s)" $target) (printf "(%s)" $destination)) -}}
+      {{- $isIndented := or (hasPrefix $line "    ") (hasPrefix $line "\t") -}}
+      {{- if $inIndentCode -}}
+        {{- if $isIndented -}}
+          {{- $passthrough = true -}}
+        {{- else -}}
+          {{- $inIndentCode = false -}}
+        {{- end -}}
+      {{- else if and $prevBlank (eq $container "") $isIndented -}}
+        {{- $inIndentCode = true -}}
+        {{- $flush = true -}}
+        {{- $passthrough = true -}}
+      {{- end -}}
+      {{- if not $passthrough -}}
+        {{- if findRE `^ {0,3}([-*+]|\d+[.)])[ \t]` $line 1 -}}
+          {{- $container = "list" -}}
+        {{- else if findRE `^ {0,3}\[\^[^\]]+\]:` $line 1 -}}
+          {{- $container = "footnote" -}}
+        {{- else if not $isIndented -}}
+          {{- $container = "" -}}
+        {{- end -}}
+        {{- $prevBlank = false -}}
+        {{- $para = $para | append $line -}}
       {{- end -}}
     {{- end -}}
   {{- end -}}
-  {{- $lines = $lines | append $line -}}
+  {{- if and $flush (gt (len $para) 0) -}}
+    {{- $block := delimit $para "\n" -}}
+    {{- $para = slice -}}
+    {{- $spans := slice -}}
+    {{- $masked := $block -}}
+    {{- range findRE "(?s)(``+(?:[^`]|`[^`])+``+|`[^`\n]+`)" $block -}}
+      {{- $token := printf "__GPUSTACK_MD_CODE_%d__" (len $spans) -}}
+      {{- $spans = $spans | append (dict "token" $token "raw" .) -}}
+      {{- $masked = strings.Replace $masked . $token 1 -}}
+    {{- end -}}
+    {{- range findRE `(?s)!?\[[^\]]*\]\([^\)]+\)` $masked -}}
+      {{- $m := . -}}
+      {{- $prefix := replaceRE `(?s)^(!?\[[^\]]*\]\().*$` "$1" $m -}}
+      {{- $inner := replaceRE `(?s)^!?\[[^\]]*\]\((.*)\)$` "$1" $m -}}
+      {{- $url := "" -}}
+      {{- if findRE `(?s)^\s*<[^>]+>` $inner 1 -}}
+        {{- $url = replaceRE `(?s)^\s*<([^>]+)>.*$` "$1" $inner -}}
+      {{- else -}}
+        {{- $url = replaceRE `(?s)^\s*([^\s]+).*$` "$1" $inner -}}
+      {{- end -}}
+      {{- if $url -}}
+        {{- $dest := partial "link-destination.html" (dict "page" $ "destination" $url "markdown" true) -}}
+        {{- if ne $dest $url -}}
+          {{- $newInner := strings.Replace $inner $url $dest 1 -}}
+          {{- $masked = replace $masked $m (printf "%s%s)" $prefix $newInner) -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+    {{- range findRE `(?m)^(?: {0,3}> ?)* {0,3}\[[^\^][^\]]*\]:[ \t]*<?[^\s>]+>?` $masked -}}
+      {{- $m := . -}}
+      {{- $url := replaceRE `^(?: {0,3}> ?)* {0,3}\[[^\^][^\]]*\]:[ \t]*<?([^\s>]+)>?$` "$1" $m -}}
+      {{- if $url -}}
+        {{- $dest := partial "link-destination.html" (dict "page" $ "destination" $url "markdown" true) -}}
+        {{- if ne $dest $url -}}
+          {{- $masked = replace $masked $m (strings.Replace $m $url $dest 1) -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+    {{- range $spans -}}
+      {{- $masked = replace $masked .token .raw -}}
+    {{- end -}}
+    {{- $out = $out | append $masked -}}
+  {{- end -}}
+  {{- if $passthrough -}}
+    {{- $out = $out | append $line -}}
+    {{- if not $isBlank -}}
+      {{- $prevBlank = false -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if and (eq (add $idx 1) $total) (gt (len $para) 0) -}}
+    {{- $block := delimit $para "\n" -}}
+    {{- $para = slice -}}
+    {{- $spans := slice -}}
+    {{- $masked := $block -}}
+    {{- range findRE "(?s)(``+(?:[^`]|`[^`])+``+|`[^`\n]+`)" $block -}}
+      {{- $token := printf "__GPUSTACK_MD_CODE_%d__" (len $spans) -}}
+      {{- $spans = $spans | append (dict "token" $token "raw" .) -}}
+      {{- $masked = strings.Replace $masked . $token 1 -}}
+    {{- end -}}
+    {{- range findRE `(?s)!?\[[^\]]*\]\([^\)]+\)` $masked -}}
+      {{- $m := . -}}
+      {{- $prefix := replaceRE `(?s)^(!?\[[^\]]*\]\().*$` "$1" $m -}}
+      {{- $inner := replaceRE `(?s)^!?\[[^\]]*\]\((.*)\)$` "$1" $m -}}
+      {{- $url := "" -}}
+      {{- if findRE `(?s)^\s*<[^>]+>` $inner 1 -}}
+        {{- $url = replaceRE `(?s)^\s*<([^>]+)>.*$` "$1" $inner -}}
+      {{- else -}}
+        {{- $url = replaceRE `(?s)^\s*([^\s]+).*$` "$1" $inner -}}
+      {{- end -}}
+      {{- if $url -}}
+        {{- $dest := partial "link-destination.html" (dict "page" $ "destination" $url "markdown" true) -}}
+        {{- if ne $dest $url -}}
+          {{- $newInner := strings.Replace $inner $url $dest 1 -}}
+          {{- $masked = replace $masked $m (printf "%s%s)" $prefix $newInner) -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+    {{- range findRE `(?m)^(?: {0,3}> ?)* {0,3}\[[^\^][^\]]*\]:[ \t]*<?[^\s>]+>?` $masked -}}
+      {{- $m := . -}}
+      {{- $url := replaceRE `^(?: {0,3}> ?)* {0,3}\[[^\^][^\]]*\]:[ \t]*<?([^\s>]+)>?$` "$1" $m -}}
+      {{- if $url -}}
+        {{- $dest := partial "link-destination.html" (dict "page" $ "destination" $url "markdown" true) -}}
+        {{- if ne $dest $url -}}
+          {{- $masked = replace $masked $m (strings.Replace $m $url $dest 1) -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+    {{- range $spans -}}
+      {{- $masked = replace $masked .token .raw -}}
+    {{- end -}}
+    {{- $out = $out | append $masked -}}
+  {{- end -}}
 {{- end -}}
-{{- return (printf "%s\n" (strings.TrimSpace (delimit $lines "\n"))) -}}
+{{- return (printf "%s\n" (strings.TrimSpace (delimit $out "\n"))) -}}

@@ -1,40 +1,36 @@
 # High Availability Operations
 
-Every control-plane component the chart deploys elects a leader, so extra replicas stand by. They buy
-failover, not throughput. A highly available install raises each replica count and turns on its
-disruption budget; everything else is one `Pod` per node (Device Managers, NFD worker, both CSI node
-`DaemonSet`s).
-
-Configure it in `values.yaml`: no HA values file ships. Every setting below sits at its chart's default,
-and the caveats are inline.
+Every control-plane component in the chart elects a single active leader, so extra replicas provide
+failover rather than higher reconciliation throughput. Enable high availability in `values.yaml` by
+raising control-plane replica counts and enabling disruption budgets; node agents (Device Managers,
+NFD worker, and CSI node `DaemonSet`s) already run one `Pod` per node.
 
 ## Contents
 
 - [Prerequisites](#prerequisites)
 - [Configuration](#configuration)
-- [Non-redundant topology](#non-redundant-topology)
+- [External worker webhook limits](#external-worker-webhook-limits)
 - [Verification](#verification)
 
 ## Prerequisites
 
-A `DoNotSchedule` spread needs **at least as many schedulable nodes as your largest replica count**; below
-that, surplus replicas stay `Pending` forever. The configuration assumes three replicas on three nodes.
-With fewer nodes, lower the counts or use `ScheduleAnyway`, a preference. The components tolerate control-plane
-taints, so three control-plane nodes spread fine.
+A `DoNotSchedule` spread requires at least as many schedulable `Node`s as your largest replica count,
+or surplus `Pod`s stay `Pending`. The example below targets three replicas across three `Node`s; on
+smaller clusters, lower replica counts or switch to `ScheduleAnyway`.
 
-They tolerate **those taints and no others**, a cordon's included, so a `Pod` evicted by a drain never
-lands back on the node being drained. Where your nodes carry a taint of your own, add it to each
+Control-plane components tolerate standard control-plane taints and no others (including cordon
+taints), so drained `Pod`s reschedule elsewhere. If your `Node`s carry custom taints, add them to each
 component's *`tolerations`*.
 
-Earlier releases let the Kueue controller manager, the NFD master and the NFD gc tolerate every taint;
-an install that relied on that must set their three lists before upgrading. Upgrade with
-`--reset-then-reuse-values`, not `--reuse-values`, or the new lists never reach the release; see
+If you are upgrading from an older release where Kueue controller manager, NFD master, and NFD GC
+tolerated all taints, add explicit *`tolerations`* first and run `helm upgrade` with
+`--reset-then-reuse-values` rather than `--reuse-values`; see
 [Upgrading the Chart](../../deploy/gpustack-operator/chart/README.md#upgrading-the-chart).
 
 ## Configuration
 
-The following values show the availability fields for each component. They are illustrative, not
-a complete placement configuration:
+Save these values as `ha.yaml` and apply them with `helm upgrade` (chart mode is required because
+image mode exposes no subchart values):
 
 ```yaml
 worker:
@@ -42,42 +38,7 @@ worker:
   podDisruptionBudget:
     enabled: true
     minAvailable: 2
-  topologySpreadConstraints: []  # Or configure worker.affinity.
-kueue:
-  controllerManager:
-    replicas: 3
-    podDisruptionBudget:
-      enabled: true
-      minAvailable: 2
-    topologySpreadConstraints: []
-node-feature-discovery:
-  master:
-    replicaCount: 3
-    podDisruptionBudget:
-      enable: true
-      minAvailable: 2
-    affinity: {}  # NFD master supports affinity only.
-csi-driver-nfs:
-  controller:
-    replicas: 2
-    topologySpreadConstraints: []  # Vendored patch.
-csi-driver-s3:
-  controller:
-    replicas: 2
-```
-
-Neither CSI controller chart provides a `PodDisruptionBudget`; the S3 controller chart also
-provides no node spread field. These upstream limitations are explained below.
-
-### Example values
-
-```yaml
-worker:
-  replicas: 3
-  podDisruptionBudget:
-    enabled: true
-    minAvailable: 2
-  topologySpreadConstraints:
+  topologySpreadConstraints:  # labelSelector auto-populated when omitted; worker.affinity replaces default
     - maxSkew: 1
       topologyKey: kubernetes.io/hostname
       whenUnsatisfiable: DoNotSchedule
@@ -88,7 +49,7 @@ kueue:
     podDisruptionBudget:
       enabled: true
       minAvailable: 2
-    topologySpreadConstraints:
+    topologySpreadConstraints:  # explicit labelSelector required; chart has no affinity key
       - maxSkew: 1
         topologyKey: kubernetes.io/hostname
         whenUnsatisfiable: DoNotSchedule
@@ -99,16 +60,17 @@ kueue:
 
 node-feature-discovery:
   master:
-    replicaCount: 3
+    replicaCount: 3  # auto-enables -enable-leader-election above 1
     podDisruptionBudget:
-      enable: true
+      enable: true  # NFD key is "enable", not "enabled"
       minAvailable: 2
+    # affinity: {}  # optional; replaces NFD's default control-plane preference
 
 csi-driver-nfs:
   controller:
     replicas: 2
-    strategyType: RollingUpdate
-    topologySpreadConstraints:
+    strategyType: RollingUpdate  # overrides Recreate default; chart has no PDB
+    topologySpreadConstraints:  # required >1 replica due to hostNetwork port bind
       - maxSkew: 1
         topologyKey: kubernetes.io/hostname
         whenUnsatisfiable: DoNotSchedule
@@ -118,7 +80,7 @@ csi-driver-nfs:
 
 csi-driver-s3:
   controller:
-    replicas: 2
+    replicas: 2  # process-level failover only; chart has no PDB or spread field
     strategyType: RollingUpdate
 ```
 
@@ -127,110 +89,87 @@ helm upgrade gpustack-operator gpustack/gpustack-operator \
   --namespace gpustack-system --reset-then-reuse-values --values ha.yaml
 ```
 
-### Worker (control plane)
+### Worker control plane
 
-The worker runs the aggregated extension API server and the scheduling-chain controllers in one
-process. Only one replica reconciles, because leader election is always on. Every replica serves the
-extension API and the admission webhooks, so with one, losing its node takes `kubectl get instancetypes`
-and `Pod` admission down until it reschedules.
+Only the elected worker leader runs controllers, while every replica serves the aggregated extension
+API (`instancetypes`, `devices`) and admission webhooks. Running one replica makes node loss block API
+reads and `Pod` admission until reschedule.
 
-`Node` spread belongs in `worker.topologySpreadConstraints`. Its default `preferred` `Pod` anti-affinity is
-deliberate: replicas stay off one node without any becoming unschedulable, so three still come up on two
-nodes. An entry omitting `labelSelector` gets the worker's own; `worker.affinity` **replaces** the
-default rather than adding to it.
+Node spread belongs in `worker.topologySpreadConstraints`. By default, `worker.affinity` sets
+preferred `Pod` anti-affinity so three replicas still start on two `Node`s; setting `worker.affinity`
+replaces that default entirely.
 
 ### Kueue controller manager
 
-Kueue's `managerConfig` elects a leader, so standbys do not reconcile. Each replica still serves Kueue's
-admission webhook, whose `failurePolicy: Fail` means one replica losing its node **blocks `Pod` creation in
-every namespace Kueue manages** until it reschedules. HA buys the most here.
+Standby Kueue replicas do not reconcile, but every replica serves Kueue's webhooks (`failurePolicy: Fail`).
+Losing a single-replica Kueue node blocks `Pod` creation across every Kueue-managed namespace.
 
-- The spread constraints carry no selector of their own. Unlike the worker's, they render as given, so
-  a `DoNotSchedule` spread needs `labelSelector` spelled out: `app.kubernetes.io/name: kueue` plus
-  `control-plane: controller-manager`, as in the example. Omit it and the spread counts every `Pod` in
-  the namespace.
-- The Kueue chart has no affinity key, so spread constraints are its only placement control.
+Always include `labelSelector` in `kueue.controllerManager.topologySpreadConstraints`; without it,
+Kubernetes counts every `Pod` in the namespace.
 
 ### NFD master
 
-The NFD master turns detections into node labels: while it is down, no node is (re)classified and the
-chain stalls for new or changed nodes. Labelled nodes and admitted workloads are unaffected.
+While NFD master is unavailable, existing labels and running workloads remain intact, and only new or
+changed `Node`s pause classification. Keep NFD GC at one replica, because brief GC downtime only delays
+cleanup of deleted `Node` records.
 
-- NFD spells the budget key `enable`, not `enabled`: a stray `enabled: true` is schema-valid and
-  does nothing.
-- Above one replica, NFD's chart adds `-enable-leader-election` for you. Standbys watch without
-  writing.
-- NFD's templates render no topology spread constraints, so spreading the master means
-  `node-feature-discovery.master.affinity`, which **replaces** NFD's preference for control-plane nodes;
-  re-state it if wanted.
+NFD spells its disruption budget switch `enable` (`enabled: true` is ignored) and supports placement
+only through `node-feature-discovery.master.affinity`.
 
-The garbage collector stays at one replica: a stalled GC only delays cleanup of a departed node's
-objects, which nothing reads.
+### NFS and S3 controllers
 
-### Two CSI controllers
+CSI controller outages delay new volume provisioning, resizing, and snapshots while mounted volumes
+continue running through the CSI node `DaemonSet`s. Both bundled CSI charts omit `PodDisruptionBudget`
+templates, honor `controller.affinity` only when *`nodeSelectorTerms`* is set, and default
+`strategyType` to `Recreate` unless overridden to `RollingUpdate`.
 
-Losing a CSI controller delays volume provisioning, resizing and snapshotting; volumes already mounted
-keep working, because the mounting side is the node `DaemonSet`. These are the least urgent of the four,
-with the weakest chart support.
+On `csi-driver-nfs`, `DoNotSchedule` hostname spread is mandatory above one replica because controller
+`Pod`s use `hostNetwork` and collide on the liveness port if co-located. `csi-driver-s3` exposes no
+spread field, so two replicas provide process-level failover without guaranteed node separation.
 
-Both charts render no `PodDisruptionBudget`, and honour `controller.affinity` **only when it carries
-*`nodeSelectorTerms`***: a `Pod` anti-affinity is schema-valid, then silently dropped.
+## External worker webhook limits
 
-The S3 chart renders no topology spread at all, so two replicas may land on one node and a drain can
-take both. Raise its count for process-level failover; it gives no node-level redundancy.
-
-The NFS chart renders `controller.topologySpreadConstraints` through a vendored patch, and above one
-replica the spread is **required, not just prudent**: its `Pod`s run on the host network and bind the
-liveness health port there, so two `Pod`s on one node leave the second crash-looping on the bind and the
-`Deployment` never fully ready. As with Kueue, the example's `labelSelector` must be spelled out.
-
-Also set `strategyType: RollingUpdate`: both default to `Recreate`, which takes every replica down
-before the new one starts and gives up, at every upgrade, the failover the replica was added for.
-
-## Non-redundant topology
-
-When the worker runs **outside** the cluster it manages but near it (image mode, `!LoopbackKubeInside &&
-LoopbackKubeNearby`), its admission webhooks register against one node IP URL instead of a `Service`.
-That URL is a single endpoint, so extra replicas receive no traffic; the source calls this "launch
-multiple instances, only one takes working". **Keep that topology at one replica.** Chart mode is
-unaffected: its webhooks are always in-cluster and `Service`-backed.
+When an image-mode worker runs outside the target cluster on an adjacent network
+(`!LoopbackKubeInside && LoopbackKubeNearby`), its webhooks register against a single node IP URL
+rather than a Kubernetes `Service`. Standby replicas receive no webhook traffic, so keep that topology
+at **one replica**. Chart-mode webhooks always route through an in-cluster `Service`.
 
 ## Verification
+
+Confirm that all control-plane `Deployment`s, disruption budgets, node placements, and leader
+elections are healthy:
 
 ```bash
 NS=gpustack-system
 
-# Every control-plane Deployment reports its full replica count Ready.
+# 1. Every control-plane Deployment reports all replicas Ready:
 kubectl -n "$NS" get deploy
 
-# The budgets exist and are satisfied (ALLOWED DISRUPTIONS ≥ 1).
+# 2. Disruption budgets exist with ALLOWED DISRUPTIONS >= 1:
 kubectl -n "$NS" get pdb
 
-# Replicas really are on distinct nodes — one line per pod, node in the second column.
-kubectl -n "$NS" get pods -o wide \
-  --field-selector status.phase=Running \
+# 3. Replicas run on distinct Nodes:
+kubectl -n "$NS" get pods --field-selector status.phase=Running \
   -o custom-columns='POD:.metadata.name,NODE:.spec.nodeName'
 
-# The NFD master elected a leader (only above one replica).
+# 4. NFD master elected a leader:
 kubectl -n "$NS" logs deploy/node-feature-discovery-master | grep -i "leader"
 ```
 
-Then the failover: drain the node running the worker's leader; a standby takes over:
+Test failover by draining the `Node` hosting the active worker leader and confirming uninterrupted API
+reads:
 
 ```bash
 kubectl drain <node> --ignore-daemonsets --delete-emptydir-data
 kubectl -n "$NS" rollout status deploy/gpustack-operator-worker
-kubectl get instancetypes          # served throughout by the surviving replicas
+kubectl get instancetypes
 kubectl uncordon <node>
 ```
 
 ---
 
-**See also** — [Installation Modes](installation-modes.md) (these settings need chart mode; image
-mode has no user-values channel) ·
-[Internals](../contribute/internals.md#worker-startup-order) · [Settings](../reference/settings.md) ·
-[KV Cache Backend](../modules/kv-cache/leader.md#high-availability) — a `KVCacheBackend`'s leader elects the
-same way but is **not** a chart component: it is a custom resource, so its replica count is a field on
-the object rather than a value here
+**See also** — [Installation Modes](installation-modes.md) (HA values require chart mode) ·
+[KV Cache Election and Failover](../modules/kv-cache/leader.md#high-availability) (leader election on
+`KVCacheBackend` custom resources)
 
-**Next** → [NVIDIA MIG Operations](../modules/devices/nvidia-mig.md).
+**Next** → [NVIDIA MIG Operations](../modules/devices/nvidia-mig.md) — configure and verify MIG partition lifecycles.

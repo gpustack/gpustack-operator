@@ -1,43 +1,42 @@
 # Architecture
 
-GPUStack Operator manages accelerator-backed workloads on Kubernetes. It discovers devices and turns
-node capacity into schedulable pools. GPU `Instance`s and model deployments use those pools.
-Model delivery resolves and supplies weights. Topology placement supports locality. *Remote direct
-memory access (RDMA)* networking supports fast transfers. Shared KV cache stores reusable inference state.
+GPUStack Operator schedules accelerator workloads on Kubernetes. It discovers node hardware and
+builds isolated Kueue scheduling pools for `Instance`s, `ModelDeployment`s, and `Pod`s. Model
+delivery resolves and caches weights, topology placement constrains failure domains, *remote direct
+memory access (RDMA)* accelerates transfers, and shared KV cache stores reusable prefixes.
 
 ## Contents
 
 - [Components](#components)
 - [Workload flow](#workload-flow)
 - [Device scheduling](#device-scheduling)
-- [Model delivery](#model-delivery)
-- [KV cache](#kv-cache)
-- [Request admission](#request-admission)
 - [Vocabulary](#vocabulary)
 - [Related documentation](#related-documentation)
 
 ## Components
 
-The `gpustack-operator` binary provides these subcommands:
+The `gpustack-operator` binary provides five subcommands, paired with the `engine-sentinel` runtime package staged into managed inference `Pod`s:
 
 | Component | Deployment | Role |
 |---|---|---|
-| `worker` | Control-plane `Deployment` | Serves APIs and manages workloads, queues and supporting resources. |
-| `device-manager` | Vendor `DaemonSet` | Discovers devices and network interfaces,<br/>reports capacity and allocates devices. |
-| `model-manager` | Per-node `DaemonSet` | Caches model weights and mounts them into workloads using node delivery. |
-| `model-transfer` | Vendor source `DaemonSet` | Runs the source broker and worker control service for remote weight delivery. |
-| `worker-gateway` | Installed separately | Combines `InstanceType`s and capacity from multiple clusters into a fleet view. |
+| `worker` | Control-plane `Deployment` | Serves APIs and reconciles workloads, queues, and supporting resources. |
+| `device-manager` | Vendor `DaemonSet` | Discovers accelerators and NICs,<br/>publishes capacity, and allocates devices. |
+| `model-manager` | Per-node `DaemonSet` | Caches verified model weights and mounts them through CSI. |
+| `model-transfer` | Vendor source `DaemonSet` | Runs the source broker and worker service, paired with the staged `gpustack_model_transfer` Python reader package for remote weight delivery. |
+| `worker-gateway` | Separate installation | Aggregates `InstanceType`s and capacity across clusters into one fleet view. |
+| `engine-sentinel` | Read-only host mount in engine `Pod`s | Pure-Python runtime package (`gpustack_engine_sentinel`) for live parameter tuning, unified `/gpustack/v1/{live,ready}` probes, role pause, and `PreStop` drain; see [Online Runtime Control](../modules/model-deployment/runtime-control.md). |
 
-The chart also includes [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery),
-[Kueue](https://github.com/kubernetes-sigs/kueue) and two CSI drivers. Topograph is optional and remains
-disabled until an administrator selects a provider. See [Installation Modes](../operate/installation-modes.md)
-for the deployment choices and [Internals](../contribute/internals.md) for contributor details.
+The Helm chart bundles [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery),
+[Kueue](https://github.com/kubernetes-sigs/kueue), and two CSI drivers. Topograph is optional and
+disabled until an administrator configures a topology provider. See
+[Installation Modes](../operate/installation-modes.md) for deployment modes and runtime settings.
 
 ## Workload flow
 
-GPU `Instance`s provide containers with optional SSH access. Model deployments run inference engines
-and, where configured, routers or *prefill*/*decode* groups. Both use the same device capacity and
-admission chain. Model delivery and KV cache are optional services alongside that chain.
+GPU `Instance`s run interactive containers with optional SSH access. `ModelDeployment`s run managed
+inference roles, routers, and *prefill/decode (PD)* or *encode/prefill/decode (EPD)* groups. Both
+consume the same pool capacity and admission chain, while model delivery and KV cache attach only
+when requested.
 
 ![Workload and scheduling flow](../assets/diagrams/architecture-overview.svg)
 
@@ -54,95 +53,93 @@ flowchart TD
     CACHE["Optional KV pool and binding"] -> PODS
 -->
 
-The diagram shows the main dependencies. It does not require every workload to use a model artifact,
-RDMA, a topology source or a shared cache. An ordinary `Pod` can request device resources directly.
+Every optional service in the diagram can be omitted. An ordinary `Pod` can also request accelerator
+resources directly through its namespace `LocalQueue`.
 
-## Device scheduling
+### Model delivery
 
-Device scheduling follows this chain:
+A `ModelArtifact` separates weight sources and credentials from workload specs. It resolves and pins
+weights from Hugging Face, ModelScope, an OCI image, or a `PersistentVolumeClaim`.
 
-1. NFD identifies node hardware and labels the nodes.
-2. The Device Manager discovers accelerators and network interfaces and maintains the `Devices`
-   inventory and allocation record.
-3. The Worker derives schedulable CPU and accelerator capacity from that inventory.
-4. The Worker derives an `AcceleratorType` for each accelerated pool (and `InstanceType`s when enabled), sharing
-   the canonical pool `ClusterQueue` while topology and admission checks constrain placement.
+Workloads load weights directly in the engine (`Engine`), mount verified node cache paths through the
+Model Manager CSI driver (`Node`), or mount an image or PVC. Remote delivery streams weights from
+prepared source nodes through `model-transfer`; see
+[Remote Weight Delivery](../modules/model-delivery/remote.md).
 
-[Device Discovery](../modules/devices/discovery.md) covers node labeling and device discovery.
-[Scheduling Chain](../modules/devices/scheduling.md) covers capacity, queues and workload pool selection.
-[RDMA Operations](../modules/rdma/operations.md) explains network resource requests, while
-[Topology-Aware Scheduling](../modules/topology/scheduling.md) explains placement domains.
-
-## Model delivery
-
-Model delivery separates model weights and credentials from workload configuration. A `ModelArtifact`
-resolves and pins a Hugging Face repository, ModelScope repository, container image or
-`PersistentVolumeClaim`. Workloads reference the artifact instead of repeating its source and credentials.
-
-Depending on the delivery mode, weights are fetched in the workload `Pod` (`Engine`), cached and
-mounted read-only on the node by the Model Manager's CSI driver (`Node`), or mounted from an
-existing volume or image. Remote delivery can serve weights from source nodes through the
-`model-transfer` broker and vendor worker. See [Remote Weight Delivery](../modules/model-delivery/remote.md).
-
-`ModelStore` and `ModelStoreBinding` manage cache budgets and namespace grants. `NodeModelStore`
-tracks per-node cache state. `ModelPrefetch` warms weights before use. These resources operate
-independently of GPU admission. See [Model Delivery](../modules/model-delivery/_index.md),
+`ModelStore` and `ModelStoreBinding` govern node selection and namespace cache quotas.
+`NodeModelStore` reports per-node cache state, and `ModelPrefetch` warms weights ahead of serving
+without holding GPU quota. See [Model Delivery](../modules/model-delivery/_index.md),
 [Model Artifact](../modules/model-delivery/artifact.md), and the
 [Model Prefetch Walkthrough](../walkthroughs/model-delivery/prefetch.md).
 
-## KV cache
+### KV cache
 
-A shared KV cache stores reusable inference state. A backend runs the cache service or points to an
-external one. Pools and namespace bindings provide access and quota grants. Compatible workloads
-receive the cache configuration when their `Pod`s are created. The service is optional. Its quota
-is separate from accelerator quota. See [KV Cache](../modules/kv-cache/_index.md).
+A `KVCacheBackend` deploys a shared Mooncake cache cluster or connects to an external endpoint.
+`KVCachePool` and `KVCachePoolBinding` grant namespace access, reuse domains, and memory ceilings
+independently of GPU quota. Compatible `ModelDeployment`s and labeled `Pod`s receive client settings
+at creation; see [KV Cache](../modules/kv-cache/_index.md).
 
-[Model Deployment](../modules/model-deployment/_index.md) brings these services together with engine,
-router and replica configuration. [GPU Instances](../modules/instances/_index.md) support interactive
-containers and SSH access using the same accelerator allocation.
+[Model Deployment](../modules/model-deployment/_index.md) combines these capabilities with engine,
+router, and scaling policies. [GPU Instances](../modules/instances/_index.md) run interactive
+containers on the same accelerator pools.
 
-## Request admission
+## Device scheduling
 
-The `Pod` webhook validates an accelerator request before Kueue reserves quota. Admission checks
-confirm that devices can satisfy it, and the scheduler, kubelet and allocator complete the
-allocation. [Admission](../modules/devices/admission.md#gates) owns the gate sequence and
-its failure behavior.
+Device scheduling runs in four stages:
 
-`AcceleratorType` and `InstanceType` status report the remaining capacity as workloads allocate and release
-devices. Use `kubectl get acctype,instancetype -w` to watch those changes. The
-[Walkthrough](../walkthroughs/devices/scheduling.md) shows the request and its resulting Kubernetes resources.
+1. NFD inspects node hardware and publishes feature labels.
+2. Device Manager detects accelerators and NICs and updates each node's `Devices` ledger.
+3. The worker derives schedulable CPU and accelerator capacity labels from that inventory.
+4. The worker creates an `AcceleratorType` per accelerated pool (plus `InstanceType`s when enabled)
+   sharing one isolated `ClusterQueue`.
+
+[Heterogeneous Devices](../modules/devices/_index.md) and
+[Preflight Checks](../modules/devices/preflight.md) cover node readiness and isolation modes.
+[Accelerator Requests](../modules/devices/requests.md) defines resource keys, capacity views, and
+pool selection. See [RDMA Operations](../modules/rdma/operations.md) for fabric requests and
+[Topology-Aware Scheduling Operations](../modules/topology/operations.md) for domain placement.
+
+### Request admission
+
+The `Pod` webhook validates accelerator requests before Kueue reserves quota. Kueue `AdmissionCheck`s
+verify per-device fit and multi-role gang readiness before kube-scheduler, kubelet, and the allocator
+bind devices; see [Accelerator Requests](../modules/devices/requests.md).
+
+`AcceleratorType` and `InstanceType` status update as workloads claim and release accelerators. Run
+`kubectl get acctype,instancetype -w` to watch live pool capacity, or follow the
+[Heterogeneous Devices Walkthrough](../walkthroughs/devices/scheduling.md).
 
 ## Vocabulary
 
 | Term | Meaning |
 |---|---|
-| Pool | `Node`s with compatible CPU, accelerator, operating system and architecture identities, served by an isolated queue. |
-| `AcceleratorType` | Cluster-scoped serving and prefetch accelerator pool; short name `acctype`. |
-| `InstanceType` | Workspace sizing and available capacity for an `Instance`. |
-| Allocation mode | Whole accelerators, shared accelerators, logical slices or hardware partitions. |
-| Credits | [Quota accounting units](../modules/devices/admission.md#gate-2-kueue-credits). |
-| Four capacity views | [Available allocation modes](../modules/devices/admission.md#four-view-status) reported by an `AcceleratorType` or `InstanceType`. |
-| `Devices` ledger | The per-node inventory and record of accelerator allocations. |
-| `LocalQueue` | The namespace queue through which a workload enters its pool. |
-| `ModelArtifact` | A namespaced model source and resolved weight identity referenced by workloads. |
-| `NodeModelStore` | The configuration and observed cache state maintained for one node. |
-| `ModelPrefetch` | A request to cache weights before a workload mounts them, authorized by a model-store binding. |
+| Pool | `Node`s with matching CPU, accelerator, OS, and architecture identities, served by one isolated `ClusterQueue`. |
+| `AcceleratorType` | Cluster-scoped accelerator pool for serving and prefetch workloads; short name `acctype`. |
+| `InstanceType` | Cluster-scoped workspace sizing and capacity view for `Instance`s. |
+| Allocation mode | Whole cards, shared cards, logical slices, or hardware partitions. |
+| Credits | Quota units (`credits.gpustack.ai/<manufacturer>`) metered on a pool `ClusterQueue`. |
+| Four capacity views | Exclusive (`EX`), shared (`SH`), sliced (`SL`), and partitioned (`PT`) counts on pool status. |
+| `Devices` ledger | Per-node custom resource recording discovered hardware and active allocations. |
+| `LocalQueue` | Namespace queue entrance that routes a workload into its target `ClusterQueue`. |
+| `ModelArtifact` | Namespaced weight source and resolved manifest digest referenced by workloads. |
+| `NodeModelStore` | Per-node cache configuration and observed digest state. |
+| `ModelPrefetch` | Namespaced request to warm a `ModelArtifact` onto bound `ModelStore` nodes. |
 
-The hardware terms Device, Accelerator and Resource are defined in
-[Device Discovery](../modules/devices/discovery.md#device-accelerator-resource).
+A physical card or module is a *device*, each schedulable unit on it is an *accelerator*, and the
+Kubernetes extended resource key a container requests is a *resource*.
 
 ## Related documentation
 
-- [Walkthrough](../walkthroughs/devices/scheduling.md) — submit a workload and inspect the scheduling chain.
-- [GPU Instances](../modules/instances/_index.md) — configure an interactive container and SSH access.
-- [Model Deployment](../modules/model-deployment/_index.md) — configure inference engines and replicas.
-- [Model Delivery](../modules/model-delivery/_index.md) — resolve, cache and mount model weights.
-- [KV Cache](../modules/kv-cache/_index.md) — connect inference workloads to a shared cache.
-- [Installation Modes](../operate/installation-modes.md) — choose how to install the operator.
+- [Heterogeneous Devices Walkthrough](../walkthroughs/devices/scheduling.md): submit workloads and inspect pool updates.
+- [GPU Instances](../modules/instances/_index.md): launch interactive containers with SSH access.
+- [Model Deployment](../modules/model-deployment/_index.md): configure inference engines, routers, and scalers.
+- [Model Delivery](../modules/model-delivery/_index.md): resolve, prefetch, and mount model weights.
+- [KV Cache](../modules/kv-cache/_index.md): attach workloads to shared prefix caches.
+- [Installation Modes](../operate/installation-modes.md): compare chart mode, image mode, and settings precedence.
 
 ---
 
-**See also** — [Accelerator Requests](../modules/devices/requests.md) ·
-[Settings](../reference/settings.md) · [All documentation](../README.md)
+**See also** — [Accelerator Requests](../modules/devices/requests.md) (resource keys and request rules) ·
+[Vendor Prerequisites](vendor-prerequisites.md) (host drivers and third-party components)
 
-**Next** → [Walkthrough](../walkthroughs/devices/scheduling.md) — follow a workload from submission to allocation.
+**Next** → [Heterogeneous Devices Walkthrough](../walkthroughs/devices/scheduling.md) — follow a workload from submission to allocation.

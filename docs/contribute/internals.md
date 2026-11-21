@@ -19,14 +19,14 @@ changes to the operator's services. Vendor libraries and object names have their
 [Architecture](../getting-started/architecture.md#components) tabulates. Beyond that table:
 
 - **`worker`** (alias `w`) runs an aggregated extension API server *and* a controller-runtime manager in
-  one process, plus the scheduling-chain controllers ([Scheduling Chain](../modules/devices/scheduling.md)). It can
+  one process, plus the scheduling-chain controllers ([Scheduling Chain](../reference/devices-scheduling.md)). It can
   install the bundled operator chart itself ([Installation Modes](../operate/installation-modes.md)), but does not by
   default.
 - **`device-manager`** has subcommands `serve` / `detect` / `monitor`: it detects and monitors local
   accelerators, reports a `NodeFeature` + `Devices` CR, and runs the device-plugin allocator.
 - **`model-manager`** (alias `mm`) is a CSI node plugin on every node, not tied to a manufacturer:
   it materializes and mounts model weights and writes only its own node's `NodeModelStore`
-  status ([Node Model Store](../modules/model-delivery/node-store.md)).
+  status ([Node Model Store](../reference/model-delivery-node-store.md)).
 
 ## Worker startup order
 
@@ -40,7 +40,7 @@ controllers can index extension-API resources. Preserve this ordering when addin
 The `NodeFeatureRule` and `AdmissionCheck` steps each retry for up to 5 minutes while their CRD becomes available. A worker
 starting alongside NFD and Kueue can reach these steps before their CRDs are served. The worker
 applies the resources in both installation modes; see [Installation
-Modes](../operate/installation-modes.md#deployed-and-applied-resources).
+Modes](../operate/installation-modes.md#worker-managed-resources).
 
 ### Preparation in every replica
 
@@ -232,7 +232,7 @@ Platform-specific code splits into `_linux.go` / `_other.go` build-constrained f
 
 The supported manufacturers and their PCI vendor IDs / resource names live in `pkg/nodefeature`,
 overridable via `GPUSTACK_*` env vars that the chart fans out from `global.manufacturers`. What each row
-of that map decides is in [Device Discovery](../modules/devices/discovery.md#gpustack-cpu-info-rule).
+of that map decides is in [Device Discovery](../reference/devices-discovery.md#gpustack-cpu-info-rule).
 
 ## CGO bindings
 
@@ -257,12 +257,12 @@ means editing C, not a config.
 
 Kubernetes label *values* cap at 63 chars. Long names (`ClusterQueue` names, queue references) live in
 `schedule.gpustack.ai/*` **annotations**, not labels; `LocalQueue`s are named `gpustack-fnv64-<hash>`
-(always 31 chars; see [Scheduling Chain](../modules/devices/scheduling.md#localqueue-in-every-namespace)).
+(always 31 chars; see [Scheduling Chain](../reference/devices-scheduling.md#localqueue-in-every-namespace)).
 Check this limit for any name that flows into a label value.
 
 ---
 
 **See also** — [Development](development.md) (build, lint, test, code generation) ·
-[Installation Modes](../operate/installation-modes.md) · [Scheduling Chain](../modules/devices/scheduling.md)
+[Installation Modes](../operate/installation-modes.md) · [Scheduling Chain](../reference/devices-scheduling.md)
 
 **Next** → [Development](development.md) — how to build and test what you just changed.

@@ -1,6 +1,27 @@
 {{- $destination := .destination -}}
 {{- $url := urls.Parse $destination -}}
-{{- if and (not $url.IsAbs) (not $url.Host) (not (strings.HasPrefix $destination "#")) -}}
+{{- $excludedPathPattern := `^(?:gpustack-operator/(?:[^/]+/)?)?(?:reference|docs/reference|docs/contribute)(?:/|$)` -}}
+{{- if $url.Host -}}
+  {{- $host := lower $url.Host -}}
+  {{- $scheme := lower $url.Scheme -}}
+  {{- if and (or (eq $scheme "https") (eq $scheme "")) (hasSuffix $host ":443") -}}
+    {{- $host = strings.TrimSuffix ":443" $host -}}
+  {{- else if and (or (eq $scheme "http") (eq $scheme "")) (hasSuffix $host ":80") -}}
+    {{- $host = strings.TrimSuffix ":80" $host -}}
+  {{- end -}}
+  {{- if eq $host "docs.gpustack.ai" -}}
+    {{- $cleanRemote := strings.TrimPrefix "/" (path.Clean (printf "/%s" (strings.TrimPrefix "/" $url.Path))) -}}
+    {{- if findRE $excludedPathPattern $cleanRemote -}}
+      {{- errorf "%s links to excluded documentation zone: %s" $.page.File.Path $destination -}}
+    {{- end -}}
+  {{- end -}}
+{{- else if and (not $url.IsAbs) (not (strings.HasPrefix $destination "#")) -}}
+  {{- if strings.HasPrefix $url.Path "/" -}}
+    {{- $cleanAbs := strings.TrimPrefix "/" (path.Clean $url.Path) -}}
+    {{- if findRE $excludedPathPattern $cleanAbs -}}
+      {{- errorf "%s links to excluded documentation zone: %s" $.page.File.Path $destination -}}
+    {{- end -}}
+  {{- end -}}
   {{- with .page.GetPage $url.Path -}}
     {{- $destination = .RelPermalink -}}
     {{- if $.markdown -}}
@@ -14,7 +35,11 @@
       {{- if hasSuffix $filename (printf "/site/content/%s" $.page.File.Path) -}}
         {{- $source = path.Clean (path.Join "site/content" $source) -}}
       {{- end -}}
-      {{- if and (eq $source "docs/README.md") (not $.markdown) (not $url.Fragment) -}}
+      {{- if or (eq $source "docs/reference") (hasPrefix $source "docs/reference/") (eq $source "docs/contribute") (hasPrefix $source "docs/contribute/") -}}
+        {{- errorf "%s links to excluded documentation zone (%s): %s" $.page.File.Path $source $destination -}}
+      {{- else if and (hasPrefix $source "site/content/") (findRE `^site/content/(?:reference|docs/reference|docs/contribute)(?:/|$)` $source) -}}
+        {{- errorf "%s links to excluded documentation zone (%s): %s" $.page.File.Path $source $destination -}}
+      {{- else if and (eq $source "docs/README.md") (not $.markdown) (not $url.Fragment) -}}
         {{- $destination = "docs/" | relLangURL -}}
       {{- else if and (ne $source "docs/README.md") (hasPrefix $source "docs/") -}}
         {{- $destination = $source | relURL -}}

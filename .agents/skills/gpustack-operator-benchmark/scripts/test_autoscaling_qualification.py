@@ -455,7 +455,7 @@ class SimSensitivityTests(unittest.TestCase):
                 algorithms = {record["algorithm"] for record in records}
                 self.assertEqual(algorithms, {"Proportional", "TokenThroughput", "Predictive"})
                 predictive = json.loads((directory / "sensitivity.json").read_text())
-                self.assertEqual(predictive["reference"], "docs/modules/model-deployment/scaling-simulation.md")
+                self.assertEqual(predictive["reference"], "docs/reference/model-deployment-scaling-simulation.md")
                 for algorithm, phases in predictive["arms"].items():
                     self.assertEqual(sorted(phases), ["baseline", "cooldown", "ramp", "sustain"], algorithm)
                     for phase in ("baseline", "ramp", "sustain"):

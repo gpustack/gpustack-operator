@@ -1,13 +1,13 @@
 # Model Deployment
 
-A `ModelDeployment` describes the model, engine and roles of a serving workload. Each role can have
-its own replicas and resources.
+A `ModelDeployment` declares the model, engine and serving roles of an inference workload. Each
+role sets its own replicas and accelerator resources.
 
 ## Contents
 
 - [Overview](#overview)
-- [Deployment configuration](#deployment-configuration)
-- [Service operations](#service-operations)
+- [Configuration](#configuration)
+- [Operations](#operations)
 - [Troubleshooting](#troubleshooting)
 
 ## Overview
@@ -25,54 +25,40 @@ flowchart TD
     ROUTER -> PODS
 -->
 
-## Deployment configuration
+## Configuration
 
-[Model Deployment Configuration](configuration.md) starts with a minimal manifest and explains
-the role contract. [Parameters](parameterize.md) catalogs generated parameters
-and overrides.
+- [Model Deployment Configuration](configuration.md) defines the base manifest, role fields,
+  override tiers and operator-owned keys.
+- [Engine Compatibility](engine-versions.md) lists minimum engine releases, Mooncake versions,
+  supported transports and known limits.
+- [Prefill and Decode](prefill-decode.md) pairs split *prefill/decode (PD)* roles;
+  [Prefill and Decode Benchmark](prefill-decode-benchmark.md) compares *PD* against an equal-GPU
+  aggregated group.
+- [Encode, Prefill and Decode](encode-prefill-decode.md) adds multimodal disaggregation;
+  [Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) compares
+  *encode/prefill/decode (EPD)* against *PD* and aggregated serving.
+- Follow [Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/prefill-decode.md),
+  [Encode, Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md)
+  and [Multi-Host Serving Walkthrough](../../walkthroughs/model-deployment/multi-host.md) for
+  step-by-step runs.
 
-[Prefill and Decode](prefill-decode.md) covers split roles, and
-[Encode, Prefill and Decode](encode-prefill-decode.md) covers multimodal disaggregation.
-[Engine Compatibility](engine-versions.md) lists minimum releases, client and store requirements,
-transport support and known failures.
+## Operations
 
-[Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) measures that
-disaggregation against an aggregated instance.
-[Prefill and Decode Benchmark](prefill-decode-benchmark.md) measures a text-only
-*prefill/decode* pair against an aggregated group on equal GPUs.
-
-Follow [Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/prefill-decode.md) for
-disaggregated serving, [Encode, Prefill and Decode Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) for
-multimodal disaggregation, and [Multi-Host Serving Walkthrough](../../walkthroughs/model-deployment/multi-host.md)
-for distributed multi-node serving.
-
-## Service operations
-
-[Online Runtime Control](runtime-control.md), [Status](status.md), [Metrics](metrics.md) and
-[Routing](routing.md) explain live parameter tuning, what the running service reports, and how requests
-are directed.
-
-[Scaling](scaling.md) plans the replica count of a deployment from the signals it publishes, and
-[Shutdown](shutdown.md) explains the retirement protocol a scale-down runs.
-The [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) configures observation and
-active scaling. The [Scaling Benchmark](scaling-benchmark.md) records H100 and H200 measurements
-and the limits observed during scale-out and retirement.
-
-[Elastic EP](elastic-ep.md) keeps one serving instance and changes its collective while it runs.
-[Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) follows prefetch, startup with
-*tensor parallelism (TP)* = 2 and *data parallelism (DP)* = 2, and *DP* width 2 → 4 expansion.
-It includes captured resource output and completed inference requests.
-
-[Elastic EP Benchmark](elastic-ep-benchmark.md) measures the same width change under a live request
-stream.
-
-[External DP](external-dp.md) runs one fixed *DP* group with an HTTP endpoint on every rank and
-Router-balanced traffic across all of them.
-The [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md) runs a fixed group
-with one HTTP endpoint per rank and checks managed Router coverage.
-
-[External DP Benchmark](external-dp-benchmark.md) compares that group with a
-monolithic wide tensor-parallel group on the same GPUs.
+- [Online Runtime Control](runtime-control.md) covers live parameter tuning, role pause and
+  retirement windows.
+- [Model Deployment Routing](routing.md) covers endpoint eligibility, router defaults and
+  per-worker metrics.
+- [Model Deployment Scaling](scaling.md) plans replica counts from engine metrics and coordinates
+  graceful retirement. Pair it with
+  [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) and
+  [Scaling Benchmark](scaling-benchmark.md).
+- [Elastic EP](elastic-ep.md) grows one running collective in place. Pair it with
+  [Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) (*tensor parallelism
+  (TP)* = 2, *data parallelism (DP)* width 2 → 4) and
+  [Elastic EP Benchmark](elastic-ep-benchmark.md).
+- [External DP](external-dp.md) exposes one HTTP endpoint per rank behind a managed router. Pair it
+  with [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md) and
+  [External DP Benchmark](external-dp-benchmark.md).
 
 ## Troubleshooting
 
@@ -82,7 +68,10 @@ If a deployment does not become ready, inspect its phase, conditions and role st
 kubectl -n <namespace> get modeldeployment <name> -o yaml
 ```
 
-Compare the result with [Model Deployment Status](status.md). For scaling problems, see the
+Match *`status.phase`*, conditions and role status against
+[Readiness and status](configuration.md#readiness-and-status) and
+[Model Deployment Routing](routing.md#troubleshooting). For scaling holds, inspect the
+`ModelDeploymentScaler` using
 [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md#troubleshooting).
 
 ---

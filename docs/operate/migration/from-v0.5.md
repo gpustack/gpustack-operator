@@ -1,14 +1,10 @@
 # Migrating from v0.5.x
 
-Versions after v0.5.x rename and restructure the scheduling objects the operator creates.
-The first, v0.6.x ("unified-pool refactor",
-[`specs/2026-06-29-instancetype-unified-pool-refactor.md`](../../../specs/2026-06-29-instancetype-unified-pool-refactor.md)),
-renames nearly every Kueue/NFD object it manages and drops the `Cohort` layer; later versions may
-reshape v0.5.x structures further.
-
-Each is **breaking** for the scheduling objects yet backward compatible for your **workloads**
-(running `Pod`s are never touched), so a plain `helm upgrade` leaves the entire v0.5.x object set
-behind as orphans. v0.6.x is the worked example throughout; substitute your target version.
+Releases starting at v0.6.x ([unified-pool refactor](../../../specs/2026-06-29-instancetype-unified-pool-refactor.md))
+rename the scheduling objects managed by GPUStack Operator and remove the Kueue `Cohort` layer.
+Running workload `Pod`s continue uninterrupted, while an in-place `helm upgrade` leaves v0.5.x
+scheduling objects behind as orphans. Commands below use `0.6.0` as the example target version;
+substitute the version you are installing.
 
 ## Contents
 
@@ -18,163 +14,125 @@ behind as orphans. v0.6.x is the worked example throughout; substitute your targ
 - [Path A: Uninstall and reinstall](#path-a-uninstall-and-reinstall)
 - [Path B: Upgrade in place](#path-b-upgrade-in-place)
 - [Verification](#verification)
-- [Notes](#notes)
+- [Summary](#summary)
 
 ## Changes in v0.6
 
-Every object below changed between v0.5.x and v0.6.x.
-
-| Object | v0.5.x | v0.6.x |
+| Object | v0.5.x | v0.6.x and later |
 |---|---|---|
-| **`ResourceFlavor`** | `gpustack--generic-ln-x64-4c-16g-98g--nvidia-tesla-t4-1d` — **double dash**, abbreviated `ln-x64`, CPU+device **composite**, unit-spec (`-4c-16g-98g`) baked into the name | **double dash**, full `os`/`arch`, CPU and device **split** into two flavors, `count`-suffixed: CPU `gpustack--<cpu>-linux-amd64-4c`, device `gpustack--<cpu>--nvidia-tesla-t4-linux-amd64-1d` |
-| **`ClusterQueue`** | composite name; up to two per pool; joined by *`spec.cohortName`* | `gpustack--<key>-<os>-<arch>`; **one isolated CQ per pool**, *`spec.cohortName`* empty (**zero Cohort**) |
-| **Cohort** | one per pool | **removed** — the `CohortReconciler` is gone |
-| **`AdmissionCheck`** | — (did not exist) | `gpustack-node-devices` (per-accelerator feasibility gate) |
-| **`InstanceType`** | aggregated **virtual** API (projected from `ClusterQueue`s; nothing stored) | a real **CRD** `instancetypes.worker.gpustack.ai` with a `.status` subresource; *`spec.group`* renamed *`spec.acceleratorGroup`*, *`spec.generalGroup`* added |
-| **`Node` feature labels** | `general.feature.gpustack.ai/generic-ln-x64` + `.z-flavor`/`.z-queue`/`.z-cohort` + per-unit `.cpu`/`.ram`/`.storage` | real per-CPU key `general.feature.gpustack.ai/<cpu>` + `.count`/`.capacity`; the `feature.gpustack.ai/acceleratable` boolean; `.z-*` and `.cpu`/`.ram`/`.storage` **dropped** |
+| **`ResourceFlavor`** | Composite CPU+device name with abbreviated `ln-x64` and unit spec (`-4c-16g-98g`) | Split CPU (`gpustack--<cpu>-linux-amd64-4c`) and device (`gpustack--<cpu>--nvidia-tesla-t4-linux-amd64-1d`) flavors |
+| **`ClusterQueue`** | Composite name; up to two queues per pool joined by *`spec.cohortName`* | `gpustack--<key>-<os>-<arch>`; one isolated queue per pool with empty *`spec.cohortName`* |
+| **`Cohort`** | One per pool | Removed (`CohortReconciler` deleted) |
+| **`AdmissionCheck`** | Not present | `gpustack-node-devices` per-accelerator feasibility gate |
+| **`InstanceType`** | Virtual aggregated API projected from `ClusterQueue`s | Stored CRD `instancetypes.worker.gpustack.ai` with `.status`, *`spec.acceleratorGroup`*, and *`spec.generalGroup`* |
+| **`Node` feature labels** | `general.feature.gpustack.ai/generic-ln-x64`, `.z-*`, and `.cpu`/`.ram`/`.storage` | Per-CPU `general.feature.gpustack.ai/<cpu>` (`.count`, `.capacity`) and `feature.gpustack.ai/acceleratable` |
 
-`Devices` and `Instance` keep their per-node / same names (the `Devices` schema only grows a
-per-accelerator allocation ledger), so they update in place and leave nothing orphaned.
+`Devices` and `Instance` keep their names and update in place without creating orphans.
 
 ## Orphaned objects after upgrade
 
-The v0.6.x operator indexes objects by their new names, so it never sees the v0.5.x-named
-`ResourceFlavor`s, `ClusterQueue`s, Cohorts and `LocalQueue`s, and it neither reconciles nor
-garbage-collects them.
-No hook cleans them: the chart's post-delete `cleanup.sh` fires only on `helm uninstall`, and the
-upgrade's own migration hooks address the pre-subchart release layout ([Migrating to Bundled Subcharts](bundled-subcharts.md)), not v0.5.x names.
+The v0.6.x worker indexes scheduling resources by their new names and ignores v0.5.x-named
+`ResourceFlavor`s, `ClusterQueue`s, `Cohort`s, and `LocalQueue`s. Chart `cleanup.sh` runs only on
+`helm uninstall`, and subchart migration hooks ([Migrating to Bundled Subcharts](bundled-subcharts.md))
+do not delete v0.5.x pool names.
 
-An in-place upgrade therefore leaves both sets: the working v0.6.x one plus a leaked v0.5.x one of
-dead `ResourceFlavor`s, `ClusterQueue`s, Cohorts, a `LocalQueue` in every namespace, and Cohorts nothing
-ever cleans.
-
-Stale node labels are the one exception: the same-named `<node>-gpustack-worker` `NodeFeature` is
-overwritten on upgrade and NFD drops the removed labels.
+Stale `Node` labels clear automatically because the worker overwrites `<node>-gpustack-worker`
+`NodeFeature` objects in place. All other v0.5.x Kueue objects require either Path A or Path B below.
 
 ## Kueue finalizer deadlock
 
-A v0.5.x `Instance` runs on an `InstanceType`-backed `ClusterQueue`, and Kueue stamps every
-`ClusterQueue` with the `kueue.x-k8s.io/resource-in-use` finalizer. Tearing Kueue down while that
-finalizer is held (the destructive `helm uninstall` path removes the controller) wedges the
-`ClusterQueue` **and its CRD** `Terminating` with nothing left to clear it: Kueue can never recreate
-the CRD, and the worker, which gates startup on installing its applications, never starts.
+Kueue places `kueue.x-k8s.io/resource-in-use` on every active `ClusterQueue`. If a destructive
+teardown removes the Kueue controller while that finalizer remains, the `ClusterQueue` and its CRD
+stay stuck in `Terminating`, while Kueue's residual validating webhook (`failurePolicy: Fail`) rejects
+manual finalizer edits.
 
-Nor can the finalizer be stripped by hand: Kueue's validating webhook (`failurePolicy: Fail`) is
-still registered with no `Service` endpoints, so every `ClusterQueue` update is rejected.
+Current operator charts prevent and self-heal this state automatically:
 
-Higher-version operators self-heal this before Kueue is deployed, so the upgrade needs no manual
-work:
+- A `pre-install`/`pre-upgrade` hook `Job` deletes Kueue webhook configurations first, strips orphaned
+  `resource-in-use` finalizers, and lets stuck Kueue CRDs finish terminating before installation.
+- Upgrades update Kueue via `helm upgrade` rather than uninstalling its controller.
 
-- A `pre-install`/`pre-upgrade` hook `Job` detects a Kueue CRD stuck `Terminating`, deletes the Kueue
-  admission-webhook configurations **first** (so the finalizer strip is not rejected), strips the
-  orphaned `resource-in-use` finalizers, and lets the CRDs drain for recreation. It is a no-op on a
-  healthy cluster, and it runs on fresh installs too, which is the only way onto a cluster left in
-  this state. (Before the
-  subchart layout, the worker's Kueue installer did this.)
-- Kueue is then repaired by `helm upgrade`, not a destructive `helm uninstall`+install, so the
-  controller stays alive to clear finalizers and no CRD is stranded.
-
-If an operator predating the fix has already wedged a Kueue CRD or `ClusterQueue` in `Terminating`,
-recover with Path A below: `cleanup.sh` deletes the Kueue webhook configurations before stripping
-finalizers (the same load-bearing order), and a fresh install then comes up cleanly.
+If an older release already wedged Kueue CRDs in `Terminating`, run [Path A](#path-a-uninstall-and-reinstall)
+below.
 
 ## Path A: Uninstall and reinstall
 
-This is the recommended path: the cleanest one, and the only one with **zero residue** by
-construction. Use it when a short scheduling gap is tolerable: running `Pod`s keep running, and
-only new admissions pause until v0.6.x is up.
+Use Path A whenever a brief scheduling pause is acceptable. Running workload `Pod`s stay up, new
+admissions pause briefly, and deleting the CRDs removes every v0.5.x object cleanly:
 
 ```bash
 NS=gpustack-system
 
-# 1. Remove v0.5.x completely, including the runtime-installed Kueue/NFD/CSI sub-releases,
-#    their CRDs/finalizers, and the aggregated APIServices/webhooks. cleanup.sh ships in the
-#    chart under files/; run it against your active context. A copy from v0.8.6 or earlier
-#    leaves the gpustack-kueue CRDs Terminating; run it as
-#    `cleanup.sh "$NS" gpustack-operator-worker-cert gpustack-kueue` instead, see
-#    Migration Troubleshooting.
+# 1. Remove v0.5.x releases, CRDs, finalizers, APIServices, and webhooks.
+#    If using cleanup.sh from v0.8.6 or earlier, pass explicit arguments instead:
+#    bash cleanup.sh "$NS" gpustack-operator-worker-cert gpustack-kueue
 bash deploy/gpustack-operator/chart/files/cleanup.sh "$NS"
-# (or, if you enabled it, the gated post-delete hook: helm uninstall with cleanupOnUninstall=true)
 
-# 2. Fresh install of v0.6.x.
+# 2. Install the target version cleanly:
 helm install gpustack-operator gpustack/gpustack-operator -n "$NS" --create-namespace --version 0.6.0
 ```
 
-Deleting the CRDs deletes all their CRs, every v0.5.x-named object included, so nothing is left to
-orphan; the v0.6.x worker re-materializes the chain from the nodes.
-
 ## Path B: Upgrade in place
 
-Use this when the release must stay in place, to preserve custom `values`. Upgrade in place, then
-run the cleanup script to strip the leaked v0.5.x objects.
+Use Path B when the existing Helm release and custom values must remain in place:
 
 ```bash
 NS=gpustack-system
 
-# 1. Upgrade in place. The chart README's "Upgrading the Chart" says why this flag.
+# 1. Upgrade the release in place:
 helm upgrade gpustack-operator gpustack/gpustack-operator -n "$NS" --version 0.6.0 --reset-then-reuse-values
 
-# 2. Wait for the v0.6.x worker to be healthy.
+# 2. Wait for the upgraded worker Deployment:
 kubectl -n "$NS" rollout status deploy/gpustack-operator-worker
 
-# 3. Preview what the cleanup will remove (changes nothing), then run it.
+# 3. Preview and remove v0.5.x scheduling orphans:
 bash docs/operate/migration/cleanup-v0.5-orphans.sh --dry-run
 bash docs/operate/migration/cleanup-v0.5-orphans.sh
 ```
 
-[`cleanup-v0.5-orphans.sh`](cleanup-v0.5-orphans.sh) removes **only** the v0.5.x orphans. v0.6.x
-names are double-dash too, so a bare `gpustack--` match would take the healthy chain; the v0.5.x-only
-signal is the CPU/RAM **unit-spec** in every v0.5.x flavor/queue/cohort name: a `-<n>c-<n>g` pair
-(e.g. `-4c-16g`). v0.6.x names carry only a trailing `-<n>c` (CPU) or `-<n>d` (device)
-**count**, never `-<n>g`.
+[`cleanup-v0.5-orphans.sh`](cleanup-v0.5-orphans.sh) matches only the v0.5.x `-<n>c-<n>g` CPU/RAM unit
+pattern (such as `-4c-16g`), leaving v0.6.x `-<n>c` and `-<n>d` objects untouched. It deletes objects
+in dependency order (`LocalQueue` → `ClusterQueue` → `Cohort` → `ResourceFlavor`) and is safe to
+re-run after transient API errors.
 
-Deletion follows dependency order (`LocalQueue` → `ClusterQueue` → Cohort → `ResourceFlavor`, so Kueue
-releases the finalizer before the flavors go). v0.5.x `InstanceType`s were virtual (nothing stored),
-so `InstanceType`s are never touched; neither are v0.6.x objects, your namespaces, `Pod`s or `Instance`s.
-The script is idempotent: a transient API error just means re-running it.
-
-If an old `ClusterQueue` still holds admitted workloads (a v0.5.x `Instance` ran across the upgrade),
-the script sets `HoldAndDrain` first, so Kueue evicts the workloads and releases the finalizer,
-then deletes the drained queue; a queue with no workloads goes directly. The names changed, so
-**re-submit the evicted workloads against the new pool's `LocalQueue`**.
+If a v0.5.x `ClusterQueue` still holds admitted `Workload`s, the script sets `HoldAndDrain` so Kueue
+evicts them and releases finalizers before deletion. Re-submit evicted workloads against the new
+pool's `LocalQueue`.
 
 ## Verification
 
+Run these checks after completing Path A or Path B:
+
 ```bash
-# Nothing is wedged Terminating (the DELETING column is <none> for every kueue CRD — see the
-# finalizer-deadlock section; a timestamp on an older operator needs the Path A recovery):
+# 1. Confirm no Kueue CRD is stuck Terminating (DELETING must be <none>):
 kubectl get crd -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletionTimestamp | grep kueue
 
-# No v0.5.x orphans remain (expect empty) — match the v0.5.x-only "-<n>c-<n>g" unit-spec, NOT a bare
-# "gpustack--" (which would also list the healthy v0.6.x objects):
+# 2. Confirm zero v0.5.x scheduling orphans remain (expect empty output):
 kubectl get resourceflavor,clusterqueue,cohort -A -o name | grep -E 'gpustack--.*-[0-9]+c-[0-9]+g'
 
-# The v0.6.x chain is healthy: one isolated CQ per pool, zero Cohort, InstanceTypes Active:
+# 3. Confirm healthy isolated pools, zero Cohorts, Active InstanceTypes, and AdmissionChecks:
 kubectl get clusterqueue -o custom-columns='NAME:.metadata.name,COHORT:.spec.cohortName'
-kubectl get cohort -A                       # expect: No resources found
+kubectl get cohort -A
 kubectl get instancetype -o custom-columns='NAME:.metadata.name,PHASE:.status.phase'
-kubectl get admissioncheck                  # expect: gpustack-node-devices
+kubectl get admissioncheck
 
-# Node labels self-healed (expect empty):
+# 4. Confirm legacy Node labels cleared (expect empty output):
 kubectl get nodes -o json | grep -oE '"[^"]*(\.z-[a-z]+|generic-ln-x64)[^"]*"' | sort -u
 ```
 
-## Notes
+## Summary
 
-- `Workload`s still on a v0.5.x queue are drained, not silently abandoned: the eviction is clean and
-  leaves no orphaned accounting behind still-running `Pod`s. Path A sidesteps the question by stopping
-  everything up front.
-- Prefer Path A unless you must keep the release in place, since it leaves no orphan class to
-  reason about.
-- Validated on a live v0.6.x cluster: a hand-created v0.5.x set (double-dash composite
-  `ResourceFlavor`s, a `ClusterQueue`, a Cohort, a `LocalQueue`) was removed with zero residue, and the
-  healthy v0.6.x chain was left byte-for-byte identical.
+Prefer Path A unless you need to preserve an in-place Helm release, because CRD removal leaves zero
+orphan state to audit. On Path B, [`cleanup-v0.5-orphans.sh`](cleanup-v0.5-orphans.sh) drains residual
+v0.5.x queues cleanly and leaves the v0.6.x scheduling chain intact[^1].
+
+[^1]: Validated on a live v0.6.x cluster against composite v0.5.x `ResourceFlavor`, `ClusterQueue`, `Cohort`, and `LocalQueue` fixtures with zero changes to active v0.6.x objects.
 
 ---
 
-**See also** — [Migrating to Bundled Subcharts](bundled-subcharts.md) (the other one-time upgrade, from
-v0.7.x or earlier) · [Scheduling Chain](../../modules/devices/scheduling.md#naming-and-grouping) (the
-object names this upgrade moves to) · [Migration Troubleshooting](troubleshooting.md) (recovering from
-a wedged upgrade or a stuck namespace)
+**See also** — [Migrating to Bundled Subcharts](bundled-subcharts.md) (one-time ownership transfer from
+v0.7.x or earlier) · [Accelerator Requests](../../modules/devices/requests.md) (resource keys and pool
+capacity views) · [Migration Troubleshooting](troubleshooting.md) (recovering wedged upgrades or stuck
+namespaces)
 
-**Next** → [Architecture](../../getting-started/architecture.md) — what the new object set means.
+**Next** → [Architecture](../../getting-started/architecture.md) — review the scheduling chain and pool vocabulary.

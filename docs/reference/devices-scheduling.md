@@ -1,8 +1,8 @@
 # Scheduling Chain
 
-The worker turns `Node` and `Devices` signals into capacity labels, Kueue queues, `AcceleratorType` and `InstanceType`
+Evidence: contract. The worker turns `Node` and `Devices` signals into capacity labels, Kueue queues, `AcceleratorType` and `InstanceType`
 resources. These are stages 3 and 4 of the chain introduced in
-[Architecture](../../getting-started/architecture.md); [Admission](admission.md) covers the checks
+[Architecture](../getting-started/architecture.md); [Admission](devices-admission.md) covers the checks
 a workload then passes.
 
 ## Contents
@@ -76,7 +76,7 @@ and in the per-profile ledgers.
 Below that boundary every layer keeps the manufacturer's spelling — the `Devices` record, the on-disk
 ownership markers, every call into its library — since a name the library does not report cannot create
 a partition. See [T-Head MIG
-Operations](thead-mig.md#partition-profile-discovery).
+Operations](../modules/devices/thead-mig.md#partition-profile-discovery).
 
 ### Per-accelerator slice counts
 
@@ -114,10 +114,10 @@ Enabling or disabling hardware partitioning is manual, through the manufacturer'
 `ppu-smi mig` for T-Head), and the operator sees it only on the next Device Manager detection.
 
 The [three-configuration
-walkthrough](nvidia-mig.md#three-mig-configurations) in [NVIDIA MIG
-Operations](nvidia-mig.md) shows the disjoint populations on a recorded 8-accelerator node,
+walkthrough](../modules/devices/nvidia-mig.md#mig-capacity-scenarios) in [NVIDIA MIG
+Operations](../modules/devices/nvidia-mig.md) shows the disjoint populations on a recorded 8-accelerator node,
 including a **mixed** one advertising both families;
-[T-Head](thead-mig.md) covers the same procedure.
+[T-Head](../modules/devices/thead-mig.md) covers the same procedure.
 
 ### RDMA feature labels
 
@@ -126,7 +126,7 @@ conditionally two informational keys. No operator-generated flavor pins any of t
 is the one meant for a workload's own nodeSelector, and withholding it is how a node with no usable
 link stops being selected by one.
 
-See [Network Topology](../rdma/network-topology.md#three-node-labels) for
+See [Network Topology](rdma-network-topology.md#three-node-labels) for
 which link states count as usable, when each informational key is present, and why the accelerator
 interconnect gets no label at all.
 
@@ -141,7 +141,7 @@ node's accelerators. Two labels per accelerator model say what one accelerator c
 | `shared-free-cards.fit.gpustack.ai/<aKey>` | how many accelerators of the model can still grant an ownership share |
 
 - Both values use Gate 3's own per-accelerator predicates. For a single `Pod` asking for one
-  accelerator, a label admits a node exactly when [Gate 3](admission.md#gate-3-per-accelerator-admissioncheck)
+  accelerator, a label admits a node exactly when [Gate 3](devices-admission.md#gate-3-per-accelerator-admissioncheck)
   would.
 - A value is `0` when every accelerator of that population is full. A label disappears when the model
   has no accelerator of that population, and when the node stops being managed.
@@ -154,10 +154,10 @@ node's accelerators. Two labels per accelerator model say what one accelerator c
 The `Workload` webhook turns them into a placement constraint: it ANDs `Gt U-1` or `Gt N-1` into the
 required node affinity of the `Workload`'s PodSet template, which Kueue's topology-aware scheduling
 reads. How it recognizes this operator's `Workload`s in a shared Kueue, and what it leaves out, is
-under [Gate 3](admission.md#gate-3-per-accelerator-admissioncheck).
+under [Gate 3](devices-admission.md#gate-3-per-accelerator-admissioncheck).
 
 The pin stays on the `Workload` and never reaches the `Pod`; why that must hold is under
-[Gate 3](admission.md#gate-3-per-accelerator-admissioncheck) too.
+[Gate 3](devices-admission.md#gate-3-per-accelerator-admissioncheck) too.
 
 ## Unit spec defaults
 
@@ -167,7 +167,7 @@ per-product preset keyed by the accelerator's manufacturer and product name, fal
 `4c / 16Gi / 100Gi`.
 
 The tier per product family is in [Instance Type Unit Resources
-Reference](../../reference/instance-type-unit-resources.md); an admin overrides it through the `InstanceType`
+Reference](instance-type-unit-resources.md); an admin overrides it through the `InstanceType`
 API without touching any `Node`.
 
 ## Stage 4: Kueue chain
@@ -185,18 +185,18 @@ Every generated flavor also pins `topology.gpustack.ai/profile` and references t
 for that ordered level set. Kueue TAS chooses a domain for the complete PodSet; a
 `ModelDeployment` can require a level without naming its concrete value. The discovery, profile,
 quota-conservation, and request path is in [Topology-Aware
-Scheduling](../topology/scheduling.md).
+Scheduling](topology-scheduling.md).
 
 TAS also ranks the domains that fit by a `Pod`'s preferred node affinity, which is how a node-delivered
 model's `Pod`s [prefer the nodes holding its
-weights](../topology/scheduling.md#node-delivered-model-placement).
+weights](topology-scheduling.md#node-delivered-model-placement).
 
 ## Naming and grouping
 
 The `ResourceFlavor` is the finest grain and setting-independent: always the CPU key, plus the
 accelerator key when accelerated, so the aggregation layer re-groups without rewriting a flavor. That
 layer (`ClusterQueue` / `AcceleratorType` / `InstanceType` / `InstanceTypeFlavor`) is grouped by the editable
-[`instance-type-aware-cpu-manufacturer`](../../reference/settings.md#settings) (default `false`):
+[`instance-type-aware-cpu-manufacturer`](settings.md#settings) (default `false`):
 
 ```
 ResourceFlavor (always the finest grain, setting-independent):
@@ -223,13 +223,13 @@ Two discriminators keep the pools clean, and one annotation carries the raw CPU 
   through NFD only for `Node`s without a detected accelerator; CPU flavors select it to exclude GPU `Node`s.
 - `note.gpustack.ai/cpuDetail` carries the raw CPU detail: always on a CPU flavor, on an accelerated one
   only when awareness is on. The defaulting webhook folds it back into the type's spec — see
-  [Admission](admission.md#type-and-instance-webhooks).
+  [Admission](devices-admission.md#type-and-instance-webhooks).
 
 ## Controllers
 
 The worker keeps five sets of objects converged:
 
-![Device scheduling chain](../../assets/diagrams/devices-scheduling-chain.svg)
+![Device scheduling chain](../assets/diagrams/devices-scheduling-chain.svg)
 
 <!--
 flowchart TD
@@ -286,11 +286,11 @@ the `AcceleratorType` share one queue.
   changes, so the re-pointed queue's selectors match.
 - **The empty-plan hold.** The queue is created on `Hold`, marked
   `topology.gpustack.ai/empty-plan-hold`, because the queue has no resource groups yet and
-  [a queue without them admits every Workload](admission.md#deployed-kueue-configuration).
+  [a queue without them admits every Workload](devices-admission.md#deployed-kueue-configuration).
   The update that fills the groups drops the marker, and the hold is then released unless the type is
   `Inactive`.
 - **Status and recreation.** The queue is watched to keep the type's `.status` fresh (the
-  [four-view](admission.md#four-view-status) / CPU projection + *`status.entrance`*), and to recreate a
+  [four-view](devices-admission.md#four-view-status) / CPU projection + *`status.entrance`*), and to recreate a
   queue an admin deleted while an `InstanceType` or admin-authored `AcceleratorType` still lives; a standalone derived `AcceleratorType` is deleted.
 - **Teardown.** Deleting an `InstanceType` stops its active `Instance`s. Its shared queue is removed only when
   no remaining `InstanceType` or `AcceleratorType` fronts the pool.
@@ -310,7 +310,7 @@ references — resolved from the pool's `ResourceFlavor`s alone, never the ownin
   whole accelerator = `M = 1,600,000` credits, so Kueue's int64 accounting never rounds fractional
   shared/sliced credits up to 1), a non-accelerated queue only CPU.
 - **`AdmissionCheck`** — `gpustack-node-devices`, referenced on an accelerated queue once Active, whoever
-  authored its `InstanceType`, and only while [`instance-type-derived-from-node`](../../reference/settings.md#authoring-the-instancetype) is on.
+  authored its `InstanceType`, and only while [`instance-type-derived-from-node`](settings.md#authoring-the-instancetype) is on.
   `gpustack-model-deployment-joint` is referenced on every queue once Active, whatever that setting says.
 - **Finalizing flavor** — a flavor whose nodes left is deleted, but Kueue holds `resource-in-use`
   until no `ClusterQueue` references it, and dropping it from the groups is the update Kueue waits
@@ -330,12 +330,12 @@ references — resolved from the pool's `ResourceFlavor`s alone, never the ownin
   `Hold` carries no marker and is left alone.
 - **Topology readiness** — refuse a partial queue plan when a flavor lacks its profile or `Topology`,
   selectors overlap, quota changes across the profile split, the same resource would occur in two
-  groups, or one resource group would exceed the [flavor limit](../topology/scheduling.md#capacity-and-lifecycle-limits).
+  groups, or one resource group would exceed the [flavor limit](topology-scheduling.md#capacity-and-lifecycle-limits).
 
 Once flavors return it switches the held queue to the new plan, and only then **restores** the stop
 policy the queue had before the drain (`None`, or an admin `Hold`, including one set or cleared while
 it waited). A recovered pool admits again without an admin.
-A drained queue also stops its running `Instance`s — see [Running-instance stop](admission.md#running-instance-stop).
+A drained queue also stops its running `Instance`s — see [Running-instance stop](devices-admission.md#running-instance-stop).
 
 ### LocalQueue in every namespace
 
@@ -348,13 +348,11 @@ Every non-system `Namespace` gets one `LocalQueue`, so workloads can submit from
 ### Per-accelerator admission check
 
 The per-accelerator **`AdmissionCheck`**, part of the admission chain; its behavior is in
-[Admission](admission.md#gate-3-per-accelerator-admissioncheck).
+[Admission](devices-admission.md#gate-3-per-accelerator-admissioncheck).
 
 ---
 
-**See also** — [Device Discovery](discovery.md) (where the capacity signals come from) ·
-[Topology-Aware Scheduling](../topology/scheduling.md) (how topology profiles enter this chain) ·
-[Walkthrough](../../walkthroughs/devices/scheduling.md) (the same objects on a live cluster) ·
-[Settings](../../reference/settings.md#settings)
-
-**Next** → [Admission](admission.md) — the gates a request passes.
+**See also** — [Device Discovery](devices-discovery.md) (where the capacity signals come from) ·
+[Topology-Aware Scheduling](topology-scheduling.md) (how topology profiles enter this chain) ·
+[Walkthrough](../walkthroughs/devices/scheduling.md) (the same objects on a live cluster) ·
+[Settings](settings.md#settings)
