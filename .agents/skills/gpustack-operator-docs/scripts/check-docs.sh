@@ -4,26 +4,18 @@
 # Scope:
 #   * links and #anchors — README.md, AGENTS.md, Copilot instructions, docs/**/*.md, .agents/skills/**/*.md
 #   * page structure and index coverage — docs/**/*.md only
+#   * strict three-zone governance (activates when docs/reference/README.md exists):
+#       - max heading depth H3 across docs/**/*.md (including blockquoted H4+);
+#       - flat docs/reference/ layout (zero subdirectories);
+#       - one-way link isolation from public docs/ and site/content/** pages;
+#       - three-table docs/README.md coverage (All pages, Reference, Contribute) + H1 label parity;
+#       - docs/reference/README.md hub routing/aliases/evidence checks and topic-page shape;
+#       - authored-prose kind-plural check across docs/** and site/content/**.
 #
-# Fails on:
-#   1. a relative link whose file does not exist, or whose #anchor no heading produces;
-#   2. a "## Contents" list that no longer matches the page's ## headings (missing, extra, reordered);
-#   3. a docs/ page with no "**See also**" footer at its end;
-#   4. a docs/ page missing from the "## All pages" table in docs/README.md;
-#   5. a prose paragraph longer than the cap (a set of items belongs in a list or a table);
-#   6. a page longer than the line cap;
-#   7. a page with more "##" sections than the cap;
-#   8. an index label in docs/README.md that differs from the page's own H1;
-#   9. a docs path named in a skill that no longer exists;
-#  10. an authored H2-H6 heading over four words or 32 visible characters, or a lowercase first
-#      word after a numbered heading prefix;
-#  11. a table header outside the 1 to 3 word limit or containing an article, demonstrative or interrogative;
-#  12. an interrogative word in a docs or README heading.
-#
-# Usage: bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh [--report] [repo-root]
+# Usage: bash .agents/skills/gpustack-operator-docs/scripts/check-docs.sh [--report] [repo-root]
 #
 # --report downgrades rules 5-8 to warnings and prints the per-page metrics, so one page can be
-# measured while the rest of the corpus is still unrefined. Rules 1-4 and 9-11 are fatal in both modes.
+# measured while the rest of the corpus is still unrefined. Rules 1-4 and 9+ are fatal in both modes.
 set -euo pipefail
 
 REPORT=0
@@ -56,50 +48,52 @@ shape_err() {
   fi
 }
 
+STRICT_ZONES=0
+if [ -f "docs/reference/README.md" ]; then
+  STRICT_ZONES=1
+fi
+
 # Pages whose structure is under contract.
 PAGES=$(find docs -name '*.md' | sort)
+SITE_CONTENT_PAGES=""
+if [ -d "site/content" ]; then
+  SITE_CONTENT_PAGES=$(find site/content -name '*.md' | sort)
+fi
 HEADING_PAGES=$( {
-  find docs site/content -name '*.md' -print
+  printf '%s\n' "$PAGES"
+  if [ -n "$SITE_CONTENT_PAGES" ]; then
+    printf '%s\n' "$SITE_CONTENT_PAGES"
+  fi
   printf '%s\n' README.md ADOPTERS.md \
     csrc/amd/rocm-slicing-shim/README.md \
     csrc/thead/ppu-slicing-shim/README.md
-} | sort -u )
-# Everything whose links are checked. AGENTS.md is included because it names the build, lint and
-# test entry points, which can go stale. Its bare backtick paths are outside this link check.
-#
-# Only the two link loops read this list. Being on it subjects a file to link and anchor resolution
-# and to nothing else -- the Contents, footer, index and size rules are held by $PAGES, and
-# AGENTS.md is not a docs page.
-#
-# Expect AGENTS.md to contribute zero checked links, and do not read that as a reason to drop it.
-# It carried none when it was added: every path in it is a bare backtick reference, which this
-# checker does not resolve. The entry is earned by the link written next, not by the ones there
-# now. Said here because a rule whose trigger never fires reads exactly like a rule that works, so
-# anyone counting what this list covers would otherwise find nothing to show for the entry and
-# conclude it is dead. It is not: it was confirmed to report both a path and an anchor that do not
-# exist, and to pass a link that resolves, before being trusted.
-LINKED_PAGES=$(printf '%s\n' \
-  "README.md" "AGENTS.md" ".github/copilot-instructions.md" "$PAGES" "$(find .agents/skills -name '*.md' | sort)")
+} | awk 'NF' | sort -u )
 
-# Shape caps (rules 5-7). The paragraph cap is the one that carries the weight: a long page that
-# reads in short paragraphs and clear lists is fine, a short page that reads as a wall of text is not.
+SKILL_MD_PAGES=""
+if [ -d ".agents/skills" ]; then
+  SKILL_MD_PAGES=$(find .agents/skills -name '*.md' | sort)
+fi
+LINKED_PAGES=$( {
+  printf '%s\n' "README.md" "AGENTS.md" ".github/copilot-instructions.md" "$PAGES"
+  if [ -n "$SKILL_MD_PAGES" ]; then
+    printf '%s\n' "$SKILL_MD_PAGES"
+  fi
+} | awk 'NF' )
+
+# Shape caps (rules 5-7).
 PARA_LINE_CAP=5     # source lines in one prose paragraph
 PARA_CHAR_CAP=500   # characters of rendered text in one prose paragraph
 PAGE_LINE_CAP=1000  # lines in one page — a backstop against a page nobody split, not a budget
 H2_CAP=10           # "##" sections in one page
 HEADING_WORD_CAP=4  # visible words after a numbered prefix, if any
 HEADING_CHAR_CAP=32 # visible characters after a numbered prefix, if any
+MAX_HEADING_DEPTH=3 # H1-H3 ceiling across docs/** in strict three-zone mode
 
 # Cap exemptions, declared here rather than escaped inline. Each is a space-separated glob list.
-# A recording and a runbook are as long as the hardware makes them.
 LINE_CAP_EXEMPT='docs/walkthroughs/devices/scheduling.md docs/operate/* docs/modules/devices/*-mig.md'
-# The index is a table of contents and a reference page is a lookup table: both are meant to be flat.
 H2_CAP_EXEMPT='docs/README.md docs/reference/*'
 
-# --- helpers ----------------------------------------------------------------
-
-# awk prelude: strip_links() removes [text](url) down to text — awk's gsub has no backreferences,
-# so it is done with a match() loop; slug() is GitHub's heading-anchor form.
+# Shared awk helpers (POSIX / macOS onetrueawk compatible; no gawk extensions).
 read -r -d '' AWK_LIB <<'AWKLIB' || true
 function strip_links(t,   m, txt) {
   while (match(t, /\[[^]]*\]\([^)]*\)/)) {
@@ -111,21 +105,102 @@ function strip_links(t,   m, txt) {
   }
   return t
 }
-function fence_line(l,   n, c) {
-  # Returns a fence marker as "<char><run-length>", or "" for a line that is not one. Markdown
-  # allows at most three spaces of indent before a fence; four makes it an indented code block.
-  # The character matters as much as the length: a ~~~ line inside a ``` block does not close it.
+function fence_open(l,   n, c, rest) {
+  sub(/^( {0,3}> ?)+/, "", l)
   if (l !~ /^ {0,3}(`{3,}|~{3,})/) return ""
   sub(/^ +/, "", l)
   c = substr(l, 1, 1)
   n = 0
   while (substr(l, n + 1, 1) == c) n++
+  rest = substr(l, n + 1)
+  if (c == "`" && index(rest, "`") > 0) return ""
   return c n
 }
-# Does this fence marker close one opened by "open"? Same character, and at least as long.
-function fence_closes(marker, open) {
-  return substr(marker, 1, 1) == substr(open, 1, 1) && \
-         (length(marker) - 1) + 0 >= (length(open) - 1) + 0
+function fence_close(l, open,   n, c, rest) {
+  sub(/^( {0,3}> ?)+/, "", l)
+  if (l !~ /^ {0,3}(`{3,}|~{3,})/) return 0
+  sub(/^ +/, "", l)
+  c = substr(l, 1, 1)
+  if (c != substr(open, 1, 1)) return 0
+  n = 0
+  while (substr(l, n + 1, 1) == c) n++
+  rest = substr(l, n + 1)
+  if (rest !~ /^[ \t]*$/) return 0
+  return n >= (substr(open, 2) + 0)
+}
+function skip_code_span(s, pos,   n, p, tlen, rs) {
+  n = length(s); p = pos
+  while (p <= n && substr(s, p, 1) == "`") p++
+  tlen = p - pos
+  while (p <= n) {
+    if (substr(s, p, 1) == "`") {
+      rs = p
+      while (p <= n && substr(s, p, 1) == "`") p++
+      if (p - rs == tlen) return p
+      continue
+    }
+    p++
+  }
+  return pos + tlen
+}
+# Strip HTML comments while skipping inline code spans so "`<!--`" stays literal code.
+function uncomment(line,   n, pos, ch, cend, end_pos, out) {
+  out = ""
+  n = length(line)
+  pos = 1
+  while (pos <= n) {
+    if (html_comment) {
+      end_pos = index(substr(line, pos), "-->")
+      if (!end_pos) return out
+      html_comment = 0
+      pos += end_pos + 2
+      continue
+    }
+    ch = substr(line, pos, 1)
+    if (ch == "\\" && pos < n) {
+      out = out substr(line, pos, 2)
+      pos += 2
+      continue
+    }
+    if (ch == "`") {
+      cend = skip_code_span(line, pos)
+      out = out substr(line, pos, cend - pos)
+      pos = cend
+      continue
+    }
+    if (substr(line, pos, 4) == "<!--") {
+      html_comment = 1
+      pos += 4
+      continue
+    }
+    out = out ch
+    pos++
+  }
+  return out
+}
+# Track standalone 4-space/tab indented code blocks while preserving list/footnote continuations.
+function is_indented_code_line(raw,   is_ind) {
+  if (raw ~ /^[ \t]*$/) {
+    md_prev_blank = 1
+    return 0
+  }
+  is_ind = (raw ~ /^(    |\t)/)
+  if (md_in_indent) {
+    if (is_ind) {
+      md_prev_blank = 0
+      return 1
+    }
+    md_in_indent = 0
+  } else if (md_prev_blank && md_container == "" && is_ind) {
+    md_in_indent = 1
+    md_prev_blank = 0
+    return 1
+  }
+  if (raw ~ /^( {0,3}> ?)* {0,3}([-*+]|[0-9]+[.)])[ \t]/) md_container = "list"
+  else if (raw ~ /^( {0,3}> ?)* {0,3}\[\^[^]]+\]:/) md_container = "footnote"
+  else if (!is_ind) md_container = ""
+  md_prev_blank = 0
+  return 0
 }
 function slug(t,   a) {
   a = tolower(strip_links(t))
@@ -135,36 +210,84 @@ function slug(t,   a) {
   gsub(/ /, "-", a)
   return a
 }
+function norm_relpath(p,   n, a, i, m, st, out) {
+  n = split(p, a, "/"); m = 0
+  for (i = 1; i <= n; i++) {
+    if (a[i] == "." || a[i] == "") continue
+    if (a[i] == "..") {
+      if (m > 0 && st[m] != "..") { m--; continue }
+    }
+    st[++m] = a[i]
+  }
+  out = ""
+  for (i = 1; i <= m; i++) out = out (i > 1 ? "/" : "") st[i]
+  return out
+}
+function hex_val(c,   p) {
+  p = index("0123456789abcdef", tolower(c))
+  return (p > 0) ? (p - 1) : -1
+}
+function url_decode(s,   n, i, out, h1, h2, code) {
+  out = ""
+  n = length(s)
+  i = 1
+  while (i <= n) {
+    if (substr(s, i, 1) == "%" && i + 2 <= n) {
+      h1 = hex_val(substr(s, i + 1, 1))
+      h2 = hex_val(substr(s, i + 2, 1))
+      if (h1 >= 0 && h2 >= 0) {
+        code = h1 * 16 + h2
+        out = out sprintf("%c", code)
+        i += 3
+        continue
+      }
+    }
+    out = out substr(s, i, 1)
+    i++
+  }
+  return out
+}
 AWKLIB
 
 # Resolve "a/b/../c" without touching the filesystem.
 normpath() {
-  awk -v p="$1" 'BEGIN {
-    n = split(p, a, "/"); m = 0
-    for (i = 1; i <= n; i++) {
-      if (a[i] == "." || a[i] == "") continue
-      if (a[i] == "..") { if (m > 0) m--; continue }
-      st[++m] = a[i]
-    }
-    out = ""
-    for (i = 1; i <= m; i++) out = out (i > 1 ? "/" : "") st[i]
-    print out
-  }'
+  awk -v p="$1" "$AWK_LIB"'BEGIN { print norm_relpath(p) }'
 }
 
-# Every heading as a GitHub anchor slug, duplicates suffixed the way GitHub does.
+# Every heading as a GitHub anchor slug, allocating duplicates against all emitted IDs.
 anchors_of() {
   awk "$AWK_LIB"'
-    { fl = fence_line($0)
-      if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
-    fence  { next }
-    html_comment { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
-    /^[ \t]*<!--/ { if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
-    /^#{1,6} / {
-      sub(/^#+ +/, "")
-      a = slug($0)
-      seen[a]++
-      print (seen[a] > 1) ? a "-" (seen[a] - 1) : a
+    BEGIN { md_prev_blank = 1 }
+    FNR == 1 && $0 == "---" { frontmatter = 1; next }
+    frontmatter { if ($0 == "---") frontmatter = 0; next }
+    !html_comment && !md_in_indent {
+      if (!fence) {
+        fo = fence_open($0)
+        if (fo != "") { fence = 1; fopen = fo; md_prev_blank = 0; next }
+      } else {
+        if (fence_close($0, fopen)) fence = 0
+        md_prev_blank = 0
+        next
+      }
+    }
+    fence { next }
+    !html_comment && is_indented_code_line($0) { next }
+    {
+      line = uncomment($0)
+      sub(/^( {0,3}> ?)+/, "", line)
+      if (line ~ /^ {0,3}#{1,6}[ \t]+/) {
+        sub(/^ {0,3}#+[ \t]+/, "", line)
+        sub(/[ \t]+#+[ \t]*$/, "", line)
+        a = slug(line)
+        cand = a
+        k = 1
+        while (cand in used) {
+          cand = a "-" k
+          k++
+        }
+        used[cand] = 1
+        print cand
+      }
     }
   ' "$1"
 }
@@ -172,15 +295,26 @@ anchors_of() {
 # The ## headings only, as anchors, with "Contents" itself dropped.
 h2_anchors_of() {
   awk "$AWK_LIB"'
-    { fl = fence_line($0)
-      if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
-    fence  { next }
-    html_comment { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
-    /^[ \t]*<!--/ { if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
-    /^## / {
-      sub(/^## +/, "")
-      if ($0 == "Contents") next
-      print slug($0)
+    BEGIN { md_prev_blank = 1 }
+    !html_comment && !md_in_indent {
+      if (!fence) {
+        fo = fence_open($0)
+        if (fo != "") { fence = 1; fopen = fo; md_prev_blank = 0; next }
+      } else {
+        if (fence_close($0, fopen)) fence = 0
+        md_prev_blank = 0
+        next
+      }
+    }
+    fence { next }
+    !html_comment && is_indented_code_line($0) { next }
+    {
+      line = uncomment($0)
+      if (line ~ /^## /) {
+        sub(/^## +/, "", line)
+        if (line == "Contents") next
+        print slug(line)
+      }
     }
   ' "$1"
 }
@@ -188,34 +322,172 @@ h2_anchors_of() {
 # The anchors the "## Contents" list links to, in order.
 toc_anchors_of() {
   awk "$AWK_LIB"'
-    { fl = fence_line($0)
-      if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
-    fence  { next }
-    html_comment { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
-    /^[ \t]*<!--/ { if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
-    /^## Contents/ { intoc = 1; next }
-    intoc && /^#{1,6} / { intoc = 0 }
-    intoc && /^- \[/ {
-      if (match($0, /\(#[^)]*\)/)) print substr($0, RSTART + 2, RLENGTH - 3)
+    BEGIN { md_prev_blank = 1 }
+    !html_comment && !md_in_indent {
+      if (!fence) {
+        fo = fence_open($0)
+        if (fo != "") { fence = 1; fopen = fo; md_prev_blank = 0; next }
+      } else {
+        if (fence_close($0, fopen)) fence = 0
+        md_prev_blank = 0
+        next
+      }
+    }
+    fence { next }
+    !html_comment && is_indented_code_line($0) { next }
+    {
+      line = uncomment($0)
+      if (line ~ /^## Contents([ \t]*$)/) { intoc = 1; next }
+      if (intoc && line ~ /^#{1,6} /) { intoc = 0 }
+      if (intoc && line ~ /^- \[/) {
+        if (match(line, /\(#[^)]*\)/)) print substr(line, RSTART + 2, RLENGTH - 3)
+      }
     }
   ' "$1"
 }
 
-# Every link target outside code fences, one per line.
+# Every link target outside code fences, standalone indented code blocks, inline code and comments.
 links_of() {
   awk "$AWK_LIB"'
-    { fl = fence_line($0)
-      if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
-    fence  { next }
-    html_comment { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
-    /^[ \t]*<!--/ { if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
-    {
-      line = $0
-      while (match(line, /\]\([^)]+\)/)) {
-        print substr(line, RSTART + 2, RLENGTH - 3)
-        line = substr(line, RSTART + RLENGTH)
+    function extract_inline(s, at,   n, pos, ch, q, depth, inner, d, gt, pdepth, dest, p, auto) {
+      n = length(s); pos = 1
+      while (pos <= n) {
+        ch = substr(s, pos, 1)
+        if (ch == "\\") { pos += 2; continue }
+        if (ch == "`") { pos = skip_code_span(s, pos); continue }
+        if (ch == "<") {
+          gt = pos + 1
+          while (gt <= n && substr(s, gt, 1) !~ /[ \t<>]/) gt++
+          if (gt <= n && substr(s, gt, 1) == ">") {
+            auto = substr(s, pos + 1, gt - pos - 1)
+            if (auto ~ /^[Hh][Tt][Tt][Pp][Ss]?:\/\/[^ \t<>]+$/) {
+              printf "%d\t%s\n", at, auto
+              pos = gt + 1
+              continue
+            }
+          }
+        }
+        if (ch == "[") {
+          q = pos + 1; depth = 1
+          while (q <= n && depth > 0) {
+            ch = substr(s, q, 1)
+            if (ch == "\\") { q += 2; continue }
+            if (ch == "`") { q = skip_code_span(s, q); continue }
+            if (ch == "[") depth++
+            else if (ch == "]") depth--
+            if (depth > 0) q++
+          }
+          if (depth == 0) {
+            inner = substr(s, pos + 1, q - pos - 1)
+            if (index(inner, "[") > 0) extract_inline(inner, at)
+            if (substr(s, q + 1, 1) == "(") {
+              d = q + 2
+              while (d <= n && substr(s, d, 1) ~ /[ \t]/) d++
+              dest = ""; p = d
+              if (substr(s, d, 1) == "<") {
+                gt = d + 1
+                while (gt <= n && substr(s, gt, 1) != ">") {
+                  if (substr(s, gt, 1) == "\\") gt++
+                  gt++
+                }
+                if (gt <= n) {
+                  dest = substr(s, d + 1, gt - d - 1)
+                  p = gt + 1
+                }
+              } else {
+                pdepth = 0
+                while (p <= n) {
+                  ch = substr(s, p, 1)
+                  if (ch == "\\") { p += 2; continue }
+                  if (ch ~ /[ \t]/) break
+                  if (ch == "(") pdepth++
+                  else if (ch == ")") {
+                    if (pdepth == 0) break
+                    pdepth--
+                  }
+                  p++
+                }
+                dest = substr(s, d, p - d)
+              }
+              while (p <= n && substr(s, p, 1) != ")") {
+                if (substr(s, p, 1) == "\\") p++
+                p++
+              }
+              if (p <= n && dest != "") {
+                printf "%d\t%s\n", at, dest
+                pos = p + 1
+                continue
+              }
+            }
+          }
+        }
+        pos++
       }
     }
+    function parse_ref_dest(rest,   gt, p, ch) {
+      sub(/^[ \t]+/, "", rest)
+      if (rest == "") return ""
+      if (substr(rest, 1, 1) == "<") {
+        gt = index(substr(rest, 2), ">")
+        if (gt > 0) return substr(rest, 2, gt - 1)
+        return ""
+      }
+      p = 1
+      while (p <= length(rest)) {
+        ch = substr(rest, p, 1)
+        if (ch ~ /[ \t]/) break
+        p++
+      }
+      return substr(rest, 1, p - 1)
+    }
+    function flush_para() {
+      if (para != "") {
+        extract_inline(para, para_start)
+        para = ""
+      }
+    }
+    BEGIN { md_prev_blank = 1 }
+    FNR == 1 && $0 == "---" { frontmatter = 1; next }
+    frontmatter { if ($0 == "---") frontmatter = 0; next }
+    !html_comment && !md_in_indent {
+      if (!fence) {
+        fo = fence_open($0)
+        if (fo != "") { flush_para(); pending_ref = 0; fence = 1; fopen = fo; md_prev_blank = 0; next }
+      } else {
+        if (fence_close($0, fopen)) fence = 0
+        md_prev_blank = 0
+        next
+      }
+    }
+    fence { next }
+    !html_comment && !pending_ref && is_indented_code_line($0) { flush_para(); next }
+    {
+      line = uncomment($0)
+      if (line ~ /^[ \t]*$/) { flush_para(); pending_ref = 0; next }
+      stripped = line
+      sub(/^( {0,3}> ?)+/, "", stripped)
+      if (pending_ref) {
+        rd = parse_ref_dest(stripped)
+        if (rd != "") printf "%d\t%s\n", pending_ref, rd
+        pending_ref = 0
+        next
+      }
+      if (stripped ~ /^ {0,3}\[[^\^][^]]*\]:[ \t]*/) {
+        flush_para()
+        rest = stripped
+        sub(/^ {0,3}\[[^\^][^]]*\]:[ \t]*/, "", rest)
+        if (rest == "") {
+          pending_ref = FNR
+        } else {
+          rd = parse_ref_dest(rest)
+          if (rd != "") printf "%d\t%s\n", FNR, rd
+        }
+        next
+      }
+      if (para == "") { para = line; para_start = FNR }
+      else { para = para " " line }
+    }
+    END { flush_para() }
   ' "$1"
 }
 
@@ -233,41 +505,107 @@ exempt() {
 # The page's H1, without the leading hashes.
 h1_of() { awk '/^# / { sub(/^# +/, ""); print; exit }' "$1"; }
 
-# How many "##" sections a page has, fenced blocks excluded.
-h2_count_of() {
+# True if a page carries a top-level "**Next**" footer outside code fences and HTML comments.
+has_next_footer() {
   awk "$AWK_LIB"'
-    { fl = fence_line($0)
-      if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
-    fence  { next }
-    html_comment { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
-    /^[ \t]*<!--/ { if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
-    /^## /  { if ($0 != "## Contents") c++ }
-    END     { print c + 0 }
+    BEGIN { md_prev_blank = 1 }
+    !html_comment && !md_in_indent {
+      if (!fence) {
+        fo = fence_open($0)
+        if (fo != "") { fence = 1; fopen = fo; md_prev_blank = 0; next }
+      } else {
+        if (fence_close($0, fopen)) fence = 0
+        md_prev_blank = 0
+        next
+      }
+    }
+    fence { next }
+    !html_comment && is_indented_code_line($0) { next }
+    {
+      line = uncomment($0)
+      if (line ~ /^\*\*Next\*\*/) { found = 1; exit }
+    }
+    END { exit (found ? 0 : 1) }
   ' "$1"
 }
 
-# Prose paragraphs over the cap, as "startline<TAB>lines<TAB>chars". A fenced block, a heading, a table
-# row, a list marker, a blockquote and the See also / Next footer are not prose, and each ends the
-# paragraph it interrupts. Indentation does not exempt anything: a paragraph nested under a list item
-# is prose a reader still has to get through, so it is measured on its dedented text. Characters are
-# counted on the rendered text, so a link costs its label, not its URL.
+# Check docs/reference/README.md for alias and evidence-label sections/markers.
+check_reference_hub_sections() {
+  awk "$AWK_LIB"'
+    BEGIN { md_prev_blank = 1 }
+    !html_comment && !md_in_indent {
+      if (!fence) {
+        fo = fence_open($0)
+        if (fo != "") { fence = 1; fopen = fo; md_prev_blank = 0; next }
+      } else {
+        if (fence_close($0, fopen)) fence = 0
+        md_prev_blank = 0
+        next
+      }
+    }
+    fence { next }
+    !html_comment && is_indented_code_line($0) { next }
+    {
+      line = uncomment($0)
+      low = tolower(line)
+      if (low ~ /^#{2,3}[ \t]+.*alias/ || low ~ /\*\*[^*]*alias[^*]*\*\*/) has_alias = 1
+      if (low ~ /^#{2,3}[ \t]+.*evidence/ || low ~ /\*\*[^*]*evidence[^*]*\*\*/) has_evidence_hdr = 1
+      if (low ~ /(^|[^a-z])(contract|recorded capture|synthetic simulation)([^a-z]|$)/) has_evidence_label = 1
+    }
+    END {
+      if (!has_alias) print "docs/reference/README.md: missing exact aliases section or marker"
+      if (!has_evidence_hdr || !has_evidence_label) print "docs/reference/README.md: missing evidence labels section or evidence label (contract, recorded capture, or synthetic simulation)"
+    }
+  ' "$1"
+}
+
+# How many "##" sections a page has, fenced blocks excluded.
+h2_count_of() {
+  awk "$AWK_LIB"'
+    BEGIN { md_prev_blank = 1 }
+    !html_comment && !md_in_indent {
+      if (!fence) {
+        fo = fence_open($0)
+        if (fo != "") { fence = 1; fopen = fo; md_prev_blank = 0; next }
+      } else {
+        if (fence_close($0, fopen)) fence = 0
+        md_prev_blank = 0
+        next
+      }
+    }
+    fence { next }
+    !html_comment && is_indented_code_line($0) { next }
+    {
+      line = uncomment($0)
+      if (line ~ /^## / && line != "## Contents") c++
+    }
+    END { print c + 0 }
+  ' "$1"
+}
+
+# Prose paragraphs over the cap, as "startline<TAB>lines<TAB>chars".
 long_paragraphs_of() {
   awk -v lcap="$PARA_LINE_CAP" -v ccap="$PARA_CHAR_CAP" "$AWK_LIB"'
     function flush() {
       if (n > 0 && (n > lcap || chars > ccap)) printf "%d\t%d\t%d\n", start, n, chars
       n = 0; chars = 0
     }
-    { fl = fence_line($0)
-      if (fl != "") { flush(); if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
+    !html_comment {
+      if (!fence) {
+        fo = fence_open($0)
+        if (fo != "") { flush(); fence = 1; fopen = fo; next }
+      } else {
+        if (fence_close($0, fopen)) fence = 0
+        next
+      }
+    }
     fence                            { next }
     html_comment                     { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
     /^[ \t]*<!--/                    { flush(); if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
     /^[ \t]*$/                       { flush(); next }
-    # Four spaces or a tab is an indented code block in Markdown, not prose.
     /^(    |\t)/                     { flush(); next }
     /^[ \t]*[#>|]/                   { flush(); next }
     /^[ \t]*([-*+]|[0-9]+[.)]) /     { flush(); next }
-    # The footer is a page-level construct at column 0; the same words indented are list prose.
     /^\*\*(See also|Next)\*\*/       { flush(); footer = 1; next }
     footer                           { next }
     {
@@ -281,12 +619,10 @@ long_paragraphs_of() {
   ' "$1"
 }
 
-# H2-H6 headings in authored reader Markdown, as actionable style findings. The numbered prefix
-# is stable navigation structure, so only its topic text counts toward the length caps. Word counts
-# split hyphenated terms. Numbered headings use an initial capital after the colon, except for
-# official names whose canonical spelling begins with a lowercase letter.
+# H1-H6 headings in authored reader Markdown (including blockquoted H4+ in strict depth mode).
 heading_issues_of() {
-  awk -v wcap="$HEADING_WORD_CAP" -v ccap="$HEADING_CHAR_CAP" -v interrogatives="${2:-0}" "$AWK_LIB"'
+  awk -v wcap="$HEADING_WORD_CAP" -v ccap="$HEADING_CHAR_CAP" \
+      -v interrogatives="${2:-0}" -v max_depth="${3:-0}" "$AWK_LIB"'
     function trim(t) {
       sub(/^[[:space:]]+/, "", t)
       sub(/[[:space:]]+$/, "", t)
@@ -301,20 +637,37 @@ heading_issues_of() {
       }
       return n
     }
-    { fl = fence_line($0)
-      if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
+    BEGIN { md_prev_blank = 1 }
+    FNR == 1 && $0 == "---" { frontmatter = 1; next }
+    frontmatter { if ($0 == "---") frontmatter = 0; next }
+    !html_comment && !md_in_indent {
+      if (!fence) {
+        fo = fence_open($0)
+        if (fo != "") { fence = 1; fopen = fo; md_prev_blank = 0; next }
+      } else {
+        if (fence_close($0, fopen)) fence = 0
+        md_prev_blank = 0
+        next
+      }
+    }
     fence { next }
-    html_comment { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
-    /^[ \t]*<!--/ { if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
-    /^#{1,6} / {
-      level = $0; sub(/ .*/, "", level)
-      raw = $0
-      sub(/^#+ +/, "", raw)
+    !html_comment && is_indented_code_line($0) { next }
+    {
+      line = uncomment($0)
+      sub(/^( {0,3}> ?)+/, "", line)
+      if (line !~ /^ {0,3}#{1,6}[[:space:]]/) next
+      sub(/^ {0,3}/, "", line)
+      level = line; sub(/[[:space:]].*/, "", level)
+      raw = line
+      sub(/^#+[[:space:]]+/, "", raw)
       sub(/[[:space:]]+#+[[:space:]]*$/, "", raw)
       visible = strip_links(raw)
       gsub(/`|\*|~/, "", visible)
       sub(/^__/, "", visible); sub(/__$/, "", visible)
       visible = trim(visible)
+      if (max_depth > 0 && length(level) > max_depth) {
+        printf "%d\tdepth\tH%d\t%s\n", FNR, length(level), visible
+      }
       if (interrogatives) {
         bad = tolower(visible)
         gsub(/[^[:alnum:]]+/, " ", bad)
@@ -342,28 +695,77 @@ heading_issues_of() {
   ' "$1"
 }
 
-# Table header findings as line number, issue and visible cell text. Fences and HTML comments
-# do not contribute table rows; comments embedded within a line are removed before detection.
+# Authored-prose kind-plural findings as "line<TAB>found<TAB>expected".
+kind_plural_issues_of() {
+  awk "$AWK_LIB"'
+    BEGIN { md_prev_blank = 1 }
+    FNR == 1 && $0 == "---" { frontmatter = 1; next }
+    frontmatter { if ($0 == "---") frontmatter = 0; next }
+    !html_comment && !md_in_indent {
+      if (!fence) {
+        fo = fence_open($0)
+        if (fo != "") { fence = 1; fopen = fo; md_prev_blank = 0; next }
+      } else {
+        if (fence_close($0, fopen)) fence = 0
+        md_prev_blank = 0
+        next
+      }
+    }
+    fence { next }
+    !html_comment && is_indented_code_line($0) { next }
+    {
+      line = uncomment($0)
+      n = length(line)
+      i = 1
+      while (i <= n) {
+        ch = substr(line, i, 1)
+        if (ch == "\\") { i += 2; continue }
+        if (ch == "`") {
+          j = i
+          while (j <= n && substr(line, j, 1) == "`") j++
+          tlen = j - i
+          k = j
+          closed = 0
+          while (k <= n) {
+            if (substr(line, k, 1) == "`") {
+              ks = k
+              while (k <= n && substr(line, k, 1) == "`") k++
+              if (k - ks == tlen) { closed = ks; break }
+              continue
+            }
+            k++
+          }
+          if (closed > 0) {
+            inner = substr(line, j, closed - j)
+            if (length(inner) >= 2 && substr(inner, 1, 1) == " " && substr(inner, length(inner), 1) == " " && inner !~ /^ +$/) {
+              inner = substr(inner, 2, length(inner) - 2)
+            }
+            if (inner ~ /^(Pods|Nodes|Instances|ModelDeployments|ModelArtifacts|Workloads)$/) {
+              sing = substr(inner, 1, length(inner) - 1)
+              printf "%d\t`%s`\t`%s`s\n", FNR, inner, sing
+            } else if (inner == "Topology" || inner == "Devices") {
+              after = substr(line, k)
+              sub(/^(\*\*|__)/, "", after)
+              if (after ~ /^s([^[:alnum:]]|$)/) {
+                fix = (inner == "Topology") ? "`Topology` resources" : "`Devices` objects"
+                printf "%d\t`%s`s\t%s\n", FNR, inner, fix
+              }
+            }
+            i = k
+            continue
+          }
+          i = j
+          continue
+        }
+        i++
+      }
+    }
+  ' "$1"
+}
+
+# Table header findings as line number, issue and visible cell text.
 table_header_issues_of() {
   awk "$AWK_LIB"'
-    function uncomment(line,   start, end, out) {
-      out = ""
-      while (length(line)) {
-        if (comment) {
-          end = index(line, "-->")
-          if (!end) return out
-          line = substr(line, end + 3)
-          comment = 0
-        } else {
-          start = index(line, "<!--")
-          if (!start) return out line
-          out = out substr(line, 1, start - 1)
-          line = substr(line, start + 4)
-          comment = 1
-        }
-      }
-      return out
-    }
     function inspect(header, at,   n, cells, i, cell, words, count, tokens, j, word, bad, escaped_pipe) {
       sub(/^[[:space:]]*\|/, "", header)
       sub(/\|[[:space:]]*$/, "", header)
@@ -392,11 +794,12 @@ table_header_issues_of() {
     }
     {
       line = $0
-      if (!comment) {
-        fl = fence_line(line)
-        if (fl != "") {
-          if (!fence) { fence = 1; fopen = fl }
-          else if (fence_closes(fl, fopen)) fence = 0
+      if (!html_comment) {
+        if (!fence) {
+          fo = fence_open(line)
+          if (fo != "") { fence = 1; fopen = fo; previous = ""; next }
+        } else {
+          if (fence_close(line, fopen)) fence = 0
           previous = ""; next
         }
       }
@@ -409,30 +812,41 @@ table_header_issues_of() {
   ' "$1"
 }
 
-# Exercise both checks independently of the repository content.
+# Exercise style checks independently of the repository content.
 run_selftest() {
   cat > "$WORK/style-self-test.md" <<'STYLE_TEST'
 # WHAT is included
 ## Why now
+#### Too deep
+Bad `Pods` and `Topology`s but good `Pod`s and `--nodes`.
 | Valid | Which mode | The value |
 |---|---|---|
 ```
 # Where ignored
+#### Fence H4
+Bad `Nodes`
 | Who ignored |
 |---|
 ```
+
+    #### Indented H4 `Instances`
+
 <!--
 ## When ignored
+#### Comment H4 `Workloads`
 -->
 STYLE_TEST
-  heading_issues_of "$WORK/style-self-test.md" 1 > "$WORK/heading-test.out"
+  heading_issues_of "$WORK/style-self-test.md" 1 3 > "$WORK/heading-test.out"
   table_header_issues_of "$WORK/style-self-test.md" > "$WORK/table-test.out"
-  [ "$(wc -l < "$WORK/heading-test.out" | tr -d ' ')" -eq 2 ] &&
+  kind_plural_issues_of "$WORK/style-self-test.md" > "$WORK/plural-test.out"
+  [ "$(wc -l < "$WORK/heading-test.out" | tr -d ' ')" -eq 3 ] &&
     grep -q 'word.*what' "$WORK/heading-test.out" &&
     grep -q 'word.*why' "$WORK/heading-test.out" &&
+    grep -q 'depth.*H4' "$WORK/heading-test.out" &&
     [ "$(wc -l < "$WORK/table-test.out" | tr -d ' ')" -eq 2 ] &&
     grep -q 'word.*which' "$WORK/table-test.out" &&
-    grep -q 'word.*the' "$WORK/table-test.out"
+    grep -q 'word.*the' "$WORK/table-test.out" &&
+    [ "$(wc -l < "$WORK/plural-test.out" | tr -d ' ')" -eq 2 ]
 }
 
 if [ "$SELFTEST" -eq 1 ]; then
@@ -441,10 +855,10 @@ if [ "$SELFTEST" -eq 1 ]; then
   exit 1
 fi
 
-# The "## All pages" rows of the index, as "path<TAB>label".
-index_labels() {
-  awk '
-    /^## All pages/   { intable = 1; next }
+# Extract rows of a "## <Section>" table in docs/README.md as "lineno<TAB>target<TAB>label".
+index_section_rows() {
+  awk -v sec="$1" '
+    $0 == "## " sec   { intable = 1; found = 1; next }
     intable && /^## / { intable = 0 }
     intable && /^\| *\[/ {
       if (!match($0, /\[[^]]*\]\([^)]*\)/)) next
@@ -453,9 +867,19 @@ index_labels() {
       target = m; sub(/^\[[^]]*\]\(/, "", target); sub(/\)$/, "", target)
       sub(/#.*$/, "", target)
       sub(/^\.\//, "", target)
-      print target "\t" label
+      printf "%d\t%s\t%s\n", FNR, target, label
     }
+    END { if (!found) exit 1 }
   ' docs/README.md
+}
+
+# Expected docs/README.md section for a docs/<rel> file in strict three-zone mode.
+expected_zone_section() {
+  case "$1" in
+    reference/*) printf 'Reference\n' ;;
+    contribute/*) printf 'Contribute\n' ;;
+    *) printf 'All pages\n' ;;
+  esac
 }
 
 for f in $LINKED_PAGES; do
@@ -463,16 +887,17 @@ for f in $LINKED_PAGES; do
   anchors_of "$f" > "$(store_for "$f")"
 done
 
-# --- 1. links ---------------------------------------------------------------
+# Rule 1: links and strict three-zone isolation
 echo "==> links"
 for f in $LINKED_PAGES; do
   [ -f "$f" ] || continue
   dir=$(dirname "$f")
-  while IFS= read -r target; do
+  while IFS="$(printf '\t')" read -r _lineno target; do
     case "$target" in
-      http://*|https://*|mailto:*|"") continue ;;
+      http://*|https://*|HTTP://*|HTTPS://*|mailto:*|//*|/*|"") continue ;;
     esac
     path="${target%%#*}"
+    path="${path%%\?*}"
     anchor=""
     case "$target" in *#*) anchor="${target#*#}" ;; esac
 
@@ -498,7 +923,96 @@ for f in $LINKED_PAGES; do
   done < <(links_of "$f")
 done
 
-# --- 2. Contents, 3. footer ------------------------------------------------
+if [ "$STRICT_ZONES" -eq 1 ]; then
+  if [ -d "docs/reference" ]; then
+    while IFS= read -r subdir; do
+      [ -n "$subdir" ] || continue
+      err "$subdir: subdirectory forbidden under flat docs/reference/"
+    done < <(find docs/reference -mindepth 1 -type d | sort)
+  fi
+
+  PUBLIC_ZONE_PAGES=$( {
+    for f in $PAGES; do
+      case "$f" in
+        docs/README.md|docs/reference/*|docs/contribute/*) continue ;;
+      esac
+      printf '%s\n' "$f"
+    done
+    if [ -n "$SITE_CONTENT_PAGES" ]; then
+      printf '%s\n' "$SITE_CONTENT_PAGES"
+    fi
+  } | awk 'NF' )
+
+  for f in $PUBLIC_ZONE_PAGES; do
+    [ -f "$f" ] || continue
+    links_of "$f" | awk -F'\t' -v src="$f" "$AWK_LIB"'
+      function dir_of(p,   idx, k) {
+        k = 0
+        for (idx = length(p); idx >= 1; idx--) {
+          if (substr(p, idx, 1) == "/") { k = idx; break }
+        }
+        return (k > 0) ? substr(p, 1, k - 1) : "."
+      }
+      function strip_default_port(hostport, sch,   colon, host, port) {
+        hostport = tolower(hostport)
+        colon = index(hostport, ":")
+        if (!colon) return hostport
+        host = substr(hostport, 1, colon - 1)
+        port = substr(hostport, colon + 1)
+        if ((sch == "https" && port == "443") || (sch == "http" && port == "80") || (sch == "" && (port == "80" || port == "443"))) {
+          return host
+        }
+        return hostport
+      }
+      function is_excluded(u,   sch, rest, slash, host, upath, np, fdir, sc_sub, sc_dir, site_np) {
+        sub(/#.*$/, "", u)
+        sub(/\?.*$/, "", u)
+        if (u == "" || tolower(u) ~ /^(mailto|tel|javascript|data):/) return 0
+        if (u ~ /^([Hh][Tt][Tt][Pp][Ss]?:)?\/\//) {
+          sch = ""
+          rest = u
+          if (tolower(rest) ~ /^https:\/\//) { sch = "https"; sub(/^[Hh][Tt][Tt][Pp][Ss]:\/\//, "", rest) }
+          else if (tolower(rest) ~ /^http:\/\//) { sch = "http"; sub(/^[Hh][Tt][Tt][Pp]:\/\//, "", rest) }
+          else { sub(/^\/\//, "", rest) }
+          slash = index(rest, "/")
+          if (slash == 0) return 0
+          host = strip_default_port(substr(rest, 1, slash - 1), sch)
+          upath = norm_relpath(url_decode(substr(rest, slash + 1)))
+          if (host == "docs.gpustack.ai") {
+            return (upath ~ /^(gpustack-operator\/[^\/]+\/)?(reference|docs\/reference|docs\/contribute)(\/|$)/)
+          }
+          if (host == "github.com") {
+            return (upath ~ /^gpustack\/gpustack-operator\/(blob|tree)\/[^\/]+\/docs\/(reference|contribute)(\/|$)/)
+          }
+          return 0
+        }
+        if (substr(u, 1, 1) == "/") {
+          np = norm_relpath(url_decode(substr(u, 2)))
+          return (np ~ /^(gpustack-operator\/[^\/]+\/)?(reference|docs\/reference|docs\/contribute)(\/|$)/)
+        }
+        u = url_decode(u)
+        fdir = dir_of(src)
+        np = norm_relpath((fdir == "." ? "" : fdir "/") u)
+        if (np ~ /^docs\/(reference|contribute)(\/|$)/) return 1
+        if (src ~ /^site\/content\//) {
+          sc_sub = substr(src, length("site/content/") + 1)
+          sc_dir = dir_of(sc_sub)
+          site_np = norm_relpath((sc_dir == "." ? "" : sc_dir "/") u)
+          if (site_np ~ /^(reference|docs\/reference|docs\/contribute)(\/|$)/) return 1
+        }
+        return 0
+      }
+      {
+        if (is_excluded($2)) printf "%s:%s: public page links to excluded zone: %s\n", src, $1, $2
+      }
+    ' > "$WORK/iso"
+    while IFS= read -r issue; do
+      [ -n "$issue" ] && err "$issue"
+    done < "$WORK/iso"
+  done
+fi
+
+# Rules 2 and 3: Contents, footer, and reference hub checks
 echo "==> page structure"
 for f in $PAGES; do
   [ "$f" = "docs/README.md" ] && continue
@@ -506,7 +1020,21 @@ for f in $PAGES; do
   tail -n 12 "$f" | grep -q '^\*\*See also\*\*' \
     || err "$f: no '**See also**' footer at the end of the page"
 
-  if ! grep -q '^## Contents' "$f"; then
+  if [ "$STRICT_ZONES" -eq 1 ]; then
+    case "$f" in
+      docs/reference/*)
+        if has_next_footer "$f"; then
+          err "$f: reference page must omit '**Next**' footer"
+        fi
+        ;;
+    esac
+  fi
+
+  if [ "$STRICT_ZONES" -eq 1 ] && [ "$f" = "docs/reference/README.md" ]; then
+    if ! grep -q '^## Contents' "$f"; then
+      continue
+    fi
+  elif ! grep -q '^## Contents' "$f"; then
     err "$f: missing the '## Contents' list"
     continue
   fi
@@ -521,22 +1049,90 @@ for f in $PAGES; do
   fi
 done
 
-# --- 4. index coverage ------------------------------------------------------
-echo "==> docs/README.md index coverage"
-# Only the "## All pages" table counts — a mention on a reading path is not a registration.
-awk '/^## All pages/ { intable = 1; next } intable && /^## / { intable = 0 } intable' \
-  docs/README.md > "$WORK/allpages"
-[ -s "$WORK/allpages" ] || err "docs/README.md: no '## All pages' section"
-for f in $PAGES; do
-  [ "$f" = "docs/README.md" ] && continue
-  rel="${f#docs/}"
-  escaped=$(printf '%s' "$rel" | sed 's/[].[^$*\\/]/\\&/g')
-  if ! grep -qE "\(${escaped}[)#]" "$WORK/allpages"; then
-    err "$f: not in the '## All pages' table of docs/README.md"
-  fi
-done
+if [ "$STRICT_ZONES" -eq 1 ]; then
+  links_of "docs/reference/README.md" | awk -F'\t' "$AWK_LIB"'
+    {
+      u = $2
+      sub(/#.*$/, "", u)
+      sub(/\?.*$/, "", u)
+      if (u == "" || u ~ /^([Hh][Tt][Tt][Pp][Ss]?:|mailto:|\/)/) next
+      print norm_relpath("docs/reference/" url_decode(u))
+    }
+  ' | sort -u > "$WORK/hub-links"
+  for f in $PAGES; do
+    case "$f" in
+      docs/reference/README.md) continue ;;
+      docs/reference/*.md)
+        if ! grep -qxF "$f" "$WORK/hub-links"; then
+          err "$f: not linked from reference hub docs/reference/README.md"
+        fi
+        ;;
+    esac
+  done
+  while IFS= read -r hub_issue; do
+    [ -n "$hub_issue" ] && err "$hub_issue"
+  done < <(check_reference_hub_sections "docs/reference/README.md")
+fi
 
-# --- 5. paragraph cap, 6. line cap, 7. section cap --------------------------
+# Rule 4: docs/README.md index coverage
+echo "==> docs/README.md index coverage"
+if [ "$STRICT_ZONES" -eq 0 ]; then
+  awk '/^## All pages/ { intable = 1; next } intable && /^## / { intable = 0 } intable' \
+    docs/README.md > "$WORK/allpages"
+  [ -s "$WORK/allpages" ] || err "docs/README.md: no '## All pages' section"
+  for f in $PAGES; do
+    [ "$f" = "docs/README.md" ] && continue
+    rel="${f#docs/}"
+    escaped=$(printf '%s' "$rel" | sed 's/[].[^$*\\/]/\\&/g')
+    if ! grep -qE "\(${escaped}[)#]" "$WORK/allpages"; then
+      err "$f: not in the '## All pages' table of docs/README.md"
+    fi
+  done
+else
+  : > "$WORK/strict-labels"
+  for sec in "All pages" "Reference" "Contribute"; do
+    sec_file="$WORK/sec-$(printf '%s' "$sec" | tr ' ' '_')"
+    if ! index_section_rows "$sec" > "$sec_file"; then
+      err "docs/README.md: no '## $sec' section"
+      : > "$sec_file"
+      continue
+    fi
+    awk -F'\t' -v sec="$sec" '
+      {
+        seen[$2]++
+        if (seen[$2] > 1) printf "docs/README.md:%s: duplicate entry '\''%s'\'' in '\''## %s'\''\n", $1, $2, sec
+      }
+    ' "$sec_file" > "$WORK/sec-dups"
+    while IFS= read -r dup_msg; do
+      [ -n "$dup_msg" ] && err "$dup_msg"
+    done < "$WORK/sec-dups"
+
+    while IFS="$(printf '\t')" read -r lineno rel label; do
+      [ -n "$rel" ] || continue
+      printf '%s\t%s\t%s\n' "$sec" "$rel" "$label" >> "$WORK/strict-labels"
+      if [ ! -f "docs/$rel" ]; then
+        err "docs/README.md:$lineno: indexed page 'docs/$rel' in '## $sec' does not exist"
+        continue
+      fi
+      want_sec=$(expected_zone_section "$rel")
+      if [ "$want_sec" != "$sec" ]; then
+        err "docs/README.md:$lineno: 'docs/$rel' belongs in '## $want_sec', not '## $sec'"
+      fi
+    done < "$sec_file"
+  done
+
+  for f in $PAGES; do
+    [ "$f" = "docs/README.md" ] && continue
+    rel="${f#docs/}"
+    want_sec=$(expected_zone_section "$rel")
+    sec_file="$WORK/sec-$(printf '%s' "$want_sec" | tr ' ' '_')"
+    if ! awk -F'\t' -v r="$rel" '$2 == r { found = 1; exit } END { exit (found ? 0 : 1) }' "$sec_file"; then
+      err "$f: not in the '## $want_sec' table of docs/README.md"
+    fi
+  done
+fi
+
+# Rules 5-7: paragraph cap, line cap, section cap
 echo "==> size and shape"
 : > "$WORK/metrics"
 for f in $PAGES; do
@@ -558,41 +1154,57 @@ for f in $PAGES; do
     "$f" "$bytes" "$lines" "$h2" "$(wc -l < "$WORK/paras" | tr -d ' ')" >> "$WORK/metrics"
 done
 
-# --- 8. index label matches the page H1 -------------------------------------
+# Rule 8: index label matches page H1
 echo "==> docs/README.md index labels"
-index_labels > "$WORK/labels"
-for f in $PAGES; do
-  [ "$f" = "docs/README.md" ] && continue
-  label=$(awk -F'\t' -v r="${f#docs/}" '$1 == r { print $2; exit }' "$WORK/labels")
-  # An absent row is rule 4's finding, not this one's.
-  [ -n "$label" ] || continue
-  h1=$(h1_of "$f")
-  [ "$label" = "$h1" ] \
-    || shape_err "$f: index label '$label' is not the page's H1 '$h1'"
-done
+if [ "$STRICT_ZONES" -eq 0 ]; then
+  index_section_rows "All pages" > "$WORK/labels" || : > "$WORK/labels"
+  for f in $PAGES; do
+    [ "$f" = "docs/README.md" ] && continue
+    label=$(awk -F'\t' -v r="${f#docs/}" '$2 == r { print $3; exit }' "$WORK/labels")
+    [ -n "$label" ] || continue
+    h1=$(h1_of "$f")
+    [ "$label" = "$h1" ] \
+      || shape_err "$f: index label '$label' is not the page's H1 '$h1'"
+  done
+else
+  while IFS="$(printf '\t')" read -r sec rel label; do
+    [ -f "docs/$rel" ] || continue
+    h1=$(h1_of "docs/$rel")
+    [ "$label" = "$h1" ] \
+      || shape_err "docs/$rel: index label '$label' in '## $sec' is not the page's H1 '$h1'"
+  done < "$WORK/strict-labels"
+fi
 
-# --- 9. paths named as skill inputs -----------------------------------------
+# Rule 9: paths named as skill inputs
 echo "==> skill document paths"
-while IFS= read -r path; do
-  [ -f "$path" ] || err "$path: named in a skill but no longer exists"
-done < <(grep -RhoE 'docs/[[:alnum:]_./-]+\.md' .agents/skills --include='*.md' | sort -u)
+if [ -d ".agents/skills" ]; then
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    [ -f "$path" ] || err "$path: named in a skill but no longer exists"
+  done < <(grep -RhoE 'docs/[[:alnum:]_./-]+\.md' .agents/skills --include='*.md' | sort -u || true)
+fi
 
-# --- 10. authored heading limits and numbered heading case -----------------
+# Rule 10: authored heading limits, depth ceiling, and numbered heading case
 echo "==> heading limits and numbered heading case"
 for f in $HEADING_PAGES; do
   [ -f "$f" ] || continue
   check_interrogatives=0
+  max_depth=0
   case "$f" in README.md|docs/*) check_interrogatives=1 ;; esac
+  if [ "$STRICT_ZONES" -eq 1 ]; then
+    case "$f" in docs/*) max_depth="$MAX_HEADING_DEPTH" ;; esac
+  fi
   while IFS="$(printf '\t')" read -r at kind detail title; do
     case "$kind" in
+      depth) err "$f:$at: heading level $detail exceeds max depth H${MAX_HEADING_DEPTH}: '$title'" ;;
       case) err "$f:$at: capitalize the first word after the numbered prefix: '$title'" ;;
       length) err "$f:$at: heading topic is $detail; cap is ${HEADING_WORD_CAP} words / ${HEADING_CHAR_CAP} characters: '$title'" ;;
       word) err "$f:$at: heading contains interrogative word '$detail': '$title'" ;;
     esac
-  done < <(heading_issues_of "$f" "$check_interrogatives")
+  done < <(heading_issues_of "$f" "$check_interrogatives" "$max_depth")
 done
 
-# --- 11. table header limits -----------------------------------------------
+# Rule 11: table header limits
 echo "==> table header limits"
 cat > "$WORK/table-self-test.md" <<'TABLE_TEST'
 | Four word header here | The value | [This](https://example.com) | **Valid** |
@@ -616,6 +1228,7 @@ if [ "$(wc -l < "$WORK/table-self-test.out" | tr -d ' ')" -ne 3 ] || \
   err "table header checker self-test failed"
 fi
 for f in README.md $PAGES; do
+  [ -f "$f" ] || continue
   while IFS="$(printf '\t')" read -r at kind detail cell; do
     case "$kind" in
       length) err "$f:$at: table header has $detail; expected 1 to 3: '$cell'" ;;
@@ -623,6 +1236,23 @@ for f in README.md $PAGES; do
     esac
   done < <(table_header_issues_of "$f")
 done
+
+# Rule 12: authored-prose kind-plural check (strict mode; docs/** and site/content/** only)
+if [ "$STRICT_ZONES" -eq 1 ]; then
+  echo "==> authored-prose kind plurals"
+  PLURAL_PAGES=$( {
+    printf '%s\n' "$PAGES"
+    if [ -n "$SITE_CONTENT_PAGES" ]; then
+      printf '%s\n' "$SITE_CONTENT_PAGES"
+    fi
+  } | awk 'NF' )
+  for f in $PLURAL_PAGES; do
+    [ -f "$f" ] || continue
+    while IFS="$(printf '\t')" read -r at bad fix; do
+      err "$f:$at: malformed kind plural $bad in authored prose; write $fix"
+    done < <(kind_plural_issues_of "$f")
+  done
+fi
 
 if [ "$REPORT" -eq 1 ]; then
   echo

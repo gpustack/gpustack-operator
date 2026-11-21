@@ -372,9 +372,9 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
       Acceptance: Updates `conventions.md` with the three-zone boundary rules, Walkthrough vs Configuration vs Benchmark prose standards (including concrete before/after examples), the shared Glossary & Singular/Plurality Table, `H1`–`H3` heading ceiling, GFM footnote rules, and `docs/reference/README.md` structural policy without breaking existing `docs/` path checks.
       Verify: `make lint docs`
 
-- [ ] **T4 · Three-zone lint, singular/plural checker, and Markdown anchor verification gates**
+- [x] **T4 · Three-zone lint, singular/plural checker, and Markdown anchor verification gates**
       Blocked by: T1
-      Owns: `.agents/skills/gpustack-operator-docs/scripts/check-docs.sh`, `.agents/skills/gpustack-operator-docs/scripts/check-docs-selftest.sh`, `hack/check/agent-index.py`, `hack/check/test_agent_index.py`, `hack/check/site-links.py`
+      Owns: `.agents/skills/gpustack-operator-docs/scripts/check-docs.sh`, `.agents/skills/gpustack-operator-docs/scripts/check-docs-selftest.sh`, `hack/check/agent-index.py`, `hack/check/test_agent_index.py`, `hack/check/site-links.py`, `site/layouts/partials/markdown-content.html`
       Gate: review
       Acceptance: Adds onetrueawk-compatible checks in `check-docs.sh` (with positive/negative cases in `check-docs-selftest.sh`) for `MAX_HEADING_DEPTH=3`, flat `docs/reference/`, one-way link isolation across `docs/` and `site/content/`, three-table `docs/README.md` (`All pages`, `Reference`, `Contribute`) + `docs/reference/README.md` policy, and authored-prose kind-plural lint (catching `` `Pods` `` / `` `Nodes` `` / `` `Instances` `` / `` `Topology`s `` while exempting literal tokens, CLI flags, API paths, fences, and captured output). Updates `agent-index.py` + `test_agent_index.py` and `site-links.py` for zero excluded HTML/search/sitemap leaks, bi-directional `/llms.txt` parity, and `/reference/*.md` `#anchor` validation (duplicate slugs, multiline links, footnotes, code-block lookalikes). Strict three-zone mode activates automatically when `docs/reference/README.md` is present so current `main` stays green until T8.
       Verify: `bash .agents/skills/gpustack-operator-docs/scripts/check-docs-selftest.sh . && python3 -m unittest -v hack/check/test_agent_index.py && make lint docs`
