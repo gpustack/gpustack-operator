@@ -140,306 +140,25 @@ node-t4-b
   **T4** `4/5 40/50 100/500 0/0` (5 = `node-t4-a`'s 1 + `node-t4-b`'s 4, none partitioned).
 - **No `Devices` for `node-cpu`** — it carries no accelerator.
 
-One of each kind, from the A10G node:
+Inspect each generated layer on `node-a10g` with `kubectl get <kind> <name> -o yaml`:
 
-### Node
-
-Labeled by two `NodeFeature`s: `node-a10g-gpustack-worker` (the `general.*` CPU keys + `managed`) and
-`node-a10g-gpustack-device-manager` (the `acceleratable.*` device keys):
-
-```yaml
-apiVersion: v1
-kind: Node
-metadata:
-  name: node-a10g
-  labels:
-    kubernetes.io/os: linux
-    kubernetes.io/arch: amd64
-    gpustack.ai/managed: "true"
-    general.feature.gpustack.ai/amd: "true"
-    general.feature.gpustack.ai/amd-epyc-7r32: "true"
-    general.feature.gpustack.ai/amd-epyc-7r32.count: "4"
-    acceleratable.feature.gpustack.ai/nvidia: "true"
-    acceleratable.feature.gpustack.ai/nvidia-a10g: "true"
-    acceleratable.feature.gpustack.ai/nvidia-a10g.count: "1"
-    acceleratable.feature.gpustack.ai/nvidia-a10g.memory: "24Gi"
-    acceleratable.feature.gpustack.ai/nvidia-a10g.cores: "10240"
-    acceleratable.feature.gpustack.ai/nvidia-a10g.family: "Ampere"
-    acceleratable.feature.gpustack.ai/nvidia-a10g.product: "NVIDIA-A10G"
-    acceleratable.feature.gpustack.ai/nvidia-a10g.comcap: "8.6"
-    acceleratable.feature.gpustack.ai/nvidia.driver-version: "580.159.03"
-    acceleratable.feature.gpustack.ai/nvidia.runtime-version: "13.0"
-```
-
-### Devices
-
-Cluster-scoped, named after the node: the worker stamps `gpustack.ai/managed` + the real CPU key, the
-Device Manager the accelerator key and the `.status` ledger:
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: Devices
-metadata:
-  name: node-a10g
-  labels:
-    kubernetes.io/os: linux
-    kubernetes.io/arch: amd64
-    gpustack.ai/managed: "true"
-    general.feature.gpustack.ai/amd-epyc-7r32: "true"
-    acceleratable.feature.gpustack.ai/nvidia-a10g: "true"
-status:
-  groups:
-    - id: a10g
-      manufacturer: nvidia
-      accelerators:
-        - id: GPU-e0587d2e-127c-4fb8-e2c1-6e517529f575
-          index: 0
-          mode: 0
-          remaining: 1600000  # per-accelerator credit ledger the AdmissionCheck reads
-```
-
-### ResourceFlavor
-
-The finest, setting-independent grain, `gpustack--${gKey}[--${aKey}]-${os}-${arch}-${count}{c|d}`. An
-**accelerated** one carries `feature.gpustack.ai/acceleratable=true`, both the CPU (`general.`) and
-device (`acceleratable.`) keys, and pins nodes via *`spec.nodeLabels`*:
-
-```yaml
-apiVersion: kueue.x-k8s.io/v1beta2
-kind: ResourceFlavor
-metadata:
-  name: gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64-1d
-  labels:
-    kubernetes.io/os: linux
-    kubernetes.io/arch: amd64
-    feature.gpustack.ai/acceleratable: "true"
-    general.feature.gpustack.ai/amd-epyc-7r32: "true"
-    acceleratable.feature.gpustack.ai/nvidia-a10g: "true"
-    acceleratable.feature.gpustack.ai/nvidia-a10g.count: "1"     # per-node accelerator count
-    acceleratable.feature.gpustack.ai/nvidia-a10g.capacity: "1"  # pooled capacity (nodes × count)
-    resource.gpustack.ai/type: nodes  # operator-owned marker
-spec:
-  nodeLabels:
-    kubernetes.io/os: linux
-    kubernetes.io/arch: amd64
-    gpustack.ai/managed: "true"
-    general.feature.gpustack.ai/amd-epyc-7r32: "true"
-    acceleratable.feature.gpustack.ai/nvidia-a10g: "true"
-    acceleratable.feature.gpustack.ai/nvidia-a10g.count: "1"
-```
-
-A **non-accelerated** (CPU) flavor carries `feature.gpustack.ai/acceleratable=false`, its capacity the
-node's CPU-core count:
-
-```yaml
-apiVersion: kueue.x-k8s.io/v1beta2
-kind: ResourceFlavor
-metadata:
-  name: gpustack--amd-epyc-7r13-linux-amd64-16c
-  labels:
-    kubernetes.io/os: linux
-    kubernetes.io/arch: amd64
-    feature.gpustack.ai/acceleratable: "false"
-    general.feature.gpustack.ai/amd-epyc-7r13: "true"
-    general.feature.gpustack.ai/amd-epyc-7r13.count: "16"
-    general.feature.gpustack.ai/amd-epyc-7r13.capacity: "16"
-    resource.gpustack.ai/type: nodes
-spec:
-  nodeLabels:
-    kubernetes.io/os: linux
-    kubernetes.io/arch: amd64
-    gpustack.ai/managed: "true"
-    general.feature.gpustack.ai/amd-epyc-7r13: "true"
-    general.feature.gpustack.ai/amd-epyc-7r13.count: "16"
-```
-
-### ClusterQueue
-
-One isolated pool per accelerator, covering the manufacturer's `credits` and gating admission with the
-per-accelerator `AdmissionCheck`. With awareness off its labels carry **no** `general.` key, so it
-aggregates the A10G across every CPU:
-
-```yaml
-apiVersion: kueue.x-k8s.io/v1beta2
-kind: ClusterQueue
-metadata:
-  name: gpustack--nvidia-a10g-linux-amd64
-  labels:
-    kubernetes.io/os: linux
-    kubernetes.io/arch: amd64
-    feature.gpustack.ai/acceleratable: "true"
-    acceleratable.feature.gpustack.ai/nvidia-a10g: "true"
-    resource.gpustack.ai/type: instancetypes
-spec:
-  admissionChecksStrategy:
-    admissionChecks:
-      - name: gpustack-node-devices
-  resourceGroups:
-    - coveredResources:
-        - credits.gpustack.ai/nvidia
-      flavors:
-        - name: gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64-1d
-          resources:
-            - name: credits.gpustack.ai/nvidia
-              nominalQuota: 1600k
-```
-
-### InstanceType
-
-The schedulable pool: webhook-stamped labels (schedule discriminators, `derived-from-node` provenance,
-the fronting `queue-entrance`), *`spec`* enriched from the matching flavor, *`status`* the reconciled
-four-view:
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: InstanceType
-metadata:
-  name: gpustack--nvidia-a10g-linux-amd64
-  labels:
-    kubernetes.io/os: linux
-    kubernetes.io/arch: amd64
-    feature.gpustack.ai/acceleratable: "true"
-    acceleratable.feature.gpustack.ai/nvidia-a10g: "true"
-    schedule.gpustack.ai/derived-from-node: "true"
-    schedule.gpustack.ai/queue-entrance: gpustack-fnv64-c4680bb149644f1c
-spec:
-  acceleratable: true
-  acceleratorGroup: nvidia-a10g
-  generalGroup: generic  # aggregated because CPU awareness is disabled
-  os: linux
-  arch: amd64
-  manufacturer: nvidia
-  product: NVIDIA-A10G
-  family: Ampere
-  memory: 24Gi
-  cores: "10240"
-  feature:
-    logicalSliced:
-      maxSize: 128
-      coresPercentageOvercommit: true
-      memoryPercentageStep: 1
-    physicalSliced:
-      maxSize: 0
-  unitResources:  # the nvidia-a10g preset, not a fixed default
-    cpu: "8"
-    ram: 64Gi
-  localStorage: 100Gi
-status:
-  phase: Active
-  accelerator:
-    capacity: "1"
-    onceMaxRequest: "1"
-    remaining: "1"
-  acceleratorShared:
-    capacity: "10"
-    onceMaxRequest: "10"
-    remaining: "10"
-  acceleratorSliced:
-    capacity: "100"
-    onceMaxRequest: "100"
-    remaining: "100"
-  acceleratorPartitioned:  # no accelerator here is in a partitioning mode
-    capacity: "0"
-    onceMaxRequest: "0"
-    remaining: "0"
-  entrance: gpustack-fnv64-c4680bb149644f1c
-```
-
-### InstanceTypeFlavor
-
-An os/arch-agnostic catalog view aggregated read-only from the flavors, with **no
-*`metadata.labels`*** — its grouping identity lives in *`spec`*:
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: InstanceTypeFlavor
-metadata:
-  name: gpustack--nvidia-a10g
-spec:
-  acceleratable: true
-  acceleratorGroup: nvidia-a10g
-  manufacturer: nvidia
-  product: NVIDIA-A10G
-  memory: 24Gi
-  cores: "10240"
-  sliceable: true
-```
+| Kind | Object on `node-a10g` | Key fields |
+|---|---|---|
+| `Node` | `node-a10g` | `gpustack.ai/managed: "true"`, `general.feature.gpustack.ai/amd-epyc-7r32*`, `acceleratable.feature.gpustack.ai/nvidia-a10g*` |
+| `Devices` | `node-a10g` | `status.groups[].accelerators[]` with `remaining: 1600000` credits per card |
+| `ResourceFlavor` | `gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64-1d` | `feature.gpustack.ai/acceleratable: "true"`, `spec.nodeLabels` pinning managed nodes |
+| `ClusterQueue` | `gpustack--nvidia-a10g-linux-amd64` | `admissionChecks: [gpustack-node-devices]`, `credits.gpustack.ai/nvidia: 1600k` |
+| `InstanceType` | `gpustack--nvidia-a10g-linux-amd64` | `spec.unitResources` (`8` CPU / `64Gi` RAM preset), `status` four-view (`EX`/`SH`/`SL`/`PT`) |
+| `InstanceTypeFlavor` | `gpustack--nvidia-a10g` | OS/arch-agnostic catalog entry carrying `product`, `memory`, `cores`, `sliceable` |
 
 ## Step 2: Remove a managed node
 
-A node stays in a pool only while it carries `gpustack.ai/managed=true`, required by the flavor's
-*`spec.nodeLabels`* and stamped through the node's worker `NodeFeature`.
-
-**Before** — `node-a10g` managed:
-
-```bash
-kubectl get instancetypes
-```
-
-Captured output:
-
-```text
-NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
-gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
-gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
-gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
-```
-
-The worker writes one `NodeFeature` per node, in `gpustack-system`, named `<node>-gpustack-worker`.
-This is the one for `node-a10g`,
-which carries the managed label and the CPU keys from the `Node` above:
-
-```yaml
-apiVersion: nfd.k8s-sigs.io/v1alpha1
-kind: NodeFeature
-metadata:
-  name: node-a10g-gpustack-worker
-  namespace: gpustack-system
-  labels:
-    nfd.node.kubernetes.io/node-name: node-a10g
-    app.kubernetes.io/part-of: gpustack-operator-worker
-spec:
-  labels:
-    gpustack.ai/managed: "true"
-    general.feature.gpustack.ai/amd: "true"
-    general.feature.gpustack.ai/amd-epyc-7r32: "true"
-    general.feature.gpustack.ai/amd-epyc-7r32.count: "4"
-```
-
-Flip that label off:
+A node stays in a pool only while its worker `NodeFeature` (`gpustack-system/<node>-gpustack-worker`)
+publishes `gpustack.ai/managed=true`. Flip that label to `"false"` on `node-a10g`:
 
 ```bash
 kubectl -n gpustack-system patch nodefeature node-a10g-gpustack-worker \
     --type=merge -p '{"spec":{"labels":{"gpustack.ai/managed":"false"}}}'
-```
-
-Captured output:
-
-```text
-nodefeature.nfd.k8s-sigs.io/node-a10g-gpustack-worker patched
-```
-
-```diff
- apiVersion: nfd.k8s-sigs.io/v1alpha1
- kind: NodeFeature
- metadata:
-   name: node-a10g-gpustack-worker
-   namespace: gpustack-system
-   labels:
-     nfd.node.kubernetes.io/node-name: node-a10g
-     app.kubernetes.io/part-of: gpustack-operator-worker
- spec:
-   labels:
--    gpustack.ai/managed: "true"
-+    gpustack.ai/managed: "false"
-     general.feature.gpustack.ai/amd: "true"
-     general.feature.gpustack.ai/amd-epyc-7r32: "true"
-     general.feature.gpustack.ai/amd-epyc-7r32.count: "4"
-```
-
-**After** — NFD propagates it; the operator retires the now-nodeless A10G flavor:
-
-```bash
 kubectl get instancetypes
 ```
 
@@ -452,43 +171,16 @@ gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-Two rows move: the A10G to `0/0 0/0 0/0` (its `ResourceFlavor` is deleted), and the generic **CPU**
-`48/72` → `48/68`, as `node-a10g`'s 4 cores leave the pool.
+The A10G pool drops to `0/0 0/0 0/0 0/0` (its `ResourceFlavor` is deleted), and generic **CPU**
+moves from `48/72` to `48/68` as `node-a10g`'s 4 cores leave.
 
-Re-admit it and one reconcile rebuilds the flavor and restores the counts:
+Re-admit `node-a10g` by patching `gpustack.ai/managed` back to `"true"`; one reconcile rebuilds the
+flavor and restores A10G to `1/1 10/10 100/100 0/0` and generic CPU to `48/72`:
 
 ```bash
 kubectl -n gpustack-system patch nodefeature node-a10g-gpustack-worker \
     --type=merge -p '{"spec":{"labels":{"gpustack.ai/managed":"true"}}}'
-
 kubectl get instancetypes
-```
-
-Captured output:
-
-```text
-NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
-gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
-gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
-gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
-```
-
-```diff
- apiVersion: nfd.k8s-sigs.io/v1alpha1
- kind: NodeFeature
- metadata:
-   name: node-a10g-gpustack-worker
-   namespace: gpustack-system
-   labels:
-     nfd.node.kubernetes.io/node-name: node-a10g
-     app.kubernetes.io/part-of: gpustack-operator-worker
- spec:
-   labels:
--    gpustack.ai/managed: "false"
-+    gpustack.ai/managed: "true"
-     general.feature.gpustack.ai/amd: "true"
-     general.feature.gpustack.ai/amd-epyc-7r32: "true"
-     general.feature.gpustack.ai/amd-epyc-7r32.count: "4"
 ```
 
 ## Step 3: Request a logical slice
@@ -770,43 +462,10 @@ gpustack--nvidia-a10g-linux-amd64                  gpustack-fnv64-c4680bb149644f
 `custom-demo` goes `Ready` on the aware pool, which drops to `0/0 0/0 0/0`, and the collapsed
 `gpustack--nvidia-a10g-linux-amd64` also drops: one accelerator, two consistent views.
 
-The re-derive also creates an aware `ClusterQueue`. It is a second object beside the collapsed
-`gpustack--nvidia-a10g-linux-amd64` queue from Step 1, and its labels **carry the CPU key**:
-
-```yaml
-apiVersion: kueue.x-k8s.io/v1beta2
-kind: ClusterQueue
-metadata:
-  name: gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64
-  labels:
-    kubernetes.io/os: linux
-    kubernetes.io/arch: amd64
-    feature.gpustack.ai/acceleratable: "true"
-    acceleratable.feature.gpustack.ai/nvidia-a10g: "true"
-    general.feature.gpustack.ai/amd-epyc-7r32: "true"  # CPU key added when CPU awareness is enabled
-    resource.gpustack.ai/type: instancetypes
-```
-
-The `InstanceTypeFlavor` catalog re-groups to per-`(gKey,aKey)` + per-`gKey`, replacing the collapsed
-rows:
-
-```bash
-kubectl get instancetypeflavor
-```
-
-Captured output:
-
-```text
-NAME                                                    GENERALGROUP                 ACCELERATORGROUP   ACCELERATABLE   MANUFACTURER   PRODUCT                                          MEMORY   CORES   SLICEABLE
-gpustack--amd-epyc-7r13                                 amd-epyc-7r13                                   false           amd            AMD EPYC 7R13 Processor
-gpustack--amd-epyc-7r32                                 amd-epyc-7r32                                   false           amd            AMD EPYC 7R32
-gpustack--intel-xeon-platinum-8259cl                    intel-xeon-platinum-8259cl                      false           intel          Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz
-gpustack--amd-epyc-7r32--nvidia-a10g                    amd-epyc-7r32                nvidia-a10g        true            nvidia         NVIDIA-A10G                                      24Gi     10240   true
-gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4   intel-xeon-platinum-8259cl   nvidia-tesla-t4    true            nvidia         Tesla-T4                                         16Gi     2560    true
-```
-
-The `ResourceFlavor` set is byte-for-byte unchanged, the same 7 as Step 1: the flip re-grouped
-only the aggregation layer.
+The aware `ClusterQueue` (`gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64`) carries
+`general.feature.gpustack.ai/amd-epyc-7r32: "true"`, and `kubectl get instancetypeflavor` now lists
+five per-CPU and per-`(gKey,aKey)` rows in place of the collapsed three. The `ResourceFlavor` set
+stays byte-for-byte unchanged (`7` objects):
 
 ```bash
 kubectl get resourceflavor --no-headers | wc -l
@@ -818,7 +477,7 @@ Captured output:
 7
 ```
 
-Turning it back off collapses the layer again, still without touching a flavor.
+Turning CPU awareness back off collapses the aggregation layer again without touching a flavor.
 
 ## Step 6: Instance pinning and volumes
 

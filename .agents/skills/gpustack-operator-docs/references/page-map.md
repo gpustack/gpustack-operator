@@ -499,13 +499,37 @@ transition, so do not "modernize" its version numbers.
 
 ## `docs/reference/*.md`
 
-**Owns** — flat LLM lookup tables, mechanical contracts, API matrices, telemetry catalogs and
-simulations, off the human HTML site and exported as `/reference/*.md` via `/llms.txt`. Today:
-the hub (`docs/reference/README.md`), the per-product unit-resources presets
+**Owns** — flat LLM lookup tables, mechanical contracts, API matrices, telemetry catalogs, raw
+captures and simulations, off the human HTML site and exported as `/reference/*.md` via `/llms.txt`.
+Today: the hub (`docs/reference/README.md`), the per-product unit-resources presets
 (`docs/reference/instance-type-unit-resources.md`), every command the binary offers with its flags
 and exit codes (`docs/reference/commands.md`), runtime settings (`docs/reference/settings.md`),
 KV cache Pod injection (`docs/reference/kv-cache-injection.md`), Instance utilization metrics
-(`docs/reference/instances-metrics.md`), and the `<module>-<topic>.md` mechanical contracts above.
+(`docs/reference/instances-metrics.md`), the `<module>-<topic>.md` mechanical contracts above, and
+the seven extracted reference appendices below:
+
+- `docs/reference/ascend-a5-matrix.md` — single canonical Ascend A5 UB/UBG/UBoE/Host RoCE rendering,
+  ranktable, conditional host mount and scenario matrix deduplicated across `vendor-prerequisites.md`,
+  `devices/preflight.md`, `kv-cache/backend.md`, `model-delivery/remote.md` and
+  `model-deployment/prefill-decode.md`.
+- `docs/reference/devices-mig-transcripts.md` — verbatim three-configuration H100 MIG capture
+  extracted from `docs/modules/devices/nvidia-mig.md` (which keeps operational steps, capacity
+  accounting and verification summary).
+- `docs/reference/devices-scheduling-capture.md` — raw multi-object `kubectl` YAML capture archive
+  extracted from `docs/walkthroughs/devices/scheduling.md` (which keeps the reproducible walkthrough,
+  concise excerpts and `unitResources` sizing guidance).
+- `docs/reference/kv-cache-backend-internals.md` — exhaustive Mooncake rendering, env/argv mapping,
+  fabric privilege derivation, full condition catalog and teardown mechanics extracted from
+  `docs/modules/kv-cache/backend.md`.
+- `docs/reference/model-delivery-remote-internals.md` — source-memory arithmetic walkthroughs,
+  manifest/journal bounds, reader session protocol, ModelExpress injected environment and raw
+  benchmark host budgets extracted from `docs/modules/model-delivery/remote.md`.
+- `docs/reference/model-deployment-internals.md` — `Pod` label/annotation metadata, exhaustive
+  operator-owned key matrix, render-version upgrade mechanics, full refusal catalog and Ascend
+  transfer port formulas extracted from `docs/modules/model-deployment/configuration.md`.
+- `docs/reference/model-deployment-scaling-internals.md` — capacity-prior catalog schema,
+  whole-unit disaggregated math, identity normalization, persistence internals, full status schemas
+  and local synthetic evaluation bounds extracted from `docs/modules/model-deployment/scaling.md`.
 
 **Not** — `docs/reference/commands.md` states what a flag does, not when to reach for the command. The procedure a
 one-shot belongs to lives on its operator page (`docs/modules/devices/preflight.md` for `device-manager

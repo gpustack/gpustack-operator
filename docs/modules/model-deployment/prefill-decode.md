@@ -352,26 +352,23 @@ carries no host path.
 ### Ascend A5 topologies
 
 On Ascend A5 (`AcceleratorType` *`status.detail.family`* `"950"`, `Ascend950PR` and `Ascend950DT`),
-`ModelDeployment` selects communication resources from the engine and *`roles[].resources.interface`*.
-Ascend A2 and A3 (`family` other than `"950"`) retain legacy rendering unchanged.
+`ModelDeployment` selects on-die UnifiedBus (*UB*) / Unified Remote Memory Access (*URMA*) versus
+Linux Host RDMA (*Host RoCE*) from the engine and *`roles[].resources.interface`*. Ascend A2 and A3
+retain legacy rendering unchanged.
 
-Ascend A5 distinguishes on-die UnifiedBus (*UB*) / Unified Remote Memory Access (*URMA*) from
-Linux Host RDMA (*Host RoCE*):
-
-- **UB and URMA (`interface: 0`)**: `Node`s publish `fabric.kind=ub` (see [RDMA Operations](../rdma/operations.md)); workloads omit *`resources.interface`* and request no Linux RDMA devices.
-- **Host RoCE (`interface > 0`)**: Workloads set *`roles[].resources.interface > 0`* on `vLLM` roles with converged `family` `"950"`.
-- **RDMA resource keys**: Operator grants `device.gpustack.ai/rdma.shared` (`1`) or `device.gpustack.ai/rdma` (`> 1`), never AWS EFA.
-
-The table below maps each Ascend A5 topology to its interface request and operator behavior:
-
-| Scenario | Interface | Operator selection | User requirement |
-|---|---|---|---|
-| **UB (`ub_ctp`)**, intra-SuperPod | `0` (omitted) | Selects on-die UB/URMA defaults (`vLLM` in-memory auto-gen, `SGLang` URMA transfer) with no `/etc/hixlep` mount. | Managed role; omit *`resources.interface`*. |
-| **UBG (`ub_rtp:device`)**, cross-SuperPod | `0` (omitted) | Same on-die UB path with no `/etc/hixlep` mount. | Pass `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`roles[].env`*. |
-| **UBoE (`uboe:device`)** | `0` (omitted) | Same on-die UB path with no `/etc/hixlep` mount. | Pass `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`roles[].env`*. |
-| **Host RoCE (`roce:host`)** | `> 0` on both `Prefill` and `Decode`, or `KVCache` `Server` | Grants `device.gpustack.ai/rdma*` and enables the `vLLM` Host RoCE endpoint path and read-only `/etc/hixlep` mount. | `vLLM` only with converged `"950"`; admin provisions [host endpoint files](../../getting-started/vendor-prerequisites.md#a5-host-roce-endpoints). |
-| **Aggregated `Server`** (no KV connector) | `0`, or `> 0` on multi-Pod/Elastic EP `vLLM` | Renders no KV connector or A5 transfer resources. | Set `interface > 0` only on multi-Pod or Elastic EP `vLLM` `Server` roles. |
-| **Constrained static-UB fallback** | `0` (omitted) | Skips operator CLI and KV/transfer env synthesis; marks `status.roles[].unmanaged: true`. | Use *`roles[].command`* take-over and *`additionalVolumes`* with admin `instance-host-path-volume-allowed` enabled. |
+- **UB, UBG and UBoE (`interface: 0`)**: Omit *`resources.interface`* on `fabric.kind=ub` nodes
+  (see [RDMA Operations](../rdma/operations.md)). The operator selects on-die UB/URMA defaults with
+  no `/etc/hixlep` mount; pass `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`roles[].env`* for UBG
+  (`ub_rtp:device`) or UBoE (`uboe:device`).
+- **Host RoCE (`interface > 0`)**: Set *`resources.interface > 0`* on both `Prefill` and `Decode`
+  (or `KVCache` `Server`) for `vLLM` roles with converged `"950"`. The operator grants
+  `device.gpustack.ai/rdma.shared` (`1`) or `device.gpustack.ai/rdma` (`> 1`), mounts `/etc/hixlep`
+  read-only, and sets outer `ascend_local_comm_res_path`. Provision
+  [host endpoint files](../../getting-started/vendor-prerequisites.md#a5-host-roce-endpoints) first.
+- **Constraints**: Asymmetric *PD* interfaces fail admission; `Encode` and `SGLang` never receive
+  `/etc/hixlep` on KV paths (`SGLang` A5 *PD* rejects *`interface > 0`* unless a bound `KVCache`
+  pool uses `RDMA`). Static-UB take-over via *`roles[].command`* needs
+  `instance-host-path-volume-allowed: "true"`.
 
 Example Ascend A5 Host RoCE *PD* deployment with a shared `CANN` `KVCache` pool:
 
@@ -411,12 +408,9 @@ spec:
         interface: 1  # grants device.gpustack.ai/rdma.shared
 ```
 
-- **Symmetric pair interfaces**: Set *`resources.interface > 0`* on both `Prefill` and `Decode`; asymmetric requests fail admission.
-- **Outer connector path**: Operator sets `ascend_local_comm_res_path` on outer `kv_connector_extra_config` (including `MultiConnector`), never child connectors.
-- **Mount yielding**: User *`additionalVolumes`* at `/etc/hixlep` replaces `gpustack-ascend-hixlep` while keeping `ascend_local_comm_res_path`.
-- **Unsupported roles**: `RoleEncode` (`kind: Encode`) and `SGLang` never receive `/etc/hixlep` or `ASCEND_LOCAL_COMM_RES`.
-- **SGLang interfaces**: `SGLang` A5 *PD* rejects *`resources.interface > 0`* unless a bound `KVCache` pool uses `RDMA`.
-- **Host-path permission**: Operator-managed `/etc/hixlep` works with `instance-host-path-volume-allowed` at `false`; static-UB *`command`* take-over needs `true`.
+User *`additionalVolumes`* at `/etc/hixlep` replaces the operator mount while keeping the outer
+connector path. Operator-managed `/etc/hixlep` works with `instance-host-path-volume-allowed` set
+to `false`.
 
 ### AWS EFA
 

@@ -52,8 +52,11 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | Topic | Page |
 |---|---|
 | Flat LLM reference navigation hub: task routing, exact API/field/condition aliases, and evidence labels | `docs/reference/README.md` |
+| Ascend A5 canonical UB/UBG/UBoE/Host RoCE rendering, ranktable, conditional host mount and scenario matrices | `docs/reference/ascend-a5-matrix.md` |
 | NFD labels, the `gpustack-cpu-info` rule, the manufacturer map | `docs/reference/devices-discovery.md` |
 | Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/reference/devices-discovery.md` |
+| Verbatim three-configuration H100 NVIDIA MIG live transcripts | `docs/reference/devices-mig-transcripts.md` |
+| Raw multi-object `kubectl` YAML captures from the scheduling walkthrough | `docs/reference/devices-scheduling-capture.md` |
 | The NIC/RDMA interface inventory, `pciRootId`/`pciSwitches`, the three link states, the `rdma.*` node labels, the RDMA resource keys | `docs/reference/rdma-network-topology.md` |
 | Capacity labels, flavor/queue/AcceleratorType/InstanceType naming and grouping, the scheduling controllers | `docs/reference/devices-scheduling.md` |
 | Topograph's boundary, `TopologySource`, topology profiles, Kueue Topologies and TAS capacity semantics, and the placement preference toward nodes holding a model | `docs/reference/topology-scheduling.md` |
@@ -61,6 +64,7 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/operate/installation-modes.md` |
 | Startup ordering, the gateway mirror, the device-plugin registration loop, per-manufacturer packages, CGO bindings, the 63-char rule | `docs/contribute/internals.md` |
 | A `KVCacheBackend`'s workloads, its admin surface, its phase or capacity | `docs/modules/kv-cache/backend.md` |
+| `KVCacheBackend` rendering internals, Mooncake env/argv mapping, full condition catalog and teardown mechanics | `docs/reference/kv-cache-backend-internals.md` |
 | The leader process itself: its Deployment, Service, probes, health document and Lease election | `docs/modules/kv-cache/leader.md` |
 | The local disk tier itself: what it renders, its bucket, its eviction, its host directory | `docs/modules/kv-cache/local-disk-tier.md` |
 | Configuring a node that is mostly disk: why a group is never disk alone, the thin-segment shape, the memory floor | `docs/modules/kv-cache/disk-heavy-nodes.md` |
@@ -74,8 +78,11 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | A `NodeModelStore` or the `model-manager` plugin: a field and its writer, the status guard, mount authorization, materialization, a failure reason, collection, a metric | `docs/reference/model-delivery-node-store.md` |
 | Running node delivery: the chart values, where the node's configuration comes from, reading a node, the watermark cap, switching delivery, where replicas land and turning the preference off, upgrading, removing the cache | `docs/modules/model-delivery/operations.md` |
 | Remote weight delivery: the `Require` and `Prefer` policies and their fallback rules, source preparation and the `sourceMemory` grant, metadata-only mounts, session credentials, control and payload networks, the remote status view, troubleshooting and rollback | `docs/modules/model-delivery/remote.md` |
+| Remote weight delivery source-memory arithmetic, manifest/journal bounds, reader session protocol, ModelExpress injected env and raw sweep budgets | `docs/reference/model-delivery-remote-internals.md` |
 | Injected engine, router, sidecar and transfer parameters, ownership and defaults | `docs/reference/model-deployment-parameters.md` |
+| `ModelDeployment` `Pod` metadata, exhaustive owned-key matrix, render-version upgrade mechanics, full refusal catalog and Ascend transfer ports | `docs/reference/model-deployment-internals.md` |
 | The `ModelDeployment` contract: AcceleratorType, explicit role resources, CPU-only scheduling, the inherited reuse domain, the three override tiers, the owned-key table, the runner-image formula, prefill/decode pairing, the topology-placement field contract | `docs/modules/model-deployment/configuration.md` |
+| `ModelDeploymentScaler` capacity-prior catalog schema, disaggregated unit math, identity normalization, persistence internals and full status schemas | `docs/reference/model-deployment-scaling-internals.md` |
 | The measured replica-scaling comparison across algorithms and engines, its latency and throughput, scale-out timing, retirement observations and failure limits | `docs/modules/model-deployment/scaling-benchmark.md` |
 | The synthetic three-algorithm scaler comparison on identical seeds, its measured request outcomes, adjustment-dynamics timelines and true per-token latencies | `docs/reference/model-deployment-scaling-simulation.md` |
 | Configuring and observing `ModelDeploymentScaler`, Shadow and Active modes, algorithm selection, EPD ratios and retirement | `docs/walkthroughs/model-deployment/scaling.md` |
@@ -303,7 +310,7 @@ These pages are not free text. Changing one side without the other breaks a buil
 | `deploy/gpustack-operator/chart/README.md`, `values.schema.json` | `values.yaml` + `README.md.gotmpl` via `make generate chart` | generated — never hand-edit; a doc path quoted in a `values.yaml` comment needs a regenerate, and `chart.yml` fails on drift |
 | `README.md` accelerator matrix | `pkg/nodefeature/knowns.go` (resource names, `SharedResourceMaxSize`, `_ManufacturerPartitionKindMap`) and **whether** each `pkg/devicemanager/detector/<mfr>/device.go` sets `LogicalSliced` at all | nothing fails; the table silently lies about what a vendor can do. The matrix is deliberately Yes/— only — per-card slice counts and the per-vendor isolation mechanism live in `docs/reference/devices-discovery.md`, not on the front page |
 | `README.md` Usage accelerator examples | `docs/modules/devices/requests.md` — *The resource keys* and *Worked example per family* | nothing fails; the front page and the normative contract drift apart. This copy is the one sanctioned exception to "state a fact once" (the README is the shop window) — change both together |
-| `docs/modules/model-deployment/configuration.md` and `docs/reference/model-deployment-parameters.md` ownership tables | `modelDeploymentOwnedKeys` | compare the owned keys with each engine's table row when either changes; the Go documentation test was removed |
+| `docs/modules/model-deployment/configuration.md`, `docs/reference/model-deployment-internals.md` and `docs/reference/model-deployment-parameters.md` ownership tables | `modelDeploymentOwnedKeys` | compare the owned keys with each engine's table row when either changes; the Go documentation test was removed |
 | `docs/reference/settings.md` tables | `pkg/worker/settings` and the `GPUSTACK_*` readers | nothing fails; an operator configures something that no longer exists |
 | `docs/README.md` zone tables (`All pages`, `Reference`, `Contribute`) and `docs/reference/README.md` hub | the set of files under `docs/` and flat `docs/reference/*.md` | `check-docs.sh` and `agent-index.py` fail |
 | `docs/README.md` page **labels** | each page's `#` H1, character for character across all three zone tables | `check-docs.sh` and `agent-index.py` fail when an index label differs from its page title |

@@ -173,30 +173,13 @@ so a node too old to serve them is named before a workload lands on it.
 
 ### A5 host ranktable requirement
 
-The host ranktable must be absent or version 2.0. `/etc/hccl_rootinfo.json` is optional host state
-owned by no package. Install
-[`ascend-docker-runtime`](https://www.hiascend.com/eng/developer/software/mindcluster) newer than
-`26.0.x` (prefer `26.2+` so the runtime no longer mounts `/etc/hccl_rootinfo.json` unconditionally).
-
-Releases through `26.1.x` mount `/etc/hccl_rootinfo.json` into every container on presence alone
-with no version check. Releases `26.2+` removed that default mount, and neither release mounts
-`/lib/route.conf`.
-
-Its format is fixed by the chip generation: **1.0 serves A2** (910/910B/310P), **1.2 serves A3**
-(910C), **2.0 serves A5**. A5 loads `libhccl_v2`, which refuses anything but 2.0:
-
-```text
-Config_Error_Ranktable(EI0014): Value 1.0 for ranktable variable version is invalid.
-Expected value: 2.0.
-```
-
-So a table left behind by an older fleet stops every **multi-card** job on the node: single-card
-allocations never build a communicator and are unaffected. No environment variable disables the
-check, and the path is compiled into the library, so the file must be corrected rather than worked
-around:
+On Atlas A5 (`950`), `/etc/hccl_rootinfo.json` must be absent (the healthy default) or version
+`2.0`. Prefer `ascend-docker-runtime` `26.2+` so the runtime does not mount it unconditionally.
+A5 loads `libhccl_v2`, which fails multi-card jobs with `Config_Error_Ranktable` error `EI0014` if
+an older A2 (`1.0`) or A3 (`1.2`) ranktable remains on the host:
 
 ```bash
-# absent is the healthy state -- HCCL then negotiates through rootInfo
+# absent is healthy -- HCCL negotiates through rootInfo
 test -e /etc/hccl_rootinfo.json && grep -o '"version"[^,]*' /etc/hccl_rootinfo.json
 # "version": "1.0"   <- breaks multi-card HCCL on A5; remove it or regenerate as 2.0
 ```
@@ -206,29 +189,24 @@ check](../modules/devices/preflight.md#a5-host-state-rows) on each A5 accelerato
 
 ### A5 conditional host mounts
 
-On Ascend A5 (`AcceleratorType` *`status.detail.family`* equal to `"950"`), `device-manager`
-inspects host files through `/host` at `Allocate` time and conditionally mounts them read-only. This
-supports `SGLang` MemFabric (`device_urma`) and legacy multi-node UB HCCL across
-[`ascend-docker-runtime`](https://www.hiascend.com/eng/developer/software/mindcluster) versions without breaking nodes that omit those files.
+On Ascend A5 (`status.detail.family` `"950"`), `device-manager` inspects `/etc/hccl_rootinfo.json`
+(non-symlink regular file `<= 1 MiB` at version `"2.0"`) and `/lib/route.conf` (regular
+non-symlink file) through `/host` at `Allocate` time and mounts valid files read-only.
 
-| Host file | Mount condition | Skip behavior |
-|---|---|---|
-| `/etc/hccl_rootinfo.json` | Regular non-symlink file (`<= 1 MiB`) containing JSON `"version": "2.0"` | Absent, symlinked, oversized, or non-`2.0` files are skipped with a diagnostic log; allocation still succeeds |
-| `/lib/route.conf` | Regular non-symlink file; resolves merged-usr `/lib` → `/usr/lib` inside `/host` | Absent, symlinked, or non-regular files are skipped with a diagnostic log; allocation still succeeds |
-
-- **Non-A5 generations**: Ascend `910`, `910B`, `910C`, `310P`, and `310B` never receive either mount.
-- **Collision handling**: Containers already declaring a mount at the same path receive no duplicate mount.
-- **Unavailable host root**: Disabling [`deviceManager.hostRootMount.enabled`](#device-manager-host-mount) skips both mounts without failing allocations.
+Absent, symlinked, invalid, or colliding paths are skipped without failing allocations. Non-A5
+generations never receive either mount, and disabling
+[`deviceManager.hostRootMount.enabled`](#device-manager-host-mount) skips both cleanly.
 
 ### A5 Host RoCE endpoints
 
 For Ascend A5 *Host RoCE* (`roce:host`) `vLLM` workloads, provision per-NPU endpoint JSON files at
 `/etc/hixlep/ub_endpoint_npu_<physical_id>.json` on each Host RoCE node. Operator-managed Host RoCE
-`Pod`s mount `/etc/hixlep` read-only with `HostPathDirectory`.
+`Pod`s mount `/etc/hixlep` read-only (`HostPathDirectory`).
 
-A missing `/etc/hixlep` directory fails kubelet volume setup immediately, and a missing endpoint
-file causes `vllm-ascend` startup to fail with `FileNotFoundError`. See [Ascend A5
-topologies](../modules/model-deployment/prefill-decode.md#ascend-a5-topologies) for workload settings.
+A missing directory fails kubelet volume setup, and a missing endpoint file fails `vllm-ascend`
+startup with `FileNotFoundError`. See
+[Ascend A5 topologies](../modules/model-deployment/prefill-decode.md#ascend-a5-topologies) for
+workload settings.
 
 
 ### Cambricon
