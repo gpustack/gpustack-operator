@@ -3,18 +3,15 @@
 Administrators toggle Hygon DCU partitioning mode **node-wide** with `hy-smi` and restart the
 Device Manager `DaemonSet` to re-detect. Once enabled, GPUStack dynamically creates and destroys GPU
 and Compute Instance pairs for scheduled workloads under `hygon.com/dcu.partitioned.mig-<profile>`
-([Accelerator Requests](requests.md#two-families-two-populations)).
+([Accelerator Requests](requests.md#accelerator-resource-families)).
 
 ## Contents
 
 - [Prerequisites](#prerequisites)
 - [Partition profile discovery](#partition-profile-discovery)
 - [Partition requests](#partition-requests)
+- [Operations](#operations)
 - [Limitations](#limitations)
-- [Enabling partitioning](#enabling-partitioning)
-- [Disabling partitioning](#disabling-partitioning)
-- [Node reboot recovery](#node-reboot-recovery)
-- [Operator boundaries](#operator-boundaries)
 
 ## Prerequisites
 
@@ -36,8 +33,8 @@ and Compute Instance pairs for scheduled workloads under `hygon.com/dcu.partitio
 ## Partition profile discovery
 
 Device Manager queries supported profiles and legal placements directly from the driver (computing
-full-card CU counts from `profile CUs × max instances` while MIG mode is active). Measured on a
-C-3000 "BW" DCU (`4` slices, `80` CUs, `65520 MiB`):
+full-card CU counts from `profile CUs × max instances` while MIG mode is active). On a Hygon
+C-3000 "BW" DCU (`4` slices, `80` CUs, `65520 MiB`), the driver reports:
 
 | Profile | Slices | Compute units | Memory | Max per card | Legal placements |
 |---|---|---|---|---|---|
@@ -84,21 +81,9 @@ Device Manager carves the GPU/Compute Instance pair and injects `/dev/kfd`, `/de
 nodes, the user-space runtime, a read-only bind mount of `/etc/dmi_mig_config/ci/dev<N>gi<G>ci<C>.conf`
 at its exact host path, and `DMI_MIG_VISIBLE_DEVICE=MIG-<uuid>`.
 
-## Limitations
+## Operations
 
-- **Node-wide, partition-only mode**: `hy-smi -mig` takes no `-i` card flag. Once enabled, every
-  card on the `Node` requires a MIG registry file (`hygon.com/dcu` and `hygon.com/dcu.sliced` drop
-  to `0`); mixed whole-card and partitioned DCUs on one `Node` are impossible.
-- **Single partition per container**: The Hygon runtime exposes at most one partition per container
-  regardless of `DMI_MIG_VISIBLE_DEVICE`; multi-partition workloads must use one `Pod` per
-  partition.
-- **Registry directory poisoning**: If a container starts after its `.conf` file was removed, the
-  container runtime creates an empty directory at `ci/dev<N>...conf`, causing future creates to fail
-  with `INSUFFICIENT_RESOURCES`. Current Device Manager builds sweep stray directories automatically
-  (use `rmdir` manually on older builds).
-- **Ephemeral MIG UUIDs**: Hygon generates a fresh `mig_uuid` on every create, even at the same slot.
-
-## Enabling partitioning
+### Enabling partitioning
 
 Consult the vendor [DCU Multi-Instance manual](https://developer.sourcefind.cn/document/9169ef18-c10d-11f0-b077-0242ac150003?id=4a82aeed-e242-11f0-b9e4-0242ac150003&title=3+DCU+Multi-Instance%E4%BD%BF%E7%94%A8%E6%89%8B%E5%86%8C&version=9169ef18-c10d-11f0-b077-0242ac150003)
 (note: the long flag is `--multi-instance-gpu`, and `-i` is not supported):
@@ -131,7 +116,7 @@ Consult the vendor [DCU Multi-Instance manual](https://developer.sourcefind.cn/d
    "hygon.com/dcu.sliced":"0"
    ```
 
-## Disabling partitioning
+### Disabling partitioning
 
 Follow the strict teardown order required by the driver:
 
@@ -148,17 +133,29 @@ Follow the strict teardown order required by the driver:
 4. Start `gpustack-operator-device-manager-hygon` and confirm `hygon.com/dcu` and
    `hygon.com/dcu.sliced` return.
 
-## Node reboot recovery
+### Node reboot recovery
 
 MIG instances and `/etc/dmi_mig_config` reset on host reboot. Verify `hy-smi` MIG mode after reboot,
 restart `gpustack-operator-device-manager-hygon` if needed, and recreate pre-reboot partition
 `Pod`s (stale ownership markers are reclaimed automatically).
 
-## Operator boundaries
+## Limitations
 
 GPUStack creates and reclaims single-CI partition instances per `Pod`. It never toggles node-wide
 `hy-smi -mig` mode, mixes whole and partitioned DCUs on one `Node`, grants multiple partitions to
 one container, or keeps warm unclaimed partitions.
+
+- **Node-wide, partition-only mode**: `hy-smi -mig` takes no `-i` card flag. Once enabled, every
+  card on the `Node` requires a MIG registry file (`hygon.com/dcu` and `hygon.com/dcu.sliced` drop
+  to `0`); mixed whole-card and partitioned DCUs on one `Node` are impossible.
+- **Single partition per container**: The Hygon runtime exposes at most one partition per container
+  regardless of `DMI_MIG_VISIBLE_DEVICE`; multi-partition workloads must use one `Pod` per
+  partition.
+- **Registry directory poisoning**: If a container starts after its `.conf` file was removed, the
+  container runtime creates an empty directory at `ci/dev<N>...conf`, causing future creates to fail
+  with `INSUFFICIENT_RESOURCES`. Current Device Manager builds sweep stray directories automatically
+  (use `rmdir` manually on older builds).
+- **Ephemeral MIG UUIDs**: Hygon generates a fresh `mig_uuid` on every create, even at the same slot.
 
 ---
 

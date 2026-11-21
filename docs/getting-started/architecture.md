@@ -10,9 +10,6 @@ memory access (RDMA)* accelerates transfers, and shared KV cache stores reusable
 - [Components](#components)
 - [Workload flow](#workload-flow)
 - [Device scheduling](#device-scheduling)
-- [Model delivery](#model-delivery)
-- [KV cache](#kv-cache)
-- [Request admission](#request-admission)
 - [Vocabulary](#vocabulary)
 - [Related documentation](#related-documentation)
 
@@ -59,6 +56,33 @@ flowchart TD
 Every optional service in the diagram can be omitted. An ordinary `Pod` can also request accelerator
 resources directly through its namespace `LocalQueue`.
 
+### Model delivery
+
+A `ModelArtifact` separates weight sources and credentials from workload specs. It resolves and pins
+weights from Hugging Face, ModelScope, an OCI image, or a `PersistentVolumeClaim`.
+
+Workloads load weights directly in the engine (`Engine`), mount verified node cache paths through the
+Model Manager CSI driver (`Node`), or mount an image or PVC. Remote delivery streams weights from
+prepared source nodes through `model-transfer`; see
+[Remote Weight Delivery](../modules/model-delivery/remote.md).
+
+`ModelStore` and `ModelStoreBinding` govern node selection and namespace cache quotas.
+`NodeModelStore` reports per-node cache state, and `ModelPrefetch` warms weights ahead of serving
+without holding GPU quota. See [Model Delivery](../modules/model-delivery/_index.md),
+[Model Artifact](../modules/model-delivery/artifact.md), and the
+[Model Prefetch Walkthrough](../walkthroughs/model-delivery/prefetch.md).
+
+### KV cache
+
+A `KVCacheBackend` deploys a shared Mooncake cache cluster or connects to an external endpoint.
+`KVCachePool` and `KVCachePoolBinding` grant namespace access, reuse domains, and memory ceilings
+independently of GPU quota. Compatible `ModelDeployment`s and labeled `Pod`s receive client settings
+at creation; see [KV Cache](../modules/kv-cache/_index.md).
+
+[Model Deployment](../modules/model-deployment/_index.md) combines these capabilities with engine,
+router, and scaling policies. [GPU Instances](../modules/instances/_index.md) run interactive
+containers on the same accelerator pools.
+
 ## Device scheduling
 
 Device scheduling runs in four stages:
@@ -75,34 +99,7 @@ Device scheduling runs in four stages:
 pool selection. See [RDMA Operations](../modules/rdma/operations.md) for fabric requests and
 [Topology-Aware Scheduling Operations](../modules/topology/operations.md) for domain placement.
 
-## Model delivery
-
-A `ModelArtifact` separates weight sources and credentials from workload specs. It resolves and pins
-weights from Hugging Face, ModelScope, an OCI image, or a `PersistentVolumeClaim`.
-
-Workloads load weights directly in the engine (`Engine`), mount verified node cache paths through the
-Model Manager CSI driver (`Node`), or mount an image or PVC. Remote delivery streams weights from
-prepared source nodes through `model-transfer`; see
-[Remote Weight Delivery](../modules/model-delivery/remote.md).
-
-`ModelStore` and `ModelStoreBinding` govern node selection and namespace cache quotas.
-`NodeModelStore` reports per-node cache state, and `ModelPrefetch` warms weights ahead of serving
-without holding GPU quota. See [Model Delivery](../modules/model-delivery/_index.md),
-[Model Artifact](../modules/model-delivery/artifact.md), and the
-[Model Prefetch Walkthrough](../walkthroughs/model-delivery/prefetch.md).
-
-## KV cache
-
-A `KVCacheBackend` deploys a shared Mooncake cache cluster or connects to an external endpoint.
-`KVCachePool` and `KVCachePoolBinding` grant namespace access, reuse domains, and memory ceilings
-independently of GPU quota. Compatible `ModelDeployment`s and labeled `Pod`s receive client settings
-at creation; see [KV Cache](../modules/kv-cache/_index.md).
-
-[Model Deployment](../modules/model-deployment/_index.md) combines these capabilities with engine,
-router, and scaling policies. [GPU Instances](../modules/instances/_index.md) run interactive
-containers on the same accelerator pools.
-
-## Request admission
+### Request admission
 
 The `Pod` webhook validates accelerator requests before Kueue reserves quota. Kueue `AdmissionCheck`s
 verify per-device fit and multi-role gang readiness before kube-scheduler, kubelet, and the allocator

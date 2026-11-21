@@ -8,13 +8,8 @@ volumes.
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Read the initial pools](#step-1-read-the-initial-pools)
-- [Step 2: Remove a managed node](#step-2-remove-a-managed-node)
-- [Step 3: Request a logical slice](#step-3-request-a-logical-slice)
-- [Step 4: Manage a custom InstanceType](#step-4-manage-a-custom-instancetype)
-- [Step 5: Enable CPU awareness](#step-5-enable-cpu-awareness)
-- [Step 6: Instance pinning and volumes](#step-6-instance-pinning-and-volumes)
+- [Pool discovery](#pool-discovery)
+- [Instance configuration](#instance-configuration)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
@@ -29,7 +24,7 @@ worker materializes Kueue `ResourceFlavor`s, `ClusterQueue`s, `AcceleratorType`s
 | `Instance` | namespace | user | Interactive workload admitted against a target `InstanceType` |
 | `NodeFeature` | namespace | worker | Per-node `<node>-gpustack-worker` record carrying `gpustack.ai/managed` |
 
-### Captured output format
+### Captured pool fields
 
 Captured `kubectl get instancetypes` excerpts genericize node names as `node-cpu`, `node-a10g`,
 `node-t4-a`, and `node-t4-b`. Watch three columns across each step:
@@ -39,18 +34,18 @@ Captured `kubectl get instancetypes` excerpts genericize node names as `node-cpu
 - **`ACCELERATOR(EX/SH/SL/PT)`**: `onceMaxRequest/remaining` for exclusive whole cards (`EX`), shared
   slots (`SH`)[^1], logical slices (`SL`), and hardware partitions (`PT`).
 
-[^1]: This capture predates shared card-count reporting, so `SH` shows share slots rather than whole-card counts ([Pre-release breaks](../../modules/devices/requests.md#pre-release-breaks)).
+[^1]: This capture predates shared card-count reporting, so `SH` shows share slots rather than whole-card counts ([Legacy request migration](../../modules/devices/requests.md#legacy-request-migration)).
 
 Each accelerator counts in either `EX`/`SH`/`SL` (unpartitioned) or `PT` (partitioned). Because none
 of these four nodes enables MIG, `PT` stays `0/0` throughout; see
-[Three MIG configurations](../../modules/devices/nvidia-mig.md#three-mig-configurations) for
+[MIG capacity scenarios](../../modules/devices/nvidia-mig.md#mig-capacity-scenarios) for
 partitioned and mixed runs.
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
-| Cluster | Four operator-managed `linux/amd64` nodes (Kubernetes and operator versions not recorded) |
+| Cluster | Four operator-managed `linux/amd64` nodes |
 | Settings | Defaults: `instance-type-derived-from-node=true` and `instance-type-aware-cpu-manufacturer=false` (toggled in Step 5) |
 
 | `Node` | CPU (`gKey`) | Cores | Accelerator (`aKey`) |
@@ -60,7 +55,9 @@ partitioned and mixed runs.
 | `node-t4-a` | `intel-xeon-platinum-8259cl` | 4 | 1 × NVIDIA Tesla T4 (`nvidia-tesla-t4`) |
 | `node-t4-b` | `intel-xeon-platinum-8259cl` | 48 | 4 × NVIDIA Tesla T4 (`nvidia-tesla-t4`) |
 
-## Step 1: Read the initial pools
+## Pool discovery
+
+### Step 1: Inspect derived pools
 
 With `instance-type-derived-from-node` enabled, list the generated Kueue flavors, queues, types, and
 `Devices` ledgers:
@@ -154,10 +151,10 @@ If a GPU node is missing from `kubectl get devices`, inspect Device Manager `Dae
 | `InstanceType` | `gpustack--nvidia-a10g-linux-amd64` | `spec.unitResources` (`8` CPU / `64Gi` RAM preset), four-view `status` |
 | `InstanceTypeFlavor` | `gpustack--nvidia-a10g` | Catalog entry carrying `product`, `memory`, `cores`, and `sliceable` |
 
-## Step 2: Remove a managed node
+### Step 2: Exclude one node
 
-A node contributes capacity to pools only while `gpustack.ai/managed=true` is present. In the captured
-run, patching `NodeFeature/node-a10g-gpustack-worker` set that label to `"false"` temporarily:
+A node contributes capacity to pools only while `gpustack.ai/managed=true` is present. Patch
+`NodeFeature/node-a10g-gpustack-worker` to set that label to `"false"` temporarily:
 
 ```bash
 kubectl -n gpustack-system patch nodefeature node-a10g-gpustack-worker \
@@ -190,7 +187,9 @@ kubectl -n gpustack-system patch nodefeature node-a10g-gpustack-worker \
 kubectl get instancetypes
 ```
 
-## Step 3: Request a logical slice
+## Instance configuration
+
+### Step 3: Request a logical slice
 
 Because `gpustack--nvidia-a10g` reports `SLICEABLE=true`, save `sliced-demo.yaml` to request 20% of
 one A10G's VRAM:
@@ -252,11 +251,11 @@ match the message in [Troubleshooting](#troubleshooting). Delete `sliced-demo` b
 A10G pool returns to `1/1 10/10 100/100 0/0`. For hardware MIG partitions (`PT`) on A100 or H100, see
 [NVIDIA MIG Operations](../../modules/devices/nvidia-mig.md).
 
-## Step 4: Manage a custom InstanceType
+### Step 4: Manage a custom InstanceType
 
 Derived `InstanceType`s initialize *`spec.unitResources`* from product presets (`8` CPU / `64Gi` RAM
 for A10G; `4` CPU / `16Gi` RAM fallback for unrecognized models; see
-[Unit resource sizing](../../modules/instances/_index.md#unit-resource-sizing)). *`spec.unitResources`*
+[Instance resource defaults](../../modules/instances/_index.md#instance-resource-defaults)). *`spec.unitResources`*
 sets default CPU and RAM when an `Instance` omits them and caps explicit requests.
 
 While `instance-general-resources-overcommit` is `true` (default), `Pod` scheduler requests use `100m`
@@ -359,7 +358,7 @@ gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-## Step 5: Enable CPU awareness
+### Step 5: Split pools by CPU
 
 Enable `instance-type-aware-cpu-manufacturer` so derived pools split by CPU model (`gKey`) while
 keeping the seven `ResourceFlavor`s unchanged:
@@ -425,7 +424,7 @@ gpustack--nvidia-a10g-linux-amd64                  gpustack-fnv64-c4680bb149644f
 7
 ```
 
-## Step 6: Instance pinning and volumes
+### Step 6: Configure pinning and volumes
 
 Use *`spec.nodeName`* to pin an `Instance` to one `Node`'s `kubernetes.io/hostname` selector (while
 still queueing through Kueue and `gpustack-node-devices`), and *`spec.additionalVolumes`* to mount
@@ -474,7 +473,7 @@ Constraints that admission and scheduling enforce:
   `Pending`.
 - **Volume placement**: node-local persistent claims pin the `Instance` to their bound `Node` unless
   `instance-persistent-volume-placement` is disabled; unbound claims hold `Pod` creation and report why
-  in *`status.phaseMessage`* ([Claim delivery and placement](../../modules/model-delivery/artifact.md#claim-delivery-and-placement)).
+  in *`status.phaseMessage`* ([PVC binding and placement](../../modules/model-delivery/artifact.md#pvc-binding-and-placement)).
 - **Host-boundary gates**: both `instance-privileged-allowed` (*`spec.privileged`*) and
   `instance-host-path-volume-allowed` (*`additionalVolumes[].hostPath`*) default to `"false"` and gate
   new grants without stopping running `Instance`s.
@@ -495,9 +494,9 @@ node-t4-b
 
 ## Limitations
 
-This recorded run covers four unpartitioned nodes (`PT` stays `0/0`). See
-[Three MIG configurations](../../modules/devices/nvidia-mig.md#three-mig-configurations) for hardware
-MIG partitioning and [Pools and diagnosis](../../modules/devices/requests.md#pools-and-diagnosis) for
+All four nodes in this environment run unpartitioned (`PT` stays `0/0`). See
+[MIG capacity scenarios](../../modules/devices/nvidia-mig.md#mig-capacity-scenarios) for hardware
+MIG partitioning and [Pool troubleshooting](../../modules/devices/requests.md#pool-troubleshooting) for
 queue quota diagnosis.
 
 ## Troubleshooting
@@ -527,8 +526,8 @@ To enable `instance-privileged-allowed` (or `instance-host-path-volume-allowed`)
 ---
 
 **See also** — [Accelerator Requests](../../modules/devices/requests.md) (resource keys and request
-rules) · [NVIDIA MIG Operations](../../modules/devices/nvidia-mig.md#three-mig-configurations)
-(hardware MIG partitioning) · [GPU Instances](../../modules/instances/_index.md) (unit resource sizing
-and utilization metrics)
+rules) · [NVIDIA MIG Operations](../../modules/devices/nvidia-mig.md#mig-capacity-scenarios)
+(hardware MIG partitioning) · [GPU Instances](../../modules/instances/_index.md) (instance resource
+defaults and utilization metrics)
 
 **Next** → [RDMA Networking Walkthrough](../rdma/network-endpoints.md) — request and verify RDMA endpoints with NUMA alignment.

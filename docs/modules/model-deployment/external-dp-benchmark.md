@@ -15,33 +15,32 @@ The initial suites describe cross-`Pod` TCP. The separate
 
 ## Contents
 
-- [Configuration](#configuration)
-- [Hardware, model and workload](#hardware-model-and-workload)
-- [Prompt lengths and concurrency](#prompt-lengths-and-concurrency)
-- [Per-rank registration](#per-rank-registration)
 - [Summary](#summary)
+- [Environment](#environment)
+- [Results](#results)
 - [InfiniBand RDMA comparison](#infiniband-rdma-comparison)
 - [Limitations](#limitations)
 
-## Configuration
+## Summary
 
-Each configuration ran one `ModelDeployment` on `gpu-node-0`.
+- **Choose wide *TP*** on single-node NVLink when throughput and token-generation latency dominate.
+- **Choose *External DP*** when per-rank HTTP ingress or concurrency-64 first-token latency fits the
+  workload (especially with InfiniBand RDMA, where it also led concurrency-64 output).
 
-| Configuration | Roles | `Pod`s | GPUs per `Pod` | Router |
-|---|---|---:|---:|---|
-| Wide *TP* | 1 *Server* | 1 | 8 | None; direct engine HTTP |
-| *External DP* | 1 *Server* group | 4 | 2 | `vllm-router`, `round_robin` |
+### Benefits
 
-Wide *TP* set `--tensor-parallel-size 8` without `--enable-expert-parallel`. *External DP* set
-*data parallelism (DP)* = 4, local *TP* = 2 and *expert parallelism (EP)* enabled
-(`--all2all-backend allgather_reducescatter`), with one API server and local attention KV cache per
-rank and no cross-rank KV transfer.
+- Registered **four healthy endpoints** and balanced traffic evenly (**285 + 284 × 3**).
+- Lowered concurrency-64 *TTFT* p50 by **2.58×** at `1024/256` and **1.23×** at `4096/128`.
+- Completed **1,088/1,088 measured requests** in both configurations with zero errors.
 
-**NVLink carried intra-`Pod` traffic only.** Each `Pod` had private IPC and `/dev/shm`, *`hostIPC`*
-disabled and no *remote direct memory access (RDMA)* interface, so cross-`Pod` *EP* communication
-used TCP sockets over `eth0`.
+### Trade-offs
 
-## Hardware, model and workload
+- Over TCP, wide *TP* delivered **2.27×–6.99× higher output throughput** in all twelve cells.
+- Cross-`Pod` *EP* used TCP versus single-`Pod` NVLink for wide *TP*.
+- At `4096/128`, concurrency 64 over TCP, *External DP* suffered severe *TTFT* p95 and *ITL* p99
+  tails.
+
+## Environment
 
 | Property | Captured value |
 |---|---|
@@ -59,12 +58,30 @@ used TCP sockets over `eth0`.
 | External parallelism | *TP* = 2, *DP* = 4, *EP* world size = 8 |
 | External port setting | `VLLM_PORT=19500` |
 
+### Configuration
+
+Each configuration ran one `ModelDeployment` on `gpu-node-0`.
+
+| Configuration | Roles | `Pod`s | GPUs per `Pod` | Router |
+|---|---|---:|---:|---|
+| Wide *TP* | 1 *Server* | 1 | 8 | None; direct engine HTTP |
+| *External DP* | 1 *Server* group | 4 | 2 | `vllm-router`, `round_robin` |
+
+Wide *TP* set `--tensor-parallel-size 8` without `--enable-expert-parallel`. *External DP* set
+*data parallelism (DP)* = 4, local *TP* = 2 and *expert parallelism (EP)* enabled
+(`--all2all-backend allgather_reducescatter`), with one API server and local attention KV cache per
+rank and no cross-rank KV transfer.
+
+**NVLink carried intra-`Pod` traffic only.** Each `Pod` had private IPC and `/dev/shm`, *`hostIPC`*
+disabled and no *remote direct memory access (RDMA)* interface, so cross-`Pod` *EP* communication
+used TCP sockets over `eth0`.
+
 ### Port allocation
 
 Every *External DP* rank set `VLLM_PORT=19500`, and the run initialized on port `19502` (an
 observed choice, not a fixed offset). See [Port allocation](external-dp.md#port-allocation) for
 vLLM port probing and the bootstrap-port race, and the
-[walkthrough manifest](../../walkthroughs/model-deployment/external-dp.md#step-1-start-the-fixed-group).
+[walkthrough manifest](../../walkthroughs/model-deployment/external-dp.md#step-1-deploy-rank-group).
 
 ### Workload
 
@@ -73,7 +90,7 @@ Target prompt/output shapes were `1024/256` and `4096/128` at concurrency 1, 4, 
 one calibration request per configuration). Prompts carried unique markers, and early stopping
 varied output-token totals.
 
-### Method
+### Measurement method
 
 The in-cluster streaming generator ran each configuration once, sequentially, with warmed weights
 (**2,176 measured requests** across 24 result files). Output throughput divides actual generated
@@ -83,7 +100,9 @@ tokens by cell wall time.
 captured millisecond precision. Bold values mark lower latency or higher throughput within each
 matched pair without claiming statistical significance.
 
-## Prompt lengths and concurrency
+## Results
+
+### Latency and throughput
 
 Every cell completed with **zero errors**.
 
@@ -127,7 +146,7 @@ changed together, so individual causes are not isolated.
 | `4096/128` | 4,094–4,099 | 64 | Wide *TP* | 256/256 | 3,814.139 | **4,057.352** | **10.136** | **55.619** | **1,491.536** | **12.761** |
 | `4096/128` | 4,094–4,098 | 64 | *External DP* | 256/256 | **3,094.017** | 17,594.349 | 193.557 | 1,953.899 | 290.025 | 2.537 |
 
-## Per-rank registration
+### Per-rank registration
 
 Operator status confirmed one ready replica group (`eligible: 1`) and four serving HTTP endpoints
 (`serving.value: 4`):
@@ -165,25 +184,6 @@ Totals match **1,137 requests** (1,088 measured, 48 warm-ups, one calibration), 
 1,137 engine completions. Generic router-access-line counts read zero separately from these
 per-worker counters.
 
-## Summary
-
-- **Choose wide *TP*** on single-node NVLink when throughput and token-generation latency dominate.
-- **Choose *External DP*** when per-rank HTTP ingress or concurrency-64 first-token latency fits the
-  workload (especially with InfiniBand RDMA, where it also led concurrency-64 output).
-
-### Benefits
-
-- Registered **four healthy endpoints** and balanced traffic evenly (**285 + 284 × 3**).
-- Lowered concurrency-64 *TTFT* p50 by **2.58×** at `1024/256` and **1.23×** at `4096/128`.
-- Completed **1,088/1,088 measured requests** in both configurations with zero errors.
-
-### Trade-offs
-
-- Over TCP, wide *TP* delivered **2.27×–6.99× higher output throughput** in all twelve cells.
-- Cross-`Pod` *EP* used TCP versus single-`Pod` NVLink for wide *TP*.
-- At `4096/128`, concurrency 64 over TCP, *External DP* suffered severe *TTFT* p95 and *ITL* p99
-  tails.
-
 ## InfiniBand RDMA comparison
 
 A follow-up on the ConnectX-7 InfiniBand node from
@@ -194,7 +194,7 @@ completed **1,088/1,088 requests with zero errors**.
 ### Transport verification
 
 Update `external-dp.yaml` from the
-[TCP walkthrough](../../walkthroughs/model-deployment/external-dp.md#step-1-start-the-fixed-group)
+[TCP walkthrough](../../walkthroughs/model-deployment/external-dp.md#step-1-deploy-rank-group)
 (the diff shows current interface allocation; the capture used manual device exposure):
 
 ```diff
@@ -217,7 +217,7 @@ NCCL logged `Using network IB` and `via NET/IB/.../GDRDMA`, confirming InfiniBan
 expert collective while intra-`Pod` *TP* stayed on NVLink. Keep **`VLLM_PORT=19500`** on every rank;
 InfiniBand does not remove the [bootstrap-port race](#port-allocation).
 
-### TCP and RDMA
+### Transport performance
 
 ![TTFT p50, ITL p99 and output throughput by concurrency for Wide TP, External DP over TCP and External DP over InfiniBand RDMA](../../assets/diagrams/external-dp-benchmark-rdma.svg)
 
@@ -247,7 +247,7 @@ Bold values mark lower latency or higher throughput within each matched *Externa
 | `4096/128` | 32 | 1,794.637 | **205.085** | 1,262.285 | **144.559** | 253.940 | **1,448.982** |
 | `4096/128` | 64 | 3,094.017 | **365.352** | 1,953.899 | **182.693** | 290.025 | **2,033.762** |
 
-### Wide TP comparison
+### Wide tensor parallelism
 
 At concurrency 64 (separate runs, eight GPUs each), RDMA *External DP* beat the recorded wide-*TP*
 output throughput on both shapes (**1.69×** at `1024/256` and **1.36×** at `4096/128`) and cut
@@ -264,7 +264,7 @@ Role status confirmed **four serving endpoints** for one replica group. Engine c
 matched **285 + 284 + 284 + 284 = 1,137** (1,088 measured, 48 warm-ups, one calibration), proving
 traffic reached every rank.
 
-### Remaining trade-offs
+### RDMA trade-offs
 
 - **Choose RDMA *External DP*** when high-concurrency ingress (concurrency 64) and first-token
   latency outweigh smoother token generation.

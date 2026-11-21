@@ -8,7 +8,7 @@ across modules in working order.
 
 - [Walkthrough selection](#walkthrough-selection)
 - [Cross-module configurations](#cross-module-configurations)
-- [Evidence and output](#evidence-and-output)
+- [Captured and illustrative output](#captured-and-illustrative-output)
 
 ## Walkthrough selection
 
@@ -24,12 +24,12 @@ contracts and benchmarks.
 | KV Cache | [Shared Cache](kv-cache/shared-cache.md) | Stand up a backend, pool, namespace binding, HA leader, local disk tier, and attached serving workload. |
 | Model Delivery | [Model Prefetch](model-delivery/prefetch.md) | Prefetch verified Hugging Face weights onto a GPU node and pin them against eviction. |
 | Model Deployment | [Preparation and choices](model-deployment/_index.md) | Compare serving topologies and prepare cluster prerequisites and GPU `AcceleratorType`s. |
-| Model Deployment | [Prefill and Decode](model-deployment/prefill-decode.md) | Deploy disaggregated *Prefill* and *Decode* roles behind `llm-d-router` on H100 GPUs. |
+| Model Deployment | [Prefill and Decode](model-deployment/prefill-decode.md) | Deploy disaggregated *Prefill* and *Decode* roles behind `llm-d-router`. |
 | Model Deployment | [Encode, Prefill and Decode](model-deployment/encode-prefill-decode.md) | Deploy multimodal *Encode*, *Prefill*, and *Decode* roles with NIXL encoder-cache transfer. |
 | Model Deployment | [Elastic EP](model-deployment/elastic-ep.md) | Expand a live Ray *EP* collective from *DP* width 2 → 4 (*EP* world size 4 → 8) without replacing surviving `Pod`s. |
 | Model Deployment | [External DP](model-deployment/external-dp.md) | Deploy four fixed *DP* ranks (*TP* = 2, *EP* world size 8) behind `vllm-router` and verify all-rank coverage. |
 | Model Deployment | [Scaling](model-deployment/scaling.md) | Observe a `ModelDeploymentScaler` in `Shadow` mode, select an algorithm or catalog prior, and activate scaling. |
-| Model Deployment | [Online Runtime Control](model-deployment/runtime-control.md) | Tune vLLM and SGLang parameters live, pause roles safely with an active scaler, and verify restart replay on H200. |
+| Model Deployment | [Online Runtime Control](model-deployment/runtime-control.md) | Tune vLLM and SGLang parameters live, pause roles safely with an active scaler, and verify restart replay. |
 | Model Deployment | [Multi-Host](model-deployment/multi-host.md) | Span one 16-GPU serving instance across two physical GPU hosts with gang admission. |
 
 ## Cross-module configurations
@@ -42,16 +42,16 @@ transports.
 |---|---|---|
 | Model delivery and serving | [Model Prefetch](model-delivery/prefetch.md) | `ModelStoreBinding` grants cache quota; `ModelDeployment` mounts the resolved `ModelArtifact`. |
 | Shared cache and serving | [Shared Cache](kv-cache/shared-cache.md) | `KVCacheBackend` backs a `KVCachePool`; `KVCachePoolBinding` injects client config into workloads. |
-| RDMA and shared cache | [RDMA Networking](rdma/network-endpoints.md#step-4-kv-cache-over-rdma) | `KVCacheBackend` switches transport to `RDMA` and claims fabric interfaces per member. |
+| RDMA and shared cache | [RDMA Networking](rdma/network-endpoints.md#step-4-configure-rdma-cache) | `KVCacheBackend` switches transport to `RDMA` and claims fabric interfaces per member. |
 | Delivery, serving, and scaling | [Scaling](model-deployment/scaling.md) | `ModelDeployment` serves a prefetched `ModelArtifact` while `ModelDeploymentScaler` drives replica counts. |
 | Topology and serving | [Hierarchical Placement](topology/hierarchical-placement.md) | `TopologySource` publishes zone or rack domains enforced by *`roles[].topology.requiredLevel`*. |
 
-## Evidence and output
+## Captured and illustrative output
 
-Each step pairs commands with `Captured output` from a recorded cluster run or `Example output
+Each step pairs commands with `Captured output` from a live cluster run or `Example output
 (illustrative)` showing the expected signal. A resource reaching `Ready` does not by itself prove
 active parallelism, all-rank routing, or successful token generation; run the inference and endpoint
-checks included in each walkthrough. *Multi-Host* is an unrecorded configuration guide with
+checks included in each walkthrough. *Multi-Host* provides illustrative configuration examples and
 verification checks.
 
 ---

@@ -9,17 +9,16 @@ name.
 
 ## Contents
 
-- [Connection and medium](#connection-and-medium)
-- [Image](#image)
-- [Metadata plane](#metadata-plane)
-- [Members](#members)
-- [Vendor-specific behavior](#vendor-specific-behavior)
+- [Configuration](#configuration)
+- [Backend images](#backend-images)
+- [Hardware requirements](#hardware-requirements)
 - [Status and conditions](#status-and-conditions)
 - [Group resizing](#group-resizing)
-- [External mode](#external-mode)
-- [Operating notes](#operating-notes)
+- [Operations](#operations)
 
-## Connection and medium
+## Configuration
+
+### Connections and storage media
 
 *`spec.connection`* selects either operator-managed workloads or an external endpoint pair. On
 managed backends, *`members[].medium`* selects host memory (`DRAM`) or device memory (`VRAM`).
@@ -55,7 +54,61 @@ spec:
 | `DRAM` | Host RAM segment | Adds `capacityPerMember + localBufferSize` to `Pod` `requests.memory` and sets `void` device visibility. |
 | `VRAM` | Device memory segment | Accounting-only for custom `USE_VRAM_SEGMENT=ON` images; charges only *`localBufferSize`* and omits `void` hiding. |
 
-## Image
+### Metadata discovery
+
+The metadata plane always uses peer-to-peer handshakes (`P2PHANDSHAKE`) and needs no external etcd
+or Redis service (*`spec.metadata`* does not exist). Configure leader election separately through
+[`leader.electionBackend`](leader.md#high-availability) (default `Kubernetes`).
+
+### Member groups
+
+Each *`members[]`* entry reconciles one `OnDelete` `DaemonSet` matching *`members[].nodeSelector`*.
+Two groups can select the same `Node` when their network identities do not collide.
+
+*`spec.transport.protocol`* accepts `Auto` (default, resolving to `TCP`), `TCP`, `RDMA`, `EFA`,
+`CANN`, `ROCM`, `MUSA`, and `MACA`. *`members[].transport.protocol`* overrides the protocol for one
+group; see [Engine Compatibility](../model-deployment/engine-versions.md#transport-compatibility).
+
+- **TCP**: Needs no host privileges, but copies payloads through the kernel network stack.
+- **Host fabrics (`RDMA`, `EFA`)**: Enable `hostNetwork: true`, `IPC_LOCK`, `SYS_RESOURCE`, and
+  fabric resource requests (`device.gpustack.ai/rdma.shared` for `1`, `device.gpustack.ai/rdma` for
+  `> 1`, or `vpc.amazonaws.com/efa`) sized by *`members[].fabricInterfaceCount`* (default `1`). Do
+  not mount `/dev/infiniband` manually.
+- **Ports**: Group `<i>` serves HTTP on `8080 + <i>` (bound on the host network when `hostNetwork`
+  is active). Data transfers use ephemeral ports negotiated via `P2PHANDSHAKE`, so open ephemeral
+  port ranges in firewalls and `NetworkPolicy` rules.
+- **Extra flags**: *`members[].extraArgs`* renders as `-D key=value` and *`leader.extraArgs`*
+  renders as `-key=value`; CXL flags are refused. Never place secrets in *`extraArgs`*.
+- **Disk offload retries**: Clients writing to a [local disk tier](local-disk-tier.md) must retry
+  when a memory segment fills ahead of asynchronous bucket eviction.
+
+### External Mooncake endpoints
+
+*`connection.external`* attaches to an existing Mooncake service without creating workloads. Supply
+both `Client` and `Admin` endpoints as `host:port`:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: external-mooncake
+spec:
+  connection:
+    external:
+      endpoints:
+        - name: Client  # engine RPC endpoint
+          address: mooncake.example:50051
+        - name: Admin  # operator health, metrics, and tenant API endpoint
+          address: mooncake.example:9003
+```
+
+- **Immediate error state**: Unreachable external endpoints report `phase: Error` immediately (never
+  `Provisioning`), and HTTP `3xx` redirects from `Admin` are refused.
+- **Single-backend ownership**: Never point two `KVCacheBackend` objects at the same external leader
+  with overlapping *`domain.name`* bindings; ceilings will oscillate and mismatched *`blockSize`* or
+  *`dtype`* values corrupt tensors.
+
+## Backend images
 
 *`members[].image`* overrides *`spec.image`*, which falls back to the `kv-cache-backend-image`
 `Setting` (defaulting to the project's `-cpu` build). Admission refuses create when all three are
@@ -89,41 +142,13 @@ handshake reports `2.0.0` across `0.3.x` releases, so mismatched lines (such as 
 Direct *prefill/decode (PD)* transfer (`MooncakeConnector` without *`spec.kvCache`*) runs engine to
 engine and does not use a store. Leader `Lease` election requires Mooncake `0.3.12` or newer.
 
-## Metadata plane
-
-The metadata plane always uses peer-to-peer handshakes (`P2PHANDSHAKE`) and needs no external etcd
-or Redis service (*`spec.metadata`* does not exist). Configure leader election separately through
-[`leader.electionBackend`](leader.md#high-availability) (default `Kubernetes`).
-
-## Members
-
-Each *`members[]`* entry reconciles one `OnDelete` `DaemonSet` matching *`members[].nodeSelector`*.
-Two groups can select the same `Node` when their network identities do not collide.
-
-*`spec.transport.protocol`* accepts `Auto` (default, resolving to `TCP`), `TCP`, `RDMA`, `EFA`,
-`CANN`, `ROCM`, `MUSA`, and `MACA`. *`members[].transport.protocol`* overrides the protocol for one
-group; see [Engine Compatibility](../model-deployment/engine-versions.md#transport-compatibility).
-
-- **TCP**: Needs no host privileges, but copies payloads through the kernel network stack.
-- **Host fabrics (`RDMA`, `EFA`)**: Enable `hostNetwork: true`, `IPC_LOCK`, `SYS_RESOURCE`, and
-  fabric resource requests (`device.gpustack.ai/rdma.shared` for `1`, `device.gpustack.ai/rdma` for
-  `> 1`, or `vpc.amazonaws.com/efa`) sized by *`members[].fabricInterfaceCount`* (default `1`). Do
-  not mount `/dev/infiniband` manually.
-- **Ports**: Group `<i>` serves HTTP on `8080 + <i>` (bound on the host network when `hostNetwork`
-  is active). Data transfers use ephemeral ports negotiated via `P2PHANDSHAKE`, so open ephemeral
-  port ranges in firewalls and `NetworkPolicy` rules.
-- **Extra flags**: *`members[].extraArgs`* renders as `-D key=value` and *`leader.extraArgs`*
-  renders as `-key=value`; CXL flags are refused. Never place secrets in *`extraArgs`*.
-- **Disk offload retries**: Clients writing to a [local disk tier](local-disk-tier.md) must retry
-  when a memory segment fills ahead of asynchronous bucket eviction.
-
-## Vendor-specific behavior
+## Hardware requirements
 
 ### Ascend
 
-`vllm-ascend` requires `protocol: CANN` (verified on `v0.23.0` and `v0.26.0rc1`) and a `-cann`
-member image (`USE_ASCEND_DIRECT`) with `medium: DRAM`. Starting a `-cann` image on `TCP` or `RDMA`
-fails with `cannot allocate local segment, ret: -1`. Idle `CANN` members use zero AICore compute.
+`vllm-ascend` requires `protocol: CANN` and a `-cann` member image (`USE_ASCEND_DIRECT`) with
+`medium: DRAM`. Starting a `-cann` image on `TCP` or `RDMA` fails with
+`cannot allocate local segment, ret: -1`. Idle `CANN` members use zero AICore compute.
 
 - **Ascend A2/A3 and A5 UB/UBG/UBoE**: Omit *`fabricInterfaceCount`*. For A5 UBG or UBoE, set
   `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`members[].extraEnv`* with `"comm_resource_config.protocol_desc"`
@@ -270,33 +295,7 @@ To retire a middle group without shifting later indices, narrow its *`nodeSelect
 +        gracePeriodSeconds: 30  # 0..3600; applies to localDisks groups
 ```
 
-## External mode
-
-*`connection.external`* attaches to an existing Mooncake service without creating workloads. Supply
-both `Client` and `Admin` endpoints as `host:port`:
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: KVCacheBackend
-metadata:
-  name: external-mooncake
-spec:
-  connection:
-    external:
-      endpoints:
-        - name: Client  # engine RPC endpoint
-          address: mooncake.example:50051
-        - name: Admin  # operator health, metrics, and tenant API endpoint
-          address: mooncake.example:9003
-```
-
-- **Immediate error state**: Unreachable external endpoints report `phase: Error` immediately (never
-  `Provisioning`), and HTTP `3xx` redirects from `Admin` are refused.
-- **Single-backend ownership**: Never point two `KVCacheBackend` objects at the same external leader
-  with overlapping *`domain.name`* bindings; ceilings will oscillate and mismatched *`blockSize`* or
-  *`dtype`* values corrupt tensors.
-
-## Operating notes
+## Operations
 
 - **Benign client warning**: `E transfer_metadata.cpp:991] Local segment descriptor not found` logs
   once on engine startup and is harmless.

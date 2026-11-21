@@ -35,7 +35,7 @@ flowchart TD
 
 ### Topology sources
 
-Choose one inventory source in [Inventory path](operations.md#inventory-path), then configure
+Choose one inventory source in [Topology inventory sources](operations.md#topology-inventory-sources), then configure
 [Topograph](operations.md#topograph-setup), [existing Node labels](operations.md#existing-node-labels),
 a [ConfigMap snapshot](operations.md#configmap-snapshot), or a
 [webhook snapshot](operations.md#webhook-snapshot).

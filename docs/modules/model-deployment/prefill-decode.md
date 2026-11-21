@@ -20,8 +20,8 @@ flowchart LR
 
 - [Configuration](#configuration)
 - [Router configuration](#router-configuration)
-- [Direct transfer transport](#direct-transfer-transport)
-- [Vendor-specific behavior](#vendor-specific-behavior)
+- [Direct KV transports](#direct-kv-transports)
+- [Hardware requirements](#hardware-requirements)
 - [Role placement and services](#role-placement-and-services)
 
 ## Configuration
@@ -120,7 +120,7 @@ Admission matches *`spec.router.name`* to *`spec.engine.name`* and rejects cross
   (status, flags, duration, chosen endpoint, method, path, request ID, bytes). Other routers follow
   their own logging flags.
 
-### Counting engine tokens
+### Router token counting
 
 **Non-*Encode* vLLM deployments behind `llm-d-router` require `--enable-scale-out` on every role.**
 The router counts prompt tokens via `POST /v1/chat/completions/render`, which vLLM exposes only
@@ -133,10 +133,9 @@ check for the flag, and the operator does not inject it.
 | *Prefill*, *Decode* | Engine `/v1/chat/completions/render` call | Yes | None |
 | Single *Server* role | Engine `/v1/chat/completions/render` call | Yes | None |
 
-**Without `--enable-scale-out`, disaggregation fails silently.** Measured on vLLM-Ascend
-`0.30.0rc1`: render calls return `404`, the router sends every request to *Decode* alone, clients
-receive `200`, and *Prefill* receives zero completions
-([Stage execution verification](encode-prefill-decode-benchmark.md#stage-execution-verification)).
+**Without `--enable-scale-out`, disaggregation fails silently.** Render calls return `404`, the
+router sends every request to *Decode* alone, clients receive `200`, and *Prefill* receives zero
+completions ([Verification](encode-prefill-decode-benchmark.md#verification)).
 
 Add the flag to both roles of a vLLM *PD* deployment:
 
@@ -161,7 +160,7 @@ Add the flag to both roles of a vLLM *PD* deployment:
 Do not add `--enable-scale-out` to images below the documented floor; older vLLM builds exit on the
 unknown flag.
 
-### Version and configuration limits
+### Router compatibility
 
 Pick an engine image meeting [Engine Compatibility](engine-versions.md#minimum-versions). Other
 router paths:
@@ -172,7 +171,7 @@ router paths:
 | `sglang-gateway` + SGLang | Not applicable | Uses SGLang native disaggregation flags |
 | `llm-d-router` + SGLang | Not applicable; token path unmeasured | Uses SGLang native disaggregation flags |
 
-## Direct transfer transport
+## Direct KV transports
 
 *`spec.kvTransfer.backend`* selects `Mooncake`, `NIXL` or `HIXL`. If omitted, it defaults to
 `Mooncake` on non-Ascend pools and `HIXL` on Ascend pools.
@@ -197,7 +196,7 @@ router paths:
 - **Rollout**: Changing transfer settings rolls both roles; transfers can fail until both halves
   converge. Verify image support in [Engine Compatibility](engine-versions.md).
 
-### Pair connections
+### Role links and connectors
 
 - **Leader routing**: Multi-`Pod` *PD* replicas route HTTP to member `0` (`member-index=0`).
   *External data parallelism (External DP)* inside *Prefill* or *Decode* is unvalidated
@@ -225,7 +224,7 @@ Flags hidden in an image entrypoint, config file, `sh -c` wrapper, `--additional
 `ConfigMap`/`Secret` `envFrom` are invisible to the operator. A symmetrically hidden pair silently
 reads a mismatched KV layout; an asymmetric pair fails startup when *Decode* exceeds *Prefill*.
 
-## Vendor-specific behavior
+## Hardware requirements
 
 ### Ascend driver mount
 
@@ -306,8 +305,8 @@ Default images exclude the EFA provider.
 
 Each role's `Workload` submits to the queue named by its *`acceleratorType`* *`status.entrance`*, so
 *Prefill* and *Decode* can target different pools or queues while the `AdmissionCheck` still admits
-the deployment atomically (see [One group per replica](configuration.md#one-group-per-replica) and
-[Deployed and applied resources](../../operate/installation-modes.md#deployed-and-applied-resources)).
+the deployment atomically (see [Replica admission groups](configuration.md#replica-admission-groups) and
+[Worker-managed resources](../../operate/installation-modes.md#worker-managed-resources)).
 
 Different manufacturers use separate pool queues (`credits.gpustack.ai/<manufacturer>`). Mixed
 Ascend/non-Ascend *PD* pairs fail admission; mixed non-Ascend pairs are admitted but unmeasured.

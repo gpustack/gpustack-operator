@@ -283,7 +283,7 @@ A digest listed in *`spec.pinned`* is never a candidate at all; the pins arrive 
 though it still counts toward the usage the watermarks read.
 
 How the watermarks are capped when the cache shares kubelet's filesystem is under [the capacity
-rule](../modules/model-delivery/operations.md#capacity-rule).
+rule](../modules/model-delivery/operations.md#cache-capacity-accounting).
 
 When the references cannot be read, no configuration has been applied yet, or the node's *`spec`*
 fails its check, a collection removes nothing, a stale partial included, and the `Ready` message

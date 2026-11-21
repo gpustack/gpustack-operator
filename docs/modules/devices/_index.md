@@ -42,7 +42,7 @@ Choose whole-card, shared, logically sliced, or hardware-partitioned resource ke
 
 ## Operations
 
-### Step 1: Check node
+### Step 1: Run host preflight
 
 Run [Preflight Checks](preflight.md) on bare hosts before installing workloads.
 
@@ -54,7 +54,7 @@ Submit queued workloads following the
 ### Step 3: Verify allocation
 
 Inspect pool capacity and `Workload` reservations in
-[Pools and diagnosis](requests.md#pools-and-diagnosis). For hardware partitions, follow the
+[Pool troubleshooting](requests.md#pool-troubleshooting). For hardware partitions, follow the
 [NVIDIA](nvidia-mig.md), [Hygon](hygon-mig.md), or [T-Head](thead-mig.md) MIG runbooks.
 
 ## Troubleshooting

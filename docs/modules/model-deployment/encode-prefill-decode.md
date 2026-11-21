@@ -1,8 +1,9 @@
 # Encode, Prefill and Decode
 
 An *encode/prefill/decode (EPD)* deployment separates visual encoding from language generation across
-three roles. See [Model Deployment Configuration](configuration.md) for base role fields and
-admission rules.
+three roles: multimodal requests traverse *Encode* → *Prefill* → *Decode* (*Encode* allocates no KV
+cache and loads no language weights), while text-only requests skip *Encode*. See
+[Model Deployment Configuration](configuration.md) for base role fields and admission rules.
 
 ![Multimodal and text-only request flows](../../assets/diagrams/model-deployment-epd.svg)
 
@@ -16,27 +17,11 @@ flowchart LR
 
 ## Contents
 
-- [Roles and request flow](#roles-and-request-flow)
 - [Configuration](#configuration)
-- [Admission constraints](#admission-constraints)
-- [Admitted matrix](#admitted-matrix)
+- [Supported serving configurations](#supported-serving-configurations)
 - [Encoder-cache connectors](#encoder-cache-connectors)
-- [Scheduling co-location](#scheduling-co-location)
-- [Request routing across roles](#request-routing-across-roles)
-- [Replica drain and retirement](#replica-drain-and-retirement)
-- [Upgrade and rollout behavior](#upgrade-and-rollout-behavior)
+- [Operations](#operations)
 - [Results](#results)
-
-## Roles and request flow
-
-| Role | Function | Notes |
-|---|---|---|
-| *Encode* | Runs the vision encoder on images and media | Allocates no KV cache and loads no language weights |
-| *Prefill* | Consumes encoder embeddings and populates KV cache | Processes prompt tokens |
-| *Decode* | Generates completion tokens from KV cache | Streams responses |
-
-Multimodal requests traverse *Encode* → *Prefill* → *Decode*. Text-only requests skip *Encode* and
-go straight to *Prefill* and *Decode*.
 
 ## Configuration
 
@@ -78,10 +63,10 @@ spec:
 The operator injects the encoder-cache and KV-transfer connectors and attaches the decode routing
 sidecar where needed. On vLLM *Encode*, the operator defaults `--mm-encoder-only`,
 `--enforce-eager` and `--no-enable-prefix-caching`; *Prefill* and *Decode* keep CUDA graphs
-enabled. See [EPD Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) for a
-recorded run.
+enabled. See [EPD Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) for
+deployment steps and multimodal checks.
 
-## Admission constraints
+### Admission constraints
 
 Admission enforces every rule below except the image version floor:
 
@@ -95,9 +80,9 @@ Admission enforces every rule below except the image version floor:
 - **Single-`Pod` encoder**: *Encode* requires `size: 1` and refuses *elastic expert parallelism
   (Elastic EP)* and *external data parallelism (External DP)*.
 - **Image version floor**: Pick an image meeting the matching row in
-  [Admitted matrix](#admitted-matrix); admission does not read image tags.
+  [Supported serving configurations](#supported-serving-configurations); admission does not read image tags.
 
-## Admitted matrix
+## Supported serving configurations
 
 Admission accepts only these combinations:
 
@@ -123,14 +108,14 @@ Verified rows served multimodal requests through the router on the listed hardwa
 
 Apply the image floor to *`spec.engine.image`* or *`roles[].image`*. Unlike text-only *prefill/decode
 (PD)*, `llm-d-router` uses its built-in token estimator for *EPD*, so do not add
-`--enable-scale-out` ([Counting engine tokens](prefill-decode.md#counting-engine-tokens)). See
-[Version and configuration limits](prefill-decode.md#version-and-configuration-limits) for
+`--enable-scale-out` ([Router token counting](prefill-decode.md#router-token-counting)). See
+[Router compatibility](prefill-decode.md#router-compatibility) for
 explicit parallelism flag rules.
 
-### vLLM on NVIDIA, AMD
+### NVIDIA and AMD vLLM
 
 Runs `ECCPUConnector` over NIXL behind `llm-d-router` or `vllm-router` with no shared volume. See
-[ECCPUConnector](#eccpuconnector) for buffer and port rules.
+[NIXL embedding transfer](#nixl-embedding-transfer) for buffer and port rules.
 
 ### vLLM on Ascend
 
@@ -150,7 +135,7 @@ Send traffic only to *`status.endpoint`* (the router `Service`). The plain deplo
 (`<name>`) hits *Prefill* directly without a router `bootstrap_room`, returning `HTTP 400`
 (`Invalid bootstrap_room`) on SGLang `0.5.18`.
 
-### Unadmitted candidates
+### Unsupported configurations
 
 | Candidate | Status |
 |---|---|
@@ -161,19 +146,20 @@ Send traffic only to *`status.endpoint`* (the router `Service`). The plain deplo
 
 ## Encoder-cache connectors
 
-### ECExampleConnector
+### Shared volume transfer
 
-Passes embeddings through a shared `ReadWriteMany` PVC attached via *`roles[].additionalVolumes`* on
-both *Encode* and *Prefill* with matching *`claimName`*, *`mountPath`* and *`subPath`*. Keep the
-*Encode* mount writable (`readOnly: false`).
+`ECExampleConnector` passes embeddings through a shared `ReadWriteMany` PVC attached via
+*`roles[].additionalVolumes`* on both *Encode* and *Prefill* with matching *`claimName`*,
+*`mountPath`* and *`subPath`*. Keep the *Encode* mount writable (`readOnly: false`).
 
 The connector has no file locking or expiry, and storage latency adds transfer delay. The operator
 omits `VLLM_USE_V2_MODEL_RUNNER` because vLLM-Ascend V2 has no multimodal encoder path.
 
-### ECCPUConnector
+### NIXL embedding transfer
 
-Transfers embeddings between `Pod`s over NIXL. The operator sets `VLLM_USE_V2_MODEL_RUNNER=1` on
-both roles and renders an untuned 1 GiB host buffer (`ec_cpu_bytes`) in `--ec-transfer-config`.
+`ECCPUConnector` transfers embeddings between `Pod`s over NIXL. The operator sets
+`VLLM_USE_V2_MODEL_RUNNER=1` on both roles and renders an untuned 1 GiB host buffer
+(`ec_cpu_bytes`) in `--ec-transfer-config`.
 
 *Encode* binds side-channel port `5601` (`VLLM_EC_SIDE_CHANNEL_HOST` = *`status.podIP`*). Admission
 refuses port `5601` on *Encode* (`ports` or `--port`) under `ECCPUConnector`; `ECExampleConnector`
@@ -193,7 +179,9 @@ Four vLLM *Encode* flags are **defaulted** (user *`extraArgs`* wins): `--enforce
 avoids empty language-model graph capture on V1 `GPUModelRunner` (`ECExampleConnector`) and is
 never defaulted on *Prefill*, *Decode* or *Server*; do not copy it onto language roles.
 
-## Scheduling co-location
+## Operations
+
+### Role placement preferences
 
 Deployments with an *Encode* role add soft hostname anti-spread preferences (matching
 `modeldeployment.gpustack.ai/role-kind` within the deployment); tight clusters still schedule
@@ -209,7 +197,7 @@ across nodes:
 *Prefill* and *Decode* exchange KV cache on every request and get higher weight than *Encode* →
 *Prefill* embeddings. Deployments without *Encode* render no affinity.
 
-## Request routing across roles
+### Request routing across roles
 
 Send client traffic to *`status.endpoint`*. *Encode* `Pod`s are excluded from the deployment
 `Service`, *`status.endpoint`* and KV-event discovery:
@@ -221,13 +209,13 @@ Send client traffic to *`status.endpoint`*. *Encode* `Pod`s are excluded from th
 
 See [Encode stage routing](routing.md#encode-stage-routing) for full router behavior.
 
-## Replica drain and retirement
+### Replica drain and retirement
 
 *Encode* exports no in-flight request gauges, so retirement uses a fixed window: `30 s` withdrawal,
 `240 s` drain (`Draining`) and `30 s` settle before `Pod` deletion. Transfers still in flight when
 the window ends fail at the client.
 
-## Upgrade and rollout behavior
+### Deployment upgrades
 
 Upgrading the operator does not roll existing *Server* or *PD* deployments without an *Encode* role.
 Role kinds are frozen after creation; create a new `ModelDeployment` to adopt *EPD*.
@@ -247,6 +235,6 @@ vision encoding and cut long-prompt *ITL* tails. See
 [Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) (measured latency and throughput) ·
 [Engine Compatibility](engine-versions.md) (supported version floors) ·
 [Model Deployment Routing](routing.md) (router selection and endpoint eligibility) ·
-[EPD Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) (recorded live run)
+[EPD Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) (deployment and multimodal checks)
 
 **Next** → [Model Deployment Routing](routing.md) — choose a routing policy and inspect candidate endpoints.

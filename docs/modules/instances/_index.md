@@ -7,9 +7,8 @@ operator adds an SSH sidecar that enters the workload container.
 ## Contents
 
 - [Overview](#overview)
-- [Pool selection](#pool-selection)
-- [Unit resource sizing](#unit-resource-sizing)
-- [Quickstart](#quickstart)
+- [Configuration](#configuration)
+- [Operations](#operations)
 - [Troubleshooting](#troubleshooting)
 
 ## Overview
@@ -31,7 +30,9 @@ flowchart TD
     SERVICE -> WORKSPACE
 -->
 
-## Pool selection
+## Configuration
+
+### Pool selection
 
 List available `InstanceType`s (`instype`) and read-only `InstanceTypeFlavor`s (`instypeflavor`)
 before creating a workspace:
@@ -51,7 +52,7 @@ With `instance-type-derived-from-node` enabled (default `true`), the operator cr
 also contribute to the generic CPU pool (`instance-type-mixed-on-node: true`), and pools collapse
 CPU vendors (`instance-type-aware-cpu-manufacturer: false`).
 
-## Unit resource sizing
+### Instance resource defaults
 
 Derived `InstanceType`s stamp *`spec.unitResources`* (*`cpu`*, *`ram`*) per whole accelerator from
 hardware presets, plus a fixed `100Gi` *`spec.localStorage`*. Unlisted accelerators fall back to
@@ -74,7 +75,7 @@ hardware presets, plus a fixed `100Gi` *`spec.localStorage`*. Unlisted accelerat
   `Instance`s so they remain `Stopped` even after the type is recreated; once the replacement type
   is `Active`, restart each workspace using [Start workspace](operations.md#step-3-start-workspace).
 
-## Quickstart
+## Operations
 
 ### Step 1: Create workspace
 

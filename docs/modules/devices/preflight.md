@@ -11,12 +11,10 @@ off-state sharing flags when required. It also launches non-privileged probe con
 ## Contents
 
 - [Prerequisites](#prerequisites)
-- [Command line](#command-line)
-- [Mounts](#mounts)
-- [Flags](#flags)
-- [Side effects](#side-effects)
-- [Emitted steps](#emitted-steps)
-- [Output by manufacturer](#output-by-manufacturer)
+- [Preflight commands](#preflight-commands)
+- [Configuration](#configuration)
+- [Probe side effects](#probe-side-effects)
+- [Checks by manufacturer](#checks-by-manufacturer)
 - [Result format](#result-format)
 
 ## Prerequisites
@@ -37,7 +35,7 @@ Probe containers run **unprivileged**, receiving only the device nodes, mounts, 
 production allocator injects (`--privileged` on the outer `preflight` container covers driver reads
 and `/dev` discovery).
 
-## Command line
+## Preflight commands
 
 Run the command for your hardware vendor. On `containerd`, replace `docker run` with `nerdctl run`
 (except on Moore Threads and NVIDIA, noted below). Verify each host driver path exists first, because
@@ -92,7 +90,7 @@ docker run --rm --privileged --network=host \
 ```
 
 `/etc/dmi_mig_config` is mounted writable for MIG registry operations, and `--probe-image` is
-required to measure slice rows ([Container-probe tier](#container-probe-tier)).
+required to measure slice checks ([Container probes](#container-probes)).
 
 ### Iluvatar
 
@@ -161,7 +159,7 @@ docker run --rm --network=host -v /:/host \
 Without vendor mounts, `preflight` cross-checks host CLIs on NVIDIA, Ascend, and AMD and prints the
 required vendor mounts for detected hardware.
 
-### Running Pod checks
+### Device Manager Pod checks
 
 Run `detect` or dry-run `preflight` inside an installed `gpustack-operator-device-manager-<manufacturer>`
 `Pod`:
@@ -176,7 +174,9 @@ The `DaemonSet` `Pod` omits `/:/host`, so `preflight` enters dry-run mode automa
 detection, `device-health`, and read-only driver checks, emits container commands, and leaves the
 node untouched.
 
-## Mounts
+## Configuration
+
+### Host access
 
 | Mount | Purpose |
 |---|---|
@@ -185,7 +185,7 @@ node untouched.
 | `-v /dev:/dev`, `-v /sys:/sys` | Supplies device nodes and sysfs topology for in-process detection and driver reads. |
 | Vendor mount or `--runtime` | Loads user-space vendor management libraries into the `preflight` process. |
 
-## Flags
+### Command flags
 
 | Flag | Effect |
 |---|---|
@@ -200,7 +200,7 @@ By default, `preflight` reads the container runtime from kubelet CRI flags or
 `/var/lib/kubelet/{kubeadm-flags.env,config.yaml}`. Otherwise it falls back to `docker`, `nerdctl`,
 or `ctr`.
 
-## Side effects
+## Probe side effects
 
 On measured tiers, `preflight` runs one 50%-slice probe per card, then two concurrent slices to
 verify co-tenancy. Containers carry label `gpustack.ai/preflight=true` (containerd namespace
@@ -213,13 +213,11 @@ verify co-tenancy. Containers carry label `gpustack.ai/preflight=true` (containe
 | Process lock | `/var/lib/gpustack/operator/preflight/lock` | File stays; kernel `flock` releases automatically on process exit. |
 | Driver sharing flag | Ascend / Cambricon driver state | Restored immediately within the same pass. |
 
-## Emitted steps
+**Printed probe commands**: Container probes skip execution under `--dry-run`, missing `/host`,
+read-only library paths, missing runtimes, `ctr`, or `nerdctl` on Ascend. In those cases,
+`preflight` prints the full command (`emitted`) without failing the exit code.
 
-Container probes skip execution under `--dry-run`, missing `/host`, read-only library paths, missing
-runtimes, `ctr`, or `nerdctl` on Ascend. In those cases, `preflight` prints the full command
-(`emitted`) without failing the exit code.
-
-## Output by manufacturer
+## Checks by manufacturer
 
 Each accelerator reports only the modes it currently offers (for example, a MIG-enabled GPU reports
 partition checks and omits logical-slice rows).
@@ -231,19 +229,19 @@ partition checks and omits logical-slice rows).
 | **Driver + injection** | Cambricon, MetaX | Yes | Allocator injection only | `simulated` |
 | **Injection only** | Iluvatar, MThreads | No (`note` explains why) | Allocator injection only | `simulated` |
 
-### Injection-only tier
+### Injection checks
 
 Iluvatar and Moore Threads enforce slicing in the kernel module and container runtime rather than a
 user-space flag. `preflight` verifies allocator injection (`simulated`) and records an explanatory
 `note`.
 
-### Container-probe tier
+### Container probes
 
 Hygon runs real probe containers (`measured`) with `--probe-image` (any glibc image carrying `sh`,
 `cat`, `grep`, `awk`, `mkdir`, `sleep`, and `kill`). The probe runs `/opt/dtk` `BandwidthTest` and
 reads `kfd` vgpu sysfs because `hy-smi` always prints full physical VRAM.
 
-### Vendor capability matrix
+### Supported vendor checks
 
 | Manufacturer | Detection API | Host cross-check | Driver check | Target mode | Container probe |
 |---|---|---|---|---|---|
@@ -319,7 +317,7 @@ topology:
   depth: declared
 ```
 
-### States and depths
+### Check states and depth
 
 | State | Meaning | Exit code |
 |---|---|---|

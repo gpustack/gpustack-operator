@@ -321,7 +321,7 @@ Each check carries a state, a depth and, where a container ran, the evidence it 
 | `simulated` | the allocator produced the injection, and it was not run |
 | `measured` | a container ran with that injection and its output was read |
 
-### A measured example
+### Measured example
 
 Taken from a run on two RX 7800 XT cards:
 

@@ -9,10 +9,8 @@ enables deferred offload (`-enable_offload=true -offload_on_evict=true`) on the 
 - [Configuration](#configuration)
 - [Bucket writes](#bucket-writes)
 - [Eviction](#eviction)
-- [Directory requirements](#directory-requirements)
 - [Cleanup on deletion](#cleanup-on-deletion)
-- [Unaccounted disk usage](#unaccounted-disk-usage)
-- [Disk-heavy nodes](#disk-heavy-nodes)
+- [Disk and memory sizing](#disk-and-memory-sizing)
 
 ## Configuration
 
@@ -52,6 +50,31 @@ spec:
 
 The tier always runs in deferred mode, keeping queued objects in memory until their disk bucket
 flushes.
+
+### Host directory requirements
+
+*`localDisks[].path`* mounts with `hostPath.type: Directory` (`fsGroup` does not apply to
+`hostPath`). Pre-create the directory on every selected `Node`, owned by the member image's UID
+(`65532` on official images):
+
+```bash
+docker run --rm --entrypoint id <your-member-image>
+install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
+```
+
+- **Path validation**: Must be an absolute path without leading/trailing whitespace or `..`, not
+  `/`, not overlapping `/dev/infiniband`, and (on `CANN` groups with *`fabricInterfaceCount`*) not
+  overlapping `/etc/hixlep`.
+- **Tier immutability**: Adding, removing, or repathing *`localDisks`* on an existing group is
+  refused (*`capacity`*, *`keyLimit`*, *`cleanAfterDelete`*, and *`eviction`* remain editable). To
+  remove a tier without deleting the whole `KVCacheBackend`, place the tier on the **last** entry in
+  *`members[]`* so that group can be removed from the tail ([Group resizing](backend.md#group-resizing)).
+
+| Symptom | Signal | Resolution |
+|---|---|---|
+| Refused at `kubectl apply` | Admission error on *`localDisks`* | Fix the path rule violation, or avoid adding/removing/repathing *`localDisks`* in place. |
+| Member `Pod` stuck `Pending` / `ContainerCreating` | `FailedMount ... hostPath type check failed` | Create *`localDisks[].path`* on the `Node` before starting the member. |
+| Member `Pod` running, `0/1` Ready (`MembersMounted=False`) | Log: `FileStorageConfig: no write permission on directory` | `chown` the host directory to the member container's UID. |
 
 ## Bucket writes
 
@@ -93,31 +116,6 @@ Admission rejects four no-op combinations: `enabled: false` with *`policy`*, `en
 Unmodeled Mooncake file-storage variables can be passed in *`members[].extraEnv`* (non-rendered keys
 only; world-readable, so never pass credentials).
 
-## Directory requirements
-
-*`localDisks[].path`* mounts with `hostPath.type: Directory` (`fsGroup` does not apply to
-`hostPath`). Pre-create the directory on every selected `Node`, owned by the member image's UID
-(`65532` on official images):
-
-```bash
-docker run --rm --entrypoint id <your-member-image>
-install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
-```
-
-- **Path validation**: Must be an absolute path without leading/trailing whitespace or `..`, not
-  `/`, not overlapping `/dev/infiniband`, and (on `CANN` groups with *`fabricInterfaceCount`*) not
-  overlapping `/etc/hixlep`.
-- **Tier immutability**: Adding, removing, or repathing *`localDisks`* on an existing group is
-  refused (*`capacity`*, *`keyLimit`*, *`cleanAfterDelete`*, and *`eviction`* remain editable). To
-  remove a tier without deleting the whole `KVCacheBackend`, place the tier on the **last** entry in
-  *`members[]`* so that group can be removed from the tail ([Group resizing](backend.md#group-resizing)).
-
-| Symptom | Signal | Resolution |
-|---|---|---|
-| Refused at `kubectl apply` | Admission error on *`localDisks`* | Fix the path rule violation, or avoid adding/removing/repathing *`localDisks`* in place. |
-| Member `Pod` stuck `Pending` / `ContainerCreating` | `FailedMount ... hostPath type check failed` | Create *`localDisks[].path`* on the `Node` before starting the member. |
-| Member `Pod` running, `0/1` Ready (`MembersMounted=False`) | Log: `FileStorageConfig: no write permission on directory` | `chown` the host directory to the member container's UID. |
-
 ## Cleanup on deletion
 
 By default (`cleanAfterDelete: false`), deleting a `KVCacheBackend` leaves *`localDisks[].path`*
@@ -142,7 +140,7 @@ the directory itself:
 +              cleanAfterDelete: true
 ```
 
-### Disabled cleanup
+### Retained cache files
 
 Pointing a new `KVCacheBackend` at a non-empty directory lets Mooncake adopt leftover buckets, which
 can serve stale bytes on key collisions. Each backend's initial member `Pod`s survey the directory
@@ -169,16 +167,14 @@ still matched at deletion time. Cleanup does not block backend deletion indefini
 kubectl describe node <node> | grep -E 'KVCacheTierNotCleaned|KVCacheTierSharedPath|KVCacheTierPartlyEmptied'
 ```
 
-## Unaccounted disk usage
-
-Kubernetes ephemeral-storage limits do not track or evict *`hostPath`* usage. Monitor the backing
-filesystem yourself and set *`localDisks[].capacity`* inside the disk's free space.
-
-## Disk-heavy nodes
+## Disk and memory sizing
 
 A `Node` with terabytes of NVMe and limited spare RAM still requires a memory segment on the same
 member group. Mooncake routes offload tasks to the client holding the key's **memory** replica, so a
 group without memory would report disk capacity while storing nothing.
+
+Kubernetes ephemeral-storage limits do not track or evict *`hostPath`* usage. Monitor the backing
+filesystem yourself and set *`localDisks[].capacity`* inside the disk's free space.
 
 Configure one group combining a thin `DRAM` segment with a large *`localDisks[].capacity`*:
 
@@ -205,7 +201,7 @@ spec:
                 policy: LRU
 ```
 
-### Memory segment floor
+### Minimum memory segment
 
 Admission enforces `capacityPerMember >= 16Mi` (one bucket) whenever *`capacityPerMember`* is
 created or edited on a group with *`localDisks`* (existing smaller values are not re-judged on

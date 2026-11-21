@@ -14,12 +14,9 @@ on the same `Node` continue serving whole-GPU, shared, and logical-slice request
 - [Prerequisites](#prerequisites)
 - [Partition profile discovery](#partition-profile-discovery)
 - [Partition requests](#partition-requests)
+- [Operations](#operations)
+- [MIG capacity scenarios](#mig-capacity-scenarios)
 - [Limitations](#limitations)
-- [Enabling partitioning](#enabling-partitioning)
-- [Disabling partitioning](#disabling-partitioning)
-- [Node reboot recovery](#node-reboot-recovery)
-- [Operator boundaries](#operator-boundaries)
-- [Three MIG configurations](#three-mig-configurations)
 
 ## Prerequisites
 
@@ -109,40 +106,25 @@ spec:
   ownership marker and MIG UUID under the GPU lock and receives **only** `main`'s MIG instance,
   never the parent GPU.
 
-## Limitations
+## Operations
 
-- **No manual `nvidia-smi mig -cgi` or `-cci`**: Hand-carved instances desynchronize node capacity
-  keys and are destroyed as orphans once idle; subdivided `-cci` instances halt node-wide reclaim
-  until removed.
-- **Immediate replacement race**: Node capacity keys free on `Pod` deletion slightly ahead of
-  debounced hardware destroy; leave a brief gap before submitting an identical replacement or allow
-  it to restart once.
-- **Reboot persistence**: MIG **instances** never survive a host reboot on any generation, and MIG
-  **mode** persists across reboots on Ampere (InfoROM) but resets to disabled on Hopper and newer.
-- **Provider NVLink health checks**: Some managed cloud agents cordon/reboot `Node`s when MIG drops
-  GPUs out of full NVLink pair checks; inspect provider node conditions if a MIG `Node` reboots.
+### Enabling partitioning
 
-## Enabling partitioning
+1. Satisfy [Prerequisites](#prerequisites), enable MIG mode per GPU or across all GPUs, and reset on
+   Ampere:
 
-### Step 1: Switch MIG mode
+   ```bash
+   nvidia-smi -i <id> -mig 1  # or: nvidia-smi -mig 1
+   # On Ampere (A100/A30) only: nvidia-smi -i <id> -r
+   ```
 
-Satisfy [Prerequisites](#prerequisites), enable MIG mode per GPU or across all GPUs, and reset on
-Ampere:
+2. Restart the NVIDIA Device Manager `DaemonSet` so the detector updates `Devices` in place (do not
+   delete `Devices` or pre-carve instances):
 
-```bash
-nvidia-smi -i <id> -mig 1  # or: nvidia-smi -mig 1
-# On Ampere (A100/A30) only: nvidia-smi -i <id> -r
-```
-
-### Step 2: Restart Device Manager
-
-Restart the NVIDIA Device Manager `DaemonSet` so the detector updates `Devices` in place (do not
-delete `Devices` or pre-carve instances):
-
-```bash
-kubectl -n gpustack-system rollout restart ds/gpustack-operator-device-manager-nvidia
-kubectl -n gpustack-system rollout status ds/gpustack-operator-device-manager-nvidia
-```
+   ```bash
+   kubectl -n gpustack-system rollout restart ds/gpustack-operator-device-manager-nvidia
+   kubectl -n gpustack-system rollout status ds/gpustack-operator-device-manager-nvidia
+   ```
 
 ### Fleet-wide MIG Manager
 
@@ -161,7 +143,7 @@ kubectl label node <node> nvidia.com/mig.config=all-enabled --overwrite
   after MIG Manager finishes switching a `Node` (check `nvidia-smi` directly if masked DCGM causes
   `nvidia.com/mig.config.state=failed`).
 
-## Disabling partitioning
+### Disabling partitioning
 
 Drain partition `Pod`s so instances reclaim (or destroy remaining instances manually), disable MIG
 mode, apply any Ampere reset, and restart `gpustack-operator-device-manager-nvidia`:
@@ -170,23 +152,18 @@ mode, apply any Ampere reset, and restart `gpustack-operator-device-manager-nvid
 nvidia-smi -i <id> -mig 0  # or: nvidia-smi -mig 0
 ```
 
-## Node reboot recovery
+### Node reboot recovery
 
 After an unplanned reboot, re-run [Enabling partitioning](#enabling-partitioning) (including the
 Device Manager `DaemonSet` restart), then delete and recreate pre-reboot partition `Pod`s so fresh
 MIG instances materialize.
 
-## Operator boundaries
-
-GPUStack creates and reclaims single-CI MIG instances for scheduled workloads and cleans idle
-untracked instances. It never toggles MIG mode, resets GPUs, evicts `Pod`s on mode switches, or
-serves subdivided `-cci` instances.
-
-## Three MIG configurations
+## MIG capacity scenarios
 
 Partitioning GPUs shifts capacity from `EX`/`SH`/`SL` to `PT` on `InstanceType` (`SH` below shows
 legacy `10`-share display; current builds display card count `8/80` and `5/50`, see
-[Pre-release breaks](requests.md#pre-release-breaks)). Observed on an 8-GPU `H100-80GB` `Node`:
+[Legacy request migration](requests.md#legacy-request-migration)). An 8-GPU `H100-80GB` `Node`
+reports these capacity views across three layouts:
 
 | Configuration | Partitioned GPUs | `EX/SH/SL/PT` | Advertised node keys |
 |---|---|---|---|
@@ -194,7 +171,7 @@ legacy `10`-share display; current builds display card count `8/80` and `5/50`, 
 | All-physical | `8` of `8` | `0/0 0/0 0/0 1/56` | `.partitioned: 56` + `.partitioned.mig-*` (`12800k` units); logical keys `0` |
 | Mixed | `3` of `8` | `5/5 50/50 100/500 1/21` | `5` GPUs under logical/whole (`640` slices); `3` GPUs under `.partitioned.*` (`21`) |
 
-### Verification summary
+### Verification
 
 Wait for `gpustack-operator-device-manager-nvidia` to be `Ready` and `.partitioned` keys to register
 on the `Node` before submitting `Pod`s, then verify carved UUIDs:
@@ -237,6 +214,23 @@ Across 7 empty GPUs plus that 1 carved GPU:
 
 *`status.detail.slicedDetail`* reflects static empty-pool capability from `Devices.spec`; read `PT`
 and `PARTITIONS` (`-o wide`) for live remaining slots.
+
+## Limitations
+
+GPUStack creates and reclaims single-CI MIG instances for scheduled workloads and cleans idle
+untracked instances. It never toggles MIG mode, resets GPUs, evicts `Pod`s on mode switches, or
+serves subdivided `-cci` instances.
+
+- **No manual `nvidia-smi mig -cgi` or `-cci`**: Hand-carved instances desynchronize node capacity
+  keys and are destroyed as orphans once idle; subdivided `-cci` instances halt node-wide reclaim
+  until removed.
+- **Immediate replacement race**: Node capacity keys free on `Pod` deletion slightly ahead of
+  debounced hardware destroy; leave a brief gap before submitting an identical replacement or allow
+  it to restart once.
+- **Reboot persistence**: MIG **instances** never survive a host reboot on any generation, and MIG
+  **mode** persists across reboots on Ampere (InfoROM) but resets to disabled on Hopper and newer.
+- **Provider NVLink health checks**: Some managed cloud agents cordon/reboot `Node`s when MIG drops
+  GPUs out of full NVLink pair checks; inspect provider node conditions if a MIG `Node` reboots.
 
 ---
 

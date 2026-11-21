@@ -35,7 +35,7 @@ kubectl get nodemodelstores.v1.worker.gpustack.ai
 - `NodeModelStore` supports reads and deletion. The worker manages its *`spec`*, and each node's plugin
   reports *`status`*. Deletion supports Kubernetes garbage collection; the worker recreates the object
   while its node runs the plugin.
-- Resource fields are described in [Model Artifact](../modules/model-delivery/artifact.md#resource),
+- Resource fields are described in [Model Artifact](../modules/model-delivery/artifact.md#configuration),
   [Model Prefetch](../modules/model-delivery/prefetch.md), and [Node Model Store](model-delivery-node-store.md#resource).
 
 ## Progress subresource

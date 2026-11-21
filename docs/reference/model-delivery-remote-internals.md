@@ -243,7 +243,7 @@ spec:
 ## Benchmark sweep details
 
 Evidence: recorded capture. Host RAM budgets, shard ceilings and detailed ModelExpress timing
-breakdowns backing the matched benchmark tables in [Remote Weight Delivery](../modules/model-delivery/remote.md#benchmarks).
+breakdowns backing the matched benchmark tables in [Remote Weight Delivery](../modules/model-delivery/remote.md#results).
 
 ### Ascend HIXL host budgets
 

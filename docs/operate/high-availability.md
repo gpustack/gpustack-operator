@@ -9,7 +9,7 @@ NFD worker, and CSI node `DaemonSet`s) already run one `Pod` per node.
 
 - [Prerequisites](#prerequisites)
 - [Configuration](#configuration)
-- [Non-redundant topology](#non-redundant-topology)
+- [External worker webhook limits](#external-worker-webhook-limits)
 - [Verification](#verification)
 
 ## Prerequisites
@@ -116,7 +116,7 @@ cleanup of deleted `Node` records.
 NFD spells its disruption budget switch `enable` (`enabled: true` is ignored) and supports placement
 only through `node-feature-discovery.master.affinity`.
 
-### Two CSI controllers
+### NFS and S3 controllers
 
 CSI controller outages delay new volume provisioning, resizing, and snapshots while mounted volumes
 continue running through the CSI node `DaemonSet`s. Both bundled CSI charts omit `PodDisruptionBudget`
@@ -127,7 +127,7 @@ On `csi-driver-nfs`, `DoNotSchedule` hostname spread is mandatory above one repl
 `Pod`s use `hostNetwork` and collide on the liveness port if co-located. `csi-driver-s3` exposes no
 spread field, so two replicas provide process-level failover without guaranteed node separation.
 
-## Non-redundant topology
+## External worker webhook limits
 
 When an image-mode worker runs outside the target cluster on an adjacent network
 (`!LoopbackKubeInside && LoopbackKubeNearby`), its webhooks register against a single node IP URL

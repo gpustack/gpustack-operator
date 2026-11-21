@@ -10,18 +10,13 @@ admission still applies.
 
 ## Contents
 
-- [Minimal deployment](#minimal-deployment)
-- [Prefill and decode](#prefill-and-decode)
-- [Topology placement](#topology-placement)
-- [Inherited reuse domain](#inherited-reuse-domain)
-- [Three override tiers](#three-override-tiers)
-- [Operator-owned keys](#operator-owned-keys)
-- [Role images](#role-images)
+- [Deployment configuration](#deployment-configuration)
+- [Engine overrides](#engine-overrides)
 - [Rollout behavior](#rollout-behavior)
 - [Admission refusals](#admission-refusals)
-- [Operating notes](#operating-notes)
+- [Operations](#operations)
 
-## Minimal deployment
+## Deployment configuration
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -72,7 +67,7 @@ The operator reserves `GPUSTACK_REPLICA_LEADER_ADDRESS`, `GPUSTACK_REPLICA_SIZE`
 `GPUSTACK_MEMBER_INDEX` at every size. It injects them only when `size > 1`. Declare the engine
 parallelism flags yourself.
 
-## Prefill and decode
+### Prefill and decode
 
 Admission handles all roles in one deployment **atomically**. Each replica forms its own Kueue `Pod`
 group. An admission check holds every group until the whole set reserves quota.
@@ -110,7 +105,7 @@ spec:
 [Prefill and Decode](prefill-decode.md) covers connectors, *`spec.router`*, direct transfer
 transports and per-role `Service`s.
 
-## Topology placement
+### Topology placement
 
 *`roles[].topology.requiredLevel`* takes a configured topology label key, such as a region, zone,
 rack or Topograph level. All *`size`* `Pod`s of each replica group must then fit in one domain at
@@ -120,18 +115,24 @@ Omit the field for unconstrained placement. `kubernetes.io/hostname` is implicit
 rejects it. A change rolls only that role's replicas. See
 [Topology-Aware Scheduling Operations](../topology/operations.md).
 
-## Inherited reuse domain
+### KV cache reuse domain
 
 The reuse domain (`name`, *`blockSize`*, `dtype`) is an immutable block on the `KVCachePoolBinding`.
 `ModelDeploymentSpec` has no domain field. A workload therefore cannot mint tenants outside its
-Binding's quota ([One Binding, one domain](../kv-cache/pool.md#one-binding-one-domain)).
+Binding's quota ([Cache reuse domains](../kv-cache/pool.md#cache-reuse-domains)).
 
 - `ModelDeployment`s that share a Binding share KV. Separate Bindings get separate tenant identifiers.
 - *`status.kvCache`* echoes the attached `binding`, `pool` and domain block.
 - The operator renders the tenant identifier on managed roles. Select a compatible engine image to
   enforce isolation ([KV Cache Pools and Bindings](../kv-cache/pool.md#limitations)).
 
-## Three override tiers
+### Role images
+
+Each replica uses *`roles[].image`* if set, then the required *`spec.engine.image`*. The operator
+never infers an image tag from node driver versions. Set a pullable tag that fits the configuration;
+see [Engine Compatibility](engine-versions.md).
+
+## Engine overrides
 
 Customize the engine through three tiers. Do not patch rendered `Pod`s.
 
@@ -206,7 +207,7 @@ To override a variable, set it in *`roles[].env`*.
 `ceil(startupTimeoutSeconds / 10)` at `periodSeconds: 10`. If cold graph compilation needs more time
 than the default timeout, raise it.
 
-## Operator-owned keys
+### Operator-owned keys
 
 The operator owns each key per engine. Admission refuses these keys in *`extraArgs`* and *`env`* on a
 managed role:
@@ -219,7 +220,7 @@ managed role:
 - Encoder-stage keys (including vLLM `--ec-transfer-config` and SGLang encoder flags) are also owned
   per engine; see [Keys the operator owns](encode-prefill-decode.md#operator-owned-keys).
 - `--kv-cache-dtype` is owned on both engines while *`spec.kvCache`* is set and
-  `model-deployment-kv-cache-dtype-owned` is `true` ([Engine dtype](../kv-cache/pool.md#engine-dtype)).
+  `model-deployment-kv-cache-dtype-owned` is `true` ([Engine cache precision](../kv-cache/pool.md#engine-cache-precision)).
 - These keys are defaulted, so a user entry wins without refusal: `MC_TE_METRIC=1`, `MC_FORCE_TCP=1`
   on TCP paths, SGLang hierarchical-cache flags, and compilation and runtime cache paths.
 - Ascend transfer defaults `ASCEND_LOCAL_COMM_RES` and `ASCEND_MF_TRANSFER_PROTOCOL` are also
@@ -231,12 +232,6 @@ reads its whole cache configuration from environment variables.
 
 Routed cache-producing vLLM roles also render `--kv-events-config` on ZMQ ports `5557` and `5558`.
 Routed SGLang roles report `KVEventsPublishing=False/PublisherDisabled`.
-
-## Role images
-
-Each replica uses *`roles[].image`* if set, then the required *`spec.engine.image`*. The operator
-never infers an image tag from node driver versions. Set a pullable tag that fits the configuration;
-see [Engine Compatibility](engine-versions.md).
 
 ## Rollout behavior
 
@@ -267,7 +262,7 @@ render version:
 
 Live fields in *`roles[].runtimeControl.parameters`*, *`roles[].pause`* and mutable *`spec.router`*
 subfields do not roll worker `Pod`s
-([Online Runtime Control](runtime-control.md#router-hash-decoupling)).
+([Online Runtime Control](runtime-control.md#router-rollout-effects)).
 
 Replacement `Pod`s get fresh names, so select replicas by label:
 
@@ -330,7 +325,7 @@ spec:
 >   -p '[{"op":"replace","path":"/spec/roles/0/size","value":2}]'
 > ```
 
-### One group per replica
+### Replica admission groups
 
 For an accelerated role, each replica is its own Kueue `Pod` group with one `Workload` of total size
 *`size`*. CPU-only roles bypass Kueue.
@@ -353,7 +348,7 @@ Rules that read `AcceleratorType` are skipped during deletion, so a missing type
 finalizer removal. If `AcceleratorType.status` has not converged, admission passes. The deployment
 then gets a `RenderFailed` warning Event until the status converges.
 
-## Operating notes
+## Operations
 
 - Replicas serve on port `8000` unless *`roles[].ports`* or `--port` sets another container port.
 - If you pass only `--port`, the operator updates the container port and the `Service`

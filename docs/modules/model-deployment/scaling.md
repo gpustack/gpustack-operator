@@ -17,18 +17,15 @@ flowchart LR
 
 ## Contents
 
-- [Resource](#resource)
+- [Configuration](#configuration)
 - [Algorithms](#algorithms)
-- [Bounds and ratios](#bounds-and-ratios)
-- [Pacing and guards](#pacing-and-guards)
-- [Resource rebalancing](#resource-rebalancing)
-- [Binding fence](#binding-fence)
-- [GitOps sync](#gitops-sync)
+- [Scaling policy](#scaling-policy)
+- [Replica ownership](#replica-ownership)
 - [Status](#status)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
-## Resource
+## Configuration
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -80,7 +77,7 @@ spec:
 - **Target ordering**: A scaler may be created before its target; it reports `TargetNotFound` until
   the `ModelDeployment` exists.
 - **Mode and suspend**: `Shadow` plans without claiming ownership; `Active` acquires the
-  [Binding fence](#binding-fence) and commits counts. `suspend: true` pauses planning and releases
+  [Scaler ownership rules](#scaler-ownership-rules) and commits counts. `suspend: true` pauses planning and releases
   ownership.
 - **Quick check**: Run `kubectl get mds` to read mode, algorithm and `Bound`, `Active` and
   `Blocked` conditions.
@@ -162,30 +159,6 @@ spec:
   blocks scale-down. A *time to first token (TTFT)* or *inter-token latency (ITL)* breach holds
   scale-down; above `1.2×` target triggers growth.
 
-### Engine signals
-
-Both engines report running and waiting queues (SGLang adds `sglang:num_decode_transfer_queue_reqs`
-and `sglang:num_prefill_inflight_queue_reqs`). Prompt rate adjusts for prefix-cache hits; generation
-rate reads rank-0 deltas; latency reads histogram quantiles with no mean fallback if buckets hit
-`+Inf`.
-
-Inspect live samples, partial scrapes and missing series through the `ModelDeployment` `/metrics`
-subresource (requires RBAC `get` on `modeldeployments/metrics`):
-
-```bash
-kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/<namespace>/modeldeployments/<name>/metrics" \
-  | jq '{partial, missing, processing, queueing, latency}'
-```
-
-The subresource scrapes up to `64` owned `Pod`s (`prometheus.io/scrape: "true"`,
-`prometheus.io/port`, `prometheus.io/scheme`; take-over *`roles[].command`* roles omit scrape
-annotations) and returns `503 Service Unavailable` when no owned `Pod` answers.
-
-- **`partial: true`**: Marks unreadable or TLS-untrusted endpoints, first counter reads, counter
-  resets, missing *TTFT* histograms or `> 64` `Pod`s.
-- **`missing[]` with `partial: false`**: Normal for zero-count error counters, idle windows or
-  unconfigured cache tiers.
-
 ### Predictive
 
 Forecasts token demand *`horizonSeconds`* ahead via a Kalman filter, floored by nested
@@ -227,6 +200,30 @@ spec:
 Before *`minPoints`* arrive (`PredictorWarmingUp`), `Predictive` uses the `TokenThroughput`
 fallback. After warm-up, panic or latency above `1.2×` target adds at least one replica, and
 scale-down requires survivors to stay at or below `80%` capacity.
+
+### Engine signals
+
+Both engines report running and waiting queues (SGLang adds `sglang:num_decode_transfer_queue_reqs`
+and `sglang:num_prefill_inflight_queue_reqs`). Prompt rate adjusts for prefix-cache hits; generation
+rate reads rank-0 deltas; latency reads histogram quantiles with no mean fallback if buckets hit
+`+Inf`.
+
+Inspect live samples, partial scrapes and missing series through the `ModelDeployment` `/metrics`
+subresource (requires RBAC `get` on `modeldeployments/metrics`):
+
+```bash
+kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/<namespace>/modeldeployments/<name>/metrics" \
+  | jq '{partial, missing, processing, queueing, latency}'
+```
+
+The subresource scrapes up to `64` owned `Pod`s (`prometheus.io/scrape: "true"`,
+`prometheus.io/port`, `prometheus.io/scheme`; take-over *`roles[].command`* roles omit scrape
+annotations) and returns `503 Service Unavailable` when no owned `Pod` answers.
+
+- **`partial: true`**: Marks unreadable or TLS-untrusted endpoints, first counter reads, counter
+  resets, missing *TTFT* histograms or `> 64` `Pod`s.
+- **`missing[]` with `partial: false`**: Normal for zero-count error counters, idle windows or
+  unconfigured cache tiers.
 
 ### Capacity priors
 
@@ -271,7 +268,7 @@ spec:
   See [Suite 2: Capacity priors](scaling-benchmark.md#suite-2-capacity-priors) and
   [Resolving a catalog prior](../../walkthroughs/model-deployment/scaling.md#catalog-prior-resolution).
 
-### Target eligibility
+### Catalog matching requirements
 
 The resolver infers model, hardware and precision from *`spec.model`* (`ModelArtifact`),
 `AcceleratorType` and `--quantization`. Pin or cross-check identities with optional
@@ -288,14 +285,16 @@ The resolver infers model, hardware and precision from *`spec.model`* (`ModelArt
 Catalog resolution supports single-`Pod` managed *Server*, *PD* and *EPD* roles with whole-card
 resources (no slicing, *Elastic EP*, *External DP*, *`spec.kvCache`* or *`roles[].command`*).
 
-## Bounds and ratios
+## Scaling policy
+
+### Replica bounds and ratios
 
 *`roles[]`* defines `minReplicas` and `maxReplicas` for every target role. *`ratios[]`* couples
 distinct roles with `min`, `max` and preferred `target` (equal values fix a ratio). The planner
 projects recommendations onto one feasible vector; if current replicas violate bounds or ratios,
 planning stops (`BoundsConflict` or `RatioConflict`) until the policy includes them.
 
-## Pacing and guards
+### Scaling rates and safeguards
 
 - **Scale-up step**: Without *`stepPolicy`*, each pass adds up to
   `max(maxStepReplicas, ceil(current * maxStepPercent))`. Set `stepPolicy` (`type: Pods` or
@@ -313,7 +312,7 @@ planning stops (`BoundsConflict` or `RatioConflict`) until the policy includes t
   Re-declaring the ordinal before `Deleting` cancels retirement (`RetirementAdopted`); see
   [Pause and retirement](runtime-control.md#pause-and-retirement).
 
-## Resource rebalancing
+### Resource rebalancing
 
 When a scale-up times out and reverts while the receiver still needs capacity, *`rebalance.policy`*
 decides whether a donor on the same nonempty *`acceleratorType`* retires one replica first:
@@ -362,7 +361,9 @@ spec:
 `RebalanceNotApplicable` means no donor shares the pool; `RebalanceBlocked` means an intermediate
 vector violates policy or a `Priority` donation already ran in this exhaustion episode.
 
-## Binding fence
+## Replica ownership
+
+### Scaler ownership rules
 
 An `Active` scaler claims target replicas with two annotations on the `ModelDeployment`:
 
@@ -376,7 +377,7 @@ other edits. A competing scaler reports `AlreadyBound`; target recreation report
 until acknowledged by a scaler edit; corrupt annotations report `InvalidBinding`. To clear an
 orphaned binding after scaler deletion, remove the annotation without editing replica counts.
 
-## GitOps sync
+### GitOps sync
 
 Ignore each role's *`replicas`* and both scaler annotations (`~1` escapes `/`) in GitOps tools:
 
@@ -438,7 +439,7 @@ Compare *`status.roles[].rawRecommendedReplicas`* against *`constrainedReplicas`
 | `Blocked` | `Ready` (`False`) | `BoundsConflict`, `RatioConflict`, `PacingBounded`, `ResourceExhausted`, `ScaleDownAborted`, `RebalanceNotApplicable`, `RebalanceBlocked`, `CapacityPriorUnresolved`, `InsufficientLoadCoverage`, `IncompatibleMetric`, `RolePaused` |
 
 `RolePaused` holds replica writes while a target role is paused
-([Scaler pause guard](runtime-control.md#scaler-pause-guard)). Check *`observedGeneration`*,
+([Scaling during pause](runtime-control.md#scaling-during-pause)). Check *`observedGeneration`*,
 *`lastCommit`*, *`pendingCohort`*, *`rebalance`*, *`lastScaleDown`* and *`resolvedCapacityPriors`*.
 
 ## Limitations

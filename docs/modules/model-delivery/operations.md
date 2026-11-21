@@ -9,11 +9,7 @@ namespace authorization.
 - [Prerequisites](#prerequisites)
 - [Configuration](#configuration)
 - [Node cache inspection](#node-cache-inspection)
-- [Capacity rule](#capacity-rule)
-- [Switch delivery](#switch-delivery)
-- [Replica placement](#replica-placement)
-- [Upgrade notes](#upgrade-notes)
-- [Removal and cache migration](#removal-and-cache-migration)
+- [Operations](#operations)
 - [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
@@ -98,7 +94,7 @@ mounts readable. Update an unseeded runtime `Setting` directly:
 +  value: 200Mi
 ```
 
-### Pool layer
+### ModelStore overrides
 
 A cluster-scoped [`ModelStore`](prefetch.md#cache-resources) overrides watermarks and download
 limits field by field on matched `Node`s (writing the winning store name to
@@ -125,7 +121,7 @@ kubectl -n gpustack-system logs -l app.kubernetes.io/component=model-manager --t
 - **Retry backoff**: `Failed` entries record *`reason`* and *`retryTime`*; fix the underlying cause
   and wait past *`retryTime`* for the next mount retry.
 
-### Model Manager command
+### Model Manager options
 
 `model-manager` (alias `mm`) runs beside `node-driver-registrar` and reads runtime policy from
 `NodeModelStore.spec`. Only `--model-manager-service-account` (default
@@ -153,7 +149,7 @@ oldest *`lastUsedTime`* entries down to the low watermark while skipping mounted
 - **Stale partials and failures**: Idle partial downloads and disk-absent `Failed` status entries
   expire after `24h`.
 
-## Capacity rule
+### Cache capacity accounting
 
 Watermarks measure total filesystem usage (including root-reserved blocks), and active downloads
 reserve their full size upfront. If nothing unpinned and unmounted can be evicted, the `Node` sets
@@ -165,9 +161,11 @@ filesystem, the plugin caps the high watermark at the lowest of `100 - nodefs.av
 
 The worker reads those thresholds from kubelet `configz` (*`spec.kubelet`*) and defaults to an `80%`
 cap (`10%`, `15%`, `85`) when unset or unreachable. Model downloads never trigger kubelet
-`DiskPressure` or image GC (verified on a shared `265 GB` boot disk).
+`DiskPressure` or image GC.
 
-## Switch delivery
+## Operations
+
+### Delivery mode changes
 
 Switching `model-artifact-delivery-mode` between `Engine` and `Node` rolls hub-backed
 `ModelDeployment`s once. PVC artifacts always mount directly, and `Instance`s always use `Node` CSI
@@ -180,7 +178,7 @@ for hub artifacts:
   `FilterNeedsNodeDelivery`. [Remote Weight Delivery](remote.md) layers inside the active delivery
   mode without changing `Engine` or `Node` semantics.
 
-## Replica placement
+### Replica placement
 
 Node-delivered `Pod`s receive preferred node affinity toward `Node`s holding their digest (unless the
 `Pod` sets a preferred topology level; see [Topology Operations](../topology/operations.md)). Compute
@@ -194,7 +192,7 @@ kubectl get nms -o custom-columns='NODE:.metadata.name,DIGESTS:.status.models[*]
 Cold downloads occur when warm `Node`s are full or no `Node` held the digest at `Pod` creation. They
 also occur if `TASRespectNodeAffinityPreferred` (enabled by default) is disabled in custom Kueue YAML.
 
-## Upgrade notes
+### Upgrade defaults
 
 - **Chart `Node` default**: With `modelManager.enabled: true`, the chart seeds
   `GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node` on every worker start. Upgrades from pre-node-delivery
@@ -202,7 +200,7 @@ also occur if `TASRespectNodeAffinityPreferred` (enabled by default) is disabled
 - **Rolling `model-manager`**: Rolling the `DaemonSet` leaves running `Pod` bind mounts active;
   concurrent new mounts retry automatically once the replacement plugin `Pod` becomes `Ready`.
 
-## Removal and cache migration
+### Removal and cache migration
 
 - **Disabling `modelManager`**: Switch `model-artifact-delivery-mode` to `Engine` before setting
   `modelManager.enabled=false` so hub deployments keep scaling after `CSIDriver` and

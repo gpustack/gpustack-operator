@@ -6,12 +6,8 @@ failure domain, and observe how moving a node between racks differs from changin
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Discover cloud zones](#step-1-discover-cloud-zones)
-- [Step 2: Request zone placement](#step-2-request-zone-placement)
-- [Step 3: Publish an inventory snapshot](#step-3-publish-an-inventory-snapshot)
-- [Step 4: Request rack placement](#step-4-request-rack-placement)
-- [Step 5: Move a node](#step-5-move-a-node)
+- [Zone placement](#zone-placement)
+- [Rack placement](#rack-placement)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
@@ -28,16 +24,18 @@ without draining queues:
 | `ConfigMap` | namespace | administrator | Versioned rack inventory snapshot consumed in Steps 3–5 |
 | `ModelDeployment` | namespace | user | Requests domain packing via *`roles[].topology.requiredLevel`* |
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
-| Cluster | Kubernetes with GPUStack installed (unrecorded configuration walkthrough) |
+| Cluster | Kubernetes with GPUStack installed (illustrative configuration examples) |
 | Nodes | Worker `Node`s carrying `topology.kubernetes.io/region` and `zone` in Steps 1–2; `ConfigMap` snapshot in Steps 3–5 |
 | `AcceleratorType` | `gpustack--nvidia-a10g-linux-amd64` (substitute an `Active` pool from `kubectl get acctype`) |
 | Model and engine | `Qwen/Qwen2.5-7B-Instruct` on vLLM `gpustack/runner:cuda13.0-vllm0.29.0` |
 
-## Step 1: Discover cloud zones
+## Zone placement
+
+### Step 1: Discover cloud zones
 
 Check existing `Node` topology labels and confirm no conflicting `TopologySource` already selects the
 worker nodes:
@@ -85,7 +83,7 @@ The operator verifies that every zone belongs to one region, stamps `topology.gp
 onto matched `Node`s, and materializes the Kueue `Topology` resource. If `Ready` is `False`, match the
 condition reason in [Troubleshooting](#troubleshooting).
 
-## Step 2: Request zone placement
+### Step 2: Request zone placement
 
 Constrain a two-`Pod` (`size: 2`) serving replica to a single availability zone:
 
@@ -126,10 +124,12 @@ kubectl -n team-a get pods -l app.kubernetes.io/instance=qwen-distributed \
 If free GPUs are split across zones without two free GPUs in any single zone, Kueue holds the entire
 replica `Pending` instead of stranding half-scheduled `Pod`s.
 
-## Step 3: Publish an inventory snapshot
+## Rack placement
+
+### Step 3: Publish an inventory snapshot
 
 Changing ordered hierarchy `levels` triggers `HoldAndDrain` queue migration; review
-[Change a live hierarchy](../../modules/topology/operations.md#live-hierarchy-changes) before running
+[Live hierarchy changes](../../modules/topology/operations.md#live-hierarchy-changes) before running
 this step on shared clusters. Delete `cloud-zones` first so two sources do not claim the same `Node`s:
 
 ```bash
@@ -200,7 +200,7 @@ If `Valid=False` or `Ready=False`, fix `ConfigMap/topology-inventory` or `Topolo
 rather than editing NFD `NodeFeature` objects directly; see
 [Verification](../../modules/topology/operations.md#verification).
 
-## Step 4: Request rack placement
+### Step 4: Request rack placement
 
 Narrow `qwen-distributed` from zone-level placement to rack-level placement:
 
@@ -221,7 +221,7 @@ Narrow `qwen-distributed` from zone-level placement to rack-level placement:
 Verify that the rolled replica schedules all `size` `Pod`s on `Node`s sharing one
 `topology.gpustack.ai/rack` label (a single rack must hold enough GPUs for the full `size`).
 
-## Step 5: Move a node
+### Step 5: Update rack assignment
 
 When `worker-b` is re-cabled to `rack-03`, update `ConfigMap/topology-inventory` and increment
 `revision`:
@@ -260,12 +260,12 @@ kubectl get node worker-b \
 
 Because `spec.levels` did not change, the profile hash stays identical and no `HoldAndDrain` queue
 migration occurs. Editing `spec.levels` changes the profile hash and drains queues; see
-[Change a live hierarchy](../../modules/topology/operations.md#live-hierarchy-changes).
+[Live hierarchy changes](../../modules/topology/operations.md#live-hierarchy-changes).
 
 ## Limitations
 
 - Each `Node` must match at most one Ready `TopologySource`; zero or multiple matches fall back to the
-  hostname-only profile ([Choose the inventory path](../../modules/topology/operations.md#inventory-path)).
+  hostname-only profile ([Topology inventory sources](../../modules/topology/operations.md#topology-inventory-sources)).
 - Domain capacity fragmentation and multi-role gang holds are covered in
   [Diagnose Pending workloads](../../modules/topology/operations.md#diagnose-pending-workloads).
 

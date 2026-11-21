@@ -6,8 +6,8 @@ role sets its own replicas and accelerator resources.
 ## Contents
 
 - [Overview](#overview)
-- [Deployment configuration](#deployment-configuration)
-- [Service operations](#service-operations)
+- [Configuration](#configuration)
+- [Operations](#operations)
 - [Troubleshooting](#troubleshooting)
 
 ## Overview
@@ -25,7 +25,7 @@ flowchart TD
     ROUTER -> PODS
 -->
 
-## Deployment configuration
+## Configuration
 
 - [Model Deployment Configuration](configuration.md) defines the base manifest, role fields,
   override tiers and operator-owned keys.
@@ -42,7 +42,7 @@ flowchart TD
   and [Multi-Host Serving Walkthrough](../../walkthroughs/model-deployment/multi-host.md) for
   step-by-step runs.
 
-## Service operations
+## Operations
 
 - [Online Runtime Control](runtime-control.md) covers live parameter tuning, role pause and
   retirement windows.

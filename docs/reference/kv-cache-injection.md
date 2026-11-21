@@ -136,7 +136,7 @@ supply the `Pod`'s IP through a *`fieldRef`* the kubelet resolves at container s
 
 Every engine is also given `--kv-cache-dtype` with the Binding's `dtype`, verbatim. Why, and which
 spellings each engine accepts, is under
-[Engine dtype](../modules/kv-cache/pool.md#engine-dtype).
+[Engine cache precision](../modules/kv-cache/pool.md#engine-cache-precision).
 
 The file is a `downwardAPI` projection of the `Pod`'s own `kvcache.gpustack.ai/client-config`
 annotation. No `ConfigMap` is created, so the configuration's lifetime is exactly the `Pod`'s.
@@ -196,7 +196,7 @@ renders an RDMA or EFA resource limit on its engine `Pod` according to the effec
 The backend's member `Pod`s configure their own host network and device access separately.
 
 The one exception is the Ascend *prefill*/*decode* path, whose engine `Pod`s mount a host driver
-tree read-only. See [Pair connections](../modules/model-deployment/prefill-decode.md#pair-connections).
+tree read-only. See [Role links and connectors](../modules/model-deployment/prefill-decode.md#role-links-and-connectors).
 
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
 when the container does not already set them. A value you set yourself is left alone.

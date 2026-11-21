@@ -2,8 +2,8 @@
 
 A `ModelDeployment` tunes engine parameters live, pauses roles and resizes *Elastic EP* collectives
 without restarting worker `Pod`s or changing `--load-format`. See
-[Online Runtime Control Walkthrough](../../walkthroughs/model-deployment/runtime-control.md) for a
-recorded NVIDIA H200 run covering vLLM and SGLang.
+[Online Runtime Control Walkthrough](../../walkthroughs/model-deployment/runtime-control.md) for
+end-to-end vLLM and SGLang examples.
 
 ![Online runtime control architecture and isolation flow](../../assets/diagrams/model-deployment-runtime-control.svg)
 
@@ -19,11 +19,9 @@ flowchart LR
 
 - [Configuration](#configuration)
 - [Supported parameters](#supported-parameters)
-- [Isolation and safety](#isolation-and-safety)
+- [Runtime safeguards](#runtime-safeguards)
 - [Pause and retirement](#pause-and-retirement)
-- [Step 1: Configure boot ceilings](#step-1-configure-boot-ceilings)
-- [Step 2: Tune or pause roles](#step-2-tune-or-pause-roles)
-- [Step 3: Verify convergence status](#step-3-verify-convergence-status)
+- [Operations](#operations)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
@@ -119,7 +117,7 @@ master after expansion.
 *`spec.model.loraAdapters`* (`name`, `artifactRef`, `subPath`, `pinned`) reserves a deployment-level
 LoRA contract; admission currently rejects non-empty values pending `ModelArtifact` LoRA support.
 
-### Router hash decoupling
+### Router rollout effects
 
 Worker `pod-spec-hash` reads only *`spec.router`* presence and *`spec.router.name`*. Editing
 `replicas`, `image`, `imagePullPolicy`, `imagePullSecrets`, `extraArgs`, `requestTimeoutSeconds` or
@@ -127,7 +125,7 @@ Worker `pod-spec-hash` reads only *`spec.router`* presence and *`spec.router.nam
 Pre-existing `render-version <= 5` `Pod`s roll at most once if a router field changes before
 replacement.
 
-## Isolation and safety
+## Runtime safeguards
 
 ### Engine sentinel injection
 
@@ -139,7 +137,7 @@ Managed accelerated non-*Encode* roles inject `gpustack-engine-sentinel` automat
 - **ASGI coverage**: Hooks vLLM, SGLang and `uvicorn.Config` fallback (`vllm-omni`, `sglang-omni`).
 - **PreStop drain**: Runs `python3 -m gpustack_engine_sentinel.drain` on `Pod` deletion.
 
-### Router allowlist
+### Router API allowlist
 
 All three managed routers enforce a shared Envoy method/path allowlist on port `8000` (including
 `vllm-omni` and `sglang-omni` multimodal endpoints) and return `403` on non-inference routes:
@@ -152,7 +150,7 @@ All three managed routers enforce a shared Envoy method/path allowlist on port `
 - **Router-first gate**: Reconcile holds `GPUSTACK_ENGINE_SENTINEL_ENABLE=1`
   (`WaitingForRouterIsolation`) until the router `Deployment` converges on the allowlist revision.
 
-### Readiness latch and drain
+### Startup readiness and drain
 
 Each sentinel-injected engine generates a per-boot `boot_id` UUID and returns `503` on
 `GET /gpustack/v1/ready` until replay and `POST /gpustack/v1/ack` succeed:
@@ -163,7 +161,7 @@ Each sentinel-injected engine generates a per-boot `boot_id` UUID and returns `5
 - **Sharded ledger**: Per-role `ConfigMap` (`runtime-control-<deploymentUID>-<roleHash>`) fences
   `5 s` `POST` timeouts (`AmbiguousOperation`) for readback recovery.
 
-### Scaler pause guard
+### Scaling during pause
 
 `ModelDeploymentScaler` coexists with *`pause`* and *`runtimeControl`* because `scaler-binding`
 fences only *`replicas`*. While desired or observed *`pause`* is `true`, the scaler holds writes
@@ -209,7 +207,9 @@ Set *`roles[].terminationGracePeriodSeconds: 45`* on SGLang *Prefill* and *Decod
 SGLang's split-role scheduler waits ~15 s after `SIGTERM` even when idle. Take-over
 *`roles[].command`* roles receive no `preStop` hook.
 
-## Step 1: Configure boot ceilings
+## Operations
+
+### Step 1: Set startup limits
 
 Apply a `ModelDeployment` with static ceilings in *`roles[].extraArgs`* and wait for any managed
 router to converge:
@@ -218,7 +218,7 @@ router to converge:
 kubectl apply -f model-deployment.yaml
 ```
 
-## Step 2: Tune or pause roles
+### Step 2: Tune or pause roles
 
 Patch *`runtimeControl.parameters`* or *`pause`* without recreating worker `Pod`s:
 
@@ -230,7 +230,7 @@ kubectl -n team-a patch modeldeployment qwen-tuned --type=json \
   -p '[{"op":"replace","path":"/spec/roles/0/pause","value":true}]'
 ```
 
-## Step 3: Verify convergence status
+### Step 3: Verify runtime settings
 
 Inspect `RuntimeControlSynced`, *`status.roles[].runtimeControl`* and scaler `Blocked` conditions:
 
@@ -278,7 +278,7 @@ kubectl -n team-a get modeldeploymentscaler -o jsonpath='{range .items[*]}{.meta
 
 ---
 
-**See also** — [Online Runtime Control Walkthrough](../../walkthroughs/model-deployment/runtime-control.md) (recorded NVIDIA H200 run) ·
+**See also** — [Online Runtime Control Walkthrough](../../walkthroughs/model-deployment/runtime-control.md) (end-to-end vLLM and SGLang examples) ·
 [Model Deployment Configuration](configuration.md) (role fields, readiness and rollout hash) ·
 [Model Deployment Routing](routing.md) (router policies and endpoint eligibility) ·
 [Model Deployment Scaling](scaling.md) (`ModelDeploymentScaler` behavior) ·

@@ -6,18 +6,14 @@ A `ModelArtifact` records a model's source, credentials, and verified identity o
 
 ## Contents
 
-- [Resource](#resource)
-- [Resolution and revalidation](#resolution-and-revalidation)
-- [Manifest digest](#manifest-digest)
-- [Workload consumption](#workload-consumption)
-- [Engine delivery](#engine-delivery)
-- [Claim delivery and placement](#claim-delivery-and-placement)
+- [Configuration](#configuration)
 - [Image source](#image-source)
-- [KV reuse domain](#kv-reuse-domain)
+- [Workload consumption](#workload-consumption)
+- [Weight delivery](#weight-delivery)
 - [Status](#status)
 - [Prerequisites and limitations](#prerequisites-and-limitations)
 
-## Resource
+## Configuration
 
 Omit `status` when applying a `ModelArtifact` (status values below are illustrative). Set
 *`expectedDigest`* only when anchoring a hub source to a known manifest digest:
@@ -82,7 +78,7 @@ status:
 - **Missing references**: Referenced `Secret` or `PersistentVolumeClaim` objects need not exist at
   admission; missing objects report `SecretNotFound` or `ClaimNotFound` in *`status.conditions`*.
 
-## Resolution and revalidation
+### Resolution and revalidation
 
 Hub sources resolve **once** using the namespace's token, pinning branches or peeled tags to an
 exact commit and building the file manifest:
@@ -111,7 +107,7 @@ via a single-file `HEAD` (redirects disabled):
 `Resolved=False` blocks new `Pod` creation, replacements, and scale-out without terminating running
 `Pod`s. PVC sources resolve once the claim exists (no revision or digest).
 
-## Manifest digest
+### Manifest digest
 
 For hub sources, *`manifestDigest`* is the SHA-256 of a canonical `gpustack-manifest v1` document
 with one LF-terminated `<algorithm>:<hex> <size> <path>` line per sorted file (`sha256` for LFS and
@@ -127,98 +123,6 @@ sha256:8111d5af... 453864 model.safetensors
   digest; mounting still requires `Resolved=True` in the consumer's namespace.
 - **No cross-hub deduplication**: Non-LFS files hash differently on Hugging Face (`gitsha1`) and
   ModelScope (`sha256`), yielding distinct digests.
-
-## Workload consumption
-
-### ModelDeployment reference
-
-Set *`spec.model.artifactRef`* when creating a `ModelDeployment` (*`spec.model`* is immutable):
-
-```diff
- apiVersion: worker.gpustack.ai/v1
- kind: ModelDeployment
- metadata:
-   name: qwen-7b-serving
- spec:
-   model:
-     name: qwen-7b  # served model name
-+    artifactRef:
-+      name: qwen-7b  # ModelArtifact in this namespace
-```
-
-Hub sources follow the `model-artifact-delivery-mode` `Setting` (`Engine` default; `Node` when the
-chart enables `modelManager`, rolling hub deployments once on switch). PVC and OCI image sources
-always mount directly:
-
-| Aspect | PVC (`Pvc`) | Hub (`Engine`) | Hub (`Node`) | OCI image (`Image`) |
-|---|---|---|---|---|
-| Mount / cache | Read-only PVC at `/var/lib/gpustack/model` (*`subPath`* = *`path`*) | Engine downloads into `/var/lib/gpustack/model-cache` | Read-only CSI `model.csi.gpustack.ai` at `/var/lib/gpustack/model` | Read-only image volume at `/var/lib/gpustack/model` |
-| Engine argv | `/var/lib/gpustack/model` | `<repository> --revision <commit>` | `/var/lib/gpustack/model` | `/var/lib/gpustack/model` |
-| Served name | `--served-model-name <spec.model.name>` | Same | Same | Same |
-
-Take-over roles (*`roles[].command`* set) receive PVC, `Node`, or `Image` volume mounts without argv
-changes, and receive nothing under `Engine`. While *`artifactRef`* is set, admission refuses manual
-model/revision/download flags, `HF_*` or `MODELSCOPE_*` variables, and custom mounts overlapping
-`/var/lib/gpustack/model` or `/var/lib/gpustack/model-cache`. Keep `--served-model-name` equal to
-*`spec.model.name`* so router routing and prefix scoring match.
-
-### Instance model volumes
-
-Mount a `ModelArtifact` into an `Instance` at creation or while stopped
-([Additional volumes](../instances/configuration.md#additional-volumes) and
-[Service lifecycle](../instances/operations.md#service-lifecycle)):
-
-```diff
- apiVersion: worker.gpustack.ai/v1
- kind: Instance
- metadata:
-   name: workspace-demo
- spec:
-+  additionalVolumes:
-+    - mountPath: /models/qwen
-+      model:
-+        artifactRef:
-+          name: qwen-7b
-```
-
-The mount is always read-only and forbids *`subPath`*. Hub artifacts always use `Node` CSI delivery
-on `Instance`s (waiting in `Starting` if `model.csi.gpustack.ai` is absent), PVC artifacts follow
-claim placement, and OCI image artifacts use Kubernetes image volumes.
-
-## Engine delivery
-
-Under `Engine` delivery, the engine downloads the pinned commit into an `emptyDir` sized to
-`max(sizeBytes * 1.1, sizeBytes + 1 GiB)`, raising the container's `ephemeral-storage` **limit**
-(not `request`) by the same amount:
-
-- **Injected environment**: Hugging Face sets owned `HF_HOME`, `HF_ENDPOINT`, and `HF_TOKEN`
-  (`secretKeyRef` `token`). ModelScope sets owned `MODELSCOPE_CACHE`, `MODELSCOPE_DOMAIN` (bare
-  host), `MODELSCOPE_API_TOKEN`, and `VLLM_USE_MODELSCOPE=true` / `SGLANG_USE_MODELSCOPE=true`.
-  Defaulted `HTTPS_PROXY` and `NO_PROXY` yield to user *`roles[].env`*.
-- **Rollouts and CA bundles**: Editing hub endpoint or proxy `Setting`s rolls `Engine`-delivered
-  deployments (`model-artifact-ca-bundle` is not mounted into tenant namespaces; mount a tenant
-  `ConfigMap` and set `REQUESTS_CA_BUNDLE` instead). Ensure any namespace `LimitRange` allows the
-  raised `ephemeral-storage` limit.
-
-## Claim delivery and placement
-
-Because Kueue *topology-aware scheduling (TAS)* ignores `Pod` volumes, the operator aligns `Pod`
-creation with PVC binding and node affinity:
-
-| Claim state | Operator behavior |
-|---|---|
-| `Bound` | Injects the PV's required node affinity into every `Pod` at creation. |
-| `Pending` (`WaitForFirstConsumer` with provisioner) | Creates `Pod`s so the first scheduled `Pod` binds the volume. |
-| `Pending` (`no-provisioner` or `Immediate`) | Holds `Pod` creation with `ClaimNotBound` (pre-bind static local PVs via *`spec.volumeName`*). |
-| Multi-`Pod` mount without `ROX` or `RWX` | Holds `Pod` creation with `AccessModeConflict`. |
-
-On a single-accelerator node with cold page caches (`1000 GiB` boot SSD; `2 TiB` network disks), a
-7B model loaded in `32.6 s` over S3 CSI (`geesefs`, `467 MB/s` cold, `~455 MB/s` warm without page
-cache), `34.8–35.7 s` from boot disk (`479 MB/s` cold, `7.4–7.8 GB/s` warm), and `40.2 s` over NFS
-CSI (`~312 MB/s` cold).
-
-Point `geesefs` S3 PV endpoints at a ClusterIP instead of `*.svc.cluster.local`. Host `systemd`
-mounts resolve names through the host DNS resolver rather than cluster DNS.
 
 ## Image source
 
@@ -260,10 +164,7 @@ docker buildx build --platform linux/amd64 --push \
 docker buildx imagetools inspect registry.example.com/team/qwen:v1 --format '{{.Manifest.Digest}}'
 ```
 
-Separately, end-to-end verification on Kubernetes `1.35.7` / containerd `2.2.6` with a 16-file
-`Qwen/Qwen2.5-7B-Instruct` image (built one `.safetensors` shard per layer) confirmed every mounted
-file matched the Hub LFS SHA-256 checksum byte for byte. The operator does not inspect registry
-contents; build integrity is owned by the image producer.
+The operator does not inspect registry contents; build integrity is owned by the image producer.
 
 Image sources always deliver as read-only Kubernetes `image` volumes at `/var/lib/gpustack/model`
 without `model.csi.gpustack.ai` or `ephemeral-storage` adjustments. Pull errors surface on `Pod`
@@ -283,7 +184,7 @@ Pod Security Admission `Restricted` permits `image` volumes on Kubernetes `>= 1.
 standard containerd mirrors (Harbor, Spegel, Dragonfly) work transparently (overlapping layer
 digests pulled in `112 ms` / `11.8 MB` versus `2m10s` / `7.89 GB` cold).
 
-### Disk cost and GC
+### Disk usage and cleanup
 
 With containerd's default `discard_unpacked_layers = false`, a pulled model image stores both
 compressed content blobs and unpacked snapshots (kubelet CRI image size reports only the compressed
@@ -294,18 +195,73 @@ blobs, undercounting a `15.24 GB` model by `~2.26×`):
 | Gzip-compressed | `12.07 GB` | `15.24 GB` | `~27.3 GB` | **`1.79×`** |
 | Uncompressed | `15.24 GB` | `15.24 GB` | `~30.5 GB` | **`2.00×`** |
 
-Verified kubelet image GC behavior (`1.35.7` / `2.2.6`):
+Kubelet image GC behavior:
 
 - **Protected while mounted**: Running containers protect mounted model images (`kubelet >= 1.31`,
   `containerd >= 2.1`); completed `Pod`s do not.
 - **Collected after scale-to-zero**: Once the last `Pod` exits, the next `5m` GC pass can remove the
-  image (`imageMinimumGCAge` checks first-detected time, not release time; measured `4m2s` to GC and
-  `12m43s` cold re-pull at `~20 MB/s` on a 2-vCPU `Node`).
+  image because `imageMinimumGCAge` checks first-detected time rather than release time.
 - **High-threshold cascade**: Pushing disk usage past *`imageGCHighThresholdPercent`* (`85%`
-  default) triggers GC across all unused images on the `Node` (`18` unrelated images collected in
-  testing).
+  default) triggers GC across all unused images on the `Node`.
 
-## KV reuse domain
+## Workload consumption
+
+### ModelDeployment reference
+
+Set *`spec.model.artifactRef`* when creating a `ModelDeployment` (*`spec.model`* is immutable):
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: qwen-7b-serving
+ spec:
+   model:
+     name: qwen-7b  # served model name
++    artifactRef:
++      name: qwen-7b  # ModelArtifact in this namespace
+```
+
+Hub sources follow the `model-artifact-delivery-mode` `Setting` (`Engine` default; `Node` when the
+chart enables `modelManager`, rolling hub deployments once on switch). PVC and OCI image sources
+always mount directly:
+
+| Aspect | PVC (`Pvc`) | Hub (`Engine`) | Hub (`Node`) | OCI image (`Image`) |
+|---|---|---|---|---|
+| Mount / cache | Read-only PVC at `/var/lib/gpustack/model` (*`subPath`* = *`path`*) | Engine downloads into `/var/lib/gpustack/model-cache` | Read-only CSI `model.csi.gpustack.ai` at `/var/lib/gpustack/model` | Read-only image volume at `/var/lib/gpustack/model` |
+| Engine argv | `/var/lib/gpustack/model` | `<repository> --revision <commit>` | `/var/lib/gpustack/model` | `/var/lib/gpustack/model` |
+| Served name | `--served-model-name <spec.model.name>` | Same | Same | Same |
+
+Take-over roles (*`roles[].command`* set) receive PVC, `Node`, or `Image` volume mounts without argv
+changes, and receive nothing under `Engine`. While *`artifactRef`* is set, admission refuses manual
+model/revision/download flags, `HF_*` or `MODELSCOPE_*` variables, and custom mounts overlapping
+`/var/lib/gpustack/model` or `/var/lib/gpustack/model-cache`. Keep `--served-model-name` equal to
+*`spec.model.name`* so router routing and prefix scoring match.
+
+### Instance model volumes
+
+Mount a `ModelArtifact` into an `Instance` at creation or while stopped
+([Additional volumes](../instances/configuration.md#additional-volumes) and
+[Workspace stop and restart](../instances/operations.md#workspace-stop-and-restart)):
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: Instance
+ metadata:
+   name: workspace-demo
+ spec:
++  additionalVolumes:
++    - mountPath: /models/qwen
++      model:
++        artifactRef:
++          name: qwen-7b
+```
+
+The mount is always read-only and forbids *`subPath`*. Hub artifacts always use `Node` CSI delivery
+on `Instance`s (waiting in `Starting` if `model.csi.gpustack.ai` is absent), PVC artifacts follow
+claim placement, and OCI image artifacts use Kubernetes image volumes.
+
+### KV reuse domain
 
 When both *`artifactRef`* and *`spec.kvCache`* are set (outside vLLM-Ascend), the operator prefixes
 KV store keys (`cache_prefix` on vLLM, `extra_backend_tag` on SGLang) with `m-` plus 32 hex chars of
@@ -314,6 +270,43 @@ KV store keys (`cache_prefix` on vLLM, `extra_backend_tag` on SGLang) with `m-` 
 - **PVC and image identity**: Replacing files inside an existing PVC keeps the same artifact UID and
   KV prefix; create a new `ModelArtifact` when changing PVC weights. Two `ModelArtifact`s naming the
   same OCI image have distinct UIDs and do not share KV blocks.
+
+## Weight delivery
+
+### Engine delivery
+
+Under `Engine` delivery, the engine downloads the pinned commit into an `emptyDir` sized to
+`max(sizeBytes * 1.1, sizeBytes + 1 GiB)`, raising the container's `ephemeral-storage` **limit**
+(not `request`) by the same amount:
+
+- **Injected environment**: Hugging Face sets owned `HF_HOME`, `HF_ENDPOINT`, and `HF_TOKEN`
+  (`secretKeyRef` `token`). ModelScope sets owned `MODELSCOPE_CACHE`, `MODELSCOPE_DOMAIN` (bare
+  host), `MODELSCOPE_API_TOKEN`, and `VLLM_USE_MODELSCOPE=true` / `SGLANG_USE_MODELSCOPE=true`.
+  Defaulted `HTTPS_PROXY` and `NO_PROXY` yield to user *`roles[].env`*.
+- **Rollouts and CA bundles**: Editing hub endpoint or proxy `Setting`s rolls `Engine`-delivered
+  deployments (`model-artifact-ca-bundle` is not mounted into tenant namespaces; mount a tenant
+  `ConfigMap` and set `REQUESTS_CA_BUNDLE` instead). Ensure any namespace `LimitRange` allows the
+  raised `ephemeral-storage` limit.
+
+### PVC binding and placement
+
+Because Kueue *topology-aware scheduling (TAS)* ignores `Pod` volumes, the operator aligns `Pod`
+creation with PVC binding and node affinity:
+
+| Claim state | Operator behavior |
+|---|---|
+| `Bound` | Injects the PV's required node affinity into every `Pod` at creation. |
+| `Pending` (`WaitForFirstConsumer` with provisioner) | Creates `Pod`s so the first scheduled `Pod` binds the volume. |
+| `Pending` (`no-provisioner` or `Immediate`) | Holds `Pod` creation with `ClaimNotBound` (pre-bind static local PVs via *`spec.volumeName`*). |
+| Multi-`Pod` mount without `ROX` or `RWX` | Holds `Pod` creation with `AccessModeConflict`. |
+
+On a single-accelerator node with cold page caches (`1000 GiB` boot SSD; `2 TiB` network disks), a
+7B model loaded in `32.6 s` over S3 CSI (`geesefs`, `467 MB/s` cold, `~455 MB/s` warm without page
+cache), `34.8–35.7 s` from boot disk (`479 MB/s` cold, `7.4–7.8 GB/s` warm), and `40.2 s` over NFS
+CSI (`~312 MB/s` cold).
+
+Point `geesefs` S3 PV endpoints at a ClusterIP instead of `*.svc.cluster.local`. Host `systemd`
+mounts resolve names through the host DNS resolver rather than cluster DNS.
 
 ## Status
 

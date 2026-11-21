@@ -8,12 +8,9 @@ on every rank, and confirm that the router distributes traffic across all four e
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Start the fixed group](#step-1-start-the-fixed-group)
-- [Step 2: Read the running resources](#step-2-read-the-running-resources)
-- [Step 3: Send requests per rank](#step-3-send-requests-per-rank)
-- [Step 4: Check Router coverage](#step-4-check-router-coverage)
-- [Step 5: Inspect and release](#step-5-inspect-and-release)
+- [Step 1: Deploy rank group](#step-1-deploy-rank-group)
+- [Verification](#verification)
+- [Cleanup](#cleanup)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
@@ -35,7 +32,7 @@ At concurrency 64 on H100 SXM5, four-rank *External DP* cut *time to first token
 vs `3,814.139 ms`), while wide *TP* = 8 retained **2.27×–6.99× higher output throughput**; see
 [External DP Benchmark](../../modules/model-deployment/external-dp-benchmark.md).
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
@@ -54,7 +51,7 @@ Enable [node model delivery](../../modules/model-delivery/operations.md) and war
 `deepseek-v2-lite-chat` in namespace `gpustack-bench` via
 [Model Prefetch](../model-delivery/prefetch.md) before applying Step 1.
 
-## Step 1: Start the fixed group
+## Step 1: Deploy rank group
 
 Save `external-dp.yaml`:
 
@@ -145,7 +142,9 @@ external-dp-arm2-external-dp-server-r0-m2              1/1     Running   0      
 external-dp-arm2-external-dp-server-r0-m3              1/1     Running   0          2m19s   gpu-node-0
 ```
 
-## Step 2: Read the running resources
+## Verification
+
+### Step 2: Verify rank endpoints
 
 Verify that the operator detected `loadBalance: "External"` and confirmed all four HTTP endpoints on
 replica group `r0`:
@@ -177,10 +176,10 @@ Captured output:
 `http://external-dp-arm2-external-dp-router.gpustack-bench.svc:8000`. If `serving.value` is `1`,
 check `--data-parallel-rank` in *`extraArgs`*.
 
-## Step 3: Send requests per rank
+### Step 3: Send requests per rank
 
-The recorded benchmark exercised all four ranks through the router; run these direct per-rank checks
-to verify each rank independently. Forward each member (`RANK=0`..`3`) in separate terminals:
+Verify each rank directly before testing router distribution. Forward each member (`RANK=0`..`3`) in
+separate terminals:
 
 ```bash
 RANK=0
@@ -210,7 +209,7 @@ done
 Confirm positive `completion_tokens`, non-empty `text`, and a trailing `data: [DONE]` on all four
 ports.
 
-## Step 4: Check Router coverage
+### Step 4: Check router distribution
 
 Forward the router's HTTP (`:8000`) and Prometheus (`:9090`) ports:
 
@@ -238,12 +237,12 @@ grep -H '^vllm_router_processed_requests_total' router-before.prom router-after.
 ```
 
 Confirm that `vllm_router_processed_requests_total` increments on **all four** `server-r0-m0`..`m3`
-workers. In the recorded H100 benchmark (**1,088/1,088 measured requests with zero errors**, plus 48
-warm-ups and 1 calibration request = 1,137 total), router counters matched engine access logs on every
-rank (`285` on `m0` and `284` each on `m1`–`m3`); see
+workers. Across **1,088/1,088 measured requests with zero errors** (plus 48 warm-ups and 1 calibration
+request = 1,137 total), router counters matched engine access logs on every rank (`285` on `m0` and
+`284` each on `m1`–`m3`); see
 [Routing verification](../../modules/model-deployment/external-dp-benchmark.md#routing-verification).
 
-## Step 5: Inspect and release
+## Cleanup
 
 If startup or routing stalls, inspect member logs and headless `Service` discovery before deleting:
 
@@ -262,13 +261,10 @@ kubectl -n gpustack-bench get pods,services,deployments,workloads \
 kubectl get devices -o json
 ```
 
-The benchmark runner confirmed `ModelDeployment` deletion without archiving a post-deletion `Devices`
-snapshot.
-
 ## Limitations
 
-- Captured on one 8-GPU H100 node over cross-`Pod` TCP; multi-node placement, *External DP* combined
-  with *PD*, and hybrid load balancing were not measured here.
+- Measurements cover single-node cross-`Pod` TCP; multi-node placement, *External DP* combined with
+  *PD*, and hybrid load balancing were not tested.
 - Fixed *External DP* groups do not resize in place; edits to *`size`* roll the entire four-`Pod`
   replica ([Admission constraints](../../modules/model-deployment/external-dp.md#admission-constraints)).
 

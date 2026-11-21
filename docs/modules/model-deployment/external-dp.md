@@ -23,38 +23,12 @@ flowchart TD
 
 ## Contents
 
-- [Overview and selection](#overview-and-selection)
 - [Configuration](#configuration)
-- [Load-balancing derivation](#load-balancing-derivation)
-- [Per-rank Pod identity](#per-rank-pod-identity)
 - [Port allocation](#port-allocation)
 - [Endpoint selection](#endpoint-selection)
-- [Probe and health](#probe-and-health)
-- [Limits](#limits)
 - [Admission constraints](#admission-constraints)
+- [Limitations](#limitations)
 - [Results](#results)
-
-## Overview and selection
-
-Splitting a *mixture of experts (MoE)* model across *data parallelism (DP)* ranks gives each rank a
-narrow *tensor parallelism (TP)* slice inside one shared *DP* × *TP* *expert parallelism (EP)*
-collective, with independent per-rank HTTP schedulers. vLLM runs one engine process per rank; SGLang
-runs one distributed launch across `size` member `Pod`s ([SGLang shape](#sglang-shape)).
-
-| Configuration | Collective | HTTP ingress | Resize contract |
-|---|---|---|---|
-| Monolithic *TP* | One engine group, one master | Master only | Replaces replicas |
-| *Elastic EP* | Ray *Internal LB*, one instance | Master only | Online `elastic.dataParallelWidth` scale-up |
-| *vLLM External DP* | Fixed ranks (`--data-parallel-rank`) | Every rank, Router-balanced | Fixed; world-size edits recreate |
-| *SGLang External DP* | Distributed launch over `size` members | Every member, Router-balanced | Fixed; replica edits recreate groups |
-
-- **Choose *External DP*** for fixed *MoE* groups needing per-rank HTTP ingress or lower
-  high-concurrency median *TTFT*.
-- **Choose [Elastic EP](elastic-ep.md)** when the collective must grow online while keeping
-  surviving `Pod`s.
-
-In the H100 vLLM capture, intra-`Pod` *TP* = 2 used NVLink while cross-`Pod` *EP* used TCP over
-`eth0` (no *RDMA* interface); the wide *TP* = 8 baseline ran all eight GPUs inside one NVLink `Pod`.
 
 ## Configuration
 
@@ -106,7 +80,27 @@ spec:
 To request two *remote direct memory access (RDMA)* endpoints per member, add `interface: "2"`
 under *`resources`*; verify active transport separately ([RDMA Operations](../rdma/operations.md)).
 
-### SGLang shape
+### Mode comparison
+
+Splitting a *mixture of experts (MoE)* model across *data parallelism (DP)* ranks gives each rank a
+narrow *tensor parallelism (TP)* slice inside one shared *DP* × *TP* *expert parallelism (EP)*
+collective, with independent per-rank HTTP schedulers. vLLM runs one engine process per rank; SGLang
+runs one distributed launch across `size` member `Pod`s
+([SGLang rank configuration](#sglang-rank-configuration)).
+
+| Configuration | Collective | HTTP ingress | Resize contract |
+|---|---|---|---|
+| Monolithic *TP* | One engine group, one master | Master only | Replaces replicas |
+| *Elastic EP* | Ray *Internal LB*, one instance | Master only | Online `elastic.dataParallelWidth` scale-up |
+| *vLLM External DP* | Fixed ranks (`--data-parallel-rank`) | Every rank, Router-balanced | Fixed; world-size edits recreate |
+| *SGLang External DP* | Distributed launch over `size` members | Every member, Router-balanced | Fixed; replica edits recreate groups |
+
+- **Choose *External DP*** for fixed *MoE* groups needing per-rank HTTP ingress or lower
+  high-concurrency median *TTFT*.
+- **Choose [Elastic EP](elastic-ep.md)** when the collective must grow online while keeping
+  surviving `Pod`s.
+
+### SGLang rank configuration
 
 SGLang runs one distributed launch spanning `size` member `Pod`s with one attention-DP group per
 member. With `SGLANG_RUST_SERVER=1`, each member serves HTTP on its base port behind
@@ -157,7 +151,7 @@ spec:
 - **Fault behavior**: A member fault stalls survivor in-flight requests until the collective aborts;
   capacity equals one group, and withdrawal is group-atomic until every member re-qualifies.
 
-### Classification contract
+### SGLang mode requirements
 
 An SGLang role derives `External` only when all four conditions hold:
 
@@ -170,7 +164,7 @@ An SGLang role derives `External` only when all four conditions hold:
 
 Single-`Pod` attention-DP or the Python frontend remains `Internal` (leader-served).
 
-## Load-balancing derivation
+### Load balancing modes
 
 There is no *External DP* spec field. The operator inspects *`roles[].extraArgs`* and *`roles[].env`*
 and reports *`status.roles[].parallelism.loadBalance`* (`External`, `Hybrid`, `Internal`,
@@ -190,14 +184,14 @@ at local size 1 or `Hybrid`; equal yields `Internal`; `--nnodes > 1` without loc
 `Unknown`). `Hybrid` normalizes to `External` at local size 1 and `Internal` when local equals
 global *DP*. Conflicting flags yield `Unknown` and fail admission.
 
-## Per-rank Pod identity
+### Per-rank Pod identity
 
 For a *Server* role with `size: N`, the operator injects `GPUSTACK_MEMBER_INDEX` (zero-based rank)
 and `GPUSTACK_REPLICA_LEADER_ADDRESS` (leader DNS on headless `Service`
 `<deployment>-<role>-r<replica>`). Pass them via Kubernetes `$(...)` expansion in *`extraArgs`*;
 the operator never infers parallel flags from *`size`* or GPU count.
 
-In the recorded vLLM run, `--data-parallel-rank` implied these defaults without extra flags:
+With vLLM, `--data-parallel-rank` implies these defaults without extra flags:
 
 | Omitted argument | Engine default |
 |---|---|
@@ -214,14 +208,14 @@ Set **`1024 <= VLLM_PORT < 32768`** (such as `19500`) on every vLLM rank, keepin
 below the Linux ephemeral range (`32768–60999`) and clear of `8000`, `29500` and `29550`. Check
 `net.ipv4.ip_local_port_range` if customized.
 
-### Allocation and coordination
+### Rank port negotiation
 
 vLLM v0.30.0 probes five free ports (`get_open_ports_list`), closes the probe sockets and shares
 the leader's candidate list during the *MoE* handshake. Fixed multiprocessing *External DP* keeps
 `_coord_store_port = 0`, so `stateless_init_dp_group` retries `EADDRINUSE` up to five times locally
 without broadcasting the retry port to peers.
 
-### Conflict boundaries
+### Port conflicts
 
 | Conflict | Behavior |
 |---|---|
@@ -231,7 +225,7 @@ without broadcasting the retry port to peers.
 In the captured failure, an outbound connection took leader ephemeral port `36558`; `m0` moved to
 `36557` while peers hung on `36558`. With `VLLM_PORT=19500`, the group converged on `19502`
 (an observed port, not a fixed offset; see
-[walkthrough manifest](../../walkthroughs/model-deployment/external-dp.md#step-1-start-the-fixed-group)).
+[walkthrough manifest](../../walkthroughs/model-deployment/external-dp.md#step-1-deploy-rank-group)).
 
 ## Endpoint selection
 
@@ -243,23 +237,13 @@ mid-flight edits keep serving existing ranks.
 Check *`status.roles[].endpoints.eligible`* (qualified replica groups, `1` in the four-rank run)
 and *`endpoints.serving`* (Router-confirmed HTTP endpoints, `4` in the four-rank run). Confirm
 per-worker balance in the Router registry and metrics
-([Serving observations](routing.md#serving-observations)).
+([Endpoint status](routing.md#endpoint-status)).
 
-## Probe and health
+### Rank health checks
 
 A member's `/health` checks only that member, not the collective. Qualification therefore runs a
 **group-forward probe** (a real generation request) against every member across the collective. A
 member that answers `/health` while its collective is broken does not qualify.
-
-## Limits
-
-- **Scale-down grace**: Disaggregated handoff grace adds `60 s` before member drain gauges are read;
-  `Draining` during those 60 s is expected.
-- **SGLang scope**: Single-role dense text deployments only (Rust server rejects multimodal models).
-  `--load-balance-method` is not rendered because the Router owns balancing.
-- **Fixed group size**: Editing *`roles[].size`* replaces whole replicas
-  ([Rollout behavior](configuration.md#rollout-behavior)). Use [Elastic EP](elastic-ep.md) for
-  in-place width growth.
 
 ## Admission constraints
 
@@ -274,11 +258,22 @@ Admission rejects these managed-role configurations:
 *Prefill* and *Decode* roles with *External DP* are admitted but unvalidated
 ([#754](https://github.com/gpustack/gpustack-operator/issues/754)).
 
+## Limitations
+
+- **Scale-down grace**: Disaggregated handoff grace adds `60 s` before member drain gauges are read;
+  `Draining` during those 60 s is expected.
+- **SGLang scope**: Single-role dense text deployments only (Rust server rejects multimodal models).
+  `--load-balance-method` is not rendered because the Router owns balancing.
+- **Fixed group size**: Editing *`roles[].size`* replaces whole replicas
+  ([Rollout behavior](configuration.md#rollout-behavior)). Use [Elastic EP](elastic-ep.md) for
+  in-place width growth.
+
 ## Results
 
-On 8 × H100 SXM5 serving `DeepSeek-V2-Lite-Chat` (vLLM `0.30.0`, *TP* = 2, *DP* = 4, *EP* = 8),
-all four endpoints balanced evenly (**285 + 284 × 3 = 1,137** total requests) with **1,088/1,088
-measured requests** and zero errors.
+On 8 × H100 SXM5 serving `DeepSeek-V2-Lite-Chat` (vLLM `0.30.0`, *TP* = 2 over NVLink, *DP* = 4,
+*EP* = 8 over TCP `eth0` versus single-`Pod` wide *TP* = 8 on NVLink), all four endpoints balanced
+evenly (**285 + 284 × 3 = 1,137** total requests) with **1,088/1,088 measured requests** and zero
+errors.
 
 Over TCP at concurrency 64, *External DP* lowered *time to first token (TTFT)* p50 against single-`Pod`
 wide *TP* = 8, while wide *TP* kept **2.27×–6.99×** higher output throughput across all 12 cells:

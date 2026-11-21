@@ -123,7 +123,7 @@ corrects false negatives.
 
 The worker applies the `gpustack-cpu-info` `NodeFeatureRule` at startup in every installation mode.
 It publishes [CPU identity](#cpu-identity) and the [non-accelerated marker](#non-accelerated-marker);
-see [Installation Modes](../operate/installation-modes.md#deployed-and-applied-resources).
+see [Installation Modes](../operate/installation-modes.md#worker-managed-resources).
 
 The rule marks PCI vendors managed by the worker as acceleratable. The chart's
 `global.manufacturers` map registers each manufacturer for labeling, detection and its Device

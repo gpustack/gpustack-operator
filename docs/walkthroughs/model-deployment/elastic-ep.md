@@ -6,11 +6,10 @@ it live to eight GPUs without replacing surviving `Pod`s, and verify uninterrupt
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
 - [Step 1: Start the elastic deployment](#step-1-start-the-elastic-deployment)
 - [Step 2: Verify baseline inference](#step-2-verify-baseline-inference)
 - [Step 3: Expand and verify inference](#step-3-expand-and-verify-inference)
-- [Step 4: Release the application](#step-4-release-the-application)
+- [Cleanup](#cleanup)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
@@ -29,13 +28,13 @@ width `2 → 4` (*EP* world size `4 → 8`) via `runtimeControl.parameters["elas
 | `AcceleratorType` | cluster | operator | Whole-GPU H100 pool requested by each two-GPU Ray member |
 | `ModelDeployment` | namespace | user | Elastic vLLM collective resized live through `elastic.dataParallelWidth` |
 
-During the recorded H100 expansion, **439/439 client requests completed with zero errors**. In the
-steady-state benchmark at concurrency 64, width 4 cut *time to first token (TTFT)* p50 by **2.50×**
-(`2,598.867 ms` vs `6,509.231 ms`) while using twice the GPUs, lowering total output throughput at
-every concurrency, and raising concurrency-1 *inter-token latency (ITL)* p50 from `8.566 ms` to
-`15.675 ms`; see [Elastic EP Benchmark](../../modules/model-deployment/elastic-ep-benchmark.md).
+During the live *DP* width 2 → 4 expansion, **439/439 client requests completed with zero errors**. In
+the steady-state benchmark at concurrency 64, width 4 cut *time to first token (TTFT)* p50 by
+**2.50×** (`2,598.867 ms` vs `6,509.231 ms`) while using twice the GPUs, lowering total output
+throughput at every concurrency, and raising concurrency-1 *inter-token latency (ITL)* p50 from
+`8.566 ms` to `15.675 ms`; see [Elastic EP Benchmark](../../modules/model-deployment/elastic-ep-benchmark.md).
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
@@ -151,9 +150,9 @@ Captured output:
 }
 ```
 
-In the recorded run, `ReplicasUpToDate` stayed `Unknown/RolloutNotObserved` even while `phase` read
-`Ready`, so verify actual token generation rather than relying on `phase` alone. Forward `Service/b2-elastic-ep`
-in a second terminal and run a streaming completion check:
+`ReplicasUpToDate` can remain `Unknown/RolloutNotObserved` while `phase` reads `Ready`, so verify
+actual token generation in addition to `phase`. Forward `Service/b2-elastic-ep` in a second terminal
+and run a streaming completion check:
 
 ```bash
 kubectl -n gpustack-bench port-forward service/b2-elastic-ep 8000:8000
@@ -213,10 +212,10 @@ jq -e --argjson generation "$MD_GENERATION" '
    all(.Known == true and .Value == 4))' observation.json
 ```
 
-In the recorded run, `observation.json` (diagnostic state rather than a public CR schema) reported
-`observedGeneration: 2`, all five width stages at `4`, and reason `native ranks and forwards agree`.
-If this check fails, inspect `ElasticResize` on `ModelDeployment` in [Troubleshooting](#troubleshooting)
-before issuing another width edit.
+`observation.json` (diagnostic state rather than a public CR schema) reports `observedGeneration: 2`,
+all five width stages at `4`, and reason `native ranks and forwards agree`. If this check fails,
+inspect `ElasticResize` on `ModelDeployment` in [Troubleshooting](#troubleshooting) before issuing
+another width edit.
 
 Snapshot the expanded deployment and verify that the Ray head and both baseline GPU `Pod`s kept their
 original `Pod` UIDs with zero container restarts:
@@ -253,7 +252,7 @@ Captured output (`scaled-cr.json` projection):
 | `b2-elastic-ep-server-6nvwx` | Added GPU member | 1/1 | New | 0 |
 | `b2-elastic-ep-server-z22ml` | Added GPU member | 1/1 | New | 0 |
 
-Recorded timeline and traffic behavior during expansion:
+Traffic and probe behavior during expansion:
 
 - Continuous concurrency-8 load (`1024` input / `256` output tokens) completed **439/439 client
   requests in 264.23 s with zero errors** and zero client-facing HTTP `503` responses (1,320 total
@@ -265,7 +264,7 @@ Recorded timeline and traffic behavior during expansion:
   `08:18:50Z` and `08:19:30Z`. Re-run the Step 2 `curl` stream after `observation.json` confirms
   effective width `4`.
 
-## Step 4: Release the application
+## Cleanup
 
 Stop `port-forward`, delete `b2-elastic-ep`, and confirm all eight H100 GPUs return to
 `remaining: 1600000`:
@@ -281,8 +280,8 @@ Deleting `ModelDeployment` preserves prefetched weights in `NodeModelStore`
 
 ## Limitations
 
-- Captured on a single 8-GPU H100 node over cross-`Pod` TCP (`width 2 → 4`, *TP* = 2); cross-node
-  resizing, *RDMA* *EP* collectives, and other models or widths were not measured here.
+- Measurements cover single-node cross-`Pod` TCP (*DP* width 2 → 4, *TP* = 2); cross-node resizing,
+  *RDMA* *EP* collectives, and other models or widths were not tested.
 - Only the master serves HTTP (`Internal LB`), and width shrink (`4 → 2`) is refused in this release.
 - See [Elastic EP Benchmark](../../modules/model-deployment/elastic-ep-benchmark.md) for steady-state
   latency and throughput trade-offs.

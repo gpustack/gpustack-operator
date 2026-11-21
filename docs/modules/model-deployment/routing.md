@@ -7,12 +7,9 @@ which replicas receive traffic.
 ## Contents
 
 - [Traffic targets](#traffic-targets)
-- [Encode stage routing](#encode-stage-routing)
 - [Default routing policies](#default-routing-policies)
-- [Prefix affinity](#prefix-affinity)
 - [Policy overrides](#policy-overrides)
-- [Serving observations](#serving-observations)
-- [Per-worker routing metrics](#per-worker-routing-metrics)
+- [Endpoint status](#endpoint-status)
 - [Troubleshooting](#troubleshooting)
 
 ## Traffic targets
@@ -36,12 +33,11 @@ those candidates.
 | *PD* pair | Token-counted *PD* split, connector docs and decode sidecar | Native *PD* mode | Native `--pd-disaggregation` (never combined with `--dp-aware`) |
 | *EPD* | `encode` profile + decode sidecar transfer | Operator-owned `--epd-config`, no sidecar | Native pair; *Prefill* dials `--encoder-urls` |
 | *Elastic EP* | Engine internal load balancing; single endpoint | Same | Same |
-| *External DP* | Admitted, but no `--policy` flag; prefer engine router | Per-rank endpoints with `--policy round_robin` (recorded) | Per-member endpoints (`--dp-aware` fan-out below) |
+| *External DP* | Admitted, but no `--policy` flag; prefer engine router | Per-rank endpoints with `--policy round_robin` | Per-member endpoints (`--dp-aware` fan-out below) |
 
 Where even spread matters (multi-replica *Server* or *External DP*), choose `vllm-router` for vLLM
 or `sglang-gateway` for SGLang because `llm-d-router` has no policy switch
-([Fixed scoring profile](#fixed-scoring-profile)). Counts above were recorded on vLLM `0.29.0` and SGLang
-`0.5.18` behind `gpustack/llm-router:v0.3.1`.
+([Fixed scoring profile](#fixed-scoring-profile)).
 
 - **External selectors**: Qualified *External* *Server* roles omit `member-index=0` while keeping
   the `endpoint-eligible` selector; the headless `Service` always publishes all members for peer
@@ -56,7 +52,7 @@ or `sglang-gateway` for SGLang because `llm-d-router` has no policy switch
   example on `v0.3.1`), subordinate members time out in the gateway's 10 s discovery step, leaving
   at most one registered worker per group.
 
-### Group exclusion
+### Excluded replica groups
 
 Protected groups are gated by `Pod` labels, never by dropping selector terms. Both the Router and
 the role `Service` enforce the same rule:
@@ -73,7 +69,7 @@ When roles in one deployment carry mixed requirements, the operator labels eligi
 members with `modeldeployment.gpustack.ai/router-candidate` to form a deployment-wide union. That
 label marks membership only; actual routing intersects it with native role and member filters.
 
-## Encode stage routing
+### Encode stage routing
 
 Send all client requests to *`status.endpoint`*. *Encode* `Pod`s stay excluded from the deployment
 `Service` and KV-event discovery:
@@ -87,13 +83,12 @@ Send all client requests to *`status.endpoint`*. *Encode* `Pod`s stay excluded f
 
 Under `llm-d-router` + vLLM, the `encode` profile omits queue, KV-cache and prefix scorers, sends
 media requests through *Encode* first, and routes text-only requests straight to *Prefill* and
-*Decode*. See [Admitted matrix](encode-prefill-decode.md#admitted-matrix) for verified combinations.
+*Decode*. See [Supported serving configurations](encode-prefill-decode.md#supported-serving-configurations) for verified combinations.
 
 ## Default routing policies
 
 `vllm-router` and `sglang-gateway` default to `cache_aware` (logging
-`policy: CacheAware { cache_threshold: 0.3, ... }`); `llm-d-router` uses its fixed scoring profile
-(recorded on bundled `vllm-router` `v0.1.16.1` and `sglang-gateway` in `gpustack/llm-router:v0.3.1`):
+`policy: CacheAware { cache_threshold: 0.3, ... }`); `llm-d-router` uses its fixed scoring profile:
 
 | Router | Default | Replica selection |
 |---|---|---|
@@ -101,7 +96,7 @@ media requests through *Encode* first, and routes text-only requests straight to
 | `sglang-gateway` | `cache_aware` | Same algorithm and three defaults |
 | `llm-d-router` | Fixed profile | Highest sum of prefix match (weight `3`, omitted on *Decode*), queue depth (`2`) and KV utilization (`2`) |
 
-## Prefix affinity
+### Prefix affinity
 
 **Under `cache_aware`, serial requests sharing a long prefix land on one replica while peers stay
 idle.** This is expected prefix reuse, not a fault; traffic spills over only when the load gap
@@ -112,10 +107,10 @@ Measured on two single-GPU *Server* replicas with serial 500-character shared-pr
 
 | Router | Engine | Requests per replica |
 |---|---|---|
-| `vllm-router` | vLLM `0.29.0` | 354 and 0 |
-| `sglang-gateway` | SGLang `0.5.18` | 406 and 0 |
-| `llm-d-router` | vLLM `0.29.0` | 187 and 170 |
-| `llm-d-router` | SGLang `0.5.18` | 375 and 0 |
+| `vllm-router` | vLLM | 354 and 0 |
+| `sglang-gateway` | SGLang | 406 and 0 |
+| `llm-d-router` | vLLM | 187 and 170 |
+| `llm-d-router` | SGLang | 375 and 0 |
 
 ## Policy overrides
 
@@ -141,7 +136,7 @@ the router logs `Starting router ... | policy: RoundRobin`. On the same two-repl
 creation, 120 requests split `60 / 60` on both routers with zero errors.
 
 Editing *`router.extraArgs`* replaces only the router `Deployment` without rolling worker `Pod`s
-([Router hash decoupling](runtime-control.md#router-hash-decoupling)); the new router starts with
+([Router rollout effects](runtime-control.md#router-rollout-effects)); the new router starts with
 an empty prefix table. Both routers also run behind the shared Envoy inference allowlist sidecar
 with a `:9091` observer when managed accelerated non-*Encode* roles exist.
 
@@ -160,7 +155,7 @@ Only `round_robin` was live-tested; `cache_aware` thresholds, `--prefill-policy`
 `llm-d-router` cannot switch policies through *`extraArgs`* because the operator owns
 `--config-file` and exposes no scorer weight fields.
 
-## Serving observations
+## Endpoint status
 
 *`status.roles[].endpoints.eligible`* counts operator-qualified endpoints (`null` before first
 observation, `0` when empty), while *`status.roles[].endpoints.serving.state`* reports the direct
@@ -190,7 +185,7 @@ agree for `Confirmed`):
 | Collection budget | `14 s` | One collection across all Router `Pod`s |
 | Freshness policy | `15 s` | Validity of a collected view before falling back to `Unknown` |
 
-## Per-worker routing metrics
+### Per-worker routing metrics
 
 The `ModelDeployment` `/metrics` subresource aggregates role and router counters without per-replica
 labels. Scrape each router's own `/metrics` for per-worker attribution (`worker` carries the worker

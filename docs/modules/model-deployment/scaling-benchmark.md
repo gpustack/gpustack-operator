@@ -17,8 +17,6 @@ compilation (~76 s on H200 vLLM) and accelerator queueing outside the scaler's c
 - [Suite 1: Scaling comparison](#suite-1-scaling-comparison)
 - [Suite 2: Capacity priors](#suite-2-capacity-priors)
 - [Verification](#verification)
-- [Benefits](#benefits)
-- [Trade-offs](#trade-offs)
 - [Limitations](#limitations)
 
 ## Summary
@@ -42,6 +40,30 @@ transient Router 503s during worker registration.
 
 All 18 H200 single-`Server` rounds, the embedded `openai/gpt-oss-120b` check, and H200 vLLM *PD*
 `Proportional` and *EPD* `Predictive` completed with zero failed requests.
+
+### Benefits
+
+- In Suite 2 on H200 from an equal 1-replica baseline, `0.75` catalog headroom triggered
+  `TokenThroughput` (`1 → 2` at `c = 24`) where unmargined saturation (`17135.159` tok/s) stalled,
+  and the embedded `openai/gpt-oss-120b` (`fp4`) prior matched sustain throughput within **1.2%**
+  (`4862.388` versus `4804.08` tok/s).
+- Pairing the catalog with `Predictive` offset ~76 s vLLM startup, cutting 45 s `sustain` *TTFT* p50
+  from `343.842` to **189.511 ms** (`maxReplicas: 2`) and 90 s `sustain` *TTFT* p50 from
+  `145.939–190.555` to **120.59 ms** (`maxReplicas: 4`, `3886.136` output tok/s, zero errors).
+- In Suite 1 on H100, predictive *PD* cut `ramp` *TTFT* p50 (`467.906` versus `2540.853` ms) and
+  raised output (`2109.251` versus `1117.481` tok/s), though low manual targets scaled it during
+  baseline.
+
+### Trade-offs
+
+- In Suite 1, 90 s cooldown sat below the 300 s downward stabilization window, leaving final
+  snapshots at two replicas.
+- In Suite 2's 45 s `sustain` rounds, `TokenThroughput` `catalog` spent `317.04` median
+  `readyReplicaSeconds` (`+33.7%` over manual's `237.094` s) without lowering `sustain` *TTFT* p50
+  because ~76 s startup consumed most of the window.
+- `Predictive` amplifies initial ramp slopes (`rawRecommendedReplicas` 4–75), so production configs
+  pair *`horizonSeconds`* (`180–300` s) with *`behavior.scaleUp.maxStepReplicas`*; see
+  [Step 3: Choose an algorithm](../../walkthroughs/model-deployment/scaling.md#step-3-choose-an-algorithm).
 
 ## Environment
 
@@ -129,10 +151,10 @@ spec:
     #   decodeTokenCapacityPerReplica: "2000"
 ```
 
-See [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md#step-1-prepare-the-target)
+See [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md#step-1-deploy-scaling-target)
 for the target `ModelDeployment` manifest.
 
-### Parallel schedule
+### Benchmark run order
 
 Two waves shared an eight-GPU ceiling (maximum reserved capacity per sequence, not continuous use):
 
@@ -258,7 +280,7 @@ to derive `12851.37` tok/s, crossing measured throughput between `c = 16` (`1147
 | 24 | 672 | 14527.811 | 2857.152 | 352.587 / 527.173 / 547.8 | 6.346 / 6.556 / 9.713 | 119.205 |
 | 32 | 800 | 17135.159 | 3369.918 | 490.591 / 689.956 / 736.115 | 6.576 / 6.824 / 20.012 | 105.395 |
 
-### Capacity-arm rounds
+### Capacity estimate comparison
 
 Eighteen serial rounds (3 alternating repeats × 6 arms) compared `frozen-manual` (`20000` tok/s),
 `tuned-manual` (`17135.159` tok/s) and `catalog` (`12851.37` tok/s) across nominal phase windows
@@ -336,7 +358,7 @@ A 60-second concurrency-8 check completed `176` requests with zero errors at `48
 (`915.002` output tok/s; *TTFT* p50 / p90 / p95 `96.185 / 225.437 / 238.947` ms; *ITL* p50 / p90 /
 p95 `10.958 / 11.713 / 12.014` ms), within **1.2%** of the embedded effective prior.
 
-### Disaggregated H200 rerun
+### H200 serving comparison
 
 Re-running the five disaggregated configurations across four single-GPU H200 nodes (`Qwen3-8B` for
 *PD*; `Qwen3-VL-8B-Instruct` in `1R1E2P1D` for *EPD*) yielded:
@@ -408,30 +430,6 @@ Additional runtime-acceptance runs verified:
   2, and returned both roles to 1.
 - **Suite 2 single-`Server` rounds**: All 12 rounds that scaled to 2 (`3` `TokenThroughput` `catalog`
   and `9` `Predictive`) returned to 1 Ready replica with zero failed requests.
-
-## Benefits
-
-- In Suite 2 on H200 from an equal 1-replica baseline, `0.75` catalog headroom triggered
-  `TokenThroughput` (`1 → 2` at `c = 24`) where unmargined saturation (`17135.159` tok/s) stalled,
-  and the embedded `openai/gpt-oss-120b` (`fp4`) prior matched sustain throughput within **1.2%**
-  (`4862.388` versus `4804.08` tok/s).
-- Pairing the catalog with `Predictive` offset ~76 s vLLM startup, cutting 45 s `sustain` *TTFT* p50
-  from `343.842` to **189.511 ms** (`maxReplicas: 2`) and 90 s `sustain` *TTFT* p50 from
-  `145.939–190.555` to **120.59 ms** (`maxReplicas: 4`, `3886.136` output tok/s, zero errors).
-- In Suite 1 on H100, predictive *PD* cut `ramp` *TTFT* p50 (`467.906` versus `2540.853` ms) and
-  raised output (`2109.251` versus `1117.481` tok/s), though low manual targets scaled it during
-  baseline.
-
-## Trade-offs
-
-- In Suite 1, 90 s cooldown sat below the 300 s downward stabilization window, leaving final
-  snapshots at two replicas.
-- In Suite 2's 45 s `sustain` rounds, `TokenThroughput` `catalog` spent `317.04` median
-  `readyReplicaSeconds` (`+33.7%` over manual's `237.094` s) without lowering `sustain` *TTFT* p50
-  because ~76 s startup consumed most of the window.
-- `Predictive` amplifies initial ramp slopes (`rawRecommendedReplicas` 4–75), so production configs
-  pair *`horizonSeconds`* (`180–300` s) with *`behavior.scaleUp.maxStepReplicas`*; see
-  [Step 3: Choose an algorithm](../../walkthroughs/model-deployment/scaling.md#step-3-choose-an-algorithm).
 
 ## Limitations
 

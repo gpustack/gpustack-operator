@@ -8,8 +8,8 @@ section.
 ## Contents
 
 - [Third-party dependencies](#third-party-dependencies)
-- [Manufacturer guides](#manufacturer-guides)
-- [Shared coexistence rules](#shared-coexistence-rules)
+- [Vendor setup requirements](#vendor-setup-requirements)
+- [Shared cluster requirements](#shared-cluster-requirements)
 
 ## Third-party dependencies
 
@@ -25,9 +25,9 @@ image mode are in [Installation Modes](../operate/installation-modes.md).
 | ModelExpress | Coordinates NVIDIA peer weight transfer and cache sharing. | Optional; the operator creates a per-deployment metadata service. See [ModelExpress](../modules/model-delivery/remote.md#nvidia-modelexpress). |
 | CSI drivers | Mount NFS or S3 volumes, or mount cached weights. | NFS and S3 ship as bundled subcharts; node model delivery uses Model Manager CSI ([Model Store Operations](../modules/model-delivery/operations.md)). |
 | Serving engines | Run inference containers. | Select a compatible runner image from [Engine Compatibility](../modules/model-deployment/engine-versions.md). |
-| Vendor drivers and toolkits | Expose accelerators to node workloads. | Install host prerequisites from [Manufacturer guides](#manufacturer-guides). |
+| Vendor drivers and toolkits | Expose accelerators to node workloads. | Install host prerequisites from [Vendor setup requirements](#vendor-setup-requirements). |
 
-## Manufacturer guides
+## Vendor setup requirements
 
 ### AMD
 
@@ -36,7 +36,7 @@ Checked against **AMD GPU Operator v1.5.1** ([Overview](https://instinct.docs.am
 [Toolkit Install](https://instinct.docs.amd.com/projects/container-toolkit/en/latest/index.html)).
 
 **Install before GPUStack** — install only the ROCm kernel driver. Per
-[Allocator injection](#allocator-injection), GPUStack injects `/dev/kfd` and each granted card's DRM
+[Container toolkit requirements](#container-toolkit-requirements), GPUStack injects `/dev/kfd` and each granted card's DRM
 nodes directly, so neither AMD Container Toolkit nor `amd-container-runtime` is needed.
 
 If a workload runs as non-root, add `video` and `render` to its container *`securityContext`*
@@ -127,7 +127,7 @@ and [`ascend-docker-runtime`](https://www.hiascend.com/eng/developer/software/mi
 on Atlas A5 (`950` series).
 
 **Install before GPUStack** — install the Ascend NPU driver, firmware, and Ascend Docker Runtime. Per
-[Allocator injection](#allocator-injection), GPUStack sets `ASCEND_VISIBLE_DEVICES` without `/dev`
+[Container toolkit requirements](#container-toolkit-requirements), GPUStack sets `ASCEND_VISIBLE_DEVICES` without `/dev`
 nodes, so the runtime hook must mount the devices. Register the runtime under handler `ascend` (matching
 the chart's `RuntimeClass`), or set `deviceManager.createRuntimeClasses=false` and supply your own.
 
@@ -178,7 +178,7 @@ Checked against **Cambricon driver 5.10.22** (Neuware SDK 1.15.0,
 [Driver Install](https://www.cambricon.com/docs/sdk_1.15.0/driver_5.10.22/user_guide/index.html)).
 
 **Install before GPUStack** — install only the Cambricon MLU driver. Per
-[Allocator injection](#allocator-injection), GPUStack injects card and host control `/dev` nodes on
+[Container toolkit requirements](#container-toolkit-requirements), GPUStack injects card and host control `/dev` nodes on
 both whole-card and sliced allocations and sets `CAMBRICON_VISIBLE_DEVICES` for compatibility with
 `cambricon-container-runtime`, so `cntoolkit` is not required.
 
@@ -189,7 +189,7 @@ Checked against **Hygon DCU Operator** (`latest` unversioned vendor docs,
 
 **Install before GPUStack** — install the Hygon DCU driver and firmware so `/dev/kfd`, `/dev/mkfd`,
 `/dev/dri/card*`, and `/dev/dri/renderD*` exist on the host. Per
-[Allocator injection](#allocator-injection), GPUStack injects those device nodes directly without a
+[Container toolkit requirements](#container-toolkit-requirements), GPUStack injects those device nodes directly without a
 container toolkit.
 
 **Vendor GPU Operator** — Hygon DCU Operator configures all components on one `DeviceConfig` custom
@@ -256,7 +256,7 @@ Checked against **ix-GPU-Operator v4.4.0** and **ix-Container-Toolkit v1.1.0**
 
 **Install before GPUStack** — install matching versions of the Iluvatar driver and
 ix-Container-Toolkit (for example, driver v4.4.0 with toolkit v1.1.0). Per
-[Allocator injection](#allocator-injection), GPUStack sets `IX_VISIBLE_DEVICES` without `/dev` nodes.
+[Container toolkit requirements](#container-toolkit-requirements), GPUStack sets `IX_VISIBLE_DEVICES` without `/dev` nodes.
 Register the runtime as `iluvatar`, or set `deviceManager.createRuntimeClasses=false` and supply your
 own `RuntimeClass`.
 
@@ -305,7 +305,7 @@ Checked against **MetaX Kubernetes GPU Operator v0.15.3**
 [Components](https://developer.metax-tech.com/api/client/document/preview/1411/k8s/03_component.html)).
 
 **Install before GPUStack** — install the MetaX driver and MXMACA SDK on the host. Per
-[Allocator injection](#allocator-injection), GPUStack injects `/dev/mxcd`, `/dev/mxnd`, `/dev/mxgd`,
+[Container toolkit requirements](#container-toolkit-requirements), GPUStack injects `/dev/mxcd`, `/dev/mxnd`, `/dev/mxgd`,
 and card DRM nodes directly, so no container toolkit is required.
 
 **Vendor GPU Operator** — MetaX GPU Operator marks `gpu-device` and `gpu-label` mandatory in every
@@ -350,7 +350,7 @@ Checked against **MT GPU Operator v2.1.0** (KUAE Cloud Native,
 [Helm Chart Install](https://docs.mthreads.com/cloud-native/cloud-native-doc-online/install_guide#mt-gpu-operator)).
 
 **Install before GPUStack** — install the Moore Threads driver and MT Container Toolkit. Per
-[Allocator injection](#allocator-injection), GPUStack sets `MTHREADS_VISIBLE_DEVICES` without `/dev`
+[Container toolkit requirements](#container-toolkit-requirements), GPUStack sets `MTHREADS_VISIBLE_DEVICES` without `/dev`
 nodes.
 
 **Vendor GPU Operator** — MT GPU Operator ships two modes: `full` (two Helm charts whose controller
@@ -414,7 +414,7 @@ Checked against **NVIDIA GPU Operator v26.3.3**
 [Helm Chart Install](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html)).
 
 **Install before GPUStack** — install the NVIDIA driver and NVIDIA Container Toolkit (either on the
-host or via NVIDIA GPU Operator). Per [Allocator injection](#allocator-injection), GPUStack sets
+host or via NVIDIA GPU Operator). Per [Container toolkit requirements](#container-toolkit-requirements), GPUStack sets
 `NVIDIA_VISIBLE_DEVICES` by default or emits CDI annotations; both paths require the toolkit.
 
 Device Manager also relies on the toolkit for MIG management (`NVIDIA_MIG_CONFIG_DEVICES` and
@@ -496,12 +496,12 @@ Checked against **T-Head SAIL SDK** (PPU SDK, HGGCRT v3,
 
 **Install before GPUStack** — install the PPU SDK Runfile (`/usr/local/PPU_SDK` by default) using
 HGGCRT v3 (backward compatible with v2), and verify with `ppu-smi` and `hgcc --version`. Per
-[Allocator injection](#allocator-injection), GPUStack injects `/dev/alixpu`, `/dev/alixpu_ctl`, and
+[Container toolkit requirements](#container-toolkit-requirements), GPUStack injects `/dev/alixpu`, `/dev/alixpu_ctl`, and
 `/dev/alixpu_ppu<N>` (plus MIG partition nodes) directly without a vendor container runtime.
 
-## Shared coexistence rules
+## Shared cluster requirements
 
-### Allocator injection
+### Container toolkit requirements
 
 Whether a host needs a vendor container toolkit depends on what GPUStack's allocator returns to
 kubelet:

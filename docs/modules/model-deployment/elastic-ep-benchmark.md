@@ -12,11 +12,8 @@ The initial suites describe cross-`Pod` TCP. The separate
 
 - [Summary](#summary)
 - [Environment](#environment)
-- [Suite 1: Width comparison](#suite-1-width-comparison)
-- [Live resize](#live-resize)
+- [Results](#results)
 - [Verification](#verification)
-- [Benefits](#benefits)
-- [Trade-offs](#trade-offs)
 - [InfiniBand RDMA comparison](#infiniband-rdma-comparison)
 - [Limitations](#limitations)
 
@@ -34,6 +31,24 @@ in both states.
   justify extra GPUs (especially over InfiniBand RDMA, where width 4 also led concurrency-64 output).
 - **Choose width 2** on TCP for lower concurrency, throughput and token-generation latency. Even at
   concurrency 64 on TCP, end-to-end p50 rose at width 4 (11,487.169 to 12,154.350 ms).
+
+### Benefits
+
+- Expanded **4 → 8 GPUs** in place while keeping the serving master and original GPU worker; live
+  load completed **439/439 requests with zero errors**.
+- Cut concurrency-64 *TTFT* p50 **2.50×** (6,509.231 to **2,598.867 ms**) and *TTFT* p95
+  (8,708.596 to **4,789.148 ms**).
+
+End-to-end p50 still rose from 11,487.169 to 12,154.350 ms at concurrency 64.
+
+### Trade-offs
+
+- Single-request *ITL* p50 rose **83.0%** (8.566 to 15.675 ms), and concurrency-64 *ITL* p50 rose
+  from 16.522 to **30.270 ms** across the four-`Pod` TCP collective.
+- Output throughput fell in all six TCP cells (109.586 to 61.020 tok/s at concurrency 1; 1,145.131
+  versus 1,121.379 tok/s at concurrency 64).
+
+The capture does not isolate collective, TCP and single-API-server overhead separately.
 
 ## Environment
 
@@ -64,7 +79,9 @@ traffic; **all cross-`Pod` *EP* collective traffic used TCP sockets over `eth0`.
 | State 2 | 2 → 4 | 2 → 4 | 4 → 8 | 2 | 4 → 8 |
 | State 3 | 4 | 4 | 8 | 2 | 8 |
 
-## Suite 1: Width comparison
+## Results
+
+### Suite 1: Serving width comparison
 
 Each state ran one sweep of target 1,024-input / 256-output-token requests (observed prompts
 1,021–1,025 tokens). Concurrency 1, 4 and 8 used 32 requests; concurrency 16 used 64; concurrency 32
@@ -100,7 +117,7 @@ matched pair.
 | 64 | 2 | 4 | 128/128 | 6,509.231 | 8,708.596 | **22.780** | **16.522** | 157.753 | **1,145.131** |
 | 64 | 4 | 8 | 128/128 | **2,598.867** | **4,789.148** | 38.357 | 30.270 | **155.538** | 1,121.379 |
 
-## Live resize
+### Live resize
 
 A concurrency-8 stream (`1,024/256` shape) ran across the width 2 → 4 patch and completed
 **439/439 requests in 264.227 seconds (264.23 s) with zero client errors**. The capture recorded
@@ -162,24 +179,6 @@ A later runtime-acceptance run repeated width 2 → 4 on an eight-GPU H100 node:
 The operator deletes the operation record after completion, leaving terminal state in the condition
 and observation. An earlier attempt on the same image did not converge and remains unexplained.
 
-## Benefits
-
-- Expanded **4 → 8 GPUs** in place while keeping the serving master and original GPU worker; live
-  load completed **439/439 requests with zero errors**.
-- Cut concurrency-64 *TTFT* p50 **2.50×** (6,509.231 to **2,598.867 ms**) and *TTFT* p95
-  (8,708.596 to **4,789.148 ms**).
-
-End-to-end p50 still rose from 11,487.169 to 12,154.350 ms at concurrency 64.
-
-## Trade-offs
-
-- Single-request *ITL* p50 rose **83.0%** (8.566 to 15.675 ms), and concurrency-64 *ITL* p50 rose
-  from 16.522 to **30.270 ms** across the four-`Pod` TCP collective.
-- Output throughput fell in all six TCP cells (109.586 to 61.020 tok/s at concurrency 1; 1,145.131
-  versus 1,121.379 tok/s at concurrency 64).
-
-The capture does not isolate collective, TCP and single-API-server overhead separately.
-
 ## InfiniBand RDMA comparison
 
 A follow-up on the ConnectX-7 InfiniBand node from
@@ -221,7 +220,7 @@ NCCL logged `Using network IB` with GPU Direct RDMA enabled, moving the cross-`P
 Because `--gpu-memory-utilization` also changed (`0.90` → `0.85`), the runs do not isolate
 transport alone.
 
-### Width comparison
+### RDMA serving widths
 
 ![TTFT p50, output throughput, ITL p50 and ITL p99 for Elastic EP width 2 and width 4 over TCP and InfiniBand RDMA](../../assets/diagrams/elastic-ep-benchmark-rdma.svg)
 
@@ -271,7 +270,7 @@ Ray registration does not prove collective readiness. The harness timer polled a
 and *`stableWidth`* instead. The **2,134** total completion lines span width 2, expansion load and
 both width-4 passes.
 
-### Remaining trade-offs
+### RDMA width trade-offs
 
 - **Choose RDMA width 4** for high-concurrency peaks (concurrency 64), where it led both *TTFT* and
   output throughput.

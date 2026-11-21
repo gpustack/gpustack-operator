@@ -10,18 +10,14 @@ the tenant partition is called a *reuse domain*; Mooncake flags, metrics, and er
 
 ## Contents
 
-- [Two kinds by scope](#two-kinds-by-scope)
+- [Pools and bindings](#pools-and-bindings)
+- [Cache reuse domains](#cache-reuse-domains)
 - [Capacity grants](#capacity-grants)
-- [One Binding, one domain](#one-binding-one-domain)
-- [Domain immutability](#domain-immutability)
-- [Ceiling and grant](#ceiling-and-grant)
-- [Full-quota behavior](#full-quota-behavior)
-- [Quota policy file](#quota-policy-file)
-- [Zero grants](#zero-grants)
-- [Operating notes](#operating-notes)
 - [Pod injection](#pod-injection)
+- [Quota and deletion checks](#quota-and-deletion-checks)
+- [Limitations](#limitations)
 
-## Two kinds by scope
+## Pools and bindings
 
 `KVCachePool` and `KVCachePoolBinding` mirror `ClusterQueue` and `LocalQueue`: the cluster object
 owns backend capacity, and the namespaced object grants quota and RBAC scope to one namespace.
@@ -53,32 +49,7 @@ spec:
     dtype: fp8_e4m3  # required; "auto" refused on new Bindings
 ```
 
-## Capacity grants
-
-A namespace has no quota on a pool until an administrator creates a `KVCachePoolBinding` in that
-namespace. The Binding registers *`spec.domain.name`* as a tenant ID in the store's ledger and sets
-its ceiling.
-
-At runtime, workloads send the reuse domain name, not the Binding name. Workloads sharing a domain
-name share cached blocks and one quota ledger; workloads with distinct domains keep separate caches
-and ledgers.
-
-### Limitations
-
-**A Binding is a provisioning and accounting record, not an access boundary.** Any `Pod` in the
-cluster that can reach the leader `Service` and knows a registered domain name can read or write
-that domain's blocks without credentials. Do not place mutually distrusting tenants on a shared
-backend without external network isolation.
-
-Managed backends enable the tenant ledger by default unless `leader.multiTenancy: false` is set (required
-below Mooncake `0.3.12`; see [GPUStack build variants](backend.md#gpustack-build-variants)). When a
-backend runs without a tenant ledger:
-
-- Admission allows a `KVCachePool` on a managed single-tenant backend with a warning that per-tenant
-  quotas are inactive (external backends are discovered at reconcile time).
-- Workloads omit the tenant ID and share the store's single default tenant.
-
-## One Binding, one domain
+## Cache reuse domains
 
 Each `KVCachePoolBinding` registers one reuse domain on its backend's leader:
 
@@ -97,13 +68,13 @@ Each `KVCachePoolBinding` registers one reuse domain on its backend's leader:
 The pool lists registered domains in *`status.domains`*. On the Binding, `DomainExclusive` confirms
 name ownership and `QuotaGranted` confirms a positive effective grant.
 
-## Domain immutability
+### Immutable domain fields
 
 *`spec.poolRef`* and every field under *`spec.domain`* (*`name`*, *`blockSize`*, and *`dtype`*) are
 immutable after creation because changing them strands ledger entries or corrupts cached block
 layouts. Delete and recreate the Binding to change them; existing cached blocks do not carry over.
 
-### Engine dtype
+### Engine cache precision
 
 When the `model-deployment-kv-cache-dtype-owned` `Setting` is `true` (default), the operator passes
 *`spec.domain.dtype`* verbatim as `--kv-cache-dtype <dtype>` to every managed `ModelDeployment` role
@@ -126,7 +97,17 @@ and [injected `Pod`](#pod-injection), refusing conflicting user flags
 
 Values above reflect vLLM `v0.29.0` and SGLang `v0.5.18`; the running engine image is authoritative.
 
-## Ceiling and grant
+## Capacity grants
+
+A namespace has no quota on a pool until an administrator creates a `KVCachePoolBinding` in that
+namespace. The Binding registers *`spec.domain.name`* as a tenant ID in the store's ledger and sets
+its ceiling.
+
+At runtime, workloads send the reuse domain name, not the Binding name. Workloads sharing a domain
+name share cached blocks and one quota ledger; workloads with distinct domains keep separate caches
+and ledgers.
+
+### Requested and effective quota
 
 *`spec.quota.ceiling`* is the requested namespace limit (required because the store rejects tenants
 without a policy). *`status.effectiveQuota`* is the byte grant computed by the store:
@@ -140,7 +121,7 @@ On `KVCachePool`, `QuotaWithinTotal` turns `False` (`Oversubscribed`) when Bindi
 *`spec.quota.total`*; if mounted member capacity is smaller, *`effectiveQuota`* still scales down to
 what members mounted.
 
-## Full-quota behavior
+### Full-quota behavior
 
 Reaching *`effectiveQuota`* triggers per-domain eviction rather than immediate write failures:
 
@@ -153,13 +134,11 @@ Reaching *`effectiveQuota`* triggers per-domain eviction rather than immediate w
   turns `true` only when a proportional recalculation cuts *`effectiveQuota`* below bytes the domain
   already holds. Compare *`status.usage`* against *`status.effectiveQuota`* to detect saturation.
 
-### Eviction
-
 Neither `KVCachePool` nor `KVCachePoolBinding` exposes eviction settings or counters because store
 eviction watermarks and metrics are process-global on the leader. Configure global eviction flags in
 *`spec.connection.managed.leader.extraArgs`* ([KV Cache Election and Failover](leader.md)).
 
-## Quota policy file
+### Quota policy file
 
 The pool controller renders all Binding ceilings on a backend into one seed `ConfigMap`. An init
 container copies that seed onto a writable volume (writing an empty policy document if no pool has
@@ -168,7 +147,7 @@ bound the backend yet) so the leader can atomically rename updated policy files 
 If `QuotaPolicyWritable` on `KVCachePool` is `False`, policy updates have stopped reaching the
 leader; inspect the pool condition message and leader logs.
 
-## Zero grants
+### Unavailable store capacity
 
 When no member segments are mounted (on initial startup or for `~5–30 s` while members remount after
 a leader restart), allocatable capacity is zero. Both the pool (`CapacityAllocatable=False`, reason
@@ -179,38 +158,12 @@ Single-tenant backends (`leader.multiTenancy: false` or external masters without
 one exception: `QuotaLedgerAvailable` reports `False/MultiTenancyDisabled` while the pool stays
 `Ready` for its single domain.
 
-## Operating notes
-
-Compare *`effectiveQuota`* and *`usage`* with `kubectl get kvcpb` (`EFFECTIVE` and `USAGE` stay
-blank when `multiTenancy` is `false`):
-
-```text
-NAME     POOL          DOMAIN        EFFECTIVE   USAGE    PHASE   AGE
-team-a   shared-dram   qwen-72b-v2   450Gi       280Gi    Ready   6d
-```
-
-When deleting a `KVCachePoolBinding` or `KVCachePool` stays in `Deleting`, inspect `Releasable=False`
-and act on the owner named by its reason:
-
-| `Releasable` reason | Cause | Resolution |
-|---|---|---|
-| `HeldByWorkloads` | Workloads in *`status.usedBy`* still reference the Binding | Delete or detach the named workloads in the namespace. |
-| `LedgerNotReleased` | Domain still holds bytes on the leader, or leader is unreachable during pool teardown | Drain the domain or restore leader `:9003` reachability (retries every `30 s`). |
-| `LedgerRequestFailed` | Admin API call failed, leaving ledger state unknown | Inspect `KVCachePool` and `KVCacheBackend` conditions and restore the leader. |
-
-If an external or permanently destroyed leader will never return, clear the pool finalizer manually
-(this orphans quota entries if the leader is still live):
-
-```bash
-kubectl patch kvcp <pool> --type=merge -p '{"metadata":{"finalizers":null}}'
-```
-
 ## Pod injection
 
 Standalone `Pod`s can attach to a `KVCachePoolBinding` via the opt-in mutating webhook. `Pod`s
 without `kvcache.gpustack.ai/inject: "true"` are ignored.
 
-### Pod injection contract
+### Pod injection configuration
 
 ```yaml
 apiVersion: v1
@@ -307,6 +260,47 @@ kubectl -n <namespace> exec <pod-name> -- python3 -c \
   `TypeError: setup(): incompatible function arguments`.
 - **Legacy image fallback**: Omit *`spec.domain.name`* (or set `default`) when running pre-`0.3.13`
   engine images.
+
+## Quota and deletion checks
+
+Compare *`effectiveQuota`* and *`usage`* with `kubectl get kvcpb` (`EFFECTIVE` and `USAGE` stay
+blank when `multiTenancy` is `false`):
+
+```text
+NAME     POOL          DOMAIN        EFFECTIVE   USAGE    PHASE   AGE
+team-a   shared-dram   qwen-72b-v2   450Gi       280Gi    Ready   6d
+```
+
+When deleting a `KVCachePoolBinding` or `KVCachePool` stays in `Deleting`, inspect `Releasable=False`
+and act on the owner named by its reason:
+
+| `Releasable` reason | Cause | Resolution |
+|---|---|---|
+| `HeldByWorkloads` | Workloads in *`status.usedBy`* still reference the Binding | Delete or detach the named workloads in the namespace. |
+| `LedgerNotReleased` | Domain still holds bytes on the leader, or leader is unreachable during pool teardown | Drain the domain or restore leader `:9003` reachability (retries every `30 s`). |
+| `LedgerRequestFailed` | Admin API call failed, leaving ledger state unknown | Inspect `KVCachePool` and `KVCacheBackend` conditions and restore the leader. |
+
+If an external or permanently destroyed leader will never return, clear the pool finalizer manually
+(this orphans quota entries if the leader is still live):
+
+```bash
+kubectl patch kvcp <pool> --type=merge -p '{"metadata":{"finalizers":null}}'
+```
+
+## Limitations
+
+**A Binding is a provisioning and accounting record, not an access boundary.** Any `Pod` in the
+cluster that can reach the leader `Service` and knows a registered domain name can read or write
+that domain's blocks without credentials. Do not place mutually distrusting tenants on a shared
+backend without external network isolation.
+
+Managed backends enable the tenant ledger by default unless `leader.multiTenancy: false` is set (required
+below Mooncake `0.3.12`; see [GPUStack build variants](backend.md#gpustack-build-variants)). When a
+backend runs without a tenant ledger:
+
+- Admission allows a `KVCachePool` on a managed single-tenant backend with a warning that per-tenant
+  quotas are inactive (external backends are discovered at reconcile time).
+- Workloads omit the tenant ID and share the store's single default tenant.
 
 ---
 

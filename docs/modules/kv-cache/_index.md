@@ -30,7 +30,7 @@ Review [Limitations](pool.md#limitations) before sharing one backend across dist
 
 ## Configuration
 
-Start with the [backend manifest](backend.md#connection-and-medium) to deploy or attach a store,
+Start with the [backend manifest](backend.md#connections-and-storage-media) to deploy or attach a store,
 then configure [pools and bindings](pool.md) for namespace quotas and reuse domains.
 [Pod injection](pool.md#pod-injection) covers opt-in `Pod` labels, annotations, and verification.
 
@@ -43,9 +43,9 @@ For an end-to-end deployment sequence, follow the
 
 Choose memory segments and optional local disk offload in [KV Cache Backend](backend.md) and
 [KV Cache Local Disk Tier](local-disk-tier.md) (including
-[disk-heavy nodes](local-disk-tier.md#disk-heavy-nodes)).
+[disk and memory sizing](local-disk-tier.md#disk-and-memory-sizing)).
 
-### Step 2: Check status
+### Step 2: Verify backend readiness
 
 Inspect backend readiness and conditions:
 
@@ -69,7 +69,7 @@ If a workload cannot attach or write to the cache, inspect the backend, pool, an
 
 Use [Refused engine launch](pool.md#refused-engine-launch) for admission refusals,
 [Pod binding verification](pool.md#pod-binding-verification) to inspect admitted `Pod`s, and
-[Operating notes](pool.md#operating-notes) for deletion holds.
+[Quota and deletion checks](pool.md#quota-and-deletion-checks) for deletion holds.
 
 ---
 

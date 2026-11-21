@@ -8,10 +8,10 @@ runtime. Choose one mode per cluster.
 
 - [Prerequisites](#prerequisites)
 - [Chart and image modes](#chart-and-image-modes)
-- [Modes are exclusive](#modes-are-exclusive)
+- [Installation ownership conflicts](#installation-ownership-conflicts)
 - [Configuration](#configuration)
 - [Settings and precedence](#settings-and-precedence)
-- [Deployed and applied resources](#deployed-and-applied-resources)
+- [Worker-managed resources](#worker-managed-resources)
 
 ## Prerequisites
 
@@ -56,9 +56,9 @@ Two components sit outside `--disable-applications`:
   `node-feature-discovery.enabled=false` hands feature discovery to an existing NFD installation.
 - **Topograph**: disabled by default and configurable only in chart mode because it requires provider
   credentials and trust settings. `TopologySource` snapshots and hostname fallback work without it
-  ([Topology-Aware Scheduling Operations](../modules/topology/operations.md#inventory-path)).
+  ([Topology-Aware Scheduling Operations](../modules/topology/operations.md#topology-inventory-sources)).
 
-## Modes are exclusive
+## Installation ownership conflicts
 
 Both modes render the same chart under `fullnameOverride: gpustack-operator`. Enabling a component in
 both modes creates identically named objects, and Helm rejects adoption with
@@ -119,7 +119,7 @@ kubectl -n gpustack-system get setting settings-default-tracking -o yaml
   `kubectl -n gpustack-system patch setting settings-default-tracking --type merge -p '{"spec":{"value":"<remaining-comma-separated-names>"}}'`,
   then re-apply your `Setting` value.
 
-## Deployed and applied resources
+## Worker-managed resources
 
 Helm validates REST mappings for the entire render before creating objects, so a chart cannot render a
 custom resource whose CRD is templated in the same install or supplied externally. Instead, the worker

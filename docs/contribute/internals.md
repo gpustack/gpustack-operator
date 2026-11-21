@@ -40,7 +40,7 @@ controllers can index extension-API resources. Preserve this ordering when addin
 The `NodeFeatureRule` and `AdmissionCheck` steps each retry for up to 5 minutes while their CRD becomes available. A worker
 starting alongside NFD and Kueue can reach these steps before their CRDs are served. The worker
 applies the resources in both installation modes; see [Installation
-Modes](../operate/installation-modes.md#deployed-and-applied-resources).
+Modes](../operate/installation-modes.md#worker-managed-resources).
 
 ### Preparation in every replica
 

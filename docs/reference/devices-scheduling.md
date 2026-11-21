@@ -114,7 +114,7 @@ Enabling or disabling hardware partitioning is manual, through the manufacturer'
 `ppu-smi mig` for T-Head), and the operator sees it only on the next Device Manager detection.
 
 The [three-configuration
-walkthrough](../modules/devices/nvidia-mig.md#three-mig-configurations) in [NVIDIA MIG
+walkthrough](../modules/devices/nvidia-mig.md#mig-capacity-scenarios) in [NVIDIA MIG
 Operations](../modules/devices/nvidia-mig.md) shows the disjoint populations on a recorded 8-accelerator node,
 including a **mixed** one advertising both families;
 [T-Head](../modules/devices/thead-mig.md) covers the same procedure.

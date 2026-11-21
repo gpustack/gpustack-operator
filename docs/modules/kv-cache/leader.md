@@ -124,11 +124,11 @@ after 20 retries (`CrashLoopBackOff`). Verify both `ServiceAccount`s before debu
 | `Service` (default) | `<backend>-leader.<namespace>.svc:50051` | Waits for Kubernetes `Endpoints` propagation on failover. |
 | `Lease` | `k8s://<namespace>/<lease>` | Reads the `Lease` directly; requires member API-server reachability and a `Lease`-enabled image. |
 
-**Failover behavior:** Standbys hold no metadata index. After failover (measured at `~16 s` on a
-single-node test cluster versus `~30 s` for a single-leader restart), the new leader rebuilds
-segment mounts from members; DRAM-only keys miss until rewritten, and [local disk tier](local-disk-tier.md)
-keys recover once disk segments re-register (unless a restarted member's new client ID collides with
-a stale replica record).
+**Failover behavior:** Standbys hold no metadata index. After failover (`~16 s` on a single-node
+cluster versus `~30 s` for a single-leader restart), the new leader rebuilds segment mounts from
+members; DRAM-only keys miss until rewritten, and [local disk tier](local-disk-tier.md) keys recover
+once disk segments re-register (unless a restarted member's new client ID collides with a stale
+replica record).
 
 ---
 

@@ -20,7 +20,7 @@ configurations.
 |---|---|---|---|---|
 | vLLM | alone | `0.29.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0`+ | `0.3.13.post1`, on the `cuda12.9` and the `cuda13.0` tag | — |
 | vLLM | *prefill/decode*, direct transfer over `tcp` | `0.29.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0`+ | `0.3.13.post1` | — |
-| vLLM | with a Mooncake store, alone or as a pair | `0.29.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0`+ | `0.3.13.post1` | the 0.3.13 line; the [default store image](../kv-cache/backend.md#image) is one |
+| vLLM | with a Mooncake store, alone or as a pair | `0.29.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0`+ | `0.3.13.post1` | the 0.3.13 line; the [default store image](../kv-cache/backend.md#backend-images) is one |
 | vLLM-Ascend | alone | `0.23.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0rc1`+ | `0.3.11.post1`, the NPU build | — |
 | vLLM-Ascend | *prefill/decode*, direct transfer | `0.23.0`, behind `llm-d-router`; `--enable-scale-out` is also required on `0.30.0rc1`+ | `0.3.11.post1`, the NPU build | — |
 | vLLM-Ascend | with a Mooncake store | not verified | `0.3.11.post1`, the NPU build | not verified |
@@ -37,34 +37,34 @@ vLLM *EPD*, NVIDIA SGLang *EPD* (run on `0.5.18`), and Ascend 910B2 vLLM-Ascend 
 AMD *EPD* and SGLang Ascend rows are admitted but unverified on hardware
 ([#763](https://github.com/gpustack/gpustack-operator/issues/763)).
 
-### Version rules
+### Engine image requirements
 
 - **Image floor**: There is no *`engine.version`* field. Roles run *`roles[].image`* or
   *`spec.engine.image`* ([Role images](configuration.md#role-images)), and admission never checks
   the tag. An image below the floor fails at startup (`ImagePullBackOff` or unknown-flag exit).
 - **Render flag**: Non-*Encode* vLLM deployments behind `llm-d-router` need `--enable-scale-out`
   starting at vLLM `0.30.0` or vLLM-Ascend `0.30.0rc1`
-  ([Counting engine tokens](prefill-decode.md#counting-engine-tokens)). Earlier `0.29.0`/`0.23.0`
+  ([Router token counting](prefill-decode.md#router-token-counting)). Earlier `0.29.0`/`0.23.0`
   floors predate that dependency.
 - **Mooncake client and store**: Each runner image embeds its Mooncake client (ROCm images compile
   their own and are unverified). Match `KVCacheBackend` members to the client's minor line
   ([Version compatibility](../kv-cache/backend.md#version-compatibility)).
 - **Direct transport defaults**: Listed runs moved KV over `tcp`, or `ascend` on vLLM-Ascend (which
-  does not support direct `tcp`; see [Pair connections](prefill-decode.md#pair-connections)).
+  does not support direct `tcp`; see [Role links and connectors](prefill-decode.md#role-links-and-connectors)).
 - **Not verified**: Means no live hardware run, not a refusal or known failure.
-- **Encoder floor**: Pick an image meeting the [admitted matrix](encode-prefill-decode.md#admitted-matrix)
+- **Encoder floor**: Pick an image meeting the [supported serving configurations](encode-prefill-decode.md#supported-serving-configurations)
   floor (`0.30.0` for NVIDIA/AMD `ECCPUConnector`, `0.30.0rc1` for Ascend `ECExampleConnector`,
   `0.5.10` for SGLang); admission does not enforce it.
 - **Group-forward probe**: Verified on vLLM `0.25.1`/`0.29.0` (`cmpl-` + `request_id`) and SGLang
   `0.5.18`/`0.5.21` (`meta_info.id` = rid). On other releases, the probe still runs: `Verified`
   admits a member, `Unknown` keeps prior eligibility, and only a failed health check withdraws it
-  ([Serving observations](routing.md#serving-observations)).
+  ([Endpoint status](routing.md#endpoint-status)).
 
 ## Transport compatibility
 
 The shared-store path uses `KVCacheBackend.spec.transport.protocol`. The direct *PD* path selects
 `Mooncake`, `NIXL` or `HIXL` through *`spec.kvTransfer.backend`*
-([Direct transfer transport](prefill-decode.md#direct-transfer-transport)). Admission refuses
+([Direct KV transports](prefill-decode.md#direct-kv-transports)). Admission refuses
 deployments whose store and direct paths request incompatible fabrics.
 
 | Transport (API/Mooncake) | Engine | Store path |
@@ -80,7 +80,7 @@ deployments whose store and direct paths request incompatible fabrics.
 | `EFA` / `efa` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` |
 | `CANN` / `ascend` | vLLM | **Not supported**: CUDA client has no Ascend transport |
 | `CANN` / `ascend` | SGLang | **Not verified** |
-| `CANN` / `ascend` | vLLM-Ascend | **Not verified**; members need [an image carrying CANN](../kv-cache/backend.md#image) |
+| `CANN` / `ascend` | vLLM-Ascend | **Not verified**; members need [an image carrying CANN](../kv-cache/backend.md#backend-images) |
 | `ROCM` / `hip` | vLLM, SGLang | **Not verified** |
 | `ROCM` / `hip` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` |
 | `MUSA`, `MACA` / `musa`, `maca` | vLLM, SGLang, vLLM-Ascend | **Not verified** |
@@ -95,7 +95,7 @@ Direct-path observations apply only to the named configurations:
 - **EFA**: Requires an [EFA engine build](../rdma/operations.md#efa-engine-images) (default store
   image includes EFA). Combined store and direct EFA paths are unverified.
 - **vLLM-Ascend direct**: Verified on `cann9.1-910b-vllm0.23.0` behind `llm-d-router`. Stores on
-  Ascend require CANN members ([image carrying CANN](../kv-cache/backend.md#image)).
+  Ascend require CANN members ([image carrying CANN](../kv-cache/backend.md#backend-images)).
 
 ## Remote weight loading
 

@@ -24,11 +24,9 @@ flowchart TD
 ## Contents
 
 - [Cache resources](#cache-resources)
-- [Placement](#placement)
-- [Warm-up Pod](#warm-up-pod)
-- [Budgets and admission](#budgets-and-admission)
-- [Pinning and expiry](#pinning-and-expiry)
-- [Status and views](#status-and-views)
+- [Prefetch placement](#prefetch-placement)
+- [Cache quota and retention](#cache-quota-and-retention)
+- [Prefetch status](#prefetch-status)
 - [Node-to-node sync](#node-to-node-sync)
 
 ## Cache resources
@@ -78,7 +76,7 @@ spec:
 Deleting a `ModelPrefetch` deletes its warm-up `Pod`s, clears its pins on the next union pass, and
 leaves cached bytes to ordinary watermark collection.
 
-## Placement
+## Prefetch placement
 
 *`spec.placement`* selects `Node`s via *`acceleratorTypes`* or *`nodeSelector`* (mutually exclusive).
 Omitting both inherits accelerated pools from same-namespace `ModelDeployment`s referencing the
@@ -106,7 +104,7 @@ spec:
 Explicit *`placement`* is required whenever *`spec.source`* is set for
 [remote weight delivery](remote.md#source-preparation).
 
-## Warm-up Pod
+### Warm-up Pod
 
 The prefetch controller creates one restricted warm-up `Pod` per target `Node` using the
 `model-prefetch-warmup-image` `Setting` (requires `sh`, `find`, and `sha256sum`). Each `Pod` mounts
@@ -115,7 +113,7 @@ the artifact's CSI volume, verifies files, and exits once the `Node` publishes t
 Warm-up `Pod`s omit `kueue.x-k8s.io/queue-name` so Kueue and accelerator `Pod` webhooks never hold
 cache warming behind compute quota.
 
-## Budgets and admission
+## Cache quota and retention
 
 A Binding's budget charges the full resolved byte size per distinct digest on every target `Node`
 (shared digests across namespaces charge each namespace independently). On `ModelStoreBinding`:
@@ -127,7 +125,7 @@ Admission rejects missing artifacts or Bindings, ungranted target `Node`s, and u
 also rejects projected footprints (`resolved size × widest node count` per digest) above
 *`quota.bytes`*.
 
-## Pinning and expiry
+### Pinning and expiry
 
 *`spec.retention.pinned`* (requires `allowPinned: true`) protects digests from eviction while still
 counting toward disk usage ([Cache collection rules](operations.md#cache-collection-rules)). The
@@ -136,7 +134,7 @@ controller merges pins across all namespaces into each `NodeModelStore.spec.pinn
 *`spec.retention.ttlAfterLastUse`* unpins a `Node`'s copy once unmounted past that duration
 (evaluated at the 1-hour granularity of *`lastUsedTime`*).
 
-## Status and views
+## Prefetch status
 
 `ModelPrefetch` reports *`desiredNodes`*, *`readyNodes`*, *`downloadingNodes`*, and conditions
 `Progressing`, `Available`, `Degraded`, and `Lapsed`. `Available` checks *`readyNodes >= minReady`*
@@ -225,8 +223,7 @@ peer and checkpoint hashes every `64 MiB`, resuming on another peer or the hub i
   bytes), and plugin `:32444/metrics` exposes `gpustack_model_manager_download_bytes_total` split by
   the `source` label (`hub` or `peer`).
 - **Trade-offs**: Peer sync cuts hub egress and hub dependency rather than fan-out time on slower
-  east-west fabrics. Each concurrent puller uses `~0.25 vCPU` on seed `Node`s (measured on 2-vCPU
-  `Node`s).
+  east-west fabrics. Each concurrent puller uses `~0.25 vCPU` on 2-vCPU seed `Node`s.
 
 ---
 

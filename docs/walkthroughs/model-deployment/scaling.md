@@ -8,11 +8,9 @@ Attach a `ModelDeploymentScaler` in `Shadow` mode to inspect replica recommendat
 
 - [Summary](#summary)
 - [Environment](#environment)
-- [Step 1: Prepare the target](#step-1-prepare-the-target)
-- [Step 2: Observe in Shadow](#step-2-observe-in-shadow)
+- [Scaler deployment](#scaler-deployment)
 - [Step 3: Choose an algorithm](#step-3-choose-an-algorithm)
-- [Step 4: Activate scaling](#step-4-activate-scaling)
-- [Step 5: Observe retirement](#step-5-observe-retirement)
+- [Live scaling](#live-scaling)
 - [Verification](#verification)
 - [Cleanup](#cleanup)
 - [Troubleshooting](#troubleshooting)
@@ -52,7 +50,9 @@ other `ModelDeploymentScaler` already binds the target deployment; see
 [Model Deployment Scaling](../../modules/model-deployment/scaling.md) and
 [GitOps sync](../../modules/model-deployment/scaling.md#gitops-sync).
 
-## Step 1: Prepare the target
+## Scaler deployment
+
+### Step 1: Deploy scaling target
 
 Save `scaling-target.yaml` (replace *`acceleratorType`* if not running on H100):
 
@@ -123,11 +123,11 @@ kubectl -n gpustack-bench get modeldeployment autoscaling-vllm-pd -w
 ```
 
 `--enable-scale-out` enables router token counting
-([Counting engine tokens](../../modules/model-deployment/prefill-decode.md#counting-engine-tokens)),
+([Router token counting](../../modules/model-deployment/prefill-decode.md#router-token-counting)),
 and `VLLM_HTTP_TIMEOUT_KEEP_ALIVE=3600` matches the benchmark configuration (it reduces, without
 eliminating, scale-out connection drops).
 
-## Step 2: Observe in Shadow
+### Step 2: Review Shadow recommendations
 
 Save `scaling-policy.yaml` in `Shadow` mode so the scaler computes recommendations without writing
 target *`replicas`*:
@@ -276,12 +276,12 @@ Nested *`tokenThroughput`* targets act as fallback while the predictor collects 
 *`status.predictors`* and role reasons to distinguish forecast planning from fallback
 ([Scale-out timing](../../modules/model-deployment/scaling-benchmark.md#scale-out-timing)).
 
-### Catalog priors
+### Catalog capacity estimates
 
 *`spec.algorithm.capacityPrior`* resolves omitted `TokenThroughput` or `Predictive` capacities from an
 embedded InferenceX `ModelDeploymentScalerCapacityPriorCatalog` (when *`catalogRef`* is omitted) or
 from a same-namespace `ConfigMap` (`priors.yaml` key by default; empty `catalogRef: {}` is rejected).
-See [Target eligibility](../../modules/model-deployment/scaling.md#target-eligibility) and
+See [Catalog matching requirements](../../modules/model-deployment/scaling.md#catalog-matching-requirements) and
 [Capacity priors](../../modules/model-deployment/scaling.md#capacity-priors).
 
 Because the embedded catalog omits `Qwen/Qwen3-8B`, create a reviewed `ConfigMap/autoscaling-priors`
@@ -430,7 +430,7 @@ To switch back to manual capacities, remove *`capacityPrior`* and supply explici
 with a warning so you can switch to `Shadow`, remove *`capacityPrior`*, or supply manual capacities
 while reconciliation sets `CapacityPriorsReady=False` and `Blocked=True`.
 
-### Encode ratios
+### Encoder replica ratios
 
 For a multimodal *EPD* target ([Encode, Prefill and Decode Walkthrough](encode-prefill-decode.md)),
 couple *encode* replica counts via *`ratios`* rather than an encode token-throughput target:
@@ -468,7 +468,9 @@ spec:
       target: "1"
 ```
 
-## Step 4: Activate scaling
+## Live scaling
+
+### Step 4: Activate scaling
 
 Change *`spec.mode`* to `Active` in `scaling-policy.yaml`, apply it, and confirm `Bound=True` and
 `Active=True`:
@@ -503,7 +505,7 @@ Verify that *`lastCommit`* advances, new `Pod`s reach `Ready`, and router per-wo
 increase on the added replicas. If *`pendingCohort`* stays non-null, inspect Kueue quota and `Pod`
 events before raising *`maxReplicas`*.
 
-## Step 5: Observe retirement
+### Step 5: Observe replica retirement
 
 Drop load to concurrency 2 for 600 s (exceeding the default 300 s scale-down stabilization window plus
 router withdrawal and drain budgets; setting `0` stores the 300 s default):
@@ -594,12 +596,13 @@ Resolution proceeds in four steps:
 4. Multiplies by *`headroom`*: `6496.65 × 0.75 = 4872.49 tokens/s` per replica, so `15,000 tokens/s`
    demand plans `ceil(15000 / 4872.49) = 4` replicas.
 
-### Capacity comparison
+### Capacity estimate comparison
 
-To compare `frozen-manual`, `tuned-manual`, and `catalog` arms on a single-`Server` `ModelDeployment`
-(no *`router`*, *`kvCache`*, or *`kvTransfer`*, and offline `evaluationTraceID` disjoint from
-`fitRunIDs`), copy `.agents/skills/gpustack-operator-benchmark/manifests/autoscaling-comparison.json`,
-fill in `REPLACE_WITH_*` placeholders, and validate offline:
+To compare `frozen-manual`, `tuned-manual`, and `catalog` configurations on a single-`Server`
+`ModelDeployment` (no *`router`*, *`kvCache`*, or *`kvTransfer`*, and offline `evaluationTraceID`
+disjoint from `fitRunIDs`), copy
+`.agents/skills/gpustack-operator-benchmark/manifests/autoscaling-comparison.json`, fill in
+`REPLACE_WITH_*` placeholders, and validate offline:
 
 ```bash
 bash .agents/skills/gpustack-operator-benchmark/cases/case-5-autoscaling.sh \
@@ -609,10 +612,10 @@ python3 .agents/skills/gpustack-operator-benchmark/scripts/autoscaling_report.py
 ```
 
 `--validate-only` makes zero cluster calls and exits `0` (valid) or `2` (input error); `--execute`
-runs at least three repeats per arm and writes `comparison.json` (`0` success, `1` round/cleanup
-failure, `2` validation error, `130` interrupt). See
-[Capacity-arm rounds](../../modules/model-deployment/scaling-benchmark.md#capacity-arm-rounds) for the
-recorded 18-round H200 results.
+runs at least three repeats per configuration and writes `comparison.json` (`0` success, `1`
+round/cleanup failure, `2` validation error, `130` interrupt). See
+[Capacity estimate comparison](../../modules/model-deployment/scaling-benchmark.md#capacity-estimate-comparison)
+for the 18-round H200 benchmark results.
 
 ## Cleanup
 

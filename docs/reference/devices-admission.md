@@ -68,7 +68,7 @@ the `Workload` with `Retry` when the fit fails.
 The worker applies the `gpustack-node-devices` `AdmissionCheck` at startup, retrying
 until Kueue's CRD is established — the chart cannot ship it, since Kueue templates its own CRDs and
 nothing orders them ahead of a custom resource in the same render (see [Install
-modes](../operate/installation-modes.md#deployed-and-applied-resources)).
+modes](../operate/installation-modes.md#worker-managed-resources)).
 
 The worker keeps it `Active`; an accelerated queue references it in *`spec.admissionChecksStrategy`*
 only once it is ([Queue quota and draining](devices-scheduling.md#queue-quota-and-draining)).

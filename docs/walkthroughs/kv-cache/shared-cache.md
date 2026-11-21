@@ -6,13 +6,8 @@ order, then add leader high availability, a local disk tier, and multi-tenant bi
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Create the store](#step-1-create-the-store)
-- [Step 2: Create pool and binding](#step-2-create-pool-and-binding)
-- [Step 3: Create the workload](#step-3-create-the-workload)
-- [Step 4: Enable high availability](#step-4-enable-high-availability)
-- [Step 5: Add a disk tier](#step-5-add-a-disk-tier)
-- [Step 6: Add a second team](#step-6-add-a-second-team)
+- [Cache deployment](#cache-deployment)
+- [Cache operations](#cache-operations)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
@@ -20,7 +15,7 @@ order, then add leader high availability, a local disk tier, and multi-tenant bi
 
 A shared Mooncake cache lets serving replicas reuse prefix KV blocks across DRAM and local disk tiers.
 Create the four objects in order because each resource references the one above it
-([Two kinds by scope](../../modules/kv-cache/pool.md#two-kinds-by-scope)):
+([Pools and bindings](../../modules/kv-cache/pool.md#pools-and-bindings)):
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
@@ -32,7 +27,7 @@ Create the four objects in order because each resource references the one above 
 Workloads always set *`kvCache.poolRef.name`* to the namespace `KVCachePoolBinding`, never the
 cluster-scoped `KVCachePool`.
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
@@ -41,7 +36,9 @@ cluster-scoped `KVCachePool`.
 | `AcceleratorType` | An `Active` pool from `kubectl get acctype` |
 | Model and engine | `Qwen/Qwen2.5-7B-Instruct` on vLLM `gpustack/runner:cuda13.0-vllm0.29.0` |
 
-## Step 1: Create the store
+## Cache deployment
+
+### Step 1: Create cache backend
 
 Save `mooncake-dram.yaml`, replacing `kubernetes.io/os: linux` with labels selecting the nodes that
 should contribute DRAM:
@@ -86,7 +83,7 @@ mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:5005
 If `CAPACITY` is smaller than expected or `PHASE` stays `Degraded`, run `kubectl describe kvcb mooncake-dram`
 and inspect `MembersMounted` in [Troubleshooting](#troubleshooting).
 
-## Step 2: Create pool and binding
+### Step 2: Create pool and binding
 
 Create namespace `team-a` if needed, then apply `pool-and-binding.yaml`:
 
@@ -139,7 +136,7 @@ Key constraints on *`domain`* and *`quota`*:
   honor injected tenant settings (for non-`default` domains, `mooncake-transfer-engine >= 0.3.13`; see
   [Tenant compatibility](../../modules/kv-cache/pool.md#tenant-compatibility)).
 
-## Step 3: Create the workload
+### Step 3: Deploy cached workload
 
 Substitute an `Active` `AcceleratorType` from `kubectl get acctype` and apply `qwen-chat.yaml`:
 
@@ -205,7 +202,9 @@ kubectl -n team-a exec <pod-name> -- python3 -c \
 If creation fails with `FailedCreate` or `TypeError` at startup, match the symptom in
 [Troubleshooting](#troubleshooting) ([Version compatibility](../../modules/kv-cache/backend.md#version-compatibility)).
 
-## Step 4: Enable high availability
+## Cache operations
+
+### Step 4: Enable high availability
 
 Scale the Mooncake leader from one replica to three without rolling existing member `DaemonSet` `Pod`s:
 
@@ -244,17 +243,15 @@ two conditions ([Health checks](../../modules/kv-cache/leader.md#health-checks))
 | `ElectionObserved` | Active `Lease` names a holder | Ready leader with empty `Lease` (wrong image, missing RBAC, or initial election in flight) |
 | `RolloutComplete` | All replicas run the current template | Rollout in progress or stalled |
 
-### Failover behavior
-
 Standby leaders hold no in-memory index. After a leader restart or failover, members remount their
 segments automatically (~30 s), and cached blocks start cold ([High availability](../../modules/kv-cache/leader.md#high-availability)).
 Master snapshot flags are refused in *`leader.extraArgs`* to prevent stale key collisions.
 
-## Step 5: Add a disk tier
+### Step 5: Add a disk tier
 
 Admission rejects adding *`localDisks`* to an existing member group in place. Prepare the host
 directory on every `kvcache: "true"` node first (owned by UID `65532` for the default image; see
-[Directory requirements](../../modules/kv-cache/local-disk-tier.md#directory-requirements)):
+[Host directory requirements](../../modules/kv-cache/local-disk-tier.md#host-directory-requirements)):
 
 ```bash
 install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
@@ -289,7 +286,7 @@ Verify `kubectl get kvcb mooncake-disk` reaches `Ready` with combined DRAM + dis
 the disk tier flushes in buckets, small workloads may keep disk usage at zero initially
 ([Bucket writes](../../modules/kv-cache/local-disk-tier.md#bucket-writes)).
 
-## Step 6: Add a second team
+### Step 6: Add a second team
 
 Grant `team-b` an isolated reuse domain on `shared-dram`:
 
@@ -352,11 +349,11 @@ spec:
 ```
 
 The operator injects `--kv-cache-dtype fp8_e4m3` onto `qwen-chat-fp8` and rejects manual
-`--kv-cache-dtype` overrides ([Engine dtype](../../modules/kv-cache/pool.md#engine-dtype)).
+`--kv-cache-dtype` overrides ([Engine cache precision](../../modules/kv-cache/pool.md#engine-cache-precision)).
 
 Because the three ceilings (`8Gi + 8Gi + 4Gi = 20Gi`) exceed `shared-dram`'s `16Gi` total, `shared-dram`
 reports `QuotaWithinTotal=False/Oversubscribed` and scales each Binding's *`status.effectiveQuota`*
-proportionally ([Ceiling and grant](../../modules/kv-cache/pool.md#ceiling-and-grant)).
+proportionally ([Requested and effective quota](../../modules/kv-cache/pool.md#requested-and-effective-quota)).
 
 ## Limitations
 
@@ -364,7 +361,7 @@ proportionally ([Ceiling and grant](../../modules/kv-cache/pool.md#ceiling-and-g
   [Limitations](../../modules/kv-cache/pool.md#limitations) and
   [Tenant compatibility](../../modules/kv-cache/pool.md#tenant-compatibility).
 - Active workloads hold a finalizer on their `KVCachePoolBinding` (`Releasable=False/HeldByWorkloads`)
-  until deleted ([Operating notes](../../modules/kv-cache/pool.md#operating-notes)).
+  until deleted ([Quota and deletion checks](../../modules/kv-cache/pool.md#quota-and-deletion-checks)).
 
 ## Troubleshooting
 
@@ -382,7 +379,7 @@ proportionally ([Ceiling and grant](../../modules/kv-cache/pool.md#ceiling-and-g
 | Pool reports `Oversubscribed` | `QuotaWithinTotal=False/Oversubscribed` | Expected proportional recut when ceilings exceed *`quota.total`*; inspect *`status.effectiveQuota`* on each Binding. |
 | Binding apply rejected on `domain.name` | `Duplicate` on *`spec.domain.name`* | Another Binding on the same backend already claims that domain (`default` when omitted); set a unique *`domain.name`*. |
 | Two Bindings claim one domain | `DomainExclusive=False/DomainClaimedByMultipleBindings` | Delete one of the racing `KVCachePoolBinding` objects. |
-| Disk-tier member stuck or unready | `FailedMount` or `no write permission on directory` | Create the host directory on every matched node with `install -d -o 65532 -g 0 -m 0750 <path>` ([Directory requirements](../../modules/kv-cache/local-disk-tier.md#directory-requirements)). |
+| Disk-tier member stuck or unready | `FailedMount` or `no write permission on directory` | Create the host directory on every matched node with `install -d -o 65532 -g 0 -m 0750 <path>` ([Host directory requirements](../../modules/kv-cache/local-disk-tier.md#host-directory-requirements)). |
 | Disk-tier init container crash-loops | `MembersMounted=False/MemberInitCrashLooping` | Use a member image that includes `sh` for the directory survey init container. |
 | Disk tier warns of preexisting files | `TierWasEmpty=False/PreexistingContent` | Empty stale files from the host path manually (`cleanAfterDelete: true` cleans only on backend deletion). |
 | HA leader `Deployment` shows `1/3` Ready | Expected leader-election steady state | No action needed; two standbys remain intentionally unready until failover. |

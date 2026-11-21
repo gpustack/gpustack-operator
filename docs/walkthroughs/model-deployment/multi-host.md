@@ -6,12 +6,10 @@ exceeds one node, using gang admission and operator-injected leader coordinates.
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Define the deployment](#step-1-define-the-deployment)
-- [Step 2: Verify gang admission](#step-2-verify-gang-admission)
-- [Step 3: Verify distributed inference](#step-3-verify-distributed-inference)
-- [Step 4: Change replicas and size](#step-4-change-replicas-and-size)
-- [Step 5: Release the application](#step-5-release-the-application)
+- [Step 1: Deploy distributed model](#step-1-deploy-distributed-model)
+- [Verification](#verification)
+- [Step 4: Scale replica groups](#step-4-scale-replica-groups)
+- [Cleanup](#cleanup)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
@@ -27,10 +25,10 @@ traffic, while subordinate members (`m1`..`mN`) join `m0` using injected discove
 | `AcceleratorType` | cluster | operator | Discovered whole-GPU H100 pool requested by every member |
 | `ModelDeployment` | namespace | user | Two-node (`size: 2`, 16-GPU) Ray serving group |
 
-This 16-GPU layout (*tensor parallelism (TP)* = 8 within each node, *pipeline parallelism (PP)* = 2 across two nodes) is an unrecorded configuration guide.
-Complete [Cluster preparation](_index.md#cluster-preparation), [GPU AcceleratorType setup](_index.md#gpu-acceleratortype-setup), and [Model Prefetch](../model-delivery/prefetch.md) in namespace `gpustack-elastic` with `minReady: 2` across both GPU hosts so both `m0` and `m1` mount warm local weights.
+This 16-GPU layout (*tensor parallelism (TP)* = 8 within each node, *pipeline parallelism (PP)* = 2 across two nodes) is an illustrative configuration example.
+Complete [Cluster preparation](_index.md#cluster-preparation), [GPU pool selection](_index.md#gpu-pool-selection), and [Model Prefetch](../model-delivery/prefetch.md) in namespace `gpustack-elastic` with `minReady: 2` across both GPU hosts so both `m0` and `m1` mount warm local weights.
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
@@ -39,11 +37,11 @@ Complete [Cluster preparation](_index.md#cluster-preparation), [GPU AcceleratorT
 | `AcceleratorType` | `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
 | Namespace and model | `gpustack-elastic` with `ModelArtifact` `deepseek-v2-lite-chat` |
 
-## Step 1: Define the deployment
+## Step 1: Deploy distributed model
 
 Because the operator does not synthesize multi-node Ray startup commands, multi-host roles use the
 take-over tier (*`roles[].command`*, which sets `status.roles[].unmanaged: true`; see
-[Three override tiers](../../modules/model-deployment/configuration.md#three-override-tiers)). Save
+[Engine overrides](../../modules/model-deployment/configuration.md#engine-overrides)). Save
 `multi-host.yaml`:
 
 ```yaml
@@ -93,7 +91,9 @@ kubectl apply -f multi-host.yaml
 kubectl -n gpustack-elastic get modeldeployment deepseek-multi-host
 ```
 
-## Step 2: Verify gang admission
+## Verification
+
+### Step 2: Verify gang admission
 
 Confirm that Kueue admitted both members (`deepseek-multi-host-server-r0-m0` and `r0-m1`) together and
 inspect the injected `GPUSTACK_*` coordinates on `m1`:
@@ -120,7 +120,7 @@ kubectl -n gpustack-elastic get svc deepseek-multi-host-server -o jsonpath='{.sp
 If either member stays `Pending`, inspect `QuotaReserved` and `Workload` conditions in
 [Troubleshooting](#troubleshooting).
 
-## Step 3: Verify distributed inference
+### Step 3: Verify distributed inference
 
 Once `m0` is serving on `:8000` (take-over roles omit operator health probes unless configured in your
 entrypoint), send a completion request to `Service/deepseek-multi-host-server`:
@@ -140,7 +140,7 @@ kubectl -n gpustack-elastic run test-client --rm -i --restart=Never \
 Confirm `"model": "deepseek-v2-lite-chat"` and positive `tokens`. If `curl` fails to connect, inspect
 `m0` and `m1` container logs to confirm `m1` joined the Ray head on `:6379`.
 
-## Step 4: Change replicas and size
+## Step 4: Scale replica groups
 
 Increase *`replicas`* to add a second independent 16-GPU two-node group (requiring 32 GPUs total):
 
@@ -164,7 +164,7 @@ admitting its replacement, so a `replicas: 1` deployment experiences downtime du
 ([Rollout behavior](../../modules/model-deployment/configuration.md#rollout-behavior)). Keep
 `--tensor-parallel-size` aligned with per-member `resources.accelerator`.
 
-## Step 5: Release the application
+## Cleanup
 
 Delete `deepseek-multi-host` and verify all 16 GPUs return full `remaining` credits:
 

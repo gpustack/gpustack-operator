@@ -30,7 +30,7 @@ flowchart TD
 
 ## Configuration
 
-Start with the [artifact manifest](artifact.md#resource) to declare hub, PVC, or
+Start with the [artifact manifest](artifact.md#configuration) to declare hub, PVC, or
 [OCI image](artifact.md#image-source) weights. Configure [Model Prefetch](prefetch.md) for namespace
 cache budgets, warm-up placement, and [node-to-node peer sync](prefetch.md#node-to-node-sync).
 

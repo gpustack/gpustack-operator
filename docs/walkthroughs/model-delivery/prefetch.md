@@ -1,19 +1,14 @@
 # Model Prefetch Walkthrough
 
 Cache DeepSeek-V2-Lite-Chat on one GPU node before you start inference. The Elastic EP and External
-DP walkthroughs start from the namespace and artifact you create here. The output below comes from a
-run with node model delivery enabled.
+DP walkthroughs start from the namespace and artifact you create here.
 
 ## Contents
 
 - [Summary](#summary)
-- [Prerequisites](#prerequisites)
-- [Environment](#environment)
-- [Step 1: Create artifact and prefetch](#step-1-create-artifact-and-prefetch)
-- [Step 2: Verify the cached model](#step-2-verify-the-cached-model)
-- [Step 3: Start a serving workload](#step-3-start-a-serving-workload)
-- [Step 4: Pin weights against eviction](#step-4-pin-weights-against-eviction)
-- [Step 5: Release the cache](#step-5-release-the-cache)
+- [Cache preparation](#cache-preparation)
+- [Step 3: Pin cached weights](#step-3-pin-cached-weights)
+- [Cleanup](#cleanup)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
@@ -30,22 +25,23 @@ serving `Pod`s mount the warm cache without re-downloading:
 | `ModelPrefetch` | namespace | user | warming the artifact onto the store's nodes |
 | `ModelDeployment` | namespace | user | the serving workload that finds the weights warm |
 
-## Prerequisites
+### Prerequisites
 
 - [Node model delivery](../../modules/model-delivery/operations.md) is enabled on the GPU node.
 - You have `kubectl`, `jq` and access to cluster-scoped model stores.
 - The node has enough free disk for the weights: 31,418,807,311 bytes for this model.
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
 | Cluster | Kubernetes with GPUStack, node model delivery enabled |
 | Node | one GPU node, named `gpu-node` in the manifests, with disk for the weights |
 | Model | `deepseek-ai/DeepSeek-V2-Lite-Chat` at revision `85864749cd611b4353ce1decdb286193298f64c7` |
-| Software versions | not recorded with this capture |
 
-## Step 1: Create artifact and prefetch
+## Cache preparation
+
+### Step 1: Create artifact and prefetch
 
 Save the manifest below as `model-delivery.yaml`. Replace both `gpu-node` values with your GPU
 node's `kubernetes.io/hostname` label. The store and the prefetch placement must select the same
@@ -132,7 +128,7 @@ kubectl apply -f model-delivery.yaml
 If admission rejects the prefetch, check the binding quota and the store name against
 [Troubleshooting](#troubleshooting).
 
-## Step 2: Verify the cached model
+### Step 2: Verify the cached model
 
 Wait for the artifact to resolve and the prefetch to become available, then confirm their status:
 
@@ -186,17 +182,15 @@ The matched entry is `Ready`, and its size equals the artifact's `SIZE`. If the 
 `state` is not `Ready`, inspect `kubectl get nodemodelstore "$NODE" -o yaml` for the digest's
 *`reason`*, *`message`* and *`retryTime`*.
 
-The captured run also checked the 12 SHA-256 results of the successful warm-up `Pod` against the
-resolved manifest. Warm-up `Pod`s are transient, so collect their logs before they complete if you
-need that evidence. Wait for `Ready` before you create the serving workload.
-
-## Step 3: Start a serving workload
+Warm-up `Pod`s verify the SHA-256 digest of all 12 files against the resolved manifest and terminate
+on completion; collect their logs while running if you need per-file output. Wait for `Ready` before
+you create a serving workload.
 
 Continue with [Elastic EP](../model-deployment/elastic-ep.md) to grow one collective, or with
-[External DP](../model-deployment/external-dp.md) to route requests across fixed DP ranks. Use the
+[External DP](../model-deployment/external-dp.md) to route requests across fixed *DP* ranks. Use the
 namespace and artifact from Step 1 in either manifest.
 
-## Step 4: Pin weights against eviction
+## Step 3: Pin cached weights
 
 When usage passes the high watermark, the node cache removes unreferenced weights, oldest first. A
 pin keeps the digest out of that collection. If the `ModelStoreBinding` does not set *`allowPinned`*,
@@ -258,7 +252,7 @@ If admission still rejects the prefetch, confirm that the binding shows `allowPi
 pinned digest is never a collection candidate on the target nodes, but it still counts toward the
 store's usage. See [Pinning and expiry](../../modules/model-delivery/prefetch.md#pinning-and-expiry).
 
-## Step 5: Release the cache
+## Cleanup
 
 Keep the prefetch while a serving application needs the cached weights. After you delete those
 consumers, remove the dedicated resources:

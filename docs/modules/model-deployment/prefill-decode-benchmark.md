@@ -12,12 +12,9 @@ The initial suites and conclusions describe cross-`Pod` TCP. The separate
 
 - [Summary](#summary)
 - [Environment](#environment)
-- [Suite 1: Fixed shapes](#suite-1-fixed-shapes)
+- [Suite 1: Fixed token lengths](#suite-1-fixed-token-lengths)
 - [Suite 2: Mixed load](#suite-2-mixed-load)
-- [Stage execution](#stage-execution)
-- [KV transfer](#kv-transfer)
-- [Benefits](#benefits)
-- [Trade-offs](#trade-offs)
+- [Verification](#verification)
 - [InfiniBand RDMA comparison](#infiniband-rdma-comparison)
 - [Limitations](#limitations)
 
@@ -36,6 +33,30 @@ Aggregated serving ran three *Server* replicas with *tensor parallelism (TP)* = 
 The mixed-load steady stream is a counterexample. It already had low *ITL* with aggregated serving
 and showed no p99 improvement with *PD*. The TCP results alone do not establish the same trade-off
 over *remote direct memory access (RDMA)*.
+
+### Benefits
+
+- At `4096/128`, concurrency 16, *ITL* p99 fell from 458.058 ms to **17.895 ms**, a **25.6× reduction**.
+- At `8192/128`, concurrency 16, *ITL* p99 fell from 509.188 ms to **18.315 ms**, a **27.8× reduction**.
+- At `256/1024`, concurrency 16, output throughput rose from 753.604 to **1,078.624 tok/s**, a **43.1% gain**.
+
+Separating prompt processing protected *Decode* token gaps under heavy long-prompt concurrency.
+
+**Repeat the `256/1024` run before you rely on its throughput gain.** That aggregated cell includes a
+*TTFT* outlier of **30,043.341 ms**. Its *TTFT* p50 and p95 were 113.217 and 177.494 ms, and p99
+equaled the outlier. The outlier extended aggregated wall time to **86.913 seconds**, versus
+**60.735 seconds** for *PD*. Its cause is unresolved, so the gain is not yet attributable to role
+separation.
+
+### Trade-offs
+
+The single *Prefill* replica queued long prompts while TCP moved their KV tensors. At `4096/128`,
+concurrency 16, *TTFT* p50 rose from 1,231.691 ms to **8,065.377 ms**. At `8192/128`, it rose from
+2,072.452 ms to **17,514.203 ms**.
+
+Aggregated serving had higher output throughput in **15 of 16 fixed-shape cells**. At `8192/128`,
+concurrency 16, it reached 322.852 tok/s against 98.154 tok/s for *PD*. In Suite 2, aggregated
+serving also had lower *TTFT* and higher throughput on both streams.
 
 ## Environment
 
@@ -63,7 +84,7 @@ Each serving `Pod` exposed only its two assigned GPUs and had a private `/dev/sh
 traffic. **All cross-`Pod` communication used TCP sockets over `eth0`, including Mooncake KV transfer
 between roles.**
 
-## Suite 1: Fixed shapes
+## Suite 1: Fixed token lengths
 
 Each shape names target input tokens / requested output tokens. Each cell excluded four warm-up
 requests. Concurrency 1, 4 and 8 used 32 measured requests; concurrency 16 used 64. Every cell
@@ -85,7 +106,7 @@ Latency columns keep the captured millisecond precision. *Time per output token 
 per-request generation time per token. *ITL* measures gaps between streamed tokens. Bold values mark
 the lower latency or higher throughput within each matched pair.
 
-### 512/256
+### 512 input, 256 output
 
 | Concurrency | Configuration | Requests | *TTFT* p50 (ms) | *TTFT* p95 (ms) | *TPOT* p50 (ms) | *ITL* p99 (ms) | Output (tok/s) |
 |---:|---|---:|---:|---:|---:|---:|---:|
@@ -98,7 +119,7 @@ the lower latency or higher throughput within each matched pair.
 | 16 | Aggregated | 64/64 | **213.619** | **315.869** | 14.182 | **17.318** | **1,040.697** |
 | 16 | *PD* | 64/64 | 261.322 | 1,602.287 | **13.877** | 17.785 | 973.298 |
 
-### 4096/128
+### 4096 input, 128 output
 
 | Concurrency | Configuration | Requests | *TTFT* p50 (ms) | *TTFT* p95 (ms) | *TPOT* p50 (ms) | *ITL* p99 (ms) | Output (tok/s) |
 |---:|---|---:|---:|---:|---:|---:|---:|
@@ -111,7 +132,7 @@ the lower latency or higher throughput within each matched pair.
 | 16 | Aggregated | 64/64 | **1,231.691** | **2,119.357** | 19.677 | 458.058 | **490.425** |
 | 16 | *PD* | 64/64 | 8,065.377 | 14,363.057 | **13.851** | **17.895** | 194.074 |
 
-### 256/1024
+### 256 input, 1024 output
 
 | Concurrency | Configuration | Requests | *TTFT* p50 (ms) | *TTFT* p95 (ms) | *TPOT* p50 (ms) | *ITL* p99 (ms) | Output (tok/s) |
 |---:|---|---:|---:|---:|---:|---:|---:|
@@ -124,7 +145,7 @@ the lower latency or higher throughput within each matched pair.
 | 16 | Aggregated | 64/64 | **113.217** | **177.494** | **14.247** | **17.597** | 753.604 |
 | 16 | *PD* | 64/64 | 198.038 | 853.881 | 14.406 | 18.334 | **1,078.624** |
 
-### 8192/128
+### 8192 input, 128 output
 
 | Concurrency | Configuration | Requests | *TTFT* p50 (ms) | *TTFT* p95 (ms) | *TPOT* p50 (ms) | *ITL* p99 (ms) | Output (tok/s) |
 |---:|---|---:|---:|---:|---:|---:|---:|
@@ -170,7 +191,9 @@ Per-request *TPOT* p99 fell from 18.708 to **13.863 ms** on the steady stream an
 **14.171 ms** on the burst stream. *TPOT* averages each request, while *ITL* measures individual
 token gaps.
 
-## Stage execution
+## Verification
+
+### Role request counts
 
 Initial and final access-log counts confirm that requests reached every expected role. The two
 captures agree. The counts include warm-up, calibration and auxiliary requests, so they are not
@@ -191,7 +214,7 @@ execution; client JSON establishes completion and errors.
 
 All successful *PD* Suite 1 and mixed-load JSON records use the final `Pod` snapshot listed above.
 
-## KV transfer
+### KV transfer throughput
 
 Mooncake producer logs contain **67 APIServer metric windows**, with throughput from 82.827 to
 1,516.976 MB/s. One window reports **1,390.73 MB/s** for 48.0 MB transferred in 34.514 ms.
@@ -201,30 +224,6 @@ The log labels do not identify each rank, and no synchronized rank counters veri
 estimate.
 
 Every captured metric window reported **zero failed transfers and zero failed receives**.
-
-## Benefits
-
-- At `4096/128`, concurrency 16, *ITL* p99 fell from 458.058 ms to **17.895 ms**, a **25.6× reduction**.
-- At `8192/128`, concurrency 16, *ITL* p99 fell from 509.188 ms to **18.315 ms**, a **27.8× reduction**.
-- At `256/1024`, concurrency 16, output throughput rose from 753.604 to **1,078.624 tok/s**, a **43.1% gain**.
-
-Separating prompt processing protected *Decode* token gaps under heavy long-prompt concurrency.
-
-**Repeat the `256/1024` run before you rely on its throughput gain.** That aggregated cell includes a
-*TTFT* outlier of **30,043.341 ms**. Its *TTFT* p50 and p95 were 113.217 and 177.494 ms, and p99
-equaled the outlier. The outlier extended aggregated wall time to **86.913 seconds**, versus
-**60.735 seconds** for *PD*. Its cause is unresolved, so the gain is not yet attributable to role
-separation.
-
-## Trade-offs
-
-The single *Prefill* replica queued long prompts while TCP moved their KV tensors. At `4096/128`,
-concurrency 16, *TTFT* p50 rose from 1,231.691 ms to **8,065.377 ms**. At `8192/128`, it rose from
-2,072.452 ms to **17,514.203 ms**.
-
-Aggregated serving had higher output throughput in **15 of 16 fixed-shape cells**. At `8192/128`,
-concurrency 16, it reached 322.852 tok/s against 98.154 tok/s for *PD*. In Suite 2, aggregated
-serving also had lower *TTFT* and higher throughput on both streams.
 
 ## InfiniBand RDMA comparison
 
@@ -269,7 +268,7 @@ separate.
 The final access capture counted **809** *Prefill* completions and **407 + 402** *Decode*
 completions. These include warm-up and calibration, so they exceed the 744 measured client requests.
 
-### Fixed-shape comparison
+### Fixed token lengths
 
 The baseline and follow-up used the same target shapes and measured request counts.
 
@@ -318,7 +317,7 @@ RDMA lowered median *TTFT* **1.55×** on the steady stream and **2.04×** on the
 Maximum *ITL* stayed close to TCP: 20.895 versus 20.850 ms for steady traffic, and 21.036 versus
 20.663 ms for bursts. Burst *ITL* p99 rose slightly from 17.826 to 17.987 ms.
 
-### Remaining trade-offs
+### RDMA trade-offs
 
 RDMA did not improve every latency metric. At `512/256`, median *TTFT* rose from 192.224 to
 215.574 ms at concurrency 8 and from 261.322 to 372.135 ms at concurrency 16. At `256/1024`,

@@ -69,7 +69,7 @@ rules are described in [KV Cache Injection](kv-cache-injection.md).
 ## Transfer parameters
 
 The table applies to managed *Prefill* and *Decode* roles behind a router. See
-[Direct transfer transport](../modules/model-deployment/prefill-decode.md#direct-transfer-transport) for admission and image
+[Direct KV transports](../modules/model-deployment/prefill-decode.md#direct-kv-transports) for admission and image
 requirements.
 
 ![KV transfer parameter decision flow](../assets/diagrams/model-deployment-transfer-decision.svg)

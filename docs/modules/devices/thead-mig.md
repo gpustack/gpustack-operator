@@ -3,18 +3,15 @@
 Administrators toggle T-Head PPU partitioning mode per card with `ppu-smi` and restart the Device
 Manager `DaemonSet` to re-detect. Once enabled, GPUStack dynamically creates and destroys GPU and
 Compute Instance pairs for scheduled workloads under `alibabacloud.com/ppu.partitioned.mig-<profile>`
-([Accelerator Requests](requests.md#two-families-two-populations)).
+([Accelerator Requests](requests.md#accelerator-resource-families)).
 
 ## Contents
 
 - [Prerequisites](#prerequisites)
 - [Partition profile discovery](#partition-profile-discovery)
 - [Partition requests](#partition-requests)
+- [Operations](#operations)
 - [Limitations](#limitations)
-- [Enabling partitioning](#enabling-partitioning)
-- [Disabling partitioning](#disabling-partitioning)
-- [Node reboot recovery](#node-reboot-recovery)
-- [Operator boundaries](#operator-boundaries)
 
 ## Prerequisites
 
@@ -100,17 +97,9 @@ spec:
 - **Packing, SSH visibility, and reclaim**: Follow the same fungible-token, sidecar-isolation, and
   reclaim rules as [NVIDIA MIG Operations](nvidia-mig.md#partition-requests).
 
-## Limitations
+## Operations
 
-- **Manual mode lifecycle and no out-of-band carving**: Administrators own `ppu-smi -mig` switches;
-  hand-carved instances skew node accounting and are reclaimed when idle, while hand-subdivided
-  instances block node-wide reclaim.
-- **Single partition per PPU request**: Request one `Pod` per partition ([Rule 3](requests.md#rule-3-partition-count)),
-  and leave a brief gap when replacing a deleted `Pod` to avoid the reclaim-debounce window.
-- **Unconfirmed reboot persistence**: Mode persistence across host reboots is unverified on hardware;
-  always verify and re-apply after a reboot.
-
-## Enabling partitioning
+### Enabling partitioning
 
 Consult [T-Head's PPU MIG documentation](https://developer.t-head.cn/docs_center/doc_detail/index.html?projectId=33&chapterId=117):
 
@@ -137,7 +126,7 @@ Consult [T-Head's PPU MIG documentation](https://developer.t-head.cn/docs_center
    profiles (`logicalSliced` drops on partitioned PPUs while unpartitioned PPUs keep logical
    slicing).
 
-## Disabling partitioning
+### Disabling partitioning
 
 1. Drain partition `Pod`s on the PPU so instances reclaim, or destroy remaining instances manually
    (**Compute Instance first**, and always pass `-gi <G>` because bare `-dgi` destroys all instances
@@ -154,16 +143,24 @@ Consult [T-Head's PPU MIG documentation](https://developer.t-head.cn/docs_center
 > **Note:** Leftover `/dev/alixpu-caps/alixpu-cap<minor>` device nodes are normal driver behavior
 > after destroy; check live instances with `ppu-smi mig -i <N> -lgi`.
 
-## Node reboot recovery
+### Node reboot recovery
 
 After a host reboot, re-verify and re-run [Enabling partitioning](#enabling-partitioning), restart
 `gpustack-operator-device-manager-thead`, and delete/recreate pre-reboot partition `Pod`s.
 
-## Operator boundaries
+## Limitations
 
 GPUStack creates and reclaims single-CI partition instances per `Pod` and cleans idle untracked
 instances. It never runs `ppu-smi -mig`, evicts `Pod`s on mode switches, or serves subdivided
 instances.
+
+- **Manual mode lifecycle and no out-of-band carving**: Administrators own `ppu-smi -mig` switches;
+  hand-carved instances skew node accounting and are reclaimed when idle, while hand-subdivided
+  instances block node-wide reclaim.
+- **Single partition per PPU request**: Request one `Pod` per partition ([Rule 3](requests.md#rule-3-partition-count)),
+  and leave a brief gap when replacing a deleted `Pod` to avoid the reclaim-debounce window.
+- **Unconfirmed reboot persistence**: Mode persistence across host reboots is unverified on hardware;
+  always verify and re-apply after a reboot.
 
 ---
 

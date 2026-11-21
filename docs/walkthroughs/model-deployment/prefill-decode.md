@@ -7,12 +7,9 @@ single endpoint.
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Start disaggregated serving](#step-1-start-disaggregated-serving)
-- [Step 2: Select the transfer backend](#step-2-select-the-transfer-backend)
-- [Step 3: Verify the router](#step-3-verify-the-router)
-- [Step 4: Inspect joint admission](#step-4-inspect-joint-admission)
-- [Step 5: Release the application](#step-5-release-the-application)
+- [Deployment](#deployment)
+- [Verification](#verification)
+- [Cleanup](#cleanup)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
@@ -31,12 +28,12 @@ role set atomically:
 | `ModelDeployment` | namespace | user | Declares 1 *Prefill* and 2 *Decode* replicas behind `llm-d-router` |
 | Router `Deployment` and `Service` | namespace | operator | Single HTTP entrypoint routing requests across roles |
 
-On one 8-GPU H100 SXM5 node (6 GPUs per arm), *PD* cut concurrency-16 long-prompt *inter-token
+On one 8-GPU H100 SXM5 node (6 GPUs per configuration), *PD* cut concurrency-16 long-prompt *inter-token
 latency (ITL)* p99 by **25.6×–27.8×** (and cut mixed steady-stream max *ITL* by **23.3×** with no p99
 gain) at the cost of higher *time to first token (TTFT)* and lower total throughput in 15 of 16
 cells; see [Prefill and Decode Benchmark](../../modules/model-deployment/prefill-decode-benchmark.md).
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
@@ -51,7 +48,9 @@ Each engine `Pod` saw only its two assigned GPUs with private IPC, private `/dev
 direct memory access (RDMA)* interface. Intra-`Pod` *tensor parallelism (TP)* (`*TP* = 2`) used
 NVLink, while **cross-`Pod` Mooncake KV transfer ran over TCP on `eth0`**.
 
-## Step 1: Start disaggregated serving
+## Deployment
+
+### Step 1: Start disaggregated serving
 
 Enable [node model delivery](../../modules/model-delivery/operations.md) and run
 [Model Prefetch](../model-delivery/prefetch.md#step-1-create-artifact-and-prefetch) in namespace
@@ -141,11 +140,11 @@ pd-arm2-pd-router-6b9fcd6b75-5ngnj  2/2     Running   gpu-node-0
 ```
 
 Because this deployment has no *Encode* role, both roles set `--enable-scale-out` for router token
-counting ([Counting engine tokens](../../modules/model-deployment/prefill-decode.md#counting-engine-tokens)).
+counting ([Router token counting](../../modules/model-deployment/prefill-decode.md#router-token-counting)).
 If `PHASE` stays `Starting`, inspect deployment conditions and match the reason in
 [Troubleshooting](#troubleshooting).
 
-## Step 2: Select the transfer backend
+### Step 2: Select the transfer backend
 
 Without *`resources.interface`*, the operator defaults *`spec.kvTransfer.backend`* to `Mooncake` over
 `tcp`. Inspect the rendered transfer flags across *Prefill* and *Decode*:
@@ -178,7 +177,9 @@ Decode routing-proxy init container:
 To switch KV transfer to *RDMA*, request *`resources.interface`* on both roles ([RDMA Walkthrough](../rdma/network-endpoints.md#step-3-request-interfaces-per-role)) and verify InfiniBand transport in engine logs ([InfiniBand RDMA comparison](../../modules/model-deployment/prefill-decode-benchmark.md#infiniband-rdma-comparison)).
 If you also attach a shared KV store via *`spec.kvCache.poolRef`*, declare it at creation because *`spec.kvCache`* is immutable ([Deployment identity fields](../../modules/model-deployment/configuration.md#deployment-identity-fields)).
 
-## Step 3: Verify the router
+## Verification
+
+### Step 3: Verify the router
 
 Confirm *`status.endpoint`* is populated and send a chat completion naming `Qwen/Qwen3-32B`:
 
@@ -202,10 +203,7 @@ Captured output:
 http://pd-arm2-pd-router.gpustack-bench.svc:8000
 ```
 
-In the recorded burst probe (16 requests at concurrency 8, 8,192 input tokens, 64 output tokens),
-all 16 requests succeeded with zero errors:
-
-Captured output:
+Captured output (burst probe: 16 requests at concurrency 8, 8,192 input tokens, 64 output tokens):
 
 ```json
 {"requests":16,"concurrency":8,"input_tokens":8192,"output_tokens":64,"ok":16,"empty":0,"bad":0}
@@ -214,7 +212,7 @@ Captured output:
 If *`status.endpoint`* is empty or requests return `503`, check `RouterReady` and `EndpointEligibility`
 conditions on `ModelDeployment/pd-arm2-pd`.
 
-## Step 4: Inspect joint admission
+### Step 4: Inspect joint admission
 
 Verify that Kueue admitted one `Workload` per engine replica (`1` *Prefill* + `2` *Decode* = `3`
 `Workload`s):
@@ -235,7 +233,7 @@ gpustack-fnv64-d6b4e8ae20539d37   gpustack-fnv64-889bba71d87d29e2   bench-gpu   
 You can edit *`replicas`* independently on *Prefill* or *Decode* without rolling surviving replicas;
 see [Rollout behavior](../../modules/model-deployment/configuration.md#rollout-behavior).
 
-## Step 5: Release the application
+## Cleanup
 
 Delete `pd-arm2-pd` and confirm owned `Pod`s, `Service`s, and GPU allocations clear:
 
@@ -257,7 +255,7 @@ Deleting `ModelDeployment` leaves prefetched weights in `NodeModelStore` untouch
 
 ## Limitations
 
-- Captured on a single 8-GPU H100 node over TCP; cross-node placement and *RDMA* / EFA / CANN / ROCm
+- Measurements cover single-node TCP transfer; cross-node placement and *RDMA*, EFA, CANN, or ROCm
   transports require separate validation.
 - See [Prefill and Decode Benchmark](../../modules/model-deployment/prefill-decode-benchmark.md) for
   full concurrency sweeps and

@@ -16,15 +16,15 @@ Current releases bundle all four as subcharts under one `values.yaml` with
 
 ## Contents
 
-- [One-time upgrade](#one-time-upgrade)
+- [Helm ownership transfer](#helm-ownership-transfer)
 - [Upgrade hooks](#upgrade-hooks)
 - [Automatic image-mode migration](#automatic-image-mode-migration)
 - [Troubleshooting](#troubleshooting)
-- [Permanent changes](#permanent-changes)
+- [Chart configuration and cleanup](#chart-configuration-and-cleanup)
 - [Rollback data loss](#rollback-data-loss)
 - [Verification](#verification)
 
-## One-time upgrade
+## Helm ownership transfer
 
 Before upgrading, snapshot your scheduling chain (see [Rollback data loss](#rollback-data-loss)), then
 upgrade with **Helm 3.21+** and `--take-ownership`[^1]:
@@ -110,7 +110,7 @@ done
 
 Review [Rollback data loss](#rollback-data-loss) first, because the chart release then owns Kueue's CRDs.
 
-## Permanent changes
+## Chart configuration and cleanup
 
 ### Manufacturer configuration
 

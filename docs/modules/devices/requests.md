@@ -2,22 +2,18 @@
 
 `Pod` admission webhooks validate accelerator requests and compute quota units at creation for every
 `Pod` carrying `kueue.x-k8s.io/queue-name`. Unlabeled `Pod`s bypass these checks and credit folds.
-See [Pools and diagnosis](#pools-and-diagnosis) to inspect pool capacity and `Pending` workloads.
+See [Pool troubleshooting](#pool-troubleshooting) to inspect pool capacity and `Pending` workloads.
 
 ## Contents
 
-- [Two families, two populations](#two-families-two-populations)
-- [Resource keys](#resource-keys)
-- [Worked example per family](#worked-example-per-family)
+- [Accelerator resource families](#accelerator-resource-families)
 - [Request rules](#request-rules)
-- [RDMA keys beside families](#rdma-keys-beside-families)
-- [Co-location conditions](#co-location-conditions)
-- [Instance API requests](#instance-api-requests)
-- [Pre-release breaks](#pre-release-breaks)
+- [RDMA resource requests](#rdma-resource-requests)
+- [Legacy request migration](#legacy-request-migration)
 - [Limitations](#limitations)
-- [Pools and diagnosis](#pools-and-diagnosis)
+- [Pool troubleshooting](#pool-troubleshooting)
 
-## Two families, two populations
+## Accelerator resource families
 
 GPUStack separates software slicing and hardware partitioning into disjoint resource families:
 
@@ -30,7 +26,7 @@ A partitioned card advertises **only** `.partitioned*` keys; an unpartitioned ca
 **only** `<base>`, `.shared`, and `.sliced*` keys. Those populations map to the four `InstanceType`
 views (`EX`, `SH`, `SL`, and `PT`).
 
-## Resource keys
+### Resource keys
 
 `<base>` is the vendor extended resource (`nvidia.com/gpu`, `huawei.com/npu`, `amd.com/gpu`, and
 others in [Accelerator Support](../../../README.md#accelerator-support)):
@@ -55,7 +51,7 @@ others in [Accelerator Support](../../../README.md#accelerator-support)):
   `.partitioned` and `.visibility` tokens are fungible counts resolved by Device Manager at
   `Allocate`.
 
-## Worked example per family
+### Pod request examples
 
 Submit `Pod`s on a pool's namespace `LocalQueue` (`ENTRANCE` on `kubectl get instancetypes`).
 
@@ -162,6 +158,38 @@ spec:
         limits:
           device.gpustack.ai/nvidia.visibility: "1"
 ```
+
+### Instance API requests
+
+An `Instance` declares whole cards, one logical slice, or one hardware partition in
+*`spec.resources`* ([GPU Instance Configuration](../instances/configuration.md#resource-requests)):
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: Instance
+metadata:
+  name: partitioned-instance
+  namespace: team-a
+spec:
+  type: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+  image: ubuntu:24.04
+  command:
+    - sleep
+    - infinity
+  resources:
+    accelerator: "1"  # integer whole cards, or "1" for sliced/partitioned requests
+    # acceleratorSlicedMemoryPercentage: 50
+    # acceleratorSlicedCoresPercentage: 50
+    acceleratorPartitionedProfile: 3g.40gb  # mutually exclusive with slice percentages
+  volume:
+    ephemeral:
+      capacity: 10Gi
+```
+
+Admission rejects unknown partition profiles (listing offered profiles), partitioning on unsupported
+vendors or unpartitioned pools, slice percentages on pools without logical slicing, non-`1` card
+counts on slice/partition requests, and whole-card counts exceeding *`status.accelerator.capacity`*.
+Host CPU and RAM scale by card count or slice/partition VRAM share.
 
 ## Request rules
 
@@ -338,11 +366,11 @@ spec:
 
 > `spec.initContainers[0].resources.limits: Forbidden: a restartable init container (a native sidecar) may not request an accelerator; move the request to an app container`
 
-## RDMA keys beside families
+## RDMA resource requests
 
 Node-level RDMA keys (`device.gpustack.ai/rdma`, `rdma.shared` at `64` tokens/endpoint, and
 `rdma.partitioned` for *SR-IOV* VFs) sit outside accelerator families, carry no `.units` keys, and
-are unmetered by Kueue ([RDMA Operations](../rdma/operations.md#key-selection) and
+are unmetered by Kueue ([RDMA Operations](../rdma/operations.md#rdma-resource-requests) and
 [NIC record inspection](../rdma/operations.md#nic-record-inspection)):
 
 ```yaml
@@ -362,7 +390,7 @@ spec:
           device.gpustack.ai/rdma.shared: "1"
 ```
 
-## Co-location conditions
+### NUMA alignment conditions
 
 Kubelet aligns an accelerator and an RDMA interface onto the same *NUMA* node only when all four
 conditions hold:
@@ -376,39 +404,7 @@ conditions hold:
 - **Node-level capacity fit**: Kube-scheduler sees only node totals; if a `Node`'s free GPU and HCA
   sit on different sockets, kubelet rejects the `Pod` without rescheduling.
 
-## Instance API requests
-
-An `Instance` declares whole cards, one logical slice, or one hardware partition in
-*`spec.resources`* ([GPU Instance Configuration](../instances/configuration.md#resource-requests)):
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: Instance
-metadata:
-  name: partitioned-instance
-  namespace: team-a
-spec:
-  type: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
-  image: ubuntu:24.04
-  command:
-    - sleep
-    - infinity
-  resources:
-    accelerator: "1"  # integer whole cards, or "1" for sliced/partitioned requests
-    # acceleratorSlicedMemoryPercentage: 50
-    # acceleratorSlicedCoresPercentage: 50
-    acceleratorPartitionedProfile: 3g.40gb  # mutually exclusive with slice percentages
-  volume:
-    ephemeral:
-      capacity: 10Gi
-```
-
-Admission rejects unknown partition profiles (listing offered profiles), partitioning on unsupported
-vendors or unpartitioned pools, slice percentages on pools without logical slicing, non-`1` card
-counts on slice/partition requests, and whole-card counts exceeding *`status.accelerator.capacity`*.
-Host CPU and RAM scale by card count or slice/partition VRAM share.
-
-## Pre-release breaks
+## Legacy request migration
 
 - **Legacy `.sliced.mig-*` keys removed**: Replace legacy `<base>.sliced.mig-<profile>` requests
   with `<base>.partitioned: "1"` and `<base>.partitioned.mig-<profile>: "1"`. Remove stale capacity
@@ -443,7 +439,7 @@ Host CPU and RAM scale by card count or slice/partition VRAM share.
 - **Partition NUMA alignment**: Under `single-numa-node`, CPU/memory may lock to one socket while
   the only free MIG slot sits on another socket.
 
-## Pools and diagnosis
+## Pool troubleshooting
 
 ### Isolation mode selection
 

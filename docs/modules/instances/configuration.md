@@ -55,7 +55,7 @@ spec:
 
 - **Running immutability**: *`spec.volume`* is permanently frozen. All other template fields,
   *`nodeName`*, and *`additionalVolumes`* freeze while running and become editable when `spec.stop: true`
-  ([Service lifecycle](operations.md#service-lifecycle)).
+  ([Workspace stop and restart](operations.md#workspace-stop-and-restart)).
 - **Privileged gate**: Requesting `spec.privileged: true` requires the `instance-privileged-allowed`
   `Setting` (`false` by default). Already-privileged `Instance`s stay editable if the `Setting` is
   disabled later.
@@ -127,7 +127,7 @@ When *`spec.sshPublicKey`* is set, the operator adds an `sshd` sidecar (`instanc
 `Setting`) that enters `main`'s namespaces. On accelerated workspaces, `sshd` requests
 `device.gpustack.ai/<manufacturer>.visibility` matching `main`'s card count so the device plugin
 grants narrow cgroup access to `main`'s allocated device or partition without extra quota
-([Worked example per family](../devices/requests.md#worked-example-per-family)).
+([Pod request examples](../devices/requests.md#pod-request-examples)).
 
 Once `PHASE` is `Ready`, forward port `22` and connect as `root`:
 

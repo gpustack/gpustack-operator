@@ -21,12 +21,10 @@ across batches so successful remote loads write zero checkpoint shards to target
 - [Configuration](#configuration)
 - [Source preparation](#source-preparation)
 - [Replica startup](#replica-startup)
-- [Require and Prefer](#require-and-prefer)
-- [Networks](#networks)
-- [Vendor-specific behavior](#vendor-specific-behavior)
+- [Hardware requirements](#hardware-requirements)
 - [NVIDIA ModelExpress](#nvidia-modelexpress)
-- [Benchmarks](#benchmarks)
-- [Observing status](#observing-status)
+- [Results](#results)
+- [Verification](#verification)
 - [Troubleshooting](#troubleshooting)
 
 ## Configuration
@@ -46,6 +44,24 @@ by `pci-<vendor>.present` under `OnDelete`). Use cert-manager when rendering man
 Remote delivery applies to **hub `ModelArtifact`s on managed `vLLM` and `SGLang` roles** (`nixl` on
 NVIDIA and `hixl` on Ascend). Take-over *`roles[].command`*, PVC, and OCI image artifacts keep their
 local paths. Treat source `Pod`s and vendor images as trusted cluster infrastructure.
+
+### Fallback policies
+
+| Policy | Allowlisted, source ready | Allowlisted, source unavailable | Outside allowlist | Ineligible role |
+|---|---|---|---|---|
+| `Require` | Loads remote | Waits within startup timeout; never downloads | Blocked (`UnqualifiedTransferBackend`) | Blocked (`RoleIneligibleForModelTransfer`) |
+| `Prefer` | Loads remote | Uses local delivery unless a remote replica is running | Falls back unless rolling a loaded replica | Falls back to local delivery |
+
+Under `Prefer`, failed remote loads recreate the replica and increment *`fallbackAttempts`*. After
+three attempts, *`reason`* turns `FallbackAttemptsSpent` and local `Node` or `Engine` delivery runs;
+loaded remote replicas keep their spec if the source disappears.
+
+### Control and payload networks
+
+Control traffic uses authenticated broker HTTPS, while payload traffic uses UCX/InfiniBand or shared
+memory (`nixl`) and CANN fabric (`hixl`). Pass NIC selection variables on sources via
+`modelTransfer.env` or `modelTransfer.extraArgs`, and apply
+[RDMA selection policies](../rdma/operations.md#selection-policy) on serving targets.
 
 ## Source preparation
 
@@ -145,25 +161,7 @@ The client caps pinned staging RAM at the minimum of its window, the source wind
 span. It closes the session after `load_weights`, retries peers on HTTP `409`, and leaves loaded
 replicas untouched when a source drains.
 
-## Require and Prefer
-
-| Policy | Allowlisted, source ready | Allowlisted, source unavailable | Outside allowlist | Ineligible role |
-|---|---|---|---|---|
-| `Require` | Loads remote | Waits within startup timeout; never downloads | Blocked (`UnqualifiedTransferBackend`) | Blocked (`RoleIneligibleForModelTransfer`) |
-| `Prefer` | Loads remote | Uses local delivery unless a remote replica is running | Falls back unless rolling a loaded replica | Falls back to local delivery |
-
-Under `Prefer`, failed remote loads recreate the replica and increment *`fallbackAttempts`*. After
-three attempts, *`reason`* turns `FallbackAttemptsSpent` and local `Node` or `Engine` delivery runs;
-loaded remote replicas keep their spec if the source disappears.
-
-## Networks
-
-Control traffic uses authenticated broker HTTPS, while payload traffic uses UCX/InfiniBand or shared
-memory (`nixl`) and CANN fabric (`hixl`). Pass NIC selection variables on sources via
-`modelTransfer.env` or `modelTransfer.extraArgs`, and apply
-[RDMA selection policies](../rdma/operations.md#selection-policy) on serving targets.
-
-## Vendor-specific behavior
+## Hardware requirements
 
 ### Ascend
 
@@ -301,7 +299,7 @@ spec:
   value: gpustack/mirrored-modelexpress-server:v0.8.0  # default image
 ```
 
-## Benchmarks
+## Results
 
 Tables compare **`Weight Transfer Time`** (slowest rank load) and **`Target Storage`** (`0 GiB` on
 remote rows) against a cold **`TCP peer sync + local load` phase-sum baseline**. Source preparation,
@@ -357,7 +355,7 @@ at *TP* = 4; `235B` = `Qwen/Qwen3-235B-A22B-Instruct-2507-FP8` at *TP* = 8 + *EP
 | 235B (*TP* = 8 + *EP*) | TP0 + broadcast (256 GiB source, 64 GiB target) | 220.19 GiB | 9.31 GiB | 0 GiB | 108.89 s (10.30×, −90.3% time) |
 | 235B (*TP* = 8 + *EP*) | TP all (256 GiB source, 32 GiB target) | 220.19 GiB | 32.00 GiB | 0 GiB | 69.16 s (16.21×, −93.8% time) |
 
-### ModelExpress D2D
+### ModelExpress GPU transfers
 
 Nebius H100 80 GB `Node`s, vLLM `0.30.0`, graph mode on `235B (TP8 + EP)`
 (`Qwen/Qwen3-235B-A22B-Instruct-2507-FP8`):
@@ -369,7 +367,7 @@ Nebius H100 80 GB `Node`s, vLLM `0.30.0`, graph mode on `235B (TP8 + EP)`
 | 235B (TP8 + EP) | Peer replica: `RdmaStrategy` (NIXL D2D + compile cache) | 0 GiB | 0 GiB | 0 GiB | 16.78 s (66.82×, −98.5% time) |
 | 235B (TP8 + EP) | Restart fallback: `GpustackLoadStrategy` (256 GiB source, 8 GiB target) | 220.19 GiB | 8.00 GiB | 0 GiB | 109.08 s (10.28×, −90.3% time) |
 
-## Observing status
+## Verification
 
 Inspect per-role and per-replica remote loading state on `ModelDeployment`:
 
@@ -380,7 +378,7 @@ kubectl -n <ns> get modeldeployment <name> -o jsonpath='{.status.model.remote}' 
 *`status.model.remote`* echoes the active *`policy`* and each replica's *`delivery`* (`Remote`,
 `Node`, or `Engine`), *`load`* (`Unknown`, `AwaitingMetadata`, `AwaitingSource`, `Loading`, or
 `Loaded`), *`reason`*, and *`fallbackAttempts`*. Source readiness lives on `ModelPrefetch`
-([Status and views](prefetch.md#status-and-views)).
+([Prefetch status](prefetch.md#prefetch-status)).
 
 ## Troubleshooting
 

@@ -1,7 +1,9 @@
 # Elastic EP
 
 An *elastic expert parallelism (Elastic EP)* deployment keeps one vLLM serving instance and expands
-its GPU collective in place inside one Ray cluster without restarting surviving `Pod`s.
+its GPU collective in place inside one Ray cluster without restarting surviving `Pod`s. The operator
+creates a CPU-only Ray head `Pod` (`--num-gpus=0`) and `Service` alongside whole-GPU master and
+worker `Pod`s whose readiness checks verify *TP*, allocated devices, and `Pod` identity.
 
 ![Elastic EP collective expansion](../../assets/diagrams/model-deployment-elastic-ep.svg)
 
@@ -19,18 +21,64 @@ flowchart TD
 
 ## Contents
 
-- [Profile contract](#profile-contract)
-- [Prerequisites](#prerequisites)
-- [Shared memory](#shared-memory)
 - [Configuration](#configuration)
-- [Width changes](#width-changes)
-- [Resize observations](#resize-observations)
-- [Resize hold conditions](#resize-hold-conditions)
-- [Interruption scope](#interruption-scope)
+- [Resize procedure](#resize-procedure)
 - [Troubleshooting](#troubleshooting)
 - [Limitations](#limitations)
 
-## Profile contract
+## Configuration
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen3-ep
+  namespace: gpustack
+spec:
+  model:
+    name: Qwen/Qwen3-30B-A3B
+    artifactRef:
+      name: qwen3-30b-a3b-artifact
+  router:
+    name: llm-d-router
+  engine:
+    name: vLLM
+    image: gpustack/runner:cuda13.0-vllm0.30.0
+  roles:
+    - name: server
+      kind: Server
+      replicas: 1
+      size: 1
+      acceleratorType: elastic-gpu
+      resources:
+        accelerator: "1"  # defaults to declared TP size (1 here) when omitted
+      runtimeControl:
+        parameters:
+          elastic.dataParallelWidth: "2"
+      extraArgs:
+        - --elastic-ep-max-dp-size
+        - "4"  # required on vLLM 0.30.0+ to allow expansion up to width 4
+      ports:
+        - name: http
+          port: 8000
+          protocol: TCP
+```
+
+- **Engine image**: Use a vLLM image with a full Ray installation matching your *mixture of experts
+  (MoE)* model and single-node *TP* width (see
+  [Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) and
+  [Elastic EP Benchmark](elastic-ep-benchmark.md#live-resize)).
+- **CPU Ray head**: Created without `AcceleratorType`, `LocalQueue`, or container resource requests
+  (namespace `LimitRange` rules still apply).
+- **Weights**: Delivered through standard `ModelArtifact` and node cache paths
+  ([Model Delivery](../model-delivery/_index.md)).
+- **Explicit *TP* and resources**: For *TP* = 2, set `--tensor-parallel-size 2` and
+  `resources.accelerator: "2"` (or omit `accelerator` to default to *TP*). Explicit values must
+  equal *TP*; CPU and RAM never auto-scale.
+- **Fabric**: Optional *`resources.interface`* enables RDMA or EFA; see
+  [InfiniBand RDMA comparison](elastic-ep-benchmark.md#infiniband-rdma-comparison).
+
+### Elastic EP settings
 
 Set *`roles[].runtimeControl.parameters["elastic.dataParallelWidth"]`* to a string integer from
 `"2"` to `"64"` to select *Elastic EP*:
@@ -72,71 +120,11 @@ Admission freezes and enforces these profile rules once created:
 - **Master HTTP ingress**: Only member 0 serves HTTP; workers join Ray and hold *expert parallelism
   (EP)* collective state.
 
-## Prerequisites
-
-- **Engine image**: Use a vLLM image with a full Ray installation matching your *mixture of experts
-  (MoE)* model and single-node *TP* width. See
-  [Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) and
-  [Elastic EP Benchmark](elastic-ep-benchmark.md#live-resize) for verified `2 → 4` runs.
-- **CPU Ray head**: The operator creates a CPU-only Ray head `Pod` (`--num-gpus=0`) and `Service`
-  with no `AcceleratorType`, `LocalQueue` or container resource requests (namespace `LimitRange`
-  rules still apply).
-- **GPU workers**: Master and worker `Pod`s keep whole-GPU allocations; readiness verifies every
-  live GPU Ray node matches *TP* plus allocated-device and `Pod` identity checks.
-- **Node scope**: The profile adds GPU `Pod`s on existing cluster capacity; it does not provision
-  cloud nodes.
-
-## Shared memory
+### Shared memory
 
 The CPU head, master and each GPU worker mount a separate `/dev/shm` `EmptyDir`. Changing
 *`roles[].shmSize`* affects new or replacement `Pod`s only; see
 [Shared memory](configuration.md#shared-memory).
-
-## Configuration
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: ModelDeployment
-metadata:
-  name: qwen3-ep
-  namespace: gpustack
-spec:
-  model:
-    name: Qwen/Qwen3-30B-A3B
-    artifactRef:
-      name: qwen3-30b-a3b-artifact
-  router:
-    name: llm-d-router
-  engine:
-    name: vLLM
-    image: gpustack/runner:cuda13.0-vllm0.30.0
-  roles:
-    - name: server
-      kind: Server
-      replicas: 1
-      size: 1
-      acceleratorType: elastic-gpu
-      resources:
-        accelerator: "1"  # defaults to declared TP size (1 here) when omitted
-      runtimeControl:
-        parameters:
-          elastic.dataParallelWidth: "2"
-      extraArgs:
-        - --elastic-ep-max-dp-size
-        - "4"  # required on vLLM 0.30.0+ to allow expansion up to width 4
-      ports:
-        - name: http
-          port: 8000
-          protocol: TCP
-```
-
-- **Weights**: Delivered through standard `ModelArtifact` and node cache paths
-  ([Model Delivery](../model-delivery/_index.md)).
-- **Explicit *TP* and resources**: For *TP* = 2, set `--tensor-parallel-size 2` and
-  `resources.accelerator: "2"` (or omit `accelerator` to default to *TP*). Explicit values must
-  equal *TP*; CPU and RAM never auto-scale.
-- **Fabric**: Optional *`resources.interface`* enables RDMA or EFA; see
-  [InfiniBand RDMA comparison](elastic-ep-benchmark.md#infiniband-rdma-comparison).
 
 ### Maximum width
 
@@ -144,7 +132,7 @@ On vLLM `0.30.0`+, declare `--elastic-ep-max-dp-size` in *`extraArgs`* at creati
 expansion (immutable after creation; omitting it blocks growth past the initial width, and older
 vLLM releases reject the flag).
 
-## Width changes
+## Resize procedure
 
 Patch only `elastic.dataParallelWidth` and wait for convergence before submitting another change:
 
@@ -172,7 +160,7 @@ The operator retains the master's command, UID and bootstrap width while adding 
 it. If quota, GPU allocation or Ray membership is incomplete, the resize holds while the running
 master keeps serving.
 
-## Resize observations
+### Resize status
 
 The operator tracks five layers independently in a deployment-owned diagnostic `ConfigMap`
 (`observation.json`, each layer carrying `Known`, `Value` and `Reason`):
@@ -189,7 +177,7 @@ Layers legitimately diverge mid-resize; unreadable layers report `Known: false` 
 a neighbor. During native resize, the engine returns HTTP `503`: liveness accepts `200` and `503`
 to avoid restarts, while readiness withdraws to shield traffic.
 
-## Resize hold conditions
+### Resize hold conditions
 
 The operator records intent before sending a resize request to the engine:
 
@@ -204,12 +192,6 @@ The operator records intent before sending a resize request to the engine:
 - **Automatic recovery**: A narrower spec retires a stale widening hold, and full member loss
   re-derives state once the spec advances and live native width is proved. Partial survival holds
   until live proof clears.
-
-## Interruption scope
-
-Scale-down is rejected at admission in this release ([#741](https://github.com/gpustack/gpustack-operator/issues/741));
-only a pre-existing in-flight narrowing can complete. A resize affects only the patched
-`ModelDeployment`; sibling deployments keep serving their own endpoints.
 
 ## Troubleshooting
 
@@ -239,9 +221,14 @@ Set `VLLM_LOGGING_LEVEL` separately for vLLM logs on GPU members.
 ## Limitations
 
 - Supports managed vLLM with a full Ray installation only; SGLang uses ordinary replica scaling.
-- Width range is `2`–`64`; scale-down is unsupported ([#741](https://github.com/gpustack/gpustack-operator/issues/741)).
+- Width range is `2`–`64`; scale-down is rejected at admission
+  ([#741](https://github.com/gpustack/gpustack-operator/issues/741)), and only a pre-existing
+  in-flight narrowing can complete.
+- A resize affects only the patched `ModelDeployment`; sibling deployments keep serving their own
+  endpoints.
 - Profile presence, *TP*, *`size`*, *`acceleratorType`* and *`resources`* are frozen after creation.
 - One serving instance per deployment (`replicas: 1`, `size: 1`); only member 0 serves HTTP.
+- Adds GPU `Pod`s on existing cluster capacity; it does not provision cloud nodes.
 
 ---
 

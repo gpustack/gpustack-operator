@@ -5,13 +5,13 @@ isolation, query live utilization, logs, and events, and diagnose stuck workspac
 
 ## Contents
 
-- [Service lifecycle](#service-lifecycle)
+- [Workspace stop and restart](#workspace-stop-and-restart)
 - [Tenant network isolation](#tenant-network-isolation)
 - [Metrics subresource](#metrics-subresource)
 - [Log and event subresources](#log-and-event-subresources)
 - [Troubleshooting](#troubleshooting)
 
-## Service lifecycle
+## Workspace stop and restart
 
 An `Instance` declaring *`spec.ports`* owns a NodePort `Service` of the same name and publishes
 allocated node ports in *`status.ports`*. The `Service` selects the backing `Pod` by its
@@ -202,6 +202,6 @@ kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/<ns>/instances/<name>/
 
 ---
 
-**See also** — [GPU Instances](_index.md) (pool selection and unit resource sizing) · [GPU Instance Configuration](configuration.md) (SSH access, volumes, and custom `InstanceType`s) · [Heterogeneous Devices Walkthrough](../../walkthroughs/devices/scheduling.md#troubleshooting) (queue and device scheduling diagnosis)
+**See also** — [GPU Instances](_index.md) (pool selection and instance resource defaults) · [GPU Instance Configuration](configuration.md) (SSH access, volumes, and custom `InstanceType`s) · [Heterogeneous Devices Walkthrough](../../walkthroughs/devices/scheduling.md#troubleshooting) (queue and device scheduling diagnosis)
 
 **Next** → [Heterogeneous Devices Walkthrough](../../walkthroughs/devices/scheduling.md) — trace a scheduled `Instance` end to end.

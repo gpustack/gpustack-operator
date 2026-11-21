@@ -6,22 +6,18 @@ PodSets. Legacy non-*TAS* queues from earlier releases are not migrated automati
 
 ## Contents
 
-- [Inventory path](#inventory-path)
-- [Topograph setup](#topograph-setup)
-- [Existing Node labels](#existing-node-labels)
-- [ConfigMap snapshot](#configmap-snapshot)
-- [Webhook snapshot](#webhook-snapshot)
+- [Topology inventory sources](#topology-inventory-sources)
 - [Topology level requests](#topology-level-requests)
-- [Verification](#verification)
 - [Live hierarchy changes](#live-hierarchy-changes)
+- [Verification](#verification)
 - [Troubleshooting](#troubleshooting)
 
-## Inventory path
+## Topology inventory sources
 
 Assign at most one `Ready` `TopologySource` per `Node`. Zero or multiple matching `Ready` sources
 fall back to the hostname-only profile so conflicting hierarchies never merge.
 
-| Scenario | Inventory path |
+| Scenario | Inventory source |
 |---|---|
 | Bundled Topograph supports your cloud, fabric, DRA, or on-prem topology | Enable `topograph` in Helm values and read its labels with *`nodeLabels`*. |
 | Cloud provider or admin already labels `Node`s | Use *`nodeLabels`* (read-only). |
@@ -31,7 +27,7 @@ fall back to the hostname-only profile so conflicting hierarchies never merge.
 Declare only strictly nested trees (every rack belongs to one zone, and every zone to one region);
 independent axes such as rack and MIG partition do not form a valid hierarchy.
 
-## Topograph setup
+### Topograph setup
 
 Topograph is disabled by default. Enable it on Kubernetes `1.27+` with a supported provider and the
 `k8s` engine. For private clusters, override `topograph.image.repository`, *`imagePullSecrets`*, and
@@ -78,7 +74,7 @@ The worker takes the longest populated prefix on each `Node`, normalizes contigu
 coarsest-to-finest, appends `kubernetes.io/hostname`, and hashes the key list into
 `topology.gpustack.ai/profile`.
 
-## Existing Node labels
+### Existing Node labels
 
 Use *`nodeLabels`* when another controller or cloud provider already writes `Node` labels:
 
@@ -103,7 +99,7 @@ spec:
 | Child label present without parent | Broken parent chain on `Node` | Populate every ancestor label (missing fine suffixes are allowed). |
 | `kubernetes.io/hostname` in *`levels`* | Reserved implicit leaf level | Remove `kubernetes.io/hostname` from *`levels`*. |
 
-## ConfigMap snapshot
+### ConfigMap snapshot
 
 Store a `TopologySourceConfiguration` YAML or JSON document in the worker namespace (`gpustack-system`):
 
@@ -144,7 +140,7 @@ Snapshots validate atomically: unknown `Node`s, undeclared keys, broken parent c
 `NodeFeature` per `Node`; set *`additionalWritePrefix`* (`topology.example.com/`) for custom DNS
 prefixes (reserved prefixes are refused).
 
-## Webhook snapshot
+### Webhook snapshot
 
 Serve the `TopologySourceConfiguration` payload (`<= 1 MiB`) over authenticated `HTTPS` (`GET`,
 redirects and proxies disabled) using worker-namespace credentials:
@@ -198,6 +194,16 @@ Omit *`requiredLevel`* for unconstrained placement (`kubernetes.io/hostname` is 
 [Topology placement](../model-deployment/configuration.md#topology-placement)). Editing
 *`requiredLevel`* updates the role hash and rolls only that role's replicas.
 
+## Live hierarchy changes
+
+Updating *`levels`* creates a new profile and `Topology`. Once `Node`s and `Devices` converge, the
+operator creates replacement `ResourceFlavor`s, drains the `ClusterQueue` (`HoldAndDrain`), swaps
+flavors at zero reservations, and restores the stop policy.
+
+If `TopologyReady=False`, inspect its reason and migration annotations before editing again. Missing
+flavors, quota mismatches, or exceeding 64 flavors per resource group preserve the previous queue
+plan.
+
 ## Verification
 
 Inspect the source, `Node` profile labels, Kueue `Topology` objects, `ResourceFlavor`s, and
@@ -224,15 +230,12 @@ Confirm `TopologySource` is `Ready` and every managed `Node` and `Devices` objec
 `ClusterQueue` `TopologyReady` is `True`; inspect *`topologyRequest.required`* and
 *`topologyAssignment`* on `Workload`s.
 
-## Live hierarchy changes
+### EKS zone verification
 
-Updating *`levels`* creates a new profile and `Topology`. Once `Node`s and `Devices` converge, the
-operator creates replacement `ResourceFlavor`s, drains the `ClusterQueue` (`HoldAndDrain`), swaps
-flavors at zero reservations, and restores the stop policy.
-
-If `TopologyReady=False`, inspect its reason and migration annotations before editing again. Missing
-flavors, quota mismatches, or exceeding 64 flavors per resource group preserve the previous queue
-plan.
+The repository EKS fixture provisions two CPU node groups across two zones (two `Node`s per zone)
+with `topograph_aws_pod_identity_enabled=true`. A size-2 PodSet schedules within one zone, while a
+size-3 PodSet stays `Pending` across four total `Node`s. Review AWS pricing before apply, test on
+fresh queues, and destroy all billable resources afterward.
 
 ## Troubleshooting
 
@@ -252,13 +255,6 @@ kubectl get nodes -L topology.gpustack.ai/profile
 | One role reserved, `Pod`s gated | `Workload` `QuotaReserved=True`, joint check `Pending` (or `Parked` after `30m`) | Free sibling role capacity in a valid domain, or recreate/reactivate `Parked` deployments. |
 | Queue blocks admission | `ClusterQueue` `TopologyReady=False` or `Unknown` (`AwaitingQueueStatus`) | Check flavor profiles, Kueue `Active` status, and keep flavors `<= 64` per resource group. |
 | Source not applied | `TopologySource` `Ready=False` (`Valid` or `OwnershipConflict`) | Fix broken parent chains, snapshot errors, or overlapping `TopologySource` selectors. |
-
-### Temporary EKS validation
-
-The repository EKS fixture provisions two CPU node groups across two zones (two `Node`s per zone)
-with `topograph_aws_pod_identity_enabled=true`. A size-2 PodSet schedules within one zone, while a
-size-3 PodSet stays `Pending` across four total `Node`s. Review AWS pricing before apply, test on
-fresh queues, and destroy all billable resources afterward.
 
 ---
 

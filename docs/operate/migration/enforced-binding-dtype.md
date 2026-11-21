@@ -2,14 +2,14 @@
 
 Starting in this release, `KVCachePoolBinding` *`spec.domain.dtype`* is rendered onto attached engines
 as `--kv-cache-dtype` instead of acting only as metadata. Check existing Bindings and deployments
-before upgrading; see [Engine dtype](../../modules/kv-cache/pool.md#engine-dtype) for the underlying
+before upgrading; see [Engine cache precision](../../modules/kv-cache/pool.md#engine-cache-precision) for the underlying
 contract.
 
 ## Contents
 
 - [Changes on upgrade](#changes-on-upgrade)
-- [Step 1: Check every Binding](#step-1-check-every-binding)
-- [Step 2: Find roles with flags](#step-2-find-roles-with-flags)
+- [Step 1: Check binding precision](#step-1-check-binding-precision)
+- [Step 2: Find conflicting dtype flags](#step-2-find-conflicting-dtype-flags)
 - [Troubleshooting](#troubleshooting)
 - [Verification](#verification)
 
@@ -27,7 +27,7 @@ contract.
 - **No new `auto` Bindings**: admission rejects `dtype: auto` on new Bindings while allowing existing
   `auto` Bindings to keep running and updating.
 
-## Step 1: Check every Binding
+## Step 1: Check binding precision
 
 List every `KVCachePoolBinding` and compare *`spec.domain.dtype`* against the engines attached to it:
 
@@ -37,11 +37,11 @@ kubectl get kvcachepoolbindings -A \
 ```
 
 Compare each value against the accepted spellings in
-[Engine dtype](../../modules/kv-cache/pool.md#engine-dtype). If both vLLM and SGLang attach to one
+[Engine cache precision](../../modules/kv-cache/pool.md#engine-cache-precision). If both vLLM and SGLang attach to one
 Binding, *`dtype`* must be valid in both engines. Fix incompatible Bindings before upgrading to avoid
 startup failures.
 
-## Step 2: Find roles with flags
+## Step 2: Find conflicting dtype flags
 
 Find pool-attached managed roles that still declare `--kv-cache-dtype` in *`extraArgs`*:
 

@@ -240,7 +240,7 @@ The `partitioned` family is the one place an *RDMA* token publishes a hint where
 counterpart publishes none: an *RDMA* partition token names exactly one virtual function, whose
 affinity a hint can honor, while an accelerator partition token names no accelerator at all. What
 that means for a request pairing the two is stated with the request rules
-([Accelerator Requests](../modules/devices/requests.md#co-location-conditions)).
+([Accelerator Requests](../modules/devices/requests.md#numa-alignment-conditions)).
 
 > **Why** one interface serves many shared holders — its multiple queue pairs are how the hardware
 > is meant to be used, with the isolation done by firmware and kernel, so several processes on one

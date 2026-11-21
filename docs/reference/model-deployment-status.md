@@ -495,7 +495,7 @@ levels back to `True` on its own once a later pass proves the live world again.
 
 ### RuntimeControlSynced
 
-Reports live convergence across answering `Pod`s and per-role status (`observedGeneration`, `synced`, `reason`, `message`, `paused`, `appliedConfigDigest`, `convergedPods`, `totalAnsweringPods`, `unsupportedFields`) in *`status.roles[*].runtimeControl`*; see [Online Runtime Control](../modules/model-deployment/runtime-control.md#step-3-verify-convergence-status) for condition reasons and troubleshooting.
+Reports live convergence across answering `Pod`s and per-role status (`observedGeneration`, `synced`, `reason`, `message`, `paused`, `appliedConfigDigest`, `convergedPods`, `totalAnsweringPods`, `unsupportedFields`) in *`status.roles[*].runtimeControl`*; see [Online Runtime Control](../modules/model-deployment/runtime-control.md#step-3-verify-runtime-settings) for condition reasons and troubleshooting.
 
 ## Scaler annotations
 
@@ -505,7 +505,7 @@ replica count and which decision last changed it. They sit in *`metadata.annotat
 *`status`*, because the single-writer fence is enforced at admission and a status field cannot
 refuse a write.
 
-[Binding fence](../modules/model-deployment/scaling.md#binding-fence) owns the payload of both annotations, the
+[Scaler ownership rules](../modules/model-deployment/scaling.md#scaler-ownership-rules) owns the payload of both annotations, the
 admission rules for bound and unbound deployments, and the escape hatch when a scaler is gone;
 [GitOps sync](../modules/model-deployment/scaling.md#gitops-sync) covers how a GitOps agent
 ignores the fields the scaler owns.

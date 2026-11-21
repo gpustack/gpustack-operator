@@ -7,12 +7,9 @@ all three stages.
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Start three-role serving](#step-1-start-three-role-serving)
-- [Step 2: Inspect role configuration](#step-2-inspect-role-configuration)
-- [Step 3: Send a multimodal request](#step-3-send-a-multimodal-request)
-- [Step 4: Admission and co-location](#step-4-admission-and-co-location)
-- [Step 5: Release the application](#step-5-release-the-application)
+- [Deployment](#deployment)
+- [Verification](#verification)
+- [Cleanup](#cleanup)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
@@ -21,7 +18,7 @@ all three stages.
 *Encode/prefill/decode (EPD)* disaggregation isolates multimodal vision encoding onto *Encode* `Pod`s
 so large image bursts do not stall token generation. Text-only requests traverse *Prefill* → *Decode*,
 while multimodal requests route through *Encode* → *Prefill* → *Decode*
-([Roles and request flow](../../modules/model-deployment/encode-prefill-decode.md#roles-and-request-flow)):
+([Encode, Prefill and Decode](../../modules/model-deployment/encode-prefill-decode.md)):
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
@@ -36,7 +33,7 @@ concurrency-8 `4k`/`8k` *inter-token latency (ITL)* p99 by **15.1×–21.8×** a
 to first token (TTFT)* p50 by **5.9×**, while small-prompt *TTFT* often favored aggregated serving;
 see [Encode, Prefill and Decode Benchmark](../../modules/model-deployment/encode-prefill-decode-benchmark.md).
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
@@ -46,7 +43,9 @@ see [Encode, Prefill and Decode Benchmark](../../modules/model-deployment/encode
 | Model | `Qwen/Qwen2.5-VL-7B-Instruct` from `ModelArtifact` `qwen2-5-vl-7b-instruct` mounted at `/var/lib/gpustack/model` |
 | Runtime | vLLM `gpustack/runner:cuda13.0-vllm0.30.0` with `llm-d-router` |
 
-## Step 1: Start three-role serving
+## Deployment
+
+### Step 1: Start three-role serving
 
 Create and prefetch `ModelArtifact` `qwen2-5-vl-7b-instruct` in `gpustack-bench` using
 [Model Prefetch](../model-delivery/prefetch.md#step-1-create-artifact-and-prefetch), then save
@@ -142,7 +141,7 @@ epd-arm3-epd-router-6cc94d94b8-glnvt    2/2     Running   0          93s
 The *Decode* `Pod` runs `2/2` containers (`main` engine plus native `routing-proxy` sidecar). If
 admission rejects the manifest or `PHASE` stays `Starting`, see [Troubleshooting](#troubleshooting).
 
-## Step 2: Inspect role configuration
+### Step 2: Inspect role configuration
 
 Project the operator-synthesized connector flags, ports, and sidecar arguments across all three engine
 roles (do not pass these owned flags in *`extraArgs`*; see
@@ -217,7 +216,9 @@ Confirm three rendered invariants:
   keeping CUDA graphs enabled.
 - ***Decode*** serves behind `routing-proxy` on `:8000` (`--ec-connector=ec-nixl` → engine `:8200`).
 
-## Step 3: Send a multimodal request
+## Verification
+
+### Step 3: Send a multimodal request
 
 Read *`status.endpoint`* and send a multimodal chat completion containing both an `image_url` (base64
 PNG) and a text prompt for `"model": "qwen2-5-vl-7b-instruct"`:
@@ -263,8 +264,8 @@ kubectl run curl-probe -n gpustack-bench --rm -i --restart=Never --image=curlima
   http://epd-arm3-epd-router.gpustack-bench.svc:8000/v1/chat/completions < request.json
 ```
 
-In the recorded H100 run (**236 measured requests with zero errors** plus 28 warm-ups), container
-access logs confirmed activity across every stage (280 lines in the router access log):
+Across **236 measured requests with zero errors** (plus 28 warm-ups; 280 router access-log lines),
+container access logs confirm activity at every stage:
 
 | Stage | Container | Captured log count |
 |---|---|---|
@@ -276,7 +277,7 @@ access logs confirmed activity across every stage (280 lines in the router acces
 If *Encode* receives requests while *Prefill* receives zero, check vLLM *PD* token-counting flags in
 [Troubleshooting](#troubleshooting).
 
-## Step 4: Admission and co-location
+### Step 4: Check admission and placement
 
 Confirm that Kueue reserved all three role `Workload`s together:
 
@@ -289,7 +290,7 @@ All four `Pod`s ran on `gpu-node-0`, with private IPC, private `/dev/shm`, and n
 
 Across multi-node clusters, rendered soft `Pod` affinity weights prefer co-locating roles that
 exchange the largest payloads without blocking scheduling
-([Scheduling co-location](../../modules/model-deployment/encode-prefill-decode.md#scheduling-co-location)):
+([Role placement preferences](../../modules/model-deployment/encode-prefill-decode.md#role-placement-preferences)):
 
 | Replica | Preferred peer | Weight |
 |---|---|---:|
@@ -298,10 +299,9 @@ exchange the largest payloads without blocking scheduling
 | *Prefill* | *Encode* | 50 |
 | *Decode* | *Prefill* | 100 |
 
-## Step 5: Release the application
+## Cleanup
 
-Delete `epd-arm3-epd` and wait until all owned `Pod`s and `Service`s terminate (the recording did not
-capture a post-deletion `Devices` snapshot):
+Delete `epd-arm3-epd` and wait until all owned `Pod`s and `Service`s terminate:
 
 ```bash
 kubectl delete modeldeployment epd-arm3-epd -n gpustack-bench
@@ -311,7 +311,7 @@ kubectl get pods,services -n gpustack-bench -l app.kubernetes.io/instance=epd-ar
 ## Limitations
 
 - Role kinds (*Encode*, *Prefill*, *Decode*, *Server*) are frozen after creation.
-- Captured on one 8-GPU H100 node over TCP; multi-node placement and GPU contention were not measured.
+- Measurements cover single-node TCP transfer; multi-node placement and GPU contention were not tested.
 - Retiring an *Encode* replica drains for a fixed ~300 s window because encoders expose no in-flight
   request counter; transfers still active when that window expires fail at the client.
 
@@ -320,9 +320,9 @@ kubectl get pods,services -n gpustack-bench -l app.kubernetes.io/instance=epd-ar
 | Symptom | Signal | Resolution |
 |---|---|---|
 | Apply rejected on role structure | Webhook refusal on `ModelDeployment` | *Encode* requires both *Prefill* and *Decode* (one role per kind, no *Server*, no *`spec.kvCache`*, and no role *`command`*; see [Admission constraints](../../modules/model-deployment/encode-prefill-decode.md#admission-constraints)). |
-| Apply rejected on engine, router, or platform | Webhook refusal on `ModelDeployment` | All three roles must share one accelerator platform and match [Admitted matrix](../../modules/model-deployment/encode-prefill-decode.md#admitted-matrix) (`vllm-router` is rejected on Ascend). |
+| Apply rejected on engine, router, or platform | Webhook refusal on `ModelDeployment` | All three roles must share one accelerator platform and match [Supported serving configurations](../../modules/model-deployment/encode-prefill-decode.md#supported-serving-configurations) (`vllm-router` is rejected on Ascend). |
 | Encoder container exits on unknown flag | Container startup failure | Upgrade the runner image to meet the floor (`vLLM >= 0.30.0`, `vllm-ascend >= 0.30.0rc1`, `SGLang >= 0.5.10`; see [Engine Compatibility](../../modules/model-deployment/engine-versions.md)). |
-| Requests bypass *Prefill* | Router routes directly to *Decode* | Check vLLM token-counting support and `--enable-scale-out` rules ([Counting engine tokens](../../modules/model-deployment/prefill-decode.md#counting-engine-tokens)). |
+| Requests bypass *Prefill* | Router routes directly to *Decode* | Check vLLM token-counting support and `--enable-scale-out` rules ([Router token counting](../../modules/model-deployment/prefill-decode.md#router-token-counting)). |
 | Ascend encoder fails storage setup | `ECExampleConnector` missing shared path | Mount a shared `ReadWriteMany` PVC on both *Encode* (read-write) and *Prefill* with identical *`claimName`*, *`mountPath`*, and *`subPath`*. |
 | Apply rejected on port `5601` or `8997` | Owned-port collision | `ECCPUConnector` owns `5601`, and SGLang *Prefill* in *EPD* owns `8997`; move custom HTTP ports off both numbers. |
 | *Encode* replica stays in `Draining` ~300 s | Bounded encoder drain timer | Expected behavior; wait for the ~300 s drain window to finish. |
@@ -331,7 +331,7 @@ kubectl get pods,services -n gpustack-bench -l app.kubernetes.io/instance=epd-ar
 ---
 
 **See also** — [Encode, Prefill and Decode](../../modules/model-deployment/encode-prefill-decode.md)
-(role contract and admitted matrix) · [Encode, Prefill and Decode Benchmark](../../modules/model-deployment/encode-prefill-decode-benchmark.md)
+(role contract and supported configurations) · [Encode, Prefill and Decode Benchmark](../../modules/model-deployment/encode-prefill-decode-benchmark.md)
 (H100 latency and throughput) · [Prefill and Decode Walkthrough](prefill-decode.md) (two-role
 disaggregation)
 
