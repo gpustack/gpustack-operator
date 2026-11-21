@@ -972,8 +972,9 @@ func TestChartModelTransferAscendHostRoCE(t *testing.T) {
 		brokerAddressEnv     = "GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS"
 		workerAddressEnv     = "GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS"
 		defaultControlAddr   = "127.0.0.1:9250"
-		udsControlAddr       = "unix:///run/model-transfer/control.sock"
-		udsWorkerAddr        = "unix:///run/model-transfer/worker.sock"
+		udsControlAddr       = "unix:///run/model-transfer-sockets/control.sock"
+		udsWorkerAddr        = "unix:///run/model-transfer-sockets/worker.sock"
+		controlSocketsPath   = "/run/model-transfer-sockets"
 		defaultGlobalResCfg  = `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}`
 		customGlobalResCfg   = `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep/custom.json"}`
 	)
@@ -1129,7 +1130,7 @@ func TestChartModelTransferAscendHostRoCE(t *testing.T) {
 					}
 				}
 
-				var hixlepVolumes int
+				var hixlepVolumes, controlSocketsVolumes int
 				for _, v := range podSpec.Volumes {
 					if v.Name == "ascend-hixlep" {
 						hixlepVolumes++
@@ -1137,11 +1138,16 @@ func TestChartModelTransferAscendHostRoCE(t *testing.T) {
 						assert.Equal(t, "/etc/hixlep", v.HostPath.Path)
 						assert.Equal(t, "Directory", v.HostPath.Type)
 					}
+					if v.Name == "control-sockets" {
+						controlSocketsVolumes++
+					}
 				}
 				if wantHostRoCE {
 					assert.Equal(t, 1, hixlepVolumes, "%s mounts ascend-hixlep volume", vendor)
+					assert.Equal(t, 1, controlSocketsVolumes, "%s defines control-sockets volume", vendor)
 				} else {
 					assert.Zero(t, hixlepVolumes, "%s omits ascend-hixlep volume", vendor)
+					assert.Zero(t, controlSocketsVolumes, "%s omits control-sockets volume", vendor)
 				}
 
 				for _, ic := range podSpec.InitContainers {
@@ -1181,6 +1187,13 @@ func TestChartModelTransferAscendHostRoCE(t *testing.T) {
 					}
 
 					if c.Name == "broker" {
+						var socketsMount *volumeMountSpec
+						for i := range c.VolumeMounts {
+							if c.VolumeMounts[i].Name == "control-sockets" {
+								socketsMount = &c.VolumeMounts[i]
+								break
+							}
+						}
 						if tc.name == "enabled wires ascend hostRoCE and default env" {
 							assert.Empty(t, globalResValues, "%s broker must not receive default ASCEND_GLOBAL_RESOURCE_CONFIG", vendor)
 						}
@@ -1188,23 +1201,32 @@ func TestChartModelTransferAscendHostRoCE(t *testing.T) {
 							assert.Contains(t, c.Args, "--control-addr="+udsControlAddr, "%s broker uses UDS control-addr", vendor)
 							assert.Contains(t, c.Args, "--worker-addr="+udsWorkerAddr, "%s broker uses UDS worker-addr", vendor)
 							assert.NotContains(t, c.Args, "--control-addr="+defaultControlAddr, "%s broker omits loopback control-addr", vendor)
+							require.NotNil(t, socketsMount, "%s broker mounts control-sockets volume", vendor)
+							assert.Equal(t, controlSocketsPath, socketsMount.MountPath)
+							assert.True(t, socketsMount.ReadOnly == nil || !*socketsMount.ReadOnly,
+								"%s broker mounts %s writable", vendor, controlSocketsPath)
 						} else {
 							assert.Contains(t, c.Args, "--control-addr="+defaultControlAddr, "%s broker keeps default loopback control-addr", vendor)
 							assert.NotContains(t, c.Args, "--control-addr="+udsControlAddr, "%s broker omits UDS control-addr", vendor)
 							assert.NotContains(t, c.Args, "--worker-addr="+udsWorkerAddr, "%s broker omits UDS worker-addr", vendor)
+							assert.Nil(t, socketsMount, "%s broker omits control-sockets volume", vendor)
 						}
 					}
 
 					if c.Name == "worker" {
 						workerFound = true
-						var bootstrapMount *volumeMountSpec
+						var bootstrapMount, socketsMount *volumeMountSpec
 						for i := range c.VolumeMounts {
-							if c.VolumeMounts[i].Name == "bootstrap" {
+							switch c.VolumeMounts[i].Name {
+							case "bootstrap":
 								bootstrapMount = &c.VolumeMounts[i]
-								break
+							case "control-sockets":
+								socketsMount = &c.VolumeMounts[i]
 							}
 						}
 						require.NotNil(t, bootstrapMount, "%s worker mounts bootstrap volume", vendor)
+						require.NotNil(t, bootstrapMount.ReadOnly, "%s worker always keeps read-only bootstrap mount", vendor)
+						assert.True(t, *bootstrapMount.ReadOnly, "%s worker always keeps read-only bootstrap mount", vendor)
 						if wantHostRoCE {
 							assert.Equal(t, 1, hixlepMounts, "%s worker mounts /etc/hixlep once", vendor)
 							require.NotNil(t, tc.wantAscendEnv)
@@ -1214,16 +1236,17 @@ func TestChartModelTransferAscendHostRoCE(t *testing.T) {
 								"%s worker uses UDS broker address without duplicates", vendor)
 							assert.Equal(t, []string{udsWorkerAddr}, workerAddrValues,
 								"%s worker uses UDS worker address without duplicates", vendor)
-							assert.True(t, bootstrapMount.ReadOnly == nil || !*bootstrapMount.ReadOnly,
-								"%s worker mounts /run/model-transfer writable for worker.sock", vendor)
+							require.NotNil(t, socketsMount, "%s worker mounts control-sockets volume", vendor)
+							assert.Equal(t, controlSocketsPath, socketsMount.MountPath)
+							assert.True(t, socketsMount.ReadOnly == nil || !*socketsMount.ReadOnly,
+								"%s worker mounts %s writable for worker.sock", vendor, controlSocketsPath)
 						} else {
 							assert.Zero(t, hixlepMounts, "%s worker omits /etc/hixlep", vendor)
 							assert.Equal(t, []string{defaultControlAddr}, brokerAddrValues,
 								"%s worker keeps default loopback broker address", vendor)
 							assert.Empty(t, workerAddrValues,
 								"%s worker omits GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS by default", vendor)
-							require.NotNil(t, bootstrapMount.ReadOnly, "%s worker keeps read-only bootstrap mount", vendor)
-							assert.True(t, *bootstrapMount.ReadOnly, "%s worker keeps read-only bootstrap mount", vendor)
+							assert.Nil(t, socketsMount, "%s worker omits control-sockets volume", vendor)
 							if tc.name != "enabled respects custom ASCEND_GLOBAL_RESOURCE_CONFIG without duplicates" &&
 								tc.name != "enabled respects empty ASCEND_GLOBAL_RESOURCE_CONFIG without duplicates" {
 								assert.Empty(t, globalResValues, "%s worker omits ASCEND_GLOBAL_RESOURCE_CONFIG", vendor)
