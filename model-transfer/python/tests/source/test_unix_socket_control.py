@@ -554,6 +554,10 @@ def test_parse_private_address_aligns_loopback_and_rejects_port_zero():
         "10.0.0.1:9252",
         "example.com:9252",
         "unix://relative.sock",
+        "unix:///tmp/../run/worker.sock",
+        "unix:///run/./worker.sock",
+        "unix:///run/worker.sock?x=1",
+        "unix:///run/worker.sock#frag",
     ):
         with pytest.raises(ValueError):
             parse_private_address(bad)

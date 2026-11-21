@@ -315,8 +315,73 @@ while idx < len(cuda_lines):
         run_blocks.append(body)
     idx += 1
 
+def tokenize_shell_words(text: str) -> list[tuple[str, str]]:
+    """Split shell text on unquoted whitespace, returning (raw_word, unquoted_word) pairs."""
+    words: list[tuple[str, str]] = []
+    raw_buf: list[str] = []
+    val_buf: list[str] = []
+    in_single = False
+    in_double = False
+    escaped = False
+    has_token = False
+    for ch in text:
+        if escaped:
+            raw_buf.append(ch)
+            val_buf.append(ch)
+            escaped = False
+            has_token = True
+            continue
+        if in_single:
+            raw_buf.append(ch)
+            if ch == "'":
+                in_single = False
+            else:
+                val_buf.append(ch)
+            has_token = True
+            continue
+        if in_double:
+            raw_buf.append(ch)
+            if ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_double = False
+            else:
+                val_buf.append(ch)
+            has_token = True
+            continue
+        if ch == "\\":
+            raw_buf.append(ch)
+            escaped = True
+            has_token = True
+        elif ch == "'":
+            raw_buf.append(ch)
+            in_single = True
+            has_token = True
+        elif ch == '"':
+            raw_buf.append(ch)
+            in_double = True
+            has_token = True
+        elif ch.isspace():
+            if has_token:
+                words.append(("".join(raw_buf), "".join(val_buf)))
+                raw_buf, val_buf, has_token = [], [], False
+        else:
+            raw_buf.append(ch)
+            val_buf.append(ch)
+            has_token = True
+    if has_token:
+        words.append(("".join(raw_buf), "".join(val_buf)))
+    return words
+
+
 def strip_outer_quotes(tok: str) -> str:
     while len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+        tok = tok[1:-1]
+    return tok
+
+
+def strip_outer_double_quotes(tok: str) -> str:
+    while len(tok) >= 2 and tok[0] == '"' and tok[-1] == '"':
         tok = tok[1:-1]
     return tok
 
@@ -332,8 +397,8 @@ standalone_var_re = re.compile(
 )
 
 
-def has_standalone_off(tokens: list[str]) -> bool:
-    unquoted = [strip_outer_quotes(t) for t in tokens if t]
+def has_standalone_off(words: list[tuple[str, str]]) -> bool:
+    unquoted = [val for _, val in words if val]
     for idx, tok in enumerate(unquoted):
         if standalone_off_re.fullmatch(tok):
             return True
@@ -342,16 +407,10 @@ def has_standalone_off(tokens: list[str]) -> bool:
     return False
 
 
-def strip_outer_double_quotes(tok: str) -> str:
-    while len(tok) >= 2 and tok[0] == '"' and tok[-1] == '"':
-        tok = tok[1:-1]
-    return tok
-
-
-def standalone_var_refs(tokens: list[str]) -> set[str]:
+def standalone_var_refs(words: list[tuple[str, str]]) -> set[str]:
     refs: set[str] = set()
-    for tok in tokens:
-        m = standalone_var_re.fullmatch(strip_outer_double_quotes(tok))
+    for raw, _ in words:
+        m = standalone_var_re.fullmatch(strip_outer_double_quotes(raw))
         if m:
             refs.add(m.group(1) or m.group(2))
     return refs
@@ -399,10 +458,10 @@ for block in run_blocks:
                 rhs_raw = rhs.strip()
                 rhs_single_quoted = len(rhs_raw) >= 2 and rhs_raw[0] == "'" and rhs_raw[-1] == "'"
                 rhs_val = strip_outer_quotes(rhs_raw)
-                rhs_tokens = rhs_val.split()
-                if has_standalone_off(rhs_tokens):
+                rhs_words = tokenize_shell_words(rhs_val)
+                if has_standalone_off(rhs_words):
                     assigned_off_vars.add(var_name)
-                elif (not rhs_single_quoted) and (standalone_var_refs(rhs_tokens) & assigned_off_vars) and not cmake_cfg_re.match(st):
+                elif (not rhs_single_quoted) and (standalone_var_refs(rhs_words) & assigned_off_vars) and not cmake_cfg_re.match(st):
                     assigned_off_vars.add(var_name)
                 else:
                     assigned_off_vars.discard(var_name)
@@ -411,9 +470,9 @@ for block in run_blocks:
                 saw_cmake_configure = True
                 cmake_args = m_cmake.group(1)
                 cmake_cmd_only = re.split(r"(?:&&|\|\||;|\|)", cmake_args, maxsplit=1)[0]
-                cmake_tokens = cmake_cmd_only.split()
-                direct_off = has_standalone_off(cmake_tokens)
-                referenced_vars = standalone_var_refs(cmake_tokens)
+                cmake_words = tokenize_shell_words(cmake_cmd_only)
+                direct_off = has_standalone_off(cmake_words)
+                referenced_vars = standalone_var_refs(cmake_words)
                 var_off = bool(referenced_vars & assigned_off_vars)
                 if not (direct_off or var_off):
                     print(

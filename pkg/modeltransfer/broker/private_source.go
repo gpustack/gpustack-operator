@@ -80,10 +80,19 @@ func parsePrivateAddress(addr string, allowEphemeralPort bool) (PrivateAddress, 
 		if strings.ContainsAny(sockPath, "?#\x00") {
 			return PrivateAddress{}, fmt.Errorf("unix socket path %q must not contain query, fragment, or null bytes", addr)
 		}
-		if sockPath == "" || !filepath.IsAbs(sockPath) || filepath.Clean(sockPath) == "/" {
+		if sockPath == "" || !filepath.IsAbs(sockPath) || strings.HasSuffix(sockPath, "/") {
 			return PrivateAddress{}, fmt.Errorf("unix socket path %q must be a non-empty absolute path", addr)
 		}
-		return PrivateAddress{UnixPath: filepath.Clean(sockPath)}, nil
+		for _, seg := range strings.Split(sockPath, "/") {
+			if seg == "." || seg == ".." {
+				return PrivateAddress{}, fmt.Errorf("unix socket path %q must not contain dot segments", addr)
+			}
+		}
+		cleaned := filepath.Clean(sockPath)
+		if cleaned == "/" {
+			return PrivateAddress{}, fmt.Errorf("unix socket path %q must be a non-empty absolute path", addr)
+		}
+		return PrivateAddress{UnixPath: cleaned}, nil
 	}
 	if strings.ContainsAny(addr, "?#\x00") {
 		return PrivateAddress{}, fmt.Errorf("private address %q must not contain query or fragment", addr)

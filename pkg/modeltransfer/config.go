@@ -434,12 +434,36 @@ func (c *Config) writeBootstrapCredential() (string, error) {
 		return "", fmt.Errorf("mint the bootstrap credential: %w", err)
 	}
 	token := hex.EncodeToString(buf)
-	if err := os.MkdirAll(filepath.Dir(c.BootstrapFile), 0o700); err != nil {
+	dir := filepath.Dir(c.BootstrapFile)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("prepare the bootstrap directory: %w", err)
 	}
-	if err := os.WriteFile(c.BootstrapFile, []byte(token), 0o600); err != nil {
-		return "", fmt.Errorf("write the bootstrap credential: %w", err)
+	tmp, err := os.CreateTemp(dir, ".bootstrap-*")
+	if err != nil {
+		return "", fmt.Errorf("create temporary bootstrap credential: %w", err)
 	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("chmod temporary bootstrap credential: %w", err)
+	}
+	if _, err := tmp.WriteString(token); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("write temporary bootstrap credential: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close temporary bootstrap credential: %w", err)
+	}
+	if err := os.Rename(tmpPath, c.BootstrapFile); err != nil {
+		return "", fmt.Errorf("publish the bootstrap credential: %w", err)
+	}
+	cleanup = false
 	return token, nil
 }
 

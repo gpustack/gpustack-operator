@@ -561,24 +561,11 @@ func RenderMemberDaemonSet(
 	}
 	// An unset count is one for RDMA and EFA: the schema stores no default, so a group that never
 	// wrote it renders exactly what a group that wrote one does.
-	applyMemberFabric(ds, fabricProtocol, ptr.Deref(member.FabricInterfaceCount, 1))
+	applyMemberFabric(ds, fabricProtocol, ptr.Deref(member.FabricInterfaceCount, 1), group)
 	applyMemberLocalDisk(ds, kvcb, member, group)
 	applyMemberHostPaths(ds, member)
 	if cannHostRoCE {
 		applyMemberAscendHIXLEP(ds, member)
-		// Reserve the host-network management port on the Pod spec so the scheduler rejects
-		// co-locating two CANN Host RoCE backends sharing an RDMA interface on the same node
-		// instead of letting a second Pod pass TCP readiness against the first Pod's listener.
-		port := memberRESTPort(group)
-		ds.Spec.Template.Spec.Containers[0].Ports = append(
-			ds.Spec.Template.Spec.Containers[0].Ports,
-			core.ContainerPort{
-				Name:          "http",
-				ContainerPort: port,
-				HostPort:      port,
-				Protocol:      core.ProtocolTCP,
-			},
-		)
 	}
 	// Last, because it merges onto whatever the fabric path put there and so has to see the
 	// finished context rather than race it.
@@ -1011,7 +998,7 @@ func memberResources(member workercore.KVCacheBackendMember) core.ResourceRequir
 //   - Every other path, including the Auto that resolved to tcp, is left exactly as rendered: no
 //     security context at all rather than an empty one, since an empty struct is an invitation to
 //     add a capability to it.
-func applyMemberFabric(ds *apps.DaemonSet, protocol string, interfaceCount int32) {
+func applyMemberFabric(ds *apps.DaemonSet, protocol string, interfaceCount int32, group int) {
 	if !memberProtocolIsHostFabric(protocol) {
 		return
 	}
@@ -1024,6 +1011,16 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string, interfaceCount int32
 	podSpec.DNSPolicy = core.DNSClusterFirstWithHostNet
 
 	container := &podSpec.Containers[0]
+	// Reserve the host-network management REST port on every host-fabric member so the
+	// scheduler catches cross-backend collisions on shared RDMA nodes instead of letting a
+	// second Pod bind-fail while passing TCP readiness against the first Pod's listener.
+	restPort := memberRESTPort(group)
+	container.Ports = append(container.Ports, core.ContainerPort{
+		Name:          "http",
+		ContainerPort: restPort,
+		HostPort:      restPort,
+		Protocol:      core.ProtocolTCP,
+	})
 	container.SecurityContext = &core.SecurityContext{
 		Capabilities: &core.Capabilities{
 			// IPC_LOCK to pin the memory the fabric registers, SYS_RESOURCE to raise the locked

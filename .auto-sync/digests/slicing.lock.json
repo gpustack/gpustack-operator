@@ -5,7 +5,7 @@
     {
       "path": ".auto-sync/checks",
       "kind": "directory",
-      "sha256": "6172f83b11281ee6ea0755e37a8cedaf4500c8ecb349372baef3950763914052"
+      "sha256": "5ce2932e8d4675a72e69c68dcc5ac32ca0080c5048dda9dd4870af8ab7f43f6a"
     },
     {
       "path": ".auto-sync/instructions/slicing.md",

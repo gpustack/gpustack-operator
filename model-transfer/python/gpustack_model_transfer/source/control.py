@@ -18,6 +18,7 @@ import http.client
 import ipaddress
 import json
 import os
+import posixpath
 import socket
 import urllib.parse
 import uuid
@@ -30,13 +31,20 @@ MAX_ASSIGNMENTS = 16
 
 
 def parse_unix_address(address: str) -> str:
-    """Validate and extract the absolute socket path from a unix:// address."""
+    """Validate and extract the clean absolute socket path from a unix:// address."""
     if not isinstance(address, str) or not address.startswith("unix://"):
         raise ValueError("address must use the unix:// scheme")
     path = address[len("unix://") :]
-    if not path or "\x00" in path or not os.path.isabs(path) or path.endswith("/"):
+    if any(ch in path for ch in ("?", "#", "\x00")):
+        raise ValueError("unix socket path must not contain query, fragment, or NUL")
+    if not path or not os.path.isabs(path) or path.endswith("/"):
         raise ValueError("unix socket path must be a non-empty absolute file path")
-    return path
+    if any(seg in (".", "..") for seg in path.split("/")):
+        raise ValueError("unix socket path must not contain dot segments")
+    cleaned = posixpath.normpath(path)
+    if cleaned == "/":
+        raise ValueError("unix socket path must be a non-empty absolute file path")
+    return cleaned
 
 
 def parse_private_address(address: str) -> tuple[str, int] | str:

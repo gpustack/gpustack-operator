@@ -51,8 +51,8 @@
 {{- $workerDNSPolicy := "" }}
 {{- $workerHixlep := dict }}
 {{- if $ascendHostRoCE }}
-{{-   $controlAddr = "unix:///run/model-transfer/control.sock" }}
-{{-   $workerAddr = "unix:///run/model-transfer/worker.sock" }}
+{{-   $controlAddr = "unix:///run/model-transfer-sockets/control.sock" }}
+{{-   $workerAddr = "unix:///run/model-transfer-sockets/worker.sock" }}
 {{-   $workerDNSPolicy = "ClusterFirstWithHostNet" }}
 {{-   $workerHixlep = dict "name" "ascend-hixlep" "path" "/etc/hixlep" "type" "Directory" "readOnly" true }}
 {{- end }}
@@ -74,10 +74,15 @@
 {{- $_ = set $workerEnvHash "GPUSTACK_MODEL_TRANSFER_SOURCE_MIN_MEMORY_BYTES" (toString $minMemoryBytes) }}
 {{- $configHash := dict
       "image" $image
+      "brokerImage" $brokerImage
       "hostNetwork" $ascendHostRoCE
       "dnsPolicy" $workerDNSPolicy
       "controlAddr" $controlAddr
       "workerAddr" $workerAddr
+      "maxSessions" $maxSessions
+      "maxMemoryBytes" $maxMemoryBytes
+      "minMemoryBytes" $minMemoryBytes
+      "extraArgs" ($root.Values.modelTransfer.extraArgs | default list)
       "env" $workerEnvHash
       "hixlep" $workerHixlep
     | toJson | sha256sum }}
@@ -252,6 +257,10 @@ spec:
               mountPath: /var/lib/gpustack/model-transfer/{{ $manufacturer }}
             - name: bootstrap
               mountPath: /run/model-transfer
+            {{- if $ascendHostRoCE }}
+            - name: control-sockets
+              mountPath: /run/model-transfer-sockets
+            {{- end }}
             - name: session-tls
               mountPath: {{ $tlsMount }}
               readOnly: true
@@ -349,19 +358,16 @@ spec:
             - name: cache
               mountPath: {{ $cacheRoot }}
               readOnly: true
-            {{- if $ascendHostRoCE }}
-            # Shared Pod-local emptyDir for the broker's bootstrap credential and the
-            # private Unix-domain control sockets (control.sock / worker.sock); mounted
-            # writable so the worker can bind worker.sock without exposing loopback TCP
-            # on the host network namespace.
-            - name: bootstrap
-              mountPath: /run/model-transfer
-            {{- else }}
             # Written by the broker only; mounted read-only here so the credential is
             # readable and nothing else about the handshake is writable from this side.
             - name: bootstrap
               mountPath: /run/model-transfer
               readOnly: true
+            {{- if $ascendHostRoCE }}
+            # Dedicated Pod-local emptyDir for private Unix-domain control sockets
+            # (control.sock / worker.sock), isolated from the read-only bootstrap volume.
+            - name: control-sockets
+              mountPath: /run/model-transfer-sockets
             {{- end }}
             - name: dev-dir
               mountPath: /dev
@@ -405,6 +411,11 @@ spec:
         - name: bootstrap
           emptyDir:
             medium: Memory
+        {{- if $ascendHostRoCE }}
+        - name: control-sockets
+          emptyDir:
+            medium: Memory
+        {{- end }}
         - name: session-tls
           secret:
             secretName: {{ $mtName }}-{{ $manufacturer }}-cert

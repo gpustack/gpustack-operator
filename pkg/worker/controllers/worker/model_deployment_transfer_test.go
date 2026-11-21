@@ -3547,6 +3547,14 @@ func TestModelDeploymentModelTransferAscendA5PreferLifecycle(t *testing.T) {
 			explicitEPLBMD, &explicitEPLBMD.Spec.Roles[0],
 			nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, true,
 		))
+		assert.Empty(t, ModelDeploymentDirectInterfaceProtocol(
+			explicitEPLBMD, &explicitEPLBMD.Spec.Roles[0],
+			nodefeature.ManufacturerNVIDIA, "", true, false,
+		), "NVIDIA single-Pod vLLM Server with --enable-eplb must not qualify for remote-only NIXL RDMA")
+		assert.Equal(t, "rdma", ModelDeploymentDirectInterfaceProtocol(
+			elasticMD, &elasticMD.Spec.Roles[0],
+			nodefeature.ManufacturerNVIDIA, "", true, false,
+		), "NVIDIA Elastic EP Server must retain independent collective RDMA eligibility")
 
 		disabledEPLBMD := newRenderDeployment(func(m *workercore.ModelDeployment) {
 			m.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM

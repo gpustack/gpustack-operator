@@ -5949,6 +5949,7 @@ func TestModelDeploymentWebhook_AscendA5InterfaceCreate(t *testing.T) {
 		awsEFAEnabled bool
 		remotePolicy  string
 		withCANNStore bool
+		withRDMAStore bool
 		artifact      *workercore.ModelArtifact
 		md            func() *workercore.ModelDeployment
 		wantErrField  string
@@ -6452,6 +6453,37 @@ func TestModelDeploymentWebhook_AscendA5InterfaceCreate(t *testing.T) {
 			},
 		},
 		{
+			name:          "A5 SGLang asymmetric P/D with ArtifactRef and RDMA KVCache still rejected",
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			artifact:      hubArtifact(),
+			withRDMAStore: true,
+			wantErrField:  "spec.roles[0].resources.interface",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill"
+						r.Kind = workercore.ModelDeploymentRoleKindPrefill
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode"
+						r.Kind = workercore.ModelDeploymentRoleKindDecode
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)}
+					}),
+				)
+				md.Spec.KVCache.PoolRef.Name = "chat"
+				md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+				return md
+			},
+		},
+		{
 			name:         "A5 vLLM Encode role with ArtifactRef requesting interface still rejected",
 			family:       nodefeature.AcceleratorFamilyAscend950,
 			artifact:     hubArtifact(),
@@ -6562,6 +6594,11 @@ func TestModelDeploymentWebhook_AscendA5InterfaceCreate(t *testing.T) {
 			objs := []ctrlcli.Object{ascendType("ascend-pool", tc.family)}
 			if tc.withCANNStore {
 				objs = append(objs, cannKVCache()...)
+			}
+			if tc.withRDMAStore {
+				rdmaObjs := kvCacheFixture()
+				rdmaObjs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "RDMA"
+				objs = append(objs, rdmaObjs...)
 			}
 			if tc.artifact != nil {
 				objs = append(objs, tc.artifact.DeepCopy())

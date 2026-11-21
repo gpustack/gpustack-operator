@@ -2570,7 +2570,13 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 			if !whole {
 				return nil, fmt.Errorf("role %q requests a fractional interface count", role.Name)
 			}
-			resource, err := ModelDeploymentInterfaceResource(protocols, directProtocol, count)
+			roleProtocols := protocols
+			roleDirectProtocol := directProtocol
+			if ModelDeploymentAscendA5AsymmetricPair(md, role, manufacturer, family) {
+				roleProtocols = nil
+				roleDirectProtocol = ""
+			}
+			resource, err := ModelDeploymentInterfaceResource(roleProtocols, roleDirectProtocol, count)
 			if err != nil {
 				return nil, fmt.Errorf("role %q interface request: %w", role.Name, err)
 			}
@@ -2584,7 +2590,8 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 			manufacturer == nodefeature.ManufacturerAscend &&
 			family == nodefeature.AcceleratorFamilyAscend950 {
 			in.Artifact.ModelTransferAscendA5 = true
-			in.Artifact.ModelTransferAscendHostRoCE = interfaceResource != ""
+			in.Artifact.ModelTransferAscendHostRoCE = interfaceResource != "" &&
+				modelDeploymentAscendRemoteDirectProtocol(md, role, manufacturer, family, true) != ""
 		}
 		ascendHostRoCE := modelDeploymentAscendHostRoCE(
 			md.Spec.Engine.Name, manufacturer, family, kvDirectProtocol, role,

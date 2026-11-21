@@ -1002,7 +1002,11 @@ func normalizeModelDeploymentArtifactForRole(
 			return &a
 		}
 		a.ModelTransferAscendA5 = true
-		a.ModelTransferAscendHostRoCE = in.InterfaceResource != ""
+		a.ModelTransferAscendHostRoCE = in.InterfaceResource != "" &&
+			modelDeploymentAscendRemoteDirectProtocol(
+				in.Deployment, in.Role,
+				nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, true,
+			) != ""
 		return &a
 	}
 	a.ModelTransferAscendHostRoCE = a.ModelTransferAscendA5 && a.ModelTransferAscendHostRoCE && in.InterfaceResource != ""

@@ -68,6 +68,7 @@ func ModelDeploymentDirectInterfaceProtocol(
 	}
 	if remoteDelivery &&
 		!modelDeploymentRoleHasConflictingLoadFormat(md.Spec.Engine.Name, role.ExtraArgs) &&
+		!modelDeploymentRoleUsesEPLB(md, role) &&
 		modelDeploymentModelTransferCandidateBackend(manufacturer, md.Spec.Engine.Name) == "nixl" {
 		return directProtocol
 	}
@@ -189,6 +190,27 @@ func modelDeploymentAscendRemoteDirectProtocol(
 	default:
 		return ""
 	}
+}
+
+// ModelDeploymentAscendA5AsymmetricPair reports whether role is a Prefill or Decode half
+// of a managed Ascend A5 (Family "950") routed P/D pair where only one half requests fabric
+// interfaces. Rejecting this before cache-store protocol matching prevents a store-provided
+// RDMA grant from putting one half on Host RoCE and the other on UB.
+func ModelDeploymentAscendA5AsymmetricPair(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer, family string,
+) bool {
+	if md == nil || role == nil || len(role.Command) > 0 ||
+		manufacturer != nodefeature.ManufacturerAscend ||
+		family != nodefeature.AcceleratorFamilyAscend950 ||
+		!ModelDeploymentDeclaresBothHalves(md) {
+		return false
+	}
+	kind := ModelDeploymentEffectiveRoleKind(role)
+	if kind != workercore.ModelDeploymentRoleKindPrefill &&
+		kind != workercore.ModelDeploymentRoleKindDecode {
+		return false
+	}
+	return !ModelDeploymentDirectPairRequestsInterfaces(md)
 }
 
 func modelDeploymentRoleRequestsInterfaces(role *workercore.ModelDeploymentRole) bool {

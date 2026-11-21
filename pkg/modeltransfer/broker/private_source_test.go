@@ -114,6 +114,8 @@ func TestNewPrivateSourceWithAddress(t *testing.T) {
 			"unix:///",
 			"unix:///run/model-transfer/worker.sock?x=1",
 			"unix:///run/model-transfer/worker.sock#frag",
+			"unix:///tmp/../run/model-transfer/worker.sock",
+			"unix:///run/./model-transfer/worker.sock",
 			"http://10.0.0.2:9252",
 			"example.com:9252",
 			"https://127.0.0.1:9252",

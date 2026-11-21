@@ -1367,13 +1367,24 @@ func TestMemberWorkload_TCPClaimsNoHost(t *testing.T) {
 // took 15002 and 15995, a second client 16566 and 16655, none of them configured — so a fixed
 // containerPort would be a false statement about which ports the process uses.
 func TestMemberWorkload_DeclaresNoDataPlanePort(t *testing.T) {
-	for _, protocol := range []string{"Auto", "TCP", "RDMA", "EFA"} {
+	for _, protocol := range []string{"Auto", "TCP", "CANN"} {
 		t.Run(protocol, func(t *testing.T) {
 			kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 				k.Spec.Transport.Protocol = protocol
 			})
 			assert.Empty(t, memberContainer(t, kvcb, "mooncake:v0.3.13").Ports,
-				"the reachability requirement is a port RANGE, and the docs state it as one")
+				"non-host-network members declare no container ports")
+		})
+	}
+	for _, protocol := range []string{"RDMA", "EFA"} {
+		t.Run(protocol, func(t *testing.T) {
+			kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+				k.Spec.Transport.Protocol = protocol
+			})
+			assert.Equal(t,
+				[]core.ContainerPort{{Name: "http", ContainerPort: 8080, HostPort: 8080, Protocol: core.ProtocolTCP}},
+				memberContainer(t, kvcb, "mooncake:v0.3.13").Ports,
+				"host-network members reserve only the management REST hostPort and no data-plane ports")
 		})
 	}
 }

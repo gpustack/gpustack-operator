@@ -813,7 +813,9 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 		rolePath := field.NewPath("spec", "roles").Index(i).Child("resources", "interface")
 		efaActive := awsEFAEnabled || slices.Contains(roleProtocols, "efa")
 		directProtocol := ""
-		if !(manufacturer == nodefeature.ManufacturerAscend &&
+		if workerctrl.ModelDeploymentAscendA5AsymmetricPair(md, role, manufacturer, family) {
+			roleProtocols = nil
+		} else if !(manufacturer == nodefeature.ManufacturerAscend &&
 			len(roleProtocols) > 0 &&
 			!slices.ContainsFunc(roleProtocols, func(p string) bool { return p != "rdma" })) {
 			var err error

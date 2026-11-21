@@ -578,7 +578,7 @@ for vendor_hash in "${default_amd_hash}" "${default_ascend_hash}" "${default_nvi
     exit 1
   fi
 done
-if grep -qE 'hostNetwork|ascend-hixlep|/etc/hixlep|ASCEND_GLOBAL_RESOURCE_CONFIG|unix:///run/model-transfer/|GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS|--worker-addr=' <<<"${default_fleets}"; then
+if grep -qE 'hostNetwork|ascend-hixlep|/etc/hixlep|ASCEND_GLOBAL_RESOURCE_CONFIG|unix:///run/model-transfer-sockets/|control-sockets|GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS|--worker-addr=' <<<"${default_fleets}"; then
   echo 'hostRoCE default: disabled by default must omit hostNetwork, /etc/hixlep, ASCEND_GLOBAL_RESOURCE_CONFIG, and UDS control wiring' >&2
   exit 1
 fi
@@ -590,7 +590,7 @@ roce_nvidia_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer
 
 # AMD and NVIDIA stay completely isolated when Ascend Host RoCE is enabled.
 for other_doc in "${roce_amd_doc}" "${roce_nvidia_doc}"; do
-  if grep -qE 'hostNetwork|dnsPolicy|ascend-hixlep|/etc/hixlep|ASCEND_GLOBAL_RESOURCE_CONFIG|unix:///run/model-transfer/|GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS|--worker-addr=' <<<"${other_doc}"; then
+  if grep -qE 'hostNetwork|dnsPolicy|ascend-hixlep|/etc/hixlep|ASCEND_GLOBAL_RESOURCE_CONFIG|unix:///run/model-transfer-sockets/|control-sockets|GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS|--worker-addr=' <<<"${other_doc}"; then
     echo 'hostRoCE isolation: non-ascend source DaemonSets must stay unaffected' >&2
     exit 1
   fi
@@ -624,22 +624,30 @@ if grep -qE 'ascend-hixlep|/etc/hixlep|ASCEND_GLOBAL_RESOURCE_CONFIG' <<<"${roce
   echo 'hostRoCE enabled: broker must not receive /etc/hixlep mount or default ASCEND_GLOBAL_RESOURCE_CONFIG' >&2
   exit 1
 fi
-if ! grep -q '^            - --control-addr=unix:///run/model-transfer/control\.sock$' <<<"${roce_ascend_broker}" \
-  || ! grep -q '^            - --worker-addr=unix:///run/model-transfer/worker\.sock$' <<<"${roce_ascend_broker}" \
+if ! grep -q '^            - --control-addr=unix:///run/model-transfer-sockets/control\.sock$' <<<"${roce_ascend_broker}" \
+  || ! grep -q '^            - --worker-addr=unix:///run/model-transfer-sockets/worker\.sock$' <<<"${roce_ascend_broker}" \
   || grep -q -- '--control-addr=127\.0\.0\.1:9250' <<<"${roce_ascend_broker}"; then
-  echo 'hostRoCE enabled: ascend broker must bind and dial Unix-domain control sockets under /run/model-transfer' >&2
+  echo 'hostRoCE enabled: ascend broker must bind and dial Unix-domain control sockets under /run/model-transfer-sockets' >&2
   exit 1
 fi
 if [[ "$(grep -c '^            - name: GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS$' <<<"${roce_ascend_worker}")" -ne 1 ]] \
-  || ! grep -q '^              value: unix:///run/model-transfer/control\.sock$' <<<"${roce_ascend_worker}" \
+  || ! grep -q '^              value: unix:///run/model-transfer-sockets/control\.sock$' <<<"${roce_ascend_worker}" \
   || [[ "$(grep -c '^            - name: GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS$' <<<"${roce_ascend_worker}")" -ne 1 ]] \
-  || ! grep -q '^              value: unix:///run/model-transfer/worker\.sock$' <<<"${roce_ascend_worker}"; then
+  || ! grep -q '^              value: unix:///run/model-transfer-sockets/worker\.sock$' <<<"${roce_ascend_worker}"; then
   echo 'hostRoCE enabled: ascend worker must configure UDS broker and worker addresses without duplicates' >&2
   exit 1
 fi
 roce_bootstrap_mount="$(grep -A2 '^            - name: bootstrap$' <<<"${roce_ascend_worker}")"
-if grep -q 'readOnly: true' <<<"${roce_bootstrap_mount}"; then
-  echo 'hostRoCE enabled: ascend worker must mount /run/model-transfer writable to bind worker.sock' >&2
+if ! grep -q '^              readOnly: true$' <<<"${roce_bootstrap_mount}"; then
+  echo 'hostRoCE enabled: ascend worker must keep /run/model-transfer bootstrap volume readOnly: true' >&2
+  exit 1
+fi
+roce_sockets_worker_mount="$(grep -A2 '^            - name: control-sockets$' <<<"${roce_ascend_worker}")"
+roce_sockets_broker_mount="$(grep -A2 '^            - name: control-sockets$' <<<"${roce_ascend_broker}")"
+if ! grep -q '^              mountPath: /run/model-transfer-sockets$' <<<"${roce_sockets_worker_mount}" \
+  || grep -q 'readOnly: true' <<<"${roce_sockets_worker_mount}" \
+  || ! grep -q '^              mountPath: /run/model-transfer-sockets$' <<<"${roce_sockets_broker_mount}"; then
+  echo 'hostRoCE enabled: broker and worker must mount dedicated writable control-sockets volume at /run/model-transfer-sockets' >&2
   exit 1
 fi
 if ! grep -q '^            - name: ascend-hixlep$' <<<"${roce_ascend_worker}" \
@@ -705,12 +713,20 @@ shadow_ascend_worker="$(sed -n '/^        - name: worker$/,/^      volumes:/p' <
 shadow_ascend_hash="$(extract_config_hash "${shadow_ascend_doc}")"
 if [[ "$(grep -c '^            - name: GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS$' <<<"${shadow_ascend_worker}")" -ne 1 ]] \
   || grep -Fq '127.0.0.1:9999' <<<"${shadow_ascend_worker}" \
-  || ! grep -q '^              value: unix:///run/model-transfer/worker\.sock$' <<<"${shadow_ascend_worker}"; then
+  || ! grep -q '^              value: unix:///run/model-transfer-sockets/worker\.sock$' <<<"${shadow_ascend_worker}"; then
   echo 'hostRoCE worker address filter: managed UDS worker address must appear once with user TCP override stripped' >&2
   exit 1
 fi
 if [[ "${shadow_ascend_hash}" != "${roce_ascend_hash}" ]]; then
   echo 'hostRoCE worker address filter: shadowed user worker address must not alter effective config-hash' >&2
+  exit 1
+fi
+
+# Changing broker session policy (source.maxSessions) must move config-hash so OnDelete rolls the Pod.
+low_sessions="$(render --set modelTransfer.source.maxSessions=3 --show-only templates/model-transfer/daemonset.yaml)"
+low_sessions_ascend="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${low_sessions}")"
+if [[ "$(extract_config_hash "${low_sessions_ascend}")" == "${default_ascend_hash}" ]]; then
+  echo 'config-hash: changing modelTransfer.source.maxSessions must change config-hash' >&2
   exit 1
 fi
 

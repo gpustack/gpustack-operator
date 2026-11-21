@@ -127,6 +127,32 @@ func TestMemoryLimitFlags(t *testing.T) {
 	assert.Equal(t, int32(32), opts.MaxSessions)
 }
 
+func TestWriteBootstrapCredentialReplacesSymlinkAtomically(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "victim.txt")
+	require.NoError(t, os.WriteFile(victim, []byte("untouched"), 0o600))
+
+	bootstrap := filepath.Join(dir, "bootstrap")
+	require.NoError(t, os.Symlink(victim, bootstrap))
+
+	cfg := &Config{BootstrapFile: bootstrap}
+	token, err := cfg.writeBootstrapCredential()
+	require.NoError(t, err)
+	assert.Len(t, token, 64)
+
+	victimData, err := os.ReadFile(victim)
+	require.NoError(t, err)
+	assert.Equal(t, "untouched", string(victimData), "symlink target must not be overwritten")
+
+	fi, err := os.Lstat(bootstrap)
+	require.NoError(t, err)
+	assert.Zero(t, fi.Mode()&os.ModeSymlink, "bootstrap file must be a regular file after atomic rename")
+	assert.Equal(t, os.FileMode(0o600), fi.Mode().Perm())
+	got, err := os.ReadFile(bootstrap)
+	require.NoError(t, err)
+	assert.Equal(t, token, string(got))
+}
+
 func TestWorkerAndControlAddrFlagsAndComplete(t *testing.T) {
 	defaults := NewOptions()
 	assert.Equal(t, "127.0.0.1:9250", defaults.ControlAddr)
