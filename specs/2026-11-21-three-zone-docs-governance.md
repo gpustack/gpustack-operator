@@ -387,7 +387,7 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
       Acceptance: Retains every assigned minimum operator task from the Public Operating Coverage Matrix (`discovery`, `scheduling`, `admission`, `network-topology`, `topology/scheduling`, `instances/metrics`, `commands`, `instance-type-unit-resources`) inside the named public owners; flattens all `H4` headings in `vendor-prerequisites.md` and `nvidia-mig.md` to `<= H3`; removes all outbound relative links to `docs/reference/**`, `docs/contribute/**`, and the 14 moving module pages.
       Verify: `make lint docs`
 
-- [ ] **T6 · KV Cache & Model Delivery: public task retention and H4 flattening**
+- [x] **T6 · KV Cache & Model Delivery: public task retention and H4 flattening**
       Blocked by: T3
       Owns: `docs/modules/kv-cache/{_index.md,backend.md,pool.md,leader.md,local-disk-tier.md,disk-heavy-nodes.md}`, `docs/modules/model-delivery/{_index.md,artifact.md,image-source.md,prefetch.md,node-to-node-sync.md,remote.md,operations.md}`, `docs/walkthroughs/kv-cache/shared-cache.md`, `docs/walkthroughs/model-delivery/prefetch.md`
       Acceptance: Retains every assigned minimum operator task from the Public Operating Coverage Matrix (`kv-cache/injection.md`, `artifact-api.md`, `node-store.md`, `settings.md`, `commands.md`) inside the named public owners; flattens all `H4` headings in `kv-cache/backend.md` and `model-delivery/remote.md` to `<= H3`; separates ModelExpress configuration cleanly from benchmark results in `remote.md`; removes all outbound relative links to `docs/reference/**`, `docs/contribute/**`, and the 14 moving module pages.

@@ -24,10 +24,10 @@ so the successful remote path does not store a complete checkpoint on the target
 - [Require and Prefer](#require-and-prefer)
 - [Networks](#networks)
 - [Vendor-specific behavior](#vendor-specific-behavior)
+- [NVIDIA ModelExpress](#nvidia-modelexpress)
 - [Benchmarks](#benchmarks)
 - [Observing status](#observing-status)
 - [Troubleshooting](#troubleshooting)
-- [Rollback](#rollback)
 
 ## Configuration
 
@@ -139,9 +139,7 @@ Use the benchmark models `Qwen/Qwen3-8B` and `Qwen/Qwen3.6-35B-A3B` in namespace
 These are configuration examples, not captured benchmark manifests; default routing admits Ascend
 `hixl` for `vLLM` and `SGLang`.
 
-#### Node and source limits
-
-Set the broker's total ceiling to `128 GiB` and each HIXL generation's ceiling to `16 GiB`:
+**Node and source limits.** Set the broker's total ceiling to `128 GiB` and each HIXL generation's ceiling to `16 GiB`:
 
 ```yaml
 modelTransfer:
@@ -154,9 +152,7 @@ modelTransfer:
     GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES: "17179869184"  # 16 GiB per generation.
 ```
 
-#### Models and shared grant
-
-Label the source node `gpustack.ai/model-transfer-source: "true"`. Create the two artifacts,
+**Models and shared grant.** Label the source node `gpustack.ai/model-transfer-source: "true"`. Create the two artifacts,
 the store and its Binding. Repository revisions and manifest digests are resolved automatically;
 see [Model Artifact](artifact.md#manifest-digest) for optional digest checks.
 
@@ -213,9 +209,7 @@ spec:
     sessions: 64
 ```
 
-#### Two model sources
-
-Each prefetch references its own artifact and the shared `qwen-source` Binding:
+**Two model sources.** Each prefetch references its own artifact and the shared `qwen-source` Binding:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -268,9 +262,7 @@ keeps its own charge, even for the same digest; copies on additional nodes share
 For illustration, `16 GiB` of native backing charges about `17.6 GiB` with reservation overhead:
 three such sources fit within `64 GiB`; a fourth does not, even below the node's `128 GiB` ceiling.
 
-#### Smaller node budget
-
-Keep the Binding and prefetches above, but lower the broker's total ceiling to `16 GiB`:
+**Smaller node budget.** Keep the Binding and prefetches above, but lower the broker's total ceiling to `16 GiB`:
 
 ```yaml
 modelTransfer:
@@ -519,7 +511,7 @@ alignment, zeroing the tail, and charging the full backing allocation. A direct 
 `4 MiB` resolves to that minimum, double buffering needs `8 MiB`, and `HixlReader` preserves
 caller-owned bounds.
 
-#### Ascend A5 scenarios
+### Ascend A5 scenarios
 
 | Scenario | Configuration | Resulting behavior |
 |---|---|---|
@@ -602,7 +594,153 @@ of at least `2 MiB` retain their alignment, with NIXL window sizes rounded down 
 spans rounded up before clamping.
 
 For measured NIXL source-to-target numbers see [NVIDIA (NIXL)](#nvidia-nixl); for peer D2D tensor
-and compile-cache sharing see [NVIDIA (ModelExpress)](#nvidia-modelexpress).
+and compile-cache sharing see [NVIDIA ModelExpress](#nvidia-modelexpress) and
+[ModelExpress D2D](#modelexpress-d2d).
+
+## NVIDIA ModelExpress
+
+ModelExpress lets vLLM and SGLang replicas share GPU tensors over NIXL device-to-device (D2D)
+transfers and reuse compiled `torch.compile` and Triton caches across replicas. Hardware
+qualification remains separate.
+
+![ModelExpress peer and source delivery](../../assets/diagrams/model-delivery-modelexpress.svg)
+
+<!--
+flowchart LR
+    subgraph SOURCE["ModelPrefetch source"]
+        HOST["Source host memory"]
+    end
+    subgraph DEPLOYMENT["ModelDeployment"]
+        SERVER["In-memory gRPC metadata server"]
+        subgraph SEED["Seed replica (Replica 0)"]
+            PGPU["Device DRAM (GPU tensors)"]
+            PCACHE["Compile cache (torch.compile / Triton)"]
+        end
+        subgraph PEER["Peer replica (Replica 1)"]
+            TGPU["Device DRAM (GPU tensors)"]
+            TCACHE["Compile cache (torch.compile / Triton)"]
+        end
+    end
+    SEED ->|"Tensor descriptors and cache manifests"| SERVER
+    SERVER ->|"Peer and cache discovery"| PEER
+    PGPU ->|"RdmaStrategy: NIXL D2D tensor stream"| TGPU
+    PCACHE ->|"NIXL compile cache transfer"| TCACHE
+    HOST ..>|"Seed replica or restart fallback: GpustackLoadStrategy (NIXL H2H + H2D)"| SEED
+    HOST ..>|"Seed replica or restart fallback: GpustackLoadStrategy (NIXL H2H + H2D)"| PEER
+-->
+
+The metadata server discovers peers and cache manifests while NIXL transfers both GPU tensors (D2D)
+and compiled cache archives between replicas. When no ready peer is available (seed replica or
+after a metadata-server restart), `GpustackLoadStrategy` reads the `ModelPrefetch` source over NIXL
+H2H and H2D. ModelExpress peer D2D over HIXL is outside this design.
+
+### Role configuration
+
+Select the load format on a `ModelDeployment` role. The example uses a Hugging Face artifact and a
+cluster-specific runner image and accelerator type.
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen-chat
+  namespace: team-a
+spec:
+  model:
+    name: Qwen/Qwen3-8B  # required
+    artifactRef:
+      name: qwen-weights  # required for the prepared source
+  engine:
+    name: vLLM  # required; vLLM or SGLang
+    image: example/engine:tag  # required; use a compatible runner image
+  roles:
+    - name: server
+      replicas: 2
+      acceleratorType: gpustack--nvidia-a10g-linux-amd64
+      resources:
+        accelerator: 1
+      extraArgs:
+        - --load-format=modelexpress  # required; mx is also accepted
+```
+
+- **Load format**: Select `modelexpress` or `mx` in the role's command or extra arguments.
+- **Artifact**: ModelExpress integration requires a Hugging Face artifact.
+- **Overrides**: Role environment values override injected defaults (set `MX_ARTIFACT_TRANSFER: "0"` to disable cache transfer).
+- **Layout**: Peer replicas need matching tensor-parallel and pipeline-parallel layouts.
+
+The Operator injects these defaults into eligible role containers. This illustrative Pod excerpt
+shows the rendered environment. The actual Pod includes additional fields.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qwen-chat-server
+  namespace: team-a
+spec:
+  containers:
+    - name: server
+      image: example/engine:tag
+      env:
+        - name: MX_SERVER_ADDRESS
+          value: qwen-chat-modelexpress.team-a.svc:8001  # metadata Service
+        - name: MX_WORKER_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP  # replica Pod IP
+        - name: MX_ARTIFACT_TRANSFER
+          value: "1"  # enable artifact transfer
+        - name: MX_ARTIFACT_COMPILE_CONFIG_DIGEST
+          value: <role-digest>  # compile-cache identity, when available
+        - name: MX_ARTIFACT_READY_URL
+          value: http://127.0.0.1:8000/health  # when engine health is available
+        - name: MX_LOAD_PLUGIN
+          value: gpustack  # GPUStack loading strategy
+        - name: MX_LOAD_PLUGIN_BEFORE
+          value: server-cache  # strategy insertion point
+```
+
+- **Server address**: Long deployment names produce a shortened Service name.
+- **Digest**: The Operator omits the digest when no compile-cache identity is available.
+- **Health URL**: The Operator injects a URL only when it can grade the engine and its port is known.
+
+### Strategy and policy
+
+| Value | Meaning | Constraints |
+|---|---|---|
+| `RdmaStrategy` | Loads tensors from a ready peer over NIXL D2D. | Tried first; peer layouts must match. |
+| `GpustackLoadStrategy` | Loads from a ready `ModelPrefetch` source. | Tried after peer delivery. |
+| Other cache and `DefaultStrategy` | Load from eligible local cache or engine volume. | Available under `Prefer`. |
+| `Require` | Allows peer and prefetch source delivery. | Failure of both permitted strategies is terminal; no local checkpoint fallback. |
+| `Prefer` | Allows peer, prefetch source and eligible local delivery. | Local strategies follow the remote strategies. |
+
+Tensor-parallel ranks select `RdmaStrategy` independently before the source strategy. One rank can
+use a peer while another uses the source. After a source or local load, a replica publishes tensor
+descriptors and compile-cache manifests for later replicas.
+
+### Metadata server
+
+The Operator creates an in-memory gRPC server and Service for each deployment with a ModelExpress
+role. Both use the name `<md-name>-modelexpress`, shortened for long names. The server is an
+unauthenticated rendezvous service in the deployment namespace. Restrict its network access to
+trusted Pods.
+
+The worker `Setting` selects the server image. The Operator exposes it in the system namespace:
+
+```yaml
+apiVersion: gpustack.ai/v1
+kind: Setting
+metadata:
+  name: model-deployment-modelexpress-server-image
+  namespace: gpustack-system  # use the system namespace
+spec:
+  value: gpustack/mirrored-modelexpress-server:v0.8.0  # default image
+```
+
+- **Image**: Use `model-deployment-modelexpress-server-image` for registry redirection or image pinning.
+- **Restart**: Server replacement loses in-memory registrations; existing replicas keep serving.
+- **Recovery**: A new replica loads from a ready source or an eligible local path and publishes metadata.
+- **Scale from zero**: The first replica has no ready peer.
 
 ## Benchmarks
 
@@ -724,42 +862,7 @@ paging (108.89 s, `10.30×` with `TP0 + broadcast` on 235B). Pairing full source
 `TP all` lets all ranks pull concurrently, reaching 81.16 s (`4.84×`, 40.00 GiB target RAM) on 80B
 and 69.16 s (`16.21×`, 32.00 GiB target RAM) on 235B with zero target disk usage.
 
-### NVIDIA (ModelExpress)
-
-ModelExpress lets vLLM and SGLang replicas share GPU tensors over NIXL device-to-device (D2D)
-transfers and reuse compiled `torch.compile` and Triton caches across replicas. Hardware
-qualification remains separate.
-
-![ModelExpress peer and source delivery](../../assets/diagrams/model-delivery-modelexpress.svg)
-
-<!--
-flowchart LR
-    subgraph SOURCE["ModelPrefetch source"]
-        HOST["Source host memory"]
-    end
-    subgraph DEPLOYMENT["ModelDeployment"]
-        SERVER["In-memory gRPC metadata server"]
-        subgraph SEED["Seed replica (Replica 0)"]
-            PGPU["Device DRAM (GPU tensors)"]
-            PCACHE["Compile cache (torch.compile / Triton)"]
-        end
-        subgraph PEER["Peer replica (Replica 1)"]
-            TGPU["Device DRAM (GPU tensors)"]
-            TCACHE["Compile cache (torch.compile / Triton)"]
-        end
-    end
-    SEED ->|"Tensor descriptors and cache manifests"| SERVER
-    SERVER ->|"Peer and cache discovery"| PEER
-    PGPU ->|"RdmaStrategy: NIXL D2D tensor stream"| TGPU
-    PCACHE ->|"NIXL compile cache transfer"| TCACHE
-    HOST ..>|"Seed replica or restart fallback: GpustackLoadStrategy (NIXL H2H + H2D)"| SEED
-    HOST ..>|"Seed replica or restart fallback: GpustackLoadStrategy (NIXL H2H + H2D)"| PEER
--->
-
-The metadata server discovers peers and cache manifests while NIXL transfers both GPU tensors (D2D)
-and compiled cache archives between replicas. When no ready peer is available (seed replica or
-after a metadata-server restart), `GpustackLoadStrategy` reads the `ModelPrefetch` source over NIXL
-H2H and H2D. ModelExpress peer D2D over HIXL is outside this design.
+### ModelExpress D2D
 
 The runs below measured `235B (TP8 + EP)` (`Qwen/Qwen3-235B-A22B-Instruct-2507-FP8`) on two Nebius
 H100 80 GB nodes with vLLM 0.30.0 in graph mode, comparing the NIXL `TCP peer sync + local load`
@@ -789,114 +892,6 @@ and `0 GiB` target disk. Restoring the shared compile caches over NIXL cuts `tor
 After a metadata-server restart empties in-memory peer registrations, a new replica falls back to
 `GpustackLoadStrategy` (109.08 s from the resident 220.19 GiB source window, `10.28×` versus
 baseline) and republishes its descriptors once ready.
-
-#### Role configuration
-
-Select the load format on a `ModelDeployment` role. The example uses a Hugging Face artifact and a
-cluster-specific runner image and accelerator type.
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: ModelDeployment
-metadata:
-  name: qwen-chat
-  namespace: team-a
-spec:
-  model:
-    name: Qwen/Qwen3-8B  # required
-    artifactRef:
-      name: qwen-weights  # required for the prepared source
-  engine:
-    name: vLLM  # required; vLLM or SGLang
-    image: example/engine:tag  # required; use a compatible runner image
-  roles:
-    - name: server
-      replicas: 2
-      acceleratorType: gpustack--nvidia-a10g-linux-amd64
-      resources:
-        accelerator: 1
-      extraArgs:
-        - --load-format=modelexpress  # required; mx is also accepted
-```
-
-- **Load format**: Select `modelexpress` or `mx` in the role's command or extra arguments.
-- **Artifact**: ModelExpress integration requires a Hugging Face artifact.
-- **Overrides**: Role environment values override injected defaults (set `MX_ARTIFACT_TRANSFER: "0"` to disable cache transfer).
-- **Layout**: Peer replicas need matching tensor-parallel and pipeline-parallel layouts.
-
-The Operator injects these defaults into eligible role containers. This illustrative Pod excerpt
-shows the rendered environment. The actual Pod includes additional fields.
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: qwen-chat-server
-  namespace: team-a
-spec:
-  containers:
-    - name: server
-      image: example/engine:tag
-      env:
-        - name: MX_SERVER_ADDRESS
-          value: qwen-chat-modelexpress.team-a.svc:8001  # metadata Service
-        - name: MX_WORKER_HOST
-          valueFrom:
-            fieldRef:
-              fieldPath: status.podIP  # replica Pod IP
-        - name: MX_ARTIFACT_TRANSFER
-          value: "1"  # enable artifact transfer
-        - name: MX_ARTIFACT_COMPILE_CONFIG_DIGEST
-          value: <role-digest>  # compile-cache identity, when available
-        - name: MX_ARTIFACT_READY_URL
-          value: http://127.0.0.1:8000/health  # when engine health is available
-        - name: MX_LOAD_PLUGIN
-          value: gpustack  # GPUStack loading strategy
-        - name: MX_LOAD_PLUGIN_BEFORE
-          value: server-cache  # strategy insertion point
-```
-
-- **Server address**: Long deployment names produce a shortened Service name.
-- **Digest**: The Operator omits the digest when no compile-cache identity is available.
-- **Health URL**: The Operator injects a URL only when it can grade the engine and its port is known.
-
-#### Strategy and policy
-
-| Value | Meaning | Constraints |
-|---|---|---|
-| `RdmaStrategy` | Loads tensors from a ready peer over NIXL D2D. | Tried first; peer layouts must match. |
-| `GpustackLoadStrategy` | Loads from a ready `ModelPrefetch` source. | Tried after peer delivery. |
-| Other cache and `DefaultStrategy` | Load from eligible local cache or engine volume. | Available under `Prefer`. |
-| `Require` | Allows peer and prefetch source delivery. | Failure of both permitted strategies is terminal; no local checkpoint fallback. |
-| `Prefer` | Allows peer, prefetch source and eligible local delivery. | Local strategies follow the remote strategies. |
-
-Tensor-parallel ranks select `RdmaStrategy` independently before the source strategy. One rank can
-use a peer while another uses the source. After a source or local load, a replica publishes tensor
-descriptors and compile-cache manifests for later replicas.
-
-#### Metadata server
-
-The Operator creates an in-memory gRPC server and Service for each deployment with a ModelExpress
-role. Both use the name `<md-name>-modelexpress`, shortened for long names. The server is an
-unauthenticated rendezvous service in the deployment namespace. Restrict its network access to
-trusted Pods.
-
-The worker `Setting` selects the server image. The Operator exposes it in the system namespace:
-
-```yaml
-apiVersion: gpustack.ai/v1
-kind: Setting
-metadata:
-  name: model-deployment-modelexpress-server-image
-  namespace: gpustack-system  # use the system namespace
-spec:
-  value: gpustack/mirrored-modelexpress-server:v0.8.0  # default image
-```
-
-- **Image**: Use the [Setting](../../reference/settings.md) for registry redirection or image pinning.
-- **Restart**: Server replacement loses in-memory registrations; existing replicas keep serving.
-- **Recovery**: A new replica loads from a ready source or an eligible local path and publishes metadata.
-- **Scale from zero**: The first replica has no ready peer.
 
 ## Observing status
 
@@ -945,7 +940,7 @@ Start from *`status.model.remote`*, then the `WeightsReady` condition and the re
 Source loss does not change replicas that already loaded. Replicas still loading can wait in
 `AwaitingSource`. Under `Prefer`, a replica can fall back if its load fails outright.
 
-## Rollback
+### Rollback
 
 To roll back, patch the `model-artifact-remote-delivery-policy` `Setting` to `Disabled` (or set
 `modelTransfer.enabled: false` in chart values). New replicas use the base
@@ -960,7 +955,7 @@ on disk.
 **See also** — [Model Prefetch](prefetch.md) (the intent and the binding grant) ·
 [Model Store Operations](operations.md) (the delivery `Setting`s in operation) ·
 [Model Artifact](artifact.md) (the identity a source serves) ·
-[Model Deployment Status](../model-deployment/status.md) (the conditions around `WeightsReady`) ·
+[Model Deployment Configuration](../model-deployment/configuration.md) (deployment roles and remote delivery conditions) ·
 [Engine Compatibility](../model-deployment/engine-versions.md) (per-engine adapter notes)
 
 **Next** → [Model Artifact](artifact.md)

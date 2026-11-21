@@ -107,8 +107,9 @@ An image's identity is its reference digest. See [Resolution and revalidation](#
 
 *`status.nodes`* counts nodes whose `NodeModelStore` reports the digest `Ready`, `Downloading` or
 `Failed`. Artifacts with the same digest see the same nodes; only counts cross namespaces.
-The mean includes only downloading nodes. Each node represents a whole copy. See the
-[progress thresholds](node-store.md#resource) and the full-precision [progress view](artifact-api.md#progress-subresource).
+The mean includes only downloading nodes. Each node represents a whole copy. See
+[Read a node](operations.md#read-a-node) for stored thresholds and [Progress subresource](#progress-subresource)
+for the live progress view.
 
 The `worker.gpustack.ai/model-artifact-protection` finalizer holds a referenced artifact in
 `Terminating`. It waits until no `ModelDeployment` or `Instance` in the namespace references it.
@@ -187,7 +188,7 @@ answer at all falls back.
 
 **Delivery under an `Expected` identity.** No commit exists, so [Engine
 delivery](#engine-delivery) is refused (`AnchorNeedsNodeDelivery`) and
-[Node delivery](node-store.md#download-and-verification) draws the manifest and the bytes from the other
+[Node delivery](operations.md#read-a-node) draws the manifest and the bytes from the other
 nodes; with no peer holding the tree the mount fails naming the digest nothing holds. Seed one
 node while the hub is reachable, and the identity stands without it.
 
@@ -267,8 +268,8 @@ with *`command`*) gets the claim or node mount and nothing else, and nothing at 
 
 **`Node` delivery** mounts an inline CSI volume of the driver `model.csi.gpustack.ai`: the node's
 `model-manager` plugin downloads the digest once per node, verifies every byte against the manifest
-before anything is mounted, and mounts only for a resolved artifact in the `Pod`'s own namespace. The
-plugin and its resource are on the [Node Model Store](node-store.md).
+before anything is mounted, and mounts only for a resolved artifact in the `Pod`'s own namespace. See
+[Model Store Operations](operations.md) for cache settings, node status, and mount diagnosis.
 
 No Hub variable and no cache `emptyDir` is rendered under `Node` delivery, and the ephemeral-storage
 limit is not raised: the volume's bytes are not the `Pod`'s.
@@ -323,7 +324,8 @@ phase message carries the kubelet's own reason, which is the only place it survi
 
 - **Changing an endpoint or proxy `Setting` rolls every Engine-delivered deployment**, because the
   values are rendered into the `Pod`s. It does not re-resolve an artifact. For the same reason the
-  proxy `Setting` accepts no credentials ([Settings](../../reference/settings.md)).
+  proxy `Setting` (`model-artifact-https-proxy`) accepts no credentials; see
+  [Model Store Operations](operations.md#settings-and-precedence).
 - **The CA bundle `Setting` is not given to engine `Pod`s.** They run in tenant namespaces, which cannot
   mount a `ConfigMap` from the worker's. Mount your own `ConfigMap` and set `REQUESTS_CA_BUNDLE`.
 - A `trust_remote_code` model writes its code under `$HF_HOME/modules`, which is on the cache.
@@ -410,11 +412,82 @@ and `ReplicasUpToDate` reports that hold with reason `RolloutHeldByWeights`.
 If Kueue's `waitForPodsReady` is enabled (the chart leaves it off), a download that outlasts its
 timeout evicts and requeues the replica.
 
+### Progress subresource
+
+Query live download progress across nodes through the `progress` subresource on `ModelArtifact`
+(`mart`, `worker.gpustack.ai/v1`). `ModelArtifact` and `ModelPrefetch` statuses are worker-owned;
+`NodeModelStore` (`nms`) is cluster-scoped and supports `get`, `list`, `watch`, and `delete`.
+
+```bash
+kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/<ns>/modelartifacts/<name>/progress"
+```
+
+```yaml
+kind: ModelArtifactProgress
+apiVersion: worker.gpustack.ai/v1
+metadata:
+  name: qwen-72b
+  namespace: team-a
+timestamp: "2026-09-26T00:00:00Z"
+manifestDigest: sha256:...
+sizeBytes: 145424101604
+ready: 1
+downloading: 2
+failed: 1
+downloadingPercent: 42
+downloadingBytes: 123482472448
+live: 2
+failureReasons:
+  - reason: SourceUnavailable
+    count: 1
+```
+
+- **On-demand read**: Computed per request within a 13 s timeout across up to 64 downloading nodes; never persisted or watched.
+- **No node names**: Namespaced output hides node names; administrators read `NodeModelStore` for per-node details.
+- **Downloading mean**: Averages only downloading nodes; *`downloadingPercent`* is absent when no node is downloading.
+- **Live reachability**: Requires worker access to plugin port `32444`; unreachable nodes contribute stored bytes and drop from `live`.
+
+**Required RBAC:** The aggregated API server requires `get` on `modelartifacts/progress` in
+`worker.gpustack.ai` inside the artifact's namespace. Granting `get` on `modelartifacts` alone is
+insufficient, and the chart grants tenants no permissions in this group.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: model-artifact-reader
+  namespace: team-a
+rules:
+  - apiGroups:
+      - worker.gpustack.ai
+    resources:
+      - modelartifacts
+      - modelartifacts/progress
+    verbs:
+      - get
+      - list
+      - watch
+```
+
+Grant `nodemodelstores` (`get`, `list`, `watch`, `delete`) only via a `ClusterRole` to cluster
+administrators and the GPUStack server.
+
+### Inspecting failed mounts
+
+When `WeightsReady` stays `False` with `Materializing`, `MaterializationFailed`, or
+`WeightsNotMounted`, inspect the serving `Pod`'s `FailedMount` events (`kubectl -n <ns> describe pod <pod>`)
+and the node's `NodeModelStore` (`kubectl get nms <node> -o yaml`).
+
+A `PermissionDenied` event indicates a namespace, `artifactUID`, `manifestDigest`, or `Resolved=True`
+mismatch (cached bytes on disk never authorize another namespace). `Aborted` (`materializing ...`)
+or `Unavailable` indicates an active download, plugin startup sync, or failure backoff past `retryTime`;
+see [Mount diagnosis](operations.md#inspecting-failed-mounts) for exact commands and fixes.
+
 ## Instance model volumes
 
 *`additionalVolumes`* is immutable while the `Instance` runs.
 Set it at creation, or set `spec.stop: true` first and edit it while the `Instance` is stopped.
-See [Instance admission](../devices/admission.md).
+See [GPU Instances](../instances/_index.md#service-lifecycle).
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -464,17 +537,16 @@ waits instead when that node cannot run one, naming the node and the floor
 - **vLLM 0.29.0 needs `--enforce-eager` for InternLM2** with `trust_remote_code`, an engine defect.
 - **`Node` delivery downloads from the Hub on every cold node.** A `Pod` prefers the nodes already
   holding the digest, but only while they have room; placed anywhere else, its node downloads. See
-  [a node-delivered model prefers the nodes holding
-  it](../topology/scheduling.md#node-delivered-model-placement).
-- `Setting`s: [Settings & Environment Variables](../../reference/settings.md#settings) carries the
+  [Replica placement](operations.md#replica-placement) and [Topology Operations](../topology/operations.md).
+- `Setting`s: [Settings and precedence](operations.md#settings-and-precedence) carries the
   two hub endpoints, proxy, no-proxy, CA bundle, revalidation interval, delivery mode and the node
   cache's watermarks and download limits.
 
 ---
 
-**See also** — [Model Deployment](../model-deployment/configuration.md) for the rest of the deployment
-contract · [Node Model Store](node-store.md) for `Node` delivery ·
-[Model Artifact API](artifact-api.md) for resource status and `progress` · [KV Cache Injection Reference](../kv-cache/injection.md) for the store connector this
-prefixes · [Model Deployment Status](../model-deployment/status.md) for the other conditions.
+**See also** — [Model Deployment Configuration](../model-deployment/configuration.md) for the rest of the deployment
+contract · [Model Store Operations](operations.md) for `Node` delivery, cache commands, and mount diagnosis ·
+[Model Prefetch](prefetch.md) for warming and budgets · [KV Cache Pools and Bindings](../kv-cache/pool.md#pod-injection) for the store connector this
+prefixes · [Model Deployment Routing](../model-deployment/routing.md) for endpoint eligibility.
 
-**Next** → [Model Deployment Status](../model-deployment/status.md)
+**Next** → [Model Store Operations](operations.md) — configure and inspect the per-node model cache.

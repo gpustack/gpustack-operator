@@ -41,7 +41,7 @@ For a complete example, follow the
 ### Step 1: Configure cache
 
 Follow [Model Store Operations](operations.md#configuration) to configure node delivery.
-[Node Model Store](node-store.md) defines node cache state and the plugin.
+[Read a node](operations.md#read-a-node) explains how to inspect node cache state and the plugin.
 
 ### Step 2: Inspect delivery
 
@@ -53,8 +53,8 @@ kubectl get nodemodelstores
 ```
 
 **Verification:** Check the artifact's `Resolved` condition and the node cache status.
-See [Model Artifact Status](artifact.md#status) and [Node Model Store](node-store.md#resource).
-The [Model Artifact API](artifact-api.md) describes progress views.
+See [Model Artifact Status](artifact.md#status) and [Read a node](operations.md#read-a-node).
+[Progress subresource](artifact.md#progress-subresource) describes live progress views and required RBAC.
 [Node-to-Node Sync](node-to-node-sync.md) describes peer status and metrics.
 
 ## Troubleshooting

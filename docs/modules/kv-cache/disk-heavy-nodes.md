@@ -112,7 +112,6 @@ floor that binds here is the memory one above.
 
 **See also** — [KV Cache Backend](backend.md) (the backend API and the tier's own
 settings, failure modes and exits are documented) · [KV Cache Pools and Bindings](pool.md) (how a namespace is granted
-a quota on the store this backend runs) · [Settings & Environment Variables](../../reference/settings.md) (the
-`kv-cache-backend-image` `Setting`)
+a quota on the store this backend runs)
 
 **Next** → [KV Cache Pools and Bindings](pool.md) — granting a namespace a quota on the store configured here.

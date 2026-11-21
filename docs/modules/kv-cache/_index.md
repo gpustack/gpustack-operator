@@ -31,7 +31,7 @@ A binding grants capacity only; read the
 
 Start with the annotated [backend example](backend.md#connection-and-medium) and its constraints.
 Configure [pools and bindings](pool.md) for quotas and reuse domains.
-[KV Cache Injection](injection.md) defines the Pod labels, annotations and engine settings.
+[Pod injection](pool.md#pod-injection) defines the `Pod` labels, annotations, and verification checks.
 
 For an end-to-end configuration, follow the
 [Shared Cache Walkthrough](../../walkthroughs/kv-cache/shared-cache.md).
@@ -64,7 +64,8 @@ If a workload cannot use the cache, inspect backend, pool and binding status.
 | `MembersMounted=False` | `AmbiguousMemberIdentity` | Use node selectors that place the groups on different nodes. |
 | Writes fail with `RPC_FAIL (-900)` | Possible store and client minor-line mismatch | Check [version compatibility](backend.md#version-compatibility). |
 
-Use [Injection Refusals](injection.md#refusals-and-fixes) for webhook messages and fixes.
+Use [Refused engine launch](pool.md#refused-engine-launch) for webhook messages and fixes, and
+[Verify Pod binding](pool.md#verify-pod-binding) to check an admitted `Pod`.
 For quota and domain failures, see [Pool Operating Notes](pool.md#operating-notes).
 For backend failures, check [Backend Status](backend.md#status-and-conditions).
 

@@ -236,7 +236,7 @@ The prefetch warms one node (`minReady: 1`); serving `Pod`s scheduled onto nodes
 *`placement.nodeSelector`* find no warmed cache. High-watermark eviction order, pin behavior
 ([Step 4](#step-4-pin-weights-against-eviction)), and *`retention.ttlAfterLastUse`* expiry are
 covered in [Pinning and expiry](../../modules/model-delivery/prefetch.md#pinning-and-expiry) and
-[References, restart, collection](../../modules/model-delivery/node-store.md#references-restart-collection).
+[Cache collection rules](../../modules/model-delivery/operations.md#cache-collection-rules).
 
 ## Troubleshooting
 

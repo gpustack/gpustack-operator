@@ -153,7 +153,7 @@ layers overlapped pulled in 112 ms and added 11.8 MB where a cold node paid 2m10
 ---
 
 **See also** — [Model Artifact](artifact.md) for the artifact contract the image
-source joins · [Node Model Store](node-store.md) for the plugin chain an image
+source joins · [Model Store Operations](operations.md) for the node cache that an image
 source stays out of · [Model Prefetch](prefetch.md) for why there is nothing to
 warm.
 

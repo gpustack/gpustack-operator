@@ -67,10 +67,10 @@ spec:
           capacityPerMember: 8Gi
 ```
 
-*`spec.image`* is left unset on purpose: the cluster-wide `kv-cache-backend-image`
-[Setting](../../reference/settings.md) supplies this project's own build, which is the one that can elect a leader
-later. Naming a published upstream image here works until Step 4 and then does not. See
-[High availability](../../modules/kv-cache/leader.md#high-availability).
+*`spec.image`* is left unset on purpose: the cluster-wide `kv-cache-backend-image` Setting
+(`kubectl -n gpustack-system get setting kv-cache-backend-image`) supplies this project's own build,
+which is the one that can elect a leader later. Naming a published upstream image here works until
+Step 4 and then does not. See [High availability](../../modules/kv-cache/leader.md#high-availability).
 
 *`capacityPerMember`* is charged to each member `Pod`'s host memory request, so it is a claim on the node
 and not a hint. One member `Pod` runs per node the selector matches.
@@ -147,7 +147,7 @@ admitted with a warning, the Binding reports `QuotaGranted=True` with reason `Un
 
 **A multi-tenant master refuses a tenant name absent from its ledger.** An engine that ignores the
 injected tenant then needs a second Binding whose domain is `default`, or that leaves `name` out.
-See [Tenant compatibility](../../modules/kv-cache/injection.md#tenant-compatibility).
+See [Tenant compatibility](../../modules/kv-cache/pool.md#tenant-compatibility).
 
 ## Step 3: Create the workload
 
@@ -180,18 +180,29 @@ useful comparison to have run once before attributing anything to the pool.
 
 **The engine is configured by injection, not by anything you write here.** The operator resolves the
 Binding, reads the backend's endpoint and the domain, and injects the store's environment into every
-role's `Pod`. What is injected per engine, and every refusal, is on
-[KV Cache Injection](../../modules/kv-cache/injection.md).
+role's `Pod`. What is injected per engine, and every refusal, is under
+[Pod injection](../../modules/kv-cache/pool.md#pod-injection).
 
-**The store version must match the engine's client.** The engine version above decides the client,
-and Step 1's unset *`spec.image`* leaves the store on the `Setting`s default. A pair on different lines
-starts healthy and then fails every write, so the version above is a choice. See
+**The store version must match the engine's client.** Check `pip show mooncake-transfer-engine` (or
+`mooncake-transfer-engine-npu` on Ascend) inside the engine image against the backend's minor line.
+Non-`default` reuse domains also require `mooncake-transfer-engine >= 0.3.13`; older images fail
+with `TypeError: setup(): incompatible function arguments`. See
 [Version compatibility](../../modules/kv-cache/backend.md#version-compatibility).
 
-Check the attachment from the deployment's own status rather than from the `Pod`s:
+Check attachment on the `ModelDeployment`, then verify the pool binding annotation on an admitted `Pod`:
 
 ```bash
-kubectl -n team-a get md qwen-chat -o jsonpath='{.status.conditions[?(@.type=="CacheAttached")]}'
+kubectl -n team-a get md qwen-chat -o jsonpath='{.status.conditions[?(@.type=="CacheAttached")]}{"\n"}'
+kubectl -n team-a get pod <pod-name> -o jsonpath='{.metadata.annotations.kvcache\.gpustack\.ai/injected}{"\n"}'
+```
+
+On an injected `Pod`, the annotation reports `"binding"`, `"domain"`, and `"tenantInjected":true`
+(for `ModelDeployment` roles, `CacheAttached=True` confirms the rendered attachment). On vLLM,
+verify the image reads the projected file:
+
+```bash
+kubectl -n team-a exec <pod-name> -- python3 -c \
+  "import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print('reader present')"
 ```
 
 ## Step 4: Enable high availability
@@ -370,16 +381,20 @@ asked. *`status.effectiveQuota`* on each Binding shows the grant. See
 
 - Domain reuse boundaries and tenant-ledger requirements are covered in
   [Limitations](../../modules/kv-cache/pool.md#limitations) and
-  [Tenant compatibility](../../modules/kv-cache/injection.md#tenant-compatibility).
+  [Tenant compatibility](../../modules/kv-cache/pool.md#tenant-compatibility).
 - Binding deletion holds (`Releasable=False`, including `HeldByWorkloads`) are covered in
   [Operating notes](../../modules/kv-cache/pool.md#operating-notes).
 - Engine-version and *`blockSize`* / `dtype` compatibility across workloads sharing a domain are
-  covered in [Tenant compatibility](../../modules/kv-cache/injection.md#tenant-compatibility).
+  covered in [Tenant compatibility](../../modules/kv-cache/pool.md#tenant-compatibility).
 
 ## Troubleshooting
 
 | Symptom | Signal | Check & Mitigation |
 |---|---|---|
+| `Pod` or `ReplicaSet` injection refused | Event: `FailedCreate` naming `binding`, `engine`, launcher, flag collision, or `QuotaLedgerAvailable` | Fix the missing/cross-namespace annotation, conflicting `--kv-transfer-config`/`--kv-cache-dtype`, indirect launcher, or wait for pool `clientEndpoint`. See [Refused engine launch](../../modules/kv-cache/pool.md#refused-engine-launch) |
+| vLLM-Ascend container fails at start | Log: `NotImplementedError: MooncakeBackend does not support protocol 'tcp'` | Backend defaulted to `Auto` (`tcp`); set `spec.transport.protocol: CANN` on the backend or member group |
+| Engine fails with `TypeError` on `setup()` | Log: `TypeError: setup(): incompatible function arguments` | Engine's `mooncake-transfer-engine` is below `0.3.13`; upgrade the image or set *`spec.domain.name`* to `default` |
+| Cache writes fail or vLLM check errors | `TENANT_NOT_REGISTERED` in logs, or `ImportError` on reader check | For `TENANT_NOT_REGISTERED`, confirm the Binding is active in the `Pod` namespace; for `ImportError`, use a vLLM image with `MooncakeStoreConnector` |
 | `KVCacheBackend` stuck in `Provisioning` or `Error` | Condition: `LeaderAvailable=False` | Leader `Deployment` unready, image missing election backend, or external endpoint address unreachable |
 | `KVCacheBackend` shows `Degraded` | Condition: `MembersMounted` shortfall (`SegmentsShort`, `NoSegments`) | `DaemonSet` member `Pod`s failing to mount or allocate memory/disk segments; check node capacity and daemon logs |
 | `KVCachePool` shows `Error` | Condition: `BackendResolved=False` / `CapacityAllocatable=False` | Referenced backend does not exist or has zero allocatable capacity |
@@ -402,7 +417,6 @@ asked. *`status.effectiveQuota`* on each Binding shows the grant. See
 [KV Cache Pools and Bindings](../../modules/kv-cache/pool.md) (quota, domains and what a full quota does) ·
 [KV Cache Local Disk Tier](../../modules/kv-cache/local-disk-tier.md) (directory, bucket and cleanup rules) ·
 [Model Deployment](../../modules/model-deployment/configuration.md) (roles, *prefill*/*decode*, rollout) ·
-[Prefill and Decode](../../modules/model-deployment/prefill-decode.md) (router, transfer) ·
-[KV Cache Injection](../../modules/kv-cache/injection.md) (what a `Pod` actually receives)
+[Prefill and Decode](../../modules/model-deployment/prefill-decode.md) (router, transfer)
 
 **Next** → [Model Prefetch Walkthrough](../model-delivery/prefetch.md) — cache weights on GPU nodes before serving.

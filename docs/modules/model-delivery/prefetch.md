@@ -10,8 +10,8 @@ lands the weights through the node cache's ordinary delivery. These resources di
 | `ModelPrefetch` | namespaced | tenant | one artifact's residency intent: a target set, how many nodes make it available, and its retention |
 
 The node's effective configuration is still `NodeModelStore`: the store layer merges above the
-cluster defaults under [Model Store Operations](operations.md), and the plugin side of
-every field is in the [Node Model Store](node-store.md).
+cluster defaults under [Model Store Operations](operations.md), and [Read a node](operations.md#read-a-node)
+explains how to inspect each node's status.
 
 ![Model prefetch peer sync and external download flow](../../assets/diagrams/model-delivery-prefetch.svg)
 
@@ -46,7 +46,7 @@ defaults when the `Setting`s carry no value.
 
 The columns are the pool's policy, not what a node has already applied: a node's own kubelet
 thresholds can cap the high watermark lower, which only that node's
-[NodeModelStore](node-store.md) shows. `Setting`s changes appear on the next `kubectl get`.
+[NodeModelStore](operations.md#read-a-node) shows. `Setting`s changes appear on the next `kubectl get`.
 A `Setting`s-only change does not trigger an update in an existing `kubectl get --watch`.
 
 A `ModelStoreBinding` is the provisioning point: creating one in a namespace is what grants that
@@ -177,9 +177,9 @@ A warm-up `Pod` never carries a `kueue.x-k8s.io/queue-name` label: a labeled `Po
 admission and topology gates and never scheduled, and this operator's own `Pod` webhook ignores
 unlabeled `Pod`s.
 
-The image is a [Setting](../../reference/settings.md): the `Pod` needs only a shell,
-`find` and `sha256sum`, and the one thing the default cannot guarantee is that a given cluster's
-registry has it.
+The image comes from the `model-prefetch-warmup-image` [Setting](operations.md#settings-and-precedence):
+the `Pod` needs only a shell, `find` and `sha256sum`, and the one thing the default cannot guarantee
+is that a given cluster's registry has it.
 
 ## Budgets and admission
 
@@ -208,7 +208,7 @@ content reports its saturation exactly as a cache full of references does.
 
 Pinning requires the grant. The nodes' pin lists are written as one union by the prefetch
 controller, the field's single writer, so two namespaces pinning one node keep both digests. See
-[Node Model Store](node-store.md#references-restart-collection) for how a pinned digest behaves
+[Cache collection rules](operations.md#cache-collection-rules) for how a pinned digest behaves
 under collection.
 
 *`spec.retention.ttlAfterLastUse`* unpins a node's copy once nothing mounted it for that long. It is
@@ -260,11 +260,12 @@ status:
       reason: CompleteSummary
 ```
 
-The [ModelPrefetch API](artifact-api.md#resources) supports resource operations and adds no subresource: the per-node
-facts already live on the nodes' reports, and the table prints who warms what and how far.
+The `ModelPrefetch` API (`worker.gpustack.ai/v1`) adds no `progress` subresource: per-node
+facts already live on `NodeModelStore` reports (`kubectl get nms`), and the table prints who
+warms what and how far.
 
 ---
 
-**See also** — [Model Artifact](artifact.md) (what a prefetch warms) · [Node Model Store](node-store.md) (the node side of every field named here) · [Model Store Operations](operations.md) (the pool layer's settings in operation)
+**See also** — [Model Artifact](artifact.md) (what a prefetch warms, and its `progress` subresource) · [Model Store Operations](operations.md) (settings, node status, and collection rules) · [Remote Weight Delivery](remote.md) (using prepared sources for remote loading)
 
-**Next** → [Node Model Store](node-store.md) — the node object the plugin serves.
+**Next** → [Model Store Operations](operations.md) — configure node cache settings and inspect nodes.

@@ -20,6 +20,7 @@ Two vocabularies meet here, as on the backend page. This API says **reuse domain
 - [Quota policy file](#quota-policy-file)
 - [Zero grants](#zero-grants)
 - [Operating notes](#operating-notes)
+- [Pod injection](#pod-injection)
 
 ## Two kinds by scope
 
@@ -122,7 +123,7 @@ question, answered in
   in one default tenant, so a second distinct domain against it is **rejected at admission**.
   Otherwise the Binding is admitted with a **warning**, including when the master's ledger state
   is still unknown. The store's support is unproven, so the image must meet the
-  [engine's tenant compatibility floor](injection.md#tenant-compatibility).
+  [tenant compatibility floor](#tenant-compatibility).
 - **A workload may not *register* its own domain.** It sends a domain name at runtime, because that
   is how the store is addressed, but a multi-tenant master accepts only names an admin already
   registered through a Binding. Every distinct registered name is a new tenant with its own
@@ -164,7 +165,7 @@ not carried over.
 
 *`domain.dtype`* is rendered as `--kv-cache-dtype <dtype>`, **verbatim**, on every engine attached
 through the Binding: each `ModelDeployment` role the operator builds the command line of, and each
-[injected Pod](injection.md). Neither engine's store key carries the dtype, so
+[injected Pod](#pod-injection). Neither engine's store key carries the dtype, so
 without this two engines on one domain can write two element types under one key.
 
 > **Why** — the failure is silent in one direction. A reader whose dtype is narrower than the
@@ -184,7 +185,8 @@ without this two engines on one domain can write two element types under one key
   [Operator-owned keys](../model-deployment/configuration.md#operator-owned-keys).
 
 All of it follows the `Setting` `model-deployment-kv-cache-dtype-owned`, on by default; turning it
-off renders and refuses nothing, as before. See [Settings](../../reference/settings.md).
+off renders and refuses nothing, as before. Inspect it with
+`kubectl -n gpustack-system get setting model-deployment-kv-cache-dtype-owned`.
 
 | Engine | Accepts |
 |---|---|
@@ -396,14 +398,128 @@ team-a   shared-dram   qwen-72b-v2   450Gi       280Gi    Ready   6d
 A grant well below the ceiling is oversubscription, which is legitimate and reported. A grant of
 zero is the [Zero grants](#zero-grants) case.
 
+## Pod injection
+
+Any `Pod` can join a `KVCachePoolBinding` through the opt-in admission webhook. A `Pod` without the
+injection label is left untouched by this webhook.
+
+### Pod injection contract
+
+A `Pod` opts in with `kvcache.gpustack.ai/inject: "true"` and configures injection through
+annotations. Leaving `kvcache.gpustack.ai/role` unset configures a plain shared read-write server;
+setting `Server` is refused.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: chat-0
+  namespace: team-a
+  labels:
+    kvcache.gpustack.ai/inject: "true"  # required opt-in trigger
+  annotations:
+    kvcache.gpustack.ai/binding: team-a  # required KVCachePoolBinding in this namespace
+    kvcache.gpustack.ai/engine: vLLM     # required: vLLM or SGLang
+    kvcache.gpustack.ai/manufacturer: ascend  # optional; vLLM only, selects vLLM-Ascend
+    kvcache.gpustack.ai/role: Prefill    # optional: Prefill or Decode (vLLM only)
+    kvcache.gpustack.ai/container: server  # required for multi-container Pods
+spec:
+  containers:
+    - name: server
+      image: vllm/vllm-openai:v0.29.0
+      command:
+        - vllm
+      args:
+        - serve
+        - --model
+        - Qwen/Qwen2.5-7B-Instruct
+      resources:
+        requests:
+          memory: 16Gi  # add 128 MiB on vLLM or 16 MiB on SGLang for staging
+        limits:
+          memory: 16Gi
+```
+
+- **Namespace scope**: `kvcache.gpustack.ai/binding` resolves only in the `Pod`'s own namespace; `/` is refused.
+- **Engine declaration**: Set `vLLM` or `SGLang`; the webhook never guesses the engine from the image.
+- **vLLM vehicles**: Injects `--kv-transfer-config`, `MOONCAKE_CONFIG_PATH`, `--kv-cache-dtype`, and `/etc/gpustack/kvcache`.
+- **SGLang vehicles**: Injects `--hicache-storage-backend mooncake`, `--enable-hierarchical-cache`, `--kv-cache-dtype`, and `MOONCAKE_*` environment variables.
+- **Host memory budget**: Add `128 MiB` (vLLM) or `16 MiB` (SGLang) to container memory requests and limits.
+- **SGLang host pool**: SGLang reserves `hicache_ratio` (default `2.0`) × device KV pool plus a `10 GiB` node reserve.
+- **Forbidden vLLM override**: Never set `kv_offloading_size` on an injected container; it overwrites `kv_connector` silently.
+- **Immutable live keys**: `kvcache.gpustack.ai/inject`, `.../injected`, and `.../client-config` freeze after `Pod` creation.
+
+### Refused engine launch
+
+The webhook fails closed whenever an injection ambiguity or invalid pool state would start an engine
+without shared caching. Inspect admission refusals on the `Deployment` or `ReplicaSet` events, and
+startup errors in container logs:
+
+```bash
+kubectl -n <namespace> get events --field-selector type=Warning
+kubectl -n <namespace> describe rs <replicaset-name>
+kubectl -n <namespace> logs <pod-name> -c <container-name>
+```
+
+| Symptom | Expected signal | Resolution |
+|---|---|---|
+| `Pod` refused at apply | Admission message naming `binding` or `engine` | Set `kvcache.gpustack.ai/binding` (same namespace) and `kvcache.gpustack.ai/engine` (`vLLM` or `SGLang`). |
+| `Pod` refused on role or container | Message rejecting `Server`, missing `container`, or init container | Omit `role` for plain servers; name an app container in `kvcache.gpustack.ai/container`. |
+| Pool readiness refusal | Message naming `QuotaLedgerAvailable` or `status.clientEndpoint` | Restore the backend leader or wait until the pool publishes *`status.clientEndpoint`*. |
+| Conflicting flag or volume | Message naming `--kv-transfer-config`, `MOONCAKE_CONFIG_PATH`, `--hicache-storage-backend`, `--kv-cache-dtype`, or `/etc/gpustack/kvcache` | Remove the manual flag, env var, or mount; match the Binding's *`spec.domain.dtype`*. |
+| Unrecognised launch command | Message rejecting bare `args`, `sh -c`, `env -S`, or `.sh` wrapper | Put the engine binary in *`command`* and flags in `args`, or set `launch-args-forwarded: "true"`. |
+| Transport protocol mismatch | Admission `NotSupportedTransport` or vLLM-Ascend `NotImplementedError` for `tcp` | Set `spec.transport.protocol: CANN` on Ascend backends, or match pool group protocols. |
+
+### Verify Pod binding
+
+Confirm that an admitted `Pod` received its binding configuration by reading the
+`kvcache.gpustack.ai/injected` annotation:
+
+```bash
+kubectl -n <namespace> get pod <pod-name> -o jsonpath='{.metadata.annotations.kvcache\.gpustack\.ai/injected}{"\n"}'
+```
+
+Captured output:
+
+```text
+{"binding":"chat","engine":"vllm","vehicle":"file","domain":"team-a-chat",
+ "tenantInjected":true,"launchProgram":"vllm","launchArgsForwarded":false}
+```
+
+Confirm `"binding"` matches the intended `KVCachePoolBinding`, `"domain"` matches its reuse domain,
+and `"tenantInjected"` is `true` (ignore legacy `engineVersion` fields on older `Pod`s). For a
+`ModelDeployment`, also check `CacheAttached`:
+
+```bash
+kubectl -n <namespace> get md <deployment-name> -o jsonpath='{.status.conditions[?(@.type=="CacheAttached")]}{"\n"}'
+```
+
+On vLLM `Pod`s, verify the container image actually imports the `MooncakeStoreConnector` reader; an
+`ImportError` means the container runs without using the cache:
+
+```bash
+kubectl -n <namespace> exec <pod-name> -- python3 -c \
+  "import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print('reader present')"
+```
+
+### Tenant compatibility
+
+**Use an engine image whose Mooncake library reads the injected tenant when isolation or separate
+ledgers are required.** `tenantInjected: true` only proves the webhook wrote `tenant_id` (vLLM) or
+`MOONCAKE_TENANT_ID` (SGLang); admission never inspects the container image.
+
+- **Match store minor line**: Check `pip show mooncake-transfer-engine` (or `mooncake-transfer-engine-npu` on Ascend) against the backend's [version compatibility](backend.md#version-compatibility).
+- **Non-`default` domain floor**: A non-`default` *`spec.domain.name`* requires `mooncake-transfer-engine >= 0.3.13` in the engine image.
+- **Older image failure**: Below `0.3.13`, non-`default` domains fail startup with `TypeError: setup(): incompatible function arguments`.
+- **Fallback for older images**: Keep *`spec.domain.name`* at `default` (or omit it) so all clients share the default ledger.
+- **Unregistered tenant**: Writes to an unknown or terminating domain fail with `TENANT_NOT_REGISTERED`.
+
 ---
 
 **See also** — [KV Cache Backend](backend.md) (the store this pool publishes, and where eviction is
-configured) · [KV Cache Injection](injection.md) (how a `Pod` consumes a namespace grant) ·
-[Model Deployment](../model-deployment/configuration.md) (the other half of the
+configured) · [Model Deployment](../model-deployment/configuration.md) (the other half of the
 worked pair: a rendered engine names this Binding through *`spec.kvCache.poolRef`*) ·
-[Admission](../devices/admission.md) (the gates and the four-view status
-pattern) · [Settings & Environment Variables](../../reference/settings.md)
+[Shared Cache Walkthrough](../../walkthroughs/kv-cache/shared-cache.md) (end-to-end cache setup and verification)
 
 **Next** → [Accelerator Requests](../devices/requests.md) — how a workload asks for the devices it
 runs on.

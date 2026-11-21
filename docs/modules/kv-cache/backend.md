@@ -309,12 +309,11 @@ visible. Wait until the tenant is listed and retry; the store is not failing.
 
 **Both host fabrics also grant the member one device, and the protocol names it.** Nothing is
 declared: an `RDMA` group asks for `device.gpustack.ai/rdma.shared`, one of
-[this operator's own RDMA keys](../rdma/network-topology.md#rdma-resource-keys);
-an `EFA` group asks for
-[the key AWS's EFA device plugin advertises](../rdma/network-topology.md#rdma-resource-keys).
+[this operator's own RDMA keys](../rdma/operations.md#choosing-a-key);
+an `EFA` group asks for the key AWS's EFA device plugin advertises.
 
-The renderer **derives** the RDMA resource name. The [RDMA resource-key contract](../rdma/network-topology.md#rdma-resource-keys)
-defines that name. The request is the permission (a bind mount of a device tree is
+The renderer **derives** the RDMA resource name from the [RDMA key rules](../rdma/operations.md#choosing-a-key).
+The request is the permission (a bind mount of a device tree is
 not), so the member that gets one can `open()` the adapter and the member that gets none could not
 have.
 
@@ -427,7 +426,7 @@ Ascend A5 UB/UBG/UBoE). Setting `fabricInterfaceCount >= 1` enables Ascend A5 Ho
 - **Defaulted env**: Injects `ASCEND_LOCAL_COMM_RES=""` and `ASCEND_GLOBAL_RESOURCE_CONFIG='{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep/ub_endpoint_npu_0.json"}'` unless declared in *`members[].extraEnv`*.
 - **Admission checks**: Suppresses the idle *`fabricInterfaceCount`* warning for `CANN`, while rejecting *`localDisks[].path`* overlapping `/etc/hixlep`.
 
-#### Ascend A5 scenarios
+### Ascend A5 scenarios
 
 The matrix maps Ascend A2/A3 and Ascend A5 (`950PR`/`950DT`) configurations to rendered member
 behavior:
@@ -988,8 +987,6 @@ judging on another is how an object goes missing from its own teardown.
 **See also** — [KV Cache Election and Failover](leader.md) (the metadata process, its probes and its
 `Lease` election) · [KV Cache Local Disk Tier](local-disk-tier.md) (the optional disk layer on a member
 group, and the bucket that is its write unit) · [KV Cache Pools and Bindings](pool.md) (how a namespace is granted
-a quota on this store, and what a quota ceiling buys) · [Admission](../devices/admission.md) (the gates and the four-view status pattern) ·
-[Settings & Environment Variables](../../reference/settings.md) (the `kv-cache-backend-image` `Setting`) ·
-[Installation Modes](../../operate/installation-modes.md) (why the CRD is applied by the worker, not the chart)
+a quota on this store, and what a quota ceiling buys) · [Installation Modes](../../operate/installation-modes.md) (why the CRD is applied by the worker, not the chart)
 
-**Next** → [Internals](../../contribute/internals.md) — startup ordering and the invariants that fail silently.
+**Next** → [KV Cache Local Disk Tier](local-disk-tier.md) — optional local disk offload for a member group.

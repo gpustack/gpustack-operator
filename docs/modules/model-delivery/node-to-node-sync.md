@@ -92,7 +92,7 @@ A pull uses one peer at a time; it does not stripe a file across several peers.
 `NodeModelStore.status.models[].source` names where the bytes came from (`Hub` or `Peer`, the
 majority kind), and the plugin's `download_bytes_total` metric splits `hub` from `peer`. On a
 shared filesystem, kubelet's eviction thresholds still cap the cache's high watermark as
-[Node Model Store](node-store.md) describes; a threshold kubelet can never fire
+[the capacity rule](operations.md#capacity-rule) describes; a threshold kubelet can never fire
 floors that cap, because the cache's own collection is then the only space reclaimer.
 
 ## Trade-offs
@@ -104,7 +104,7 @@ on 2-vCPU nodes, plus the link's bandwidth); on GPU nodes this shares headroom w
 
 ---
 
-**See also** — [Node Model Store](node-store.md) for the cache the trees live in, and
+**See also** — [Model Store Operations](operations.md) for node cache configuration and inspection, and
 [Model Artifact](artifact.md) for the manifest digest the listings are bound to.
 
 

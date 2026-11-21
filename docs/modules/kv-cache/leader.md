@@ -277,8 +277,7 @@ store problem.
 **See also** — [KV Cache Backend](backend.md) (the object this leader belongs to, its members, and
 what status reports) · [KV Cache Local Disk Tier](local-disk-tier.md) (the disk tier, whose offload
 flags this leader derives from the members' declaration) · [High Availability Operations](../../operate/high-availability.md) (the replica setting
-per control-plane component) · [Settings & Environment Variables](../../reference/settings.md) (the
-`kv-cache-backend-image` `Setting`)
+per control-plane component)
 
 **Next** → [KV Cache Backend](backend.md) — the members this leader serves, and the status it is read
 from.

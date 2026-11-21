@@ -1,8 +1,8 @@
 # Model Store Operations
 
 The `model-manager` `DaemonSet` keeps one model cache per node. It downloads each Hugging Face or ModelScope
-`ModelArtifact` digest once per node and mounts it for workloads. Configure and inspect that cache
-with the steps below; [Node Model Store](node-store.md) explains each mount.
+`ModelArtifact` digest once per node and mounts it for workloads. Each mount is authorized against a
+`ModelArtifact` in the `Pod`'s namespace and served read-only by `model.csi.gpustack.ai`.
 
 ## Contents
 
@@ -61,21 +61,43 @@ A node without the plugin cannot mount node-delivered weights.
 | Layer | Carrier | Owner | Scope |
 | --- | --- | --- | --- |
 | Deploy time | chart values; in image mode the worker's overlay, which sets only the switch | installer | the switch, the cache root, the kubelet directory, images, resources and placement, the delivery mode |
-| Cluster runtime | [Settings](../../reference/settings.md#settings) in the operator namespace | administrator | delivery mode, Hub endpoint, proxy, no-proxy, CA bundle, watermarks, download concurrency and bandwidth |
+| Cluster runtime | `Setting`s (`kubectl -n gpustack-system get settings`) | administrator | delivery mode, Hub endpoint, proxy, no-proxy, CA bundle, watermarks, download concurrency and bandwidth |
 | Object | the `ModelArtifact` | tenant | source, revision, patterns, `Secret`; immutable |
 
 The worker merges the runtime layer into every node's `NodeModelStore.spec` within a minute of a
 change, and the plugin reads only that object and the CA `ConfigMap` it names. Nothing a tenant
-writes chooses where a node connects. The `Setting`s this adds:
+writes chooses where a node connects.
 
-| `Setting` | Default | Check |
+### Settings and precedence
+
+A non-blank `GPUSTACK_*` environment variable in the worker `Deployment` overwrites its `Setting` on
+every worker start. Chart-rendered variables (`modelManager.enabled: true` sets
+`GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node`; `modelTransfer.enabled: false` sets
+`GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled`) revert runtime `Setting` edits on restart,
+so change those via Helm values.
+
+```bash
+kubectl -n gpustack-system get settings
+kubectl -n gpustack-system get deploy -o yaml | grep -A1 'GPUSTACK_'
+kubectl -n gpustack-system logs deploy/gpustack-operator-worker | grep 'setting overridden on start'
+```
+
+| `Setting` | Default | Constraints |
 | --- | --- | --- |
-| `model-artifact-delivery-mode` | `Engine`; the chart declares `Node` with the plugin, and the worker reasserts it | `Engine` or `Node`; `Node` needs the `CSIDriver` |
-| `model-artifact-remote-delivery-policy` | `Prefer`; the chart declares `Disabled` only when `modelTransfer.enabled: false` | `Disabled`, `Require` or `Prefer`; `Require` and `Prefer` need the `CSIDriver` |
-| `model-store-high-watermark` | `80` | integer, above the low watermark, at most `95` |
-| `model-store-low-watermark` | `70` | integer, at least `1`, below the high watermark |
-| `model-store-download-concurrency` | `8` | concurrent requests per node, `1` to `64` |
-| `model-store-download-bandwidth` | `0` | bytes per second per node as a quantity (`200Mi`); `0` is unlimited |
+| `model-artifact-delivery-mode` (`GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE`) | `Engine` (`Node` via chart) | Immediate; `Engine` or `Node` (`Node` requires `CSIDriver`). |
+| `model-artifact-remote-delivery-policy` (`GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY`) | `Prefer` | Immediate; `Disabled`, `Require`, or `Prefer`. |
+| `model-artifact-huggingface-endpoint` (`GPUSTACK_MODEL_ARTIFACT_HUGGINGFACE_ENDPOINT`) | `https://huggingface.co` | Next trigger; hub URL for resolution and downloads. |
+| `model-artifact-modelscope-endpoint` (`GPUSTACK_MODEL_ARTIFACT_MODELSCOPE_ENDPOINT`) | `https://www.modelscope.cn` | Next trigger; bare host passed to engines as `MODELSCOPE_DOMAIN`. |
+| `model-artifact-https-proxy` (`GPUSTACK_MODEL_ARTIFACT_HTTPS_PROXY`) | *(blank)* | Next trigger; `http`/`https` URL without credentials. |
+| `model-artifact-no-proxy` (`GPUSTACK_MODEL_ARTIFACT_NO_PROXY`) | *(blank)* | Next trigger; comma-separated hosts bypassing proxy. |
+| `model-artifact-ca-bundle` (`GPUSTACK_MODEL_ARTIFACT_CA_BUNDLE`) | *(blank)* | Next trigger; `ConfigMap` (`ca.crt`) in operator namespace (not tenant `Pod`s). |
+| `model-artifact-revalidate-interval` (`GPUSTACK_MODEL_ARTIFACT_REVALIDATE_INTERVAL`) | `24h` | Next trigger; minimum `1m`. |
+| `model-store-high-watermark` (`GPUSTACK_MODEL_STORE_HIGH_WATERMARK`) | `80` | Immediate; integer above low watermark, max `95`. |
+| `model-store-low-watermark` (`GPUSTACK_MODEL_STORE_LOW_WATERMARK`) | `70` | Immediate; integer `>= 1`, below high watermark. |
+| `model-store-download-concurrency` (`GPUSTACK_MODEL_STORE_DOWNLOAD_CONCURRENCY`) | `8` | Immediate; concurrent HTTP requests per node (`1` to `64`). |
+| `model-store-download-bandwidth` (`GPUSTACK_MODEL_STORE_DOWNLOAD_BANDWIDTH`) | `0` | Immediate; bytes per second quantity (`200Mi`); `0` is unlimited. |
+| `model-store-peer-sync` (`GPUSTACK_MODEL_STORE_PEER_SYNC`) | `true` | Immediate; enables peer-node pulls on port `32445`. |
+| `model-prefetch-warmup-image` (`GPUSTACK_MODEL_PREFETCH_WARMUP_IMAGE`) | `gpustack/mirrored-python:3.12-alpine` | Immediate; warm-up `Pod` image containing shell, `find`, and `sha256sum`. |
 
 The endpoint, proxy, no-proxy and CA bundle `Setting`s a `ModelArtifact` already resolves through feed
 *`spec.hub`* as well, so the controller, an engine and the plugin reach the same Hub the same way.
@@ -123,23 +145,54 @@ kubectl get nms gpu-node-01 -o yaml                # spec: what the plugin appli
 kubectl get nms gpu-node-01 -o jsonpath='{.metadata.generation} {.status.observedGeneration}{"\n"}'
 kubectl describe pod <consumer>                    # FailedMount events carry refusals and download progress
 kubectl get nodemodelstores.v1.worker.gpustack.ai  # Ready, Used, Models, Downloading
+kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/<ns>/modelartifacts/<name>/progress"
+kubectl get --raw "/api/v1/namespaces/gpustack-system/pods/https:<plugin-pod>:32444/proxy/metrics"
+kubectl -n gpustack-system logs -l app.kubernetes.io/component=model-manager --tail=100
 ```
 
 - ***`spec`* is the effective configuration**, and *`observedGeneration`* equal to the object's
   `generation` means the plugin applies it. The `Ready` message says when the high watermark was
   capped, and from what.
 - ***`status.models`*** lists each digest the node holds, is downloading or failed on, and whether a
-  `Pod` mounts it; a download's *`downloadedBytes`* [moves in steps](node-store.md#resource).
+  `Pod` mounts it; a download's *`downloadedBytes`* updates every 30 seconds once a download moves by 5%.
   It names no tenant: find a deployment's digest in its *`status.model.manifestDigest`*, and an
   artifact's nodes in its *`status.nodes`* or its
-  [progress](artifact-api.md#progress-subresource).
+  [progress subresource](artifact.md#progress-subresource).
 - **A `Failed` digest** carries its reason and *`retryTime`*. Mounts of it do not download again
   before then; fix the cause (the `Secret`, the proxy, the CA) and the next attempt after *`retryTime`*
   picks it up.
 - **A stale object**: a node the plugin stopped running on keeps its object, with a `Ready`
   condition that no longer changes.
-- **Metrics** are on the plugin's port: `kubectl get --raw
-  "/api/v1/namespaces/gpustack-system/pods/https:<plugin-pod>:32444/proxy/metrics"`.
+
+### Model Manager command
+
+The `model-manager` (alias `mm`) service runs on every cache node beside `node-driver-registrar` and
+reads its runtime configuration from `NodeModelStore.spec`, not from flags. Only the worker's
+`--model-manager-service-account` (default `gpustack-operator-model-manager`), bound to its `Pod`,
+may update `nodemodelstores/status`.
+
+```bash
+gpustack-operator model-manager --node-name="$(hostname)" --cache-root=/mnt/models
+```
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--node-name` | — | `Node` and `NodeModelStore` name. |
+| `--kubelet-dir` | `/var/lib/kubelet` | Kubelet root holding `pods` mount targets. |
+| `--cache-root` | `/var/lib/gpustack/models` | Node cache root directory. |
+| `--csi-socket` | `<kubelet-dir>/plugins/model.csi.gpustack.ai/csi.sock` | CSI Unix domain socket path. |
+| `--secure-port` | `32444` | HTTPS port for `/metrics`, `/readyz`, and `/livez`. |
+
+### Cache collection rules
+
+Collection runs when disk usage passes the high watermark, when a new reservation does not fit, and
+every five minutes. It removes oldest *`lastUsedTime`* entries first down to the low watermark,
+skipping mounted trees and digests pinned via `ModelPrefetch` (*`spec.pinned`*):
+
+- **Published trees**: Eligible 10 minutes after the last `Pod` unmounts them.
+- **Stale partials**: Partial downloads with no active mount attempt expire after 24 hours.
+- **Failure records**: Removed from *`status.models`* 24 hours after the last failure when absent from disk.
+- **Invalid configuration**: `Ready=False` (`InvalidConfiguration`) halts new downloads and collection while keeping existing published mounts working.
 
 ## Capacity rule
 
@@ -202,9 +255,10 @@ what `Engine` and `Node` mean.
 
 ## Replica placement
 
-A node-delivered `Pod` prefers the nodes holding its digest when they can take it; the mechanism is in
-[Topology-Aware Scheduling](../topology/scheduling.md#node-delivered-model-placement).
-Compute always comes first, so a warm cache never holds a `Pod` back.
+A node-delivered `Pod` prefers the nodes holding its digest when they can take it, while compute
+always comes first so a warm cache never holds a `Pod` back. The webhook adds preferred node
+affinity for cached nodes unless the `Pod` requests a preferred topology level; see
+[Topology Operations](../topology/operations.md).
 
 ```bash
 kubectl get pod <replica> -o jsonpath='{.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution}{"\n"}{.spec.nodeName}{"\n"}'
@@ -279,10 +333,46 @@ kubelet retries it, and it succeeds once the new `Pod` serves.
 | `WeightsReady=False` and the node lists the digest `Failed` | Reason: `MaterializationFailed` | the node's *`status.models`* entry: reason, message and *`retryTime`* |
 | The `Pod`'s `PodReadyToStartContainers` is not True yet | Reason: `WeightsNotMounted` | the `Pod`'s `FailedMount` events: a `PermissionDenied` names the authorization rule that failed |
 
+### Inspecting failed mounts
+
+When weights fail to mount, inspect the deployment condition, the `Pod` `FailedMount` events, the
+`NodeModelStore` entry for the artifact's `manifestDigest`, and the plugin logs:
+
+```bash
+kubectl -n <ns> get md <deployment> -o jsonpath='{.status.conditions[?(@.type=="WeightsReady")]}{"\n"}'
+kubectl -n <ns> get events --field-selector involvedObject.name=<pod>,reason=FailedMount
+kubectl get nms <node> -o yaml
+kubectl -n gpustack-system logs <model-manager-pod> --tail=100
+```
+
+### Mount refusal vs unavailability
+
+Read the `FailedMount` event and `NodeModelStore` `status.models[]` to separate permanent
+authorization refusals from transient download or backoff states:
+
+| Event or signal | Cause | Next action |
+|---|---|---|
+| `PermissionDenied` in `FailedMount` | Missing inline ephemeral CSI volume, missing `ModelArtifact` in `Pod` namespace, UID/`manifestDigest` mismatch, or `Resolved!=True` | Verify `ModelArtifact` in the `Pod` namespace is `Resolved=True`; recreate the `Pod` or deployment if the artifact UID or digest changed. |
+| `Aborted` (`materializing sha256:...: X of Y received`) | First mount started background download | Wait for kubelet retry; the `Pod` starts up to ~2 minutes after publication completes. |
+| `Unavailable` right after plugin restart | Plugin informer has not finished initial artifact sync | Confirm the plugin `Pod` is `Ready` and allow kubelet to retry. |
+| `Unavailable` with `Failed` digest and `retryTime` | Earlier download failed; backoff runs 1 minute to 1 hour | Check `NodeModelStore` *`reason`*/*`message`* and plugin logs, fix the cause, and wait past *`retryTime`*. |
+
+`NodeModelStore.status.models[]` reports one of these failure reasons:
+
+| Reason | Meaning | Runtime effect |
+|---|---|---|
+| `InvalidRequest` | Invalid endpoint, proxy, or CA configuration | Waits for *`NodeModelStore.spec`* to change (`Ready=False/InvalidConfiguration` blocks new downloads). |
+| `AccessDenied` | Hub refused the credential | Enters backoff (`1m` to `1h`); fix the artifact `Secret` token. |
+| `SourceUnavailable` | Hub unreachable, 5xx/429, stalled byte ranges, or no peer holds an `Expected` digest | Enters backoff; check network/proxy or seed a peer node for `Expected` anchors. |
+| `IntegrityMismatch` | File hash/size or manifest digest mismatch | Discards file and enters backoff; check mirror integrity. |
+| `InsufficientCapacity` | Reservation exceeds high watermark after collection | Enters backoff (`CapacityLow=True/NothingToRemove`); free space or lower concurrent mounts. |
+| `Canceled` | No mount requested the digest for 5 minutes | Keeps partial files; next mount resumes immediately without backoff. |
+
 ---
 
-**See also** — [Node Model Store](node-store.md) for every field and
-reason · [Model Artifact](artifact.md) for the artifact and its
-patterns · [Settings](../../reference/settings.md#settings) for every `Setting`.
+**See also** — [Model Artifact](artifact.md) for the artifact contract, patterns, and `progress` RBAC ·
+[Model Prefetch](prefetch.md) for cache warming and budgets ·
+[Node-to-Node Sync](node-to-node-sync.md) for peer weight distribution ·
+[Remote Weight Delivery](remote.md) for source-memory remote loading.
 
 **Next** → [Model Artifact](artifact.md)
