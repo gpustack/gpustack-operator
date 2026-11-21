@@ -9,16 +9,17 @@ Use [the shared module map](../../../docs/README.md#module-map) to locate the re
 owning specs, code entry points and related modules. [AGENTS.md](../../../AGENTS.md#finding-sources)
 owns the retrieval and evidence rules; this skill owns its execution procedure.
 
-The docs have capability guides, with technical pages linked from each guide. Everything in
-`docs/` follows one shape and one index. Generated chart documentation is still pinned to code.
-This skill routes a change to the page that owns it.
+The docs split into three zones registered in one shared index: public human site guides
+(`docs/getting-started/`, `docs/walkthroughs/`, curated `docs/modules/`, `docs/operate/`), flat
+LLM reference pages (`docs/reference/*.md`), and repo-only contributor guides (`docs/contribute/*.md`).
+Generated chart documentation is still pinned to code. This skill routes a change to the page that owns it.
 
 **Read the index first**: [`docs/README.md`](../../../docs/README.md) — it carries the reading paths and
-the page table you must update when adding a page.
+the three zone tables (`All pages`, `Reference`, `Contribute`) you must update when adding or moving a page.
 
 ## Shared index and generated exports
 
-`docs/README.md` owns both the complete page table and the module map. Each module entry uses
+`docs/README.md` owns the three zone tables (`All pages`, `Reference`, `Contribute`) and the module map. Each module entry uses
 single-line `ID`, `Use for`, `Aliases`, `Guides`, `Code` and `Skills` fields; `Specs` and `Related`
 link to applicable design records and neighboring module headings. Keep IDs stable when display
 names change. A capability directory needs its own entry; API changes, installation and development
@@ -29,11 +30,13 @@ boundary, replacing an owning spec, or changing a skill's document inputs. Updat
 and spec for contract changes; edit routing only when the association changes. Pure wording edits
 need no mechanical index update. Preserve existing spec status and evidence limits.
 
-Hugo generates `/llms.txt` from the `All pages` table and Markdown exports from page sources. Do not
+Hugo generates `/llms.txt` from the `All pages`, `Reference` and `Contribute` tables in `docs/README.md`,
+renders Markdown exports beside public HTML pages, and serves rewritten static `/reference/*.md` files
+staged by `hack/site/rewrite_reference.py`. Do not
 maintain a separate copy or summary. `make site` and `make lint docs` verify module coverage, skill
-consumers, local source paths, the generated index, exported prose and code blocks, and site links.
+consumers, local source paths, zone isolation, the generated index, exported prose and code blocks, and site links.
 These checks establish structure and synchronization; review must establish semantic completeness.
-The local module map stays out of the site's article list and navigation.
+The local module map, `docs/reference/`, and `docs/contribute/` stay out of the site's HTML article list, search index, sitemap and sidebar navigation.
 
 ## The rule that keeps the overview small
 
@@ -48,12 +51,13 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 
 | Topic | Page |
 |---|---|
-| NFD labels, the `gpustack-cpu-info` rule, the manufacturer map | `docs/modules/devices/discovery.md` |
-| Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/modules/devices/discovery.md` |
-| The NIC/RDMA interface inventory, `pciRootId`/`pciSwitches`, the three link states, the `rdma.*` node labels, the RDMA resource keys | `docs/modules/rdma/network-topology.md` |
-| Capacity labels, flavor/queue/AcceleratorType/InstanceType naming and grouping, the scheduling controllers | `docs/modules/devices/scheduling.md` |
-| Topograph's boundary, `TopologySource`, topology profiles, Kueue Topologies and TAS capacity semantics, and the placement preference toward nodes holding a model | `docs/modules/topology/scheduling.md` |
-| Any admission gate, the four-view status, InstanceType/Instance/Pod webhook rules, drain-stop | `docs/modules/devices/admission.md` |
+| Flat LLM reference navigation hub: task routing, exact API/field/condition aliases, and evidence labels | `docs/reference/README.md` |
+| NFD labels, the `gpustack-cpu-info` rule, the manufacturer map | `docs/reference/devices-discovery.md` |
+| Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/reference/devices-discovery.md` |
+| The NIC/RDMA interface inventory, `pciRootId`/`pciSwitches`, the three link states, the `rdma.*` node labels, the RDMA resource keys | `docs/reference/rdma-network-topology.md` |
+| Capacity labels, flavor/queue/AcceleratorType/InstanceType naming and grouping, the scheduling controllers | `docs/reference/devices-scheduling.md` |
+| Topograph's boundary, `TopologySource`, topology profiles, Kueue Topologies and TAS capacity semantics, and the placement preference toward nodes holding a model | `docs/reference/topology-scheduling.md` |
+| Any admission gate, the four-view status, InstanceType/Instance/Pod webhook rules, drain-stop | `docs/reference/devices-admission.md` |
 | Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/operate/installation-modes.md` |
 | Startup ordering, the gateway mirror, the device-plugin registration loop, per-manufacturer packages, CGO bindings, the 63-char rule | `docs/contribute/internals.md` |
 | A `KVCacheBackend`'s workloads, its admin surface, its phase or capacity | `docs/modules/kv-cache/backend.md` |
@@ -62,18 +66,18 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | Configuring a node that is mostly disk: why a group is never disk alone, the thin-segment shape, the memory floor | `docs/modules/kv-cache/disk-heavy-nodes.md` |
 | A `KVCachePool` or `KVCachePoolBinding`: the grant, the reuse domain, a quota ceiling or grant, what a full quota does | `docs/modules/kv-cache/pool.md` |
 | Standing a cache up end to end, or which object comes first: the pasteable four-object sequence | `docs/walkthroughs/kv-cache/shared-cache.md` |
-| How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/modules/kv-cache/injection.md` |
+| How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/reference/kv-cache-injection.md` |
 | A `ModelArtifact`: its sources, resolution and revalidation, the manifest digest, how a `ModelDeployment` or an `Instance` mounts or downloads it, claim placement, the weight identity in KV keys | `docs/modules/model-delivery/artifact.md` |
 | The `image` source of a `ModelArtifact`: the digest contract, building weights into an image, image-volume delivery, the version floors, double storage, kubelet image GC, registry mirrors | `docs/modules/model-delivery/image-source.md` |
 | A `ModelStore`, `ModelStoreBinding` or `ModelPrefetch`: the grant, the budget, pinning, TTL expiry, the warm-up pod and why it is label-free | `docs/modules/model-delivery/prefetch.md` |
-| The public APIs for `ModelArtifact` and `NodeModelStore`, the `progress` subresource and who may read it, the GPUStack server capability map | `docs/modules/model-delivery/artifact-api.md` |
-| A `NodeModelStore` or the `model-manager` plugin: a field and its writer, the status guard, mount authorization, materialization, a failure reason, collection, a metric | `docs/modules/model-delivery/node-store.md` |
+| The public APIs for `ModelArtifact` and `NodeModelStore`, the `progress` subresource and who may read it, the GPUStack server capability map | `docs/reference/model-delivery-artifact-api.md` |
+| A `NodeModelStore` or the `model-manager` plugin: a field and its writer, the status guard, mount authorization, materialization, a failure reason, collection, a metric | `docs/reference/model-delivery-node-store.md` |
 | Running node delivery: the chart values, where the node's configuration comes from, reading a node, the watermark cap, switching delivery, where replicas land and turning the preference off, upgrading, removing the cache | `docs/modules/model-delivery/operations.md` |
 | Remote weight delivery: the `Require` and `Prefer` policies and their fallback rules, source preparation and the `sourceMemory` grant, metadata-only mounts, session credentials, control and payload networks, the remote status view, troubleshooting and rollback | `docs/modules/model-delivery/remote.md` |
-| Injected engine, router, sidecar and transfer parameters, ownership and defaults | `docs/modules/model-deployment/parameterize.md` |
+| Injected engine, router, sidecar and transfer parameters, ownership and defaults | `docs/reference/model-deployment-parameters.md` |
 | The `ModelDeployment` contract: AcceleratorType, explicit role resources, CPU-only scheduling, the inherited reuse domain, the three override tiers, the owned-key table, the runner-image formula, prefill/decode pairing, the topology-placement field contract | `docs/modules/model-deployment/configuration.md` |
 | The measured replica-scaling comparison across algorithms and engines, its latency and throughput, scale-out timing, retirement observations and failure limits | `docs/modules/model-deployment/scaling-benchmark.md` |
-| The synthetic three-algorithm scaler comparison on identical seeds, its measured request outcomes, adjustment-dynamics timelines and true per-token latencies | `docs/modules/model-deployment/scaling-simulation.md` |
+| The synthetic three-algorithm scaler comparison on identical seeds, its measured request outcomes, adjustment-dynamics timelines and true per-token latencies | `docs/reference/model-deployment-scaling-simulation.md` |
 | Configuring and observing `ModelDeploymentScaler`, Shadow and Active modes, algorithm selection, EPD ratios and retirement | `docs/walkthroughs/model-deployment/scaling.md` |
 | How an Elastic EP (`runtimeControl.parameters["elastic.dataParallelWidth"]`) profile resizes a serving instance's expert-parallel collective in place without replacing surviving pods | `docs/modules/model-deployment/elastic-ep.md` |
 | The measured comparison of an expert-parallel collective before, during, and after a live `elastic.dataParallelWidth` resize | `docs/modules/model-deployment/elastic-ep-benchmark.md` |
@@ -82,8 +86,8 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | How External DP runs one fixed data-parallel collective with an HTTP endpoint on every rank behind `vllm-router` or `sglang-gateway` | `docs/modules/model-deployment/external-dp.md` |
 | The measured comparison of External DP per-rank serving against a monolithic wide tensor-parallel group | `docs/modules/model-deployment/external-dp-benchmark.md` |
 | A fixed External DP group, its minimum arguments, per-rank requests, or measured Router coverage | `docs/walkthroughs/model-deployment/external-dp.md` |
-| A `ModelDeployment` metrics snapshot, which series each field reads per engine, role and router, cache-hit scope or Pod scrape annotation | `docs/modules/model-deployment/metrics.md` |
-| What a `ModelDeployment` status condition or published field means, and how to read them when a deployment misbehaves | `docs/modules/model-deployment/status.md` |
+| A `ModelDeployment` metrics snapshot, which series each field reads per engine, role and router, cache-hit scope or Pod scrape annotation | `docs/reference/model-deployment-metrics.md` |
+| What a `ModelDeployment` status condition or published field means, and how to read them when a deployment misbehaves | `docs/reference/model-deployment-status.md` |
 | How a prefill role and a decode role are paired: the connector each engine and router renders, `spec.router` and its fields, `spec.kvTransfer`, roles on different hardware, a role's own Service | `docs/modules/model-deployment/prefill-decode.md` |
 | The measured comparison of disaggregated prefill/decode serving against an equal-GPU aggregated group across uniform and mixed prompt lengths | `docs/modules/model-deployment/prefill-decode-benchmark.md` |
 | How an `Encode` role pairs with `Prefill` and `Decode`: the admitted EPD matrix, encoder-cache connectors (`ECCPUConnector`, `ECExampleConnector`), shared RWX PVC rules, soft co-location affinity, and bounded encoder drain | `docs/modules/model-deployment/encode-prefill-decode.md` |
@@ -91,7 +95,7 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | A recorded three-role EPD deployment (`Encode` + `Prefill` + `Decode` + `llm-d-router`), its captured CR/Pod output and multimodal inference check | `docs/walkthroughs/model-deployment/encode-prefill-decode.md` |
 | Which replica a managed router picks, its default routing policy, switching it through `spec.router.extraArgs`, the router's own per-replica series | `docs/modules/model-deployment/routing.md` |
 | `runtimeControl.parameters`, `pause`, `gpustack-engine-sentinel`, reserved `loraAdapters`, router inference allowlist, and router hash decoupling | `docs/modules/model-deployment/runtime-control.md` |
-| What a `ModelDeployment` replica does between its Pod's delete and its engine's exit: the drain hook, its timings, what it does not cover | `docs/modules/model-deployment/shutdown.md` |
+| What a `ModelDeployment` replica does between its Pod's delete and its engine's exit: the drain hook, its timings, what it does not cover | `docs/reference/model-deployment-shutdown.md` |
 | The lowest engine release a deployment configuration runs on, the Mooncake client its runner image carries, the store line it needs, which transport each engine can use on each path | `docs/modules/model-deployment/engine-versions.md` |
 | A resource key, a request rule, a request example | `docs/modules/devices/requests.md` |
 | How many RDMA endpoints a workload asks for, setting or reading the kubelet TopologyManager policy, what to do about RDMA keys no queue meters, the engine image an EFA path needs | `docs/modules/rdma/operations.md` |
@@ -102,7 +106,7 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | An upgrade path between versions | `docs/operate/migration/*.md` |
 | Recovery from a wedged upgrade or a stuck namespace deletion | `docs/operate/migration/troubleshooting.md` |
 | A per-product preset value | `docs/reference/instance-type-unit-resources.md` |
-| Instance resource-use metrics | `docs/modules/instances/metrics.md` |
+| Instance resource-use metrics | `docs/reference/instances-metrics.md` |
 | A subcommand, one of its flags, its exit codes, its invocation | `docs/reference/commands.md` |
 | A user-visible capability, a vendor's slicing support, the install flow | `README.md` |
 | Vendor prerequisites, third-party dependencies, vendor GPU Operator coexistence | `docs/getting-started/vendor-prerequisites.md` |
@@ -168,17 +172,18 @@ into block style with two-space indentation, one field or list item per line. Do
 JSON-style objects or arrays in YAML examples, including commented alternatives. Empty collections
 use `{}` or `[]`; removing their delimiters would change them to null.
 
-REQUIRED: in `docs/`, pair a **macro** annotated Pretty YAML example with a **micro** constraint
-breakdown whenever documenting a Kubernetes custom resource (CR):
+REQUIRED: in `docs/`, present a **macro** annotated Pretty YAML example for a Kubernetes custom
+resource (CR), adding **micro** constraint breakdowns only where fields carry non-obvious constraints
+or compare choices:
 
 - **Macro configuration**: Provide a complete, runnable Pretty YAML resource (`apiVersion`, `kind`,
   and `metadata` included) with inline `#` comments marking required fields, optional defaults, and
   immutability (`# required`, `# optional, default: ...`, `# enum: ...`). Never use field-by-field
   Markdown tables to duplicate full CR schemas.
-- **Micro configuration**: Immediately beneath the Pretty YAML, list required/optional/immutability
-  rules as short bullets (`- **<Field or rule>**: <Explanation in <=20 words>`) and document enum
-  values, admission gates, or webhook validations in uniform Markdown tables (`| Value | Meaning | Constraints |`
-  or `| Condition | Reason | Resolution |`).
+- **Micro configuration**: Add short constraint bullets (`- **<Field or rule>**: <Explanation in <=20 words>`)
+  or uniform Markdown tables (`| Value | Meaning | Constraints |` or `| Condition | Reason | Resolution |`)
+  immediately beneath the Pretty YAML only when they state real constraints, admission gates, or choices;
+  do not restate self-evident YAML fields.
 
 Every YAML block that represents a Kubernetes resource (`Pod`, `Instance`, `ModelDeployment`,
 `ModelDeploymentScaler`, `ModelArtifact`, `ModelPrefetch`, `NodeModelStore`, `KVCacheBackend`,
@@ -239,14 +244,15 @@ Published Markdown allows hidden flowgraph comments and raw HTML only for attrib
 `<br>` or `<br/>` line breaks. Keep
 HTML examples inside fenced or inline code. The existing site gate checks this allowlist;
 link templates retain automatic URL escaping.
-When adding a page, add its order and short menu label to `site/data/navigation.yaml`. Put setup
+When adding a public page, add its order and short menu label to `site/data/navigation.yaml` (flat
+`docs/reference/*.md` and `docs/contribute/*.md` pages never appear in `navigation.yaml`). Put setup
 and configuration before operations and diagnosis; keep related vendor procedures together.
 Name top-level groups for capabilities, such as `Heterogeneous Devices`, `RDMA Networking` and `Topology`.
 Use component names such as `Device Manager` when describing those components.
 Use short, Title-Cased nouns or noun phrases for menu labels at every depth, including child menus.
 Name the article's purpose within
 its hierarchy and omit the parent module's name. Use `children` for subordinate pages, such as
-`Benchmark` under a serving mode or `API` under `Model Artifact`.
+`Benchmark` under a serving mode.
 Walkthrough module links use the same names and order as the outer capability groups.
 
 Choose titles from the page's task or subject. Check them against its introduction and main sections.
@@ -262,13 +268,17 @@ Keep that table in navigation order, with child articles immediately after their
 
 ## Page shape
 
-Every page in `docs/` (the index excepted) opens with a short introduction, has a `## Contents` list
-mirroring its `##` headings and a `**See also**` / `**Next**` footer. Templates and the writing rules
-are in
+Every page in `docs/` (`docs/README.md` and `docs/reference/README.md` excepted) opens with a short
+introduction, has a `## Contents` list mirroring its `##` headings, and ends with a `**See also**`
+footer. Public site pages include `**Next**` wherever a next step exists and never link to
+`docs/reference/` or `docs/contribute/`; `docs/reference/*.md` topic pages state an opening evidence
+label (`contract`, `recorded capture`, or `synthetic simulation`) and omit `**Next**`. Templates and
+the writing rules are in
 [references/conventions.md](references/conventions.md).
 Apply its [section names and steps](references/conventions.md#section-names-and-steps) rules:
 use one name for each section purpose, concise plain headings and `Step N: <short imperative>`
-for ordered operations. Keep every H2–H6 heading within four words and 32 visible characters,
+for ordered operations. Enforce a three-level heading ceiling (`H1`–`H3`; zero `H4`–`H6` across `docs/**`)
+and keep every H2–H3 heading within four words and 32 visible characters,
 excluding a numbered prefix such as `Step 2:`. In numbered headings, capitalize the first word after
 the colon and use sentence case for the rest. Preserve the meaning of architecture stages, admission
 gates and request rules. In README and docs, exclude interrogative words (`what`, `where`, `when`,
@@ -277,7 +287,7 @@ Table headers also contain 1 to 3 words and exclude articles and demonstratives.
 Apply its [terminology and numbers](references/conventions.md#terminology-and-numbers) rules to
 guides, operations, benchmarks and reference pages as well as walkthroughs. Expand unfamiliar
 abbreviations, italicize the defined concept terms, roles and fields, and use consistent degree and unit notation.
-Use inline code for Kubernetes resource kinds; add bold when a resource needs emphasis.
+Use inline code for Kubernetes resource kinds (plurals add `s` outside backticks: `` `Pod`s ``); add bold when a resource needs emphasis.
 Keep identifiers and captured evidence intact. Search related pages for competing names before editing.
 Apply the [narrative voice](references/conventions.md#narrative-voice) to README, docs and site content:
 use imperative instructions and objective descriptions. Name technical subjects directly; avoid author
@@ -291,12 +301,12 @@ These pages are not free text. Changing one side without the other breaks a buil
 |---|---|---|
 | `docs/reference/instance-type-unit-resources.md` | `pkg/nodefeature/unit_resources_preset.yaml` | compare the product rows with the preset data when either changes; no Go documentation test pins this table |
 | `deploy/gpustack-operator/chart/README.md`, `values.schema.json` | `values.yaml` + `README.md.gotmpl` via `make generate chart` | generated — never hand-edit; a doc path quoted in a `values.yaml` comment needs a regenerate, and `chart.yml` fails on drift |
-| `README.md` accelerator matrix | `pkg/nodefeature/knowns.go` (resource names, `SharedResourceMaxSize`, `_ManufacturerPartitionKindMap`) and **whether** each `pkg/devicemanager/detector/<mfr>/device.go` sets `LogicalSliced` at all | nothing fails; the table silently lies about what a vendor can do. The matrix is deliberately Yes/— only — per-card slice counts and the per-vendor isolation mechanism live in `docs/modules/devices/discovery.md`, not on the front page |
+| `README.md` accelerator matrix | `pkg/nodefeature/knowns.go` (resource names, `SharedResourceMaxSize`, `_ManufacturerPartitionKindMap`) and **whether** each `pkg/devicemanager/detector/<mfr>/device.go` sets `LogicalSliced` at all | nothing fails; the table silently lies about what a vendor can do. The matrix is deliberately Yes/— only — per-card slice counts and the per-vendor isolation mechanism live in `docs/reference/devices-discovery.md`, not on the front page |
 | `README.md` Usage accelerator examples | `docs/modules/devices/requests.md` — *The resource keys* and *Worked example per family* | nothing fails; the front page and the normative contract drift apart. This copy is the one sanctioned exception to "state a fact once" (the README is the shop window) — change both together |
-| `docs/modules/model-deployment/configuration.md` and `docs/modules/model-deployment/parameterize.md` ownership tables | `modelDeploymentOwnedKeys` | compare the owned keys with each engine's table row when either changes; the Go documentation test was removed |
+| `docs/modules/model-deployment/configuration.md` and `docs/reference/model-deployment-parameters.md` ownership tables | `modelDeploymentOwnedKeys` | compare the owned keys with each engine's table row when either changes; the Go documentation test was removed |
 | `docs/reference/settings.md` tables | `pkg/worker/settings` and the `GPUSTACK_*` readers | nothing fails; an operator configures something that no longer exists |
-| `docs/README.md` page table | the set of files under `docs/` | `check-docs.sh` fails |
-| `docs/README.md` page **labels** | each page's `#` H1, character for character | `check-docs.sh` fails when an index label differs from its page title |
+| `docs/README.md` zone tables (`All pages`, `Reference`, `Contribute`) and `docs/reference/README.md` hub | the set of files under `docs/` and flat `docs/reference/*.md` | `check-docs.sh` and `agent-index.py` fail |
+| `docs/README.md` page **labels** | each page's `#` H1, character for character across all three zone tables | `check-docs.sh` and `agent-index.py` fail when an index label differs from its page title |
 
 ## Before you finish
 
@@ -306,13 +316,15 @@ bash .agents/skills/gpustack-operator-docs/scripts/check-docs.sh --report   # wh
 ```
 
 It verifies relative links and `#anchor`s across `README.md`, `AGENTS.md`, `docs/**` and
-`.agents/skills/**`; and — for `docs/**` only — each page's `## Contents` against its headings, a
-`**See also**` footer at the end, registration in the `## All pages` table of `docs/README.md`, the
-label there against the page's H1, and the size caps for paragraphs, page length, section count and
-H2–H6 heading length (see `references/conventions.md`). The heading word and character limits and
+`.agents/skills/**`; and — for `docs/**` only — flat `docs/reference/` layout, one-way link
+isolation from public pages, each page's `## Contents` against its headings, `**See also**` /
+`**Next**` zone footer rules, registration in the `All pages`, `Reference` and `Contribute` tables
+of `docs/README.md` plus `docs/reference/README.md` hub coverage, H1 label parity, authored-prose
+kind plurals, `H1`–`H3` heading depth, and the size caps for paragraphs, page length, section count
+and H2–H3 heading length (see `references/conventions.md`). The heading word and character limits and
 numbered-heading capitalization apply to all authored Markdown under `docs/` and `site/content/`,
 plus `README.md`, `ADOPTERS.md` and the two csrc READMEs. Interrogative words are forbidden in
-README and docs H1–H6 headings and table headers; table headers also have word and article limits.
+README and docs H1–H3 headings and table headers; table headers also have word and article limits.
 These checks remain fatal under `--report`; `--selftest` exercises the heading and table checks.
 `--report` demotes the paragraph, page-length, section-count and index-label checks to warnings and
 prints the per-page metrics. The gate also resolves literal `docs/*.md` paths named across skills,
@@ -342,8 +354,9 @@ It still does **not** read prose: everything below is on you.
       Headings are short, plain and free of unnecessary `The`; numbered headings use a colon.
       Step headings state reader actions. Update Contents and every inbound anchor after renaming.
       For a full sweep, account for every authored page, including pages that need no edit.
-- [ ] CR API, configuration and status structures use annotated Pretty YAML (macro view) paired with
-      `<=20`-word constraint bullets and uniform enum/validation tables (micro view), not full field tables.
+- [ ] CR API, configuration and status structures use annotated Pretty YAML (macro view), adding
+      `<=20`-word constraint bullets or uniform enum/validation tables (micro view) only where fields
+      carry non-obvious constraints or compare choices, never full field tables.
       Every Kubernetes resource YAML block and CR configuration `diff` block includes full
       `apiVersion`, `kind` and `metadata` headers (not inner fragments). Generated Helm chart
       documentation is excluded.

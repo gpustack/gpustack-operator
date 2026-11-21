@@ -1,6 +1,6 @@
 # Command Reference
 
-The `gpustack-operator` binary provides long-running services and one-shot commands. The services are what a
+Evidence: contract. The `gpustack-operator` binary provides long-running services and one-shot commands. The services are what a
 deployment runs; the one-shots are what you run by hand on a node, and the first two sections choose
 between them.
 
@@ -148,7 +148,7 @@ gpustack-operator device-manager serve --manufacturer=nvidia --no-partitioned
 The per-node model cache. A CSI node plugin serving inline ephemeral volumes of the driver
 `model.csi.gpustack.ai`: it authorizes each mount against the `Pod`'s namespace, downloads and
 verifies a Hugging Face artifact's files once per node, and writes that node's `NodeModelStore`
-status. See [Node Model Store](../modules/model-delivery/node-store.md).
+status. See [Node Model Store](model-delivery-node-store.md).
 
 Runs as the Model Manager `DaemonSet` beside the `node-driver-registrar` sidecar. Its configuration
 comes from its node's `NodeModelStore.spec`, not from flags.
@@ -285,7 +285,7 @@ docker run --rm --privileged -v /dev:/dev -v /sys:/sys \
 ```
 
 The same figures reach a cluster through the `Instance` metrics surfaces; see [Instance
-Metrics](../modules/instances/metrics.md).
+Metrics](instances-metrics.md).
 
 ## device-manager preflight
 
@@ -385,4 +385,3 @@ answering.
 tables · [Settings](settings.md) for what is configured through the `Setting` CR ·
 [Internals](../contribute/internals.md) for startup order and the invariants these commands rest
 on.
-**Next** → [Preflight](../modules/devices/preflight.md)

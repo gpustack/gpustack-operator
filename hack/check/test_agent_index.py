@@ -409,13 +409,17 @@ class AgentIndexAndSiteLinksTests(unittest.TestCase):
     def test_site_links_rejects_public_html_links_into_excluded_zones_and_normalized_origins(self) -> None:
         bad_hrefs = (
             "/reference/README.md",
+            "/gpustack-operator/reference/settings.md",
             "../../../reference/settings.md",
             "/docs/reference/settings/",
             "/docs/contribute/development/",
             "/docs/%72eference/settings/",
+            "https://docs.gpustack.ai/gpustack-operator/reference/settings.md",
+            "HTTPS://DOCS.GPUSTACK.AI:443/gpustack-operator/reference/settings.md",
             "https://docs.gpustack.ai/gpustack-operator/main/reference/settings.md",
             "HTTPS://DOCS.GPUSTACK.AI:443/reference/README.md",
             "http://docs.gpustack.ai:80/docs/contribute/development/",
+            "//docs.gpustack.ai/gpustack-operator/reference/settings.md",
             "//docs.gpustack.ai/gpustack-operator/main/reference/settings.md",
             "//DOCS.GPUSTACK.AI:443/docs/reference/settings/",
         )

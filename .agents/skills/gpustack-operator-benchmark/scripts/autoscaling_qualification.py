@@ -1152,7 +1152,7 @@ def suite_sim_sensitivity(cluster, out_dir, options):
     for, what the deployment became, what the engine reported, and, for a catalog arm,
     the resolved basis and the boundary the resolution stopped at - and every request is
     scored against the true SLO so the arms compare directly against
-    docs/modules/model-deployment/scaling-simulation.md.
+    docs/reference/model-deployment-scaling-simulation.md.
     """
     directory = Path(out_dir) / "sim-sensitivity"
     directory.mkdir(parents=True, exist_ok=True)
@@ -1242,7 +1242,7 @@ def suite_sim_sensitivity(cluster, out_dir, options):
     rounds.write_json(directory / "sensitivity.json", {
         "schemaVersion": "1",
         "comparisonKind": "scaling-sensitivity",
-        "reference": "docs/modules/model-deployment/scaling-simulation.md",
+        "reference": "docs/reference/model-deployment-scaling-simulation.md",
         "arms": arms,
         "cases": records,
     })

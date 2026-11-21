@@ -1,6 +1,6 @@
 # Model Deployment Metrics
 
-The aggregated API combines selected current gauges from a deployment's engine and router `Pod`s.
+Evidence: contract. The aggregated API combines selected current gauges from a deployment's engine and router `Pod`s.
 Each managed `Pod` also exposes its own native `/metrics` output for Prometheus users.
 
 ## Contents
@@ -134,7 +134,7 @@ exported, so what each counts has not been checked against a failed request. Why
 in [Latency, traffic, and transfer](#latency-traffic-and-transfer).
 
 Where a router sent each request is not in the snapshot; its own per-replica series say, listed in
-[Per-worker routing metrics](routing.md#per-worker-routing-metrics).
+[Per-worker routing metrics](../modules/model-deployment/routing.md#per-worker-routing-metrics).
 
 ## Windowed cache hits
 
@@ -258,7 +258,5 @@ annotation. The operator installs no `PodMonitor` or `ServiceMonitor`.
 
 ---
 
-**See also** — [Model Deployment](configuration.md) for role configuration ·
-[Instance Metrics Reference](../instances/metrics.md) for the separate `Instance` utilization API.
-
-**Next** → [Model Deployment Status](status.md)
+**See also** — [Model Deployment](../modules/model-deployment/configuration.md) for role configuration ·
+[Instance Metrics Reference](instances-metrics.md) for the separate `Instance` utilization API.

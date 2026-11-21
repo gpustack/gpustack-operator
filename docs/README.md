@@ -16,7 +16,7 @@
 - ID: `devices`
 - Use for: discover accelerators, map capacity labels to Kueue queues, enforce admission gates, and run MIG partitioning
 - Aliases: `Devices`, `AcceleratorType`, `GPU`, `NPU`, `MIG`, `accelerator`, `device plugin`
-- Guides: [Heterogeneous Devices](modules/devices/_index.md), [Accelerator Requests](modules/devices/requests.md), [Admission](modules/devices/admission.md)
+- Guides: [Heterogeneous Devices](modules/devices/_index.md), [Accelerator Requests](modules/devices/requests.md), [Preflight Checks](modules/devices/preflight.md), [Device Discovery](reference/devices-discovery.md), [Scheduling Chain](reference/devices-scheduling.md), [Admission](reference/devices-admission.md)
 - Specs: [Accelerator resource modes](../specs/2026-06-21-accelerator-resource-modes-refactor.md), [Soft-slicing runtime isolation](../specs/2026-06-25-accelerator-soft-slicing-runtime-isolation.md), [Unified pool](../specs/2026-06-29-instancetype-unified-pool-refactor.md), [Credit scoring](../specs/2026-06-24-unified-credit-base-scoring.md), [Preflight unhealthy accelerators](../specs/2026-10-29-preflight-unhealthy-accelerators.md), [Accelerator types and model resources](../specs/2026-11-11-accelerator-type-and-model-deployment-resources.md), [Ascend A5 communication resources and host root](../specs/2026-11-19-model-deployment-ascend-a5-comm-res.md)
 - Code: [pkg/devicemanager](../pkg/devicemanager/), [pkg/deviceplugin](../pkg/deviceplugin/), [pkg/nodefeature](../pkg/nodefeature/), [pkg/utils/hostfs](../pkg/utils/hostfs/), [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/)
 - Related: [RDMA Networking](#rdma-networking), [Topology](#topology), [GPU Instances](#gpu-instances)
@@ -27,7 +27,7 @@
 - ID: `rdma`
 - Use for: discover NIC and RDMA link topology, select RDMA endpoints, and align requests with TopologyManager
 - Aliases: `RDMA`, `NIC`, `RoCE`, `link state`, `rdma.capable`
-- Guides: [RDMA Networking](modules/rdma/_index.md), [RDMA Operations](modules/rdma/operations.md), [Network Topology](modules/rdma/network-topology.md), [RDMA Networking Walkthrough](walkthroughs/rdma/network-endpoints.md)
+- Guides: [RDMA Networking](modules/rdma/_index.md), [RDMA Operations](modules/rdma/operations.md), [Network Topology](reference/rdma-network-topology.md), [RDMA Networking Walkthrough](walkthroughs/rdma/network-endpoints.md)
 - Specs: [NIC/RDMA topology](../specs/2026-09-02-devices-nic-rdma-topology.md), [Endpoint discovery and selection filters](../specs/2026-10-30-rdma-network-selection.md), [Extended resource](../specs/2026-09-20-rdma-extended-resource.md), [NVIDIA fabric domain](../specs/2026-09-20-nvidia-fabric-domain.md), [Fabric by protocol](../specs/2026-09-22-fabric-device-by-protocol.md), [Interface count](../specs/2026-09-22-fabric-interface-count.md)
 - Code: [pkg/devicemanager/detector](../pkg/devicemanager/detector/), [detector/rdma.go](../pkg/devicemanager/detector/rdma.go), [pkg/device/rdma.go](../pkg/device/rdma.go), [api/worker/v1alpha1/devices.go](../api/worker/v1alpha1/devices.go), [api/worker/v1/devices_rdma_selection_policy.go](../api/worker/v1/devices_rdma_selection_policy.go), [extensionapis/worker/devices_rdma_selection_policy.go](../pkg/worker/extensionapis/worker/devices_rdma_selection_policy.go), [webhooks/worker/devices_rdma_selection_policy.go](../pkg/worker/webhooks/worker/devices_rdma_selection_policy.go), [pkg/deviceplugin/rdma_policy.go](../pkg/deviceplugin/rdma_policy.go), [rdma_selection_observer.go](../pkg/deviceplugin/rdma_selection_observer.go), [rdma_selection.go](../pkg/deviceplugin/rdma_selection.go), [rdma_allocate.go](../pkg/deviceplugin/rdma_allocate.go), [pkg/nodefeature/rdma.go](../pkg/nodefeature/rdma.go), [pkg/nodefeature/fabric.go](../pkg/nodefeature/fabric.go)
 - Related: [Heterogeneous Devices](#heterogeneous-devices)
@@ -38,7 +38,7 @@
 - ID: `topology`
 - Use for: publish zone and rack topology domains, configure Kueue TAS placement, and diagnose pending groups
 - Aliases: `TAS`, `Topograph`, `topology source`, `zone`, `placement`
-- Guides: [Topology](modules/topology/_index.md), [Topology-Aware Scheduling](modules/topology/scheduling.md), [Topology-Aware Scheduling Operations](modules/topology/operations.md), [Hierarchical Placement Walkthrough](walkthroughs/topology/hierarchical-placement.md)
+- Guides: [Topology](modules/topology/_index.md), [Topology-Aware Scheduling Operations](modules/topology/operations.md), [Topology-Aware Scheduling](reference/topology-scheduling.md), [Hierarchical Placement Walkthrough](walkthroughs/topology/hierarchical-placement.md)
 - Specs: [Topology discovery](../specs/2026-09-22-topology-discovery.md), [Model placement preference](../specs/2026-09-26-model-placement-preference.md)
 - Code: [topology_source.go](../pkg/worker/controllers/worker/topology_source.go), [node_topology.go](../pkg/worker/controllers/worker/node_topology.go)
 - Related: [Heterogeneous Devices](#heterogeneous-devices), [Model Deployment](#model-deployment)
@@ -49,7 +49,7 @@
 - ID: `kv-cache`
 - Use for: deploy shared KV cache backends, manage pool grants and quotas, and inject cache config into workloads
 - Aliases: `KVCacheBackend`, `KVCachePool`, `Mooncake`, `prefix cache`, `injection`
-- Guides: [KV Cache](modules/kv-cache/_index.md), [Shared Cache Walkthrough](walkthroughs/kv-cache/shared-cache.md), [KV Cache Backend](modules/kv-cache/backend.md), [KV Cache Pools and Bindings](modules/kv-cache/pool.md)
+- Guides: [KV Cache](modules/kv-cache/_index.md), [Shared Cache Walkthrough](walkthroughs/kv-cache/shared-cache.md), [KV Cache Backend](modules/kv-cache/backend.md), [KV Cache Pools and Bindings](modules/kv-cache/pool.md), [KV Cache Injection Reference](reference/kv-cache-injection.md)
 - Specs: [Backend](../specs/2026-08-28-kv-cache-backend.md), [Pool](../specs/2026-08-28-kv-cache-pool.md), [Injection](../specs/2026-08-28-kv-cache-injection.md), [Media and scaling](../specs/2026-09-05-kv-cache-media-and-scaling.md), [High availability](../specs/2026-09-06-kv-cache-backend-high-availability.md), [Ascend A5 KV cache, ModelTransfer, and DRAM](../specs/2026-11-20-ascend-a5-kvcache-modeltransfer-and-dram-normalization.md)
 - Code: [pkg/worker/kvcache](../pkg/worker/kvcache/), [pkg/worker/kvcache/inject](../pkg/worker/kvcache/inject/), [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/)
 - Related: [Model Deployment](#model-deployment)
@@ -60,7 +60,7 @@
 - ID: `model-delivery`
 - Use for: resolve model artifacts, operate node caches, prefetch weights, and run remote or peer weight delivery
 - Aliases: `ModelArtifact`, `NodeModelStore`, `ModelStore`, `ModelPrefetch`, `model cache`, `Hugging Face`, `ModelExpress`
-- Guides: [Model Delivery](modules/model-delivery/_index.md), [Model Artifact](modules/model-delivery/artifact.md), [Node Model Store](modules/model-delivery/node-store.md), [Model Store Operations](modules/model-delivery/operations.md), [Remote Weight Delivery](modules/model-delivery/remote.md), [Model Prefetch Walkthrough](walkthroughs/model-delivery/prefetch.md)
+- Guides: [Model Delivery](modules/model-delivery/_index.md), [Model Artifact](modules/model-delivery/artifact.md), [Node Model Store](reference/model-delivery-node-store.md), [Model Store Operations](modules/model-delivery/operations.md), [Remote Weight Delivery](modules/model-delivery/remote.md), [Model Prefetch Walkthrough](walkthroughs/model-delivery/prefetch.md)
 - Specs: [Model artifact](../specs/2026-09-25-model-artifact.md), [Node model store](../specs/2026-09-25-node-model-store.md), [Prefetch](../specs/2026-09-27-model-prefetch.md), [Peer sync](../specs/2026-09-27-model-peer-sync.md), [Image source](../specs/2026-09-27-model-image-source.md), [Remote weight loading](../specs/2026-10-28-model-artifact-remote-weight-loading.md), [ModelExpress peer delivery](../specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md), [Settings sync semantics](../specs/2026-10-19-settings-env-sync-and-default-tracking.md), [Accelerator types and model resources](../specs/2026-11-11-accelerator-type-and-model-deployment-resources.md), [Ascend A5 KV cache, ModelTransfer, and DRAM](../specs/2026-11-20-ascend-a5-kvcache-modeltransfer-and-dram-normalization.md)
 - Code: [pkg/modelartifact](../pkg/modelartifact/), [pkg/modelmanager](../pkg/modelmanager/), [pkg/modelstore](../pkg/modelstore/), [pkg/modeltransfer/artifact](../pkg/modeltransfer/artifact/), [model_deployment_transfer_source.go](../pkg/worker/controllers/worker/model_deployment_transfer_source.go), [model_deployment_modelexpress.go](../pkg/worker/controllers/worker/model_deployment_modelexpress.go), [pack/mirrored-modelexpress-server](../pack/mirrored-modelexpress-server/), [pkg/modeltransfer](../pkg/modeltransfer/), [model-transfer/python](../model-transfer/python/), [pyproject.toml](../model-transfer/python/pyproject.toml), [pack/model-transfer](../pack/model-transfer/), [acceptance](../model-transfer/python/gpustack_model_transfer/acceptance/)
 - Related: [Model Deployment](#model-deployment), [RDMA Networking](#rdma-networking), [KV Cache](#kv-cache), [GPU Instances](#gpu-instances)
@@ -71,7 +71,7 @@
 - ID: `model-deployment`
 - Use for: configure serving roles, disaggregated P/D and EPD topologies, routers, online runtime control, scaling, and drain lifecycles
 - Aliases: `ModelDeployment`, `ModelDeploymentScaler`, `scaler`, `autoscaling`, `prefill`, `decode`, `router`, `vLLM`, `SGLang`, `replica`, `EPD`, `encode`
-- Guides: [Model Deployment](modules/model-deployment/_index.md), [Configuration](modules/model-deployment/configuration.md), [Parameters](modules/model-deployment/parameterize.md), [Model Deployment Scaling](modules/model-deployment/scaling.md), [Model Deployment Scaling Simulation](modules/model-deployment/scaling-simulation.md), [Model Deployment Scaling Benchmark](modules/model-deployment/scaling-benchmark.md), [Model Deployment Scaling Walkthrough](walkthroughs/model-deployment/scaling.md), [Online Runtime Control](modules/model-deployment/runtime-control.md), [Online Runtime Control Walkthrough](walkthroughs/model-deployment/runtime-control.md), [Engine Compatibility](modules/model-deployment/engine-versions.md), [Prefill and Decode](modules/model-deployment/prefill-decode.md), [Prefill and Decode Benchmark](modules/model-deployment/prefill-decode-benchmark.md), [Encode, Prefill and Decode](modules/model-deployment/encode-prefill-decode.md), [Encode, Prefill and Decode Benchmark](modules/model-deployment/encode-prefill-decode-benchmark.md), [Elastic EP](modules/model-deployment/elastic-ep.md), [Elastic EP Benchmark](modules/model-deployment/elastic-ep-benchmark.md), [External DP](modules/model-deployment/external-dp.md), [External DP Benchmark](modules/model-deployment/external-dp-benchmark.md), [Model Deployment Routing](modules/model-deployment/routing.md), [Model Deployment Status](modules/model-deployment/status.md), [Model Deployment Shutdown](modules/model-deployment/shutdown.md), [Prefill and Decode Walkthrough](walkthroughs/model-deployment/prefill-decode.md), [Encode, Prefill and Decode Walkthrough](walkthroughs/model-deployment/encode-prefill-decode.md), [Elastic EP Walkthrough](walkthroughs/model-deployment/elastic-ep.md), [External DP Walkthrough](walkthroughs/model-deployment/external-dp.md), [Multi-Host Serving Walkthrough](walkthroughs/model-deployment/multi-host.md)
+- Guides: [Model Deployment](modules/model-deployment/_index.md), [Configuration](modules/model-deployment/configuration.md), [Parameters](reference/model-deployment-parameters.md), [Model Deployment Scaling](modules/model-deployment/scaling.md), [Model Deployment Scaling Simulation](reference/model-deployment-scaling-simulation.md), [Model Deployment Scaling Benchmark](modules/model-deployment/scaling-benchmark.md), [Model Deployment Scaling Walkthrough](walkthroughs/model-deployment/scaling.md), [Online Runtime Control](modules/model-deployment/runtime-control.md), [Online Runtime Control Walkthrough](walkthroughs/model-deployment/runtime-control.md), [Engine Compatibility](modules/model-deployment/engine-versions.md), [Prefill and Decode](modules/model-deployment/prefill-decode.md), [Prefill and Decode Benchmark](modules/model-deployment/prefill-decode-benchmark.md), [Encode, Prefill and Decode](modules/model-deployment/encode-prefill-decode.md), [Encode, Prefill and Decode Benchmark](modules/model-deployment/encode-prefill-decode-benchmark.md), [Elastic EP](modules/model-deployment/elastic-ep.md), [Elastic EP Benchmark](modules/model-deployment/elastic-ep-benchmark.md), [External DP](modules/model-deployment/external-dp.md), [External DP Benchmark](modules/model-deployment/external-dp-benchmark.md), [Model Deployment Routing](modules/model-deployment/routing.md), [Model Deployment Metrics](reference/model-deployment-metrics.md), [Model Deployment Status](reference/model-deployment-status.md), [Model Deployment Shutdown](reference/model-deployment-shutdown.md), [Prefill and Decode Walkthrough](walkthroughs/model-deployment/prefill-decode.md), [Encode, Prefill and Decode Walkthrough](walkthroughs/model-deployment/encode-prefill-decode.md), [Elastic EP Walkthrough](walkthroughs/model-deployment/elastic-ep.md), [External DP Walkthrough](walkthroughs/model-deployment/external-dp.md), [Multi-Host Serving Walkthrough](walkthroughs/model-deployment/multi-host.md)
 - Specs: [Consolidation](../specs/2026-09-18-kvcache-and-model-deployment-consolidation.md), [Role replica admission](../specs/2026-09-19-role-replica-admission-unit.md), [Role configuration mutability](../specs/2026-10-08-model-deployment-role-mutability.md), [P/D pairing and router](../specs/2026-09-12-model-deployment-pd-pairing-and-router.md), [Router implementations](../specs/2026-09-19-model-deployment-router-implementations.md), [Router qualification and drain](../specs/2026-10-01-s1-router-qualification-and-drain.md), [Elastic EP resize](../specs/2026-10-01-s2-elastic-ep-resize.md), [EPD disaggregation](../specs/2026-10-13-model-deployment-epd-disaggregation.md), [Unified port 8000](../specs/2026-10-18-model-deployment-unify-port-8000.md), [Render version](../specs/2026-10-18-model-deployment-render-version.md), [Compilation cache and startup timeout](../specs/2026-10-19-compilation-cache-and-startup-timeout.md), [Docs and benchmarks](../specs/2026-10-19-model-deployment-docs-and-benchmarks.md), [Scaler](../specs/2026-10-21-model-deployment-scaler.md), [Capacity priors and evaluation](../specs/2026-10-26-inferencex-model-deployment-scaling.md), [Whole-unit disaggregated priors](../specs/2026-11-13-whole-unit-disaggregated-capacity-priors.md), [DP group router supervisor](../specs/2026-10-22-dp-group-router-supervisor.md), [KVTransfer NIXL, HIXL, and EFA](../specs/2026-11-10-model-deployment-kvtransfer-nixl-hixl.md), [KVTransfer peer backends](../specs/2026-11-11-model-deployment-kvtransfer-peer-backends.md), [Accelerator types and model resources](../specs/2026-11-11-accelerator-type-and-model-deployment-resources.md), [Ascend A5 communication resources and host root](../specs/2026-11-19-model-deployment-ascend-a5-comm-res.md), [Online runtime control and router hash decoupling](../specs/2026-11-19-model-deployment-online-runtime-control.md), [Ascend A5 KV cache, ModelTransfer, and DRAM](../specs/2026-11-20-ascend-a5-kvcache-modeltransfer-and-dram-normalization.md)
 - Code: [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/), [pkg/worker/scaling](../pkg/worker/scaling/), [gen/priors](../gen/priors/), [pkg/worker/elasticengine](../pkg/worker/elasticengine/), [pkg/worker/webhooks/worker](../pkg/worker/webhooks/worker/), [pack/llm-router](../pack/llm-router/), [pkg/worker/runtimecontrol](../pkg/worker/runtimecontrol/), [engine-sentinel/python](../engine-sentinel/python/)
 - Related: [KV Cache](#kv-cache), [Model Delivery](#model-delivery), [Topology](#topology)
@@ -82,7 +82,7 @@
 - ID: `instances`
 - Use for: launch accelerator-backed container workspaces, configure SSH access, pin nodes, and read instance metrics
 - Aliases: `Instance`, `InstanceType`, `SSH`, `workspace`
-- Guides: [GPU Instances](modules/instances/_index.md), [Accelerator Requests](modules/devices/requests.md), [Instance Metrics Reference](modules/instances/metrics.md)
+- Guides: [GPU Instances](modules/instances/_index.md), [Accelerator Requests](modules/devices/requests.md), [Instance Metrics Reference](reference/instances-metrics.md)
 - Specs: [SSH instance slicing](../specs/2026-07-04-ssh-instance-accelerator-slicing.md), [Sidecar partition visibility](../specs/2026-07-26-ssh-sidecar-partition-visibility.md), [Node pinning and additional volumes](../specs/2026-07-31-instance-node-pinning-and-additional-volumes.md), [Utilization metrics](../specs/2026-08-07-instance-utilization-metrics.md), [Service preserved across stop](../specs/2026-10-19-preserve-instance-service-across-stop.md)
 - Code: [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/), [pkg/worker/extensionapis/worker](../pkg/worker/extensionapis/worker/), [pkg/devicemanager/exporter](../pkg/devicemanager/exporter/), [pkg/kubemetrics](../pkg/kubemetrics/)
 - Related: [Heterogeneous Devices](#heterogeneous-devices), [Model Delivery](#model-delivery)
@@ -93,7 +93,7 @@
 - ID: `api`
 - Use for: evolve public `worker.gpustack.ai/v1` and internal `v1alpha1` types, extension API proxies, codegen, and RBAC
 - Aliases: `worker.gpustack.ai/v1`, `v1alpha1`, `CRD`, `aggregated apiserver`
-- Guides: [Development](contribute/development.md), [Model Artifact API](modules/model-delivery/artifact-api.md)
+- Guides: [Development](contribute/development.md), [Model Artifact API](reference/model-delivery-artifact-api.md)
 - Code: [api/worker/v1](../api/worker/v1/), [api/worker/v1alpha1](../api/worker/v1alpha1/), [pkg/worker/extensionapis](../pkg/worker/extensionapis/), [pkg/extensionapi](../pkg/extensionapi/), [pkg/systemkuberess](../pkg/systemkuberess/), [gen/api](../gen/api/), [serviceaccount.yaml](../deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml)
 - Related: [Development](#development), [GPU Instances](#gpu-instances)
 - Skills: [generate](../.agents/skills/gpustack-operator-generate/SKILL.md)
@@ -154,10 +154,7 @@
 | --- | --- |
 | [Heterogeneous Devices](modules/devices/_index.md) | Choose an accelerator request mode |
 | [Preflight Checks](modules/devices/preflight.md) | Validate node health before installation |
-| [Device Discovery](modules/devices/discovery.md) | Trace hardware detection, slicing, and allocation |
 | [Accelerator Requests](modules/devices/requests.md) | Look up resource keys and request rules |
-| [Scheduling Chain](modules/devices/scheduling.md) | Map node capacity labels to Kueue queues |
-| [Admission](modules/devices/admission.md) | Review webhook checks and admission gates |
 | [NVIDIA MIG Operations](modules/devices/nvidia-mig.md) | Enable and recover NVIDIA MIG partitions |
 | [Hygon MIG Operations](modules/devices/hygon-mig.md) | Enable and recover Hygon partitions |
 | [T-Head MIG Operations](modules/devices/thead-mig.md) | Enable and recover T-Head partitions |
@@ -167,7 +164,6 @@
 | Page | Description |
 | --- | --- |
 | [RDMA Networking](modules/rdma/_index.md) | Configure RDMA-backed workloads |
-| [Network Topology](modules/rdma/network-topology.md) | Inspect NIC discovery, PCI roots, and link states |
 | [RDMA Operations](modules/rdma/operations.md) | Request and verify RDMA endpoints and TopologyManager |
 
 ### Topology
@@ -175,7 +171,6 @@
 | Page | Description |
 | --- | --- |
 | [Topology](modules/topology/_index.md) | Constrain workload placement by topology domain |
-| [Topology-Aware Scheduling](modules/topology/scheduling.md) | Map topology snapshots into Kueue TAS placement |
 | [Topology-Aware Scheduling Operations](modules/topology/operations.md) | Enable Topograph and diagnose pending placement |
 
 ### KV Cache
@@ -185,7 +180,6 @@
 | [KV Cache](modules/kv-cache/_index.md) | Deploy shared inference prefix caches |
 | [KV Cache Backend](modules/kv-cache/backend.md) | Configure Mooncake cache backends and capacity |
 | [KV Cache Pools and Bindings](modules/kv-cache/pool.md) | Grant cache reuse domains and enforce pool quotas |
-| [KV Cache Injection Reference](modules/kv-cache/injection.md) | Attach a Pod to a KV cache pool |
 | [KV Cache Election and Failover](modules/kv-cache/leader.md) | Operate leader election, probes, and failover |
 | [KV Cache Local Disk Tier](modules/kv-cache/local-disk-tier.md) | Configure local disk cache buckets and eviction |
 | [KV Cache on Disk-Heavy Nodes](modules/kv-cache/disk-heavy-nodes.md) | Size memory floors on disk-heavy nodes |
@@ -196,10 +190,8 @@
 | --- | --- |
 | [Model Delivery](modules/model-delivery/_index.md) | Select how model weights reach workloads |
 | [Model Artifact](modules/model-delivery/artifact.md) | Resolve, verify, and mount model weight artifacts |
-| [Model Artifact API](modules/model-delivery/artifact-api.md) | Query public artifact and node cache APIs |
 | [Model Image Source](modules/model-delivery/image-source.md) | Package and deliver weights as OCI image volumes |
 | [Model Prefetch](modules/model-delivery/prefetch.md) | Warm model weights on target nodes before launch |
-| [Node Model Store](modules/model-delivery/node-store.md) | Inspect node cache state, CSI mounts, and collection |
 | [Node-to-Node Sync](modules/model-delivery/node-to-node-sync.md) | Transfer cached weights between cluster nodes |
 | [Remote Weight Delivery](modules/model-delivery/remote.md) | Load weights over the network from prepared sources |
 | [Model Store Operations](modules/model-delivery/operations.md) | Operate node cache watermarks, placement, and cleanup |
@@ -210,7 +202,6 @@
 | --- | --- |
 | [Model Deployment](modules/model-deployment/_index.md) | Deploy managed model serving workloads |
 | [Configuration](modules/model-deployment/configuration.md) | Configure roles, resources, overrides, and placement |
-| [Parameters](modules/model-deployment/parameterize.md) | Inspect synthesized engine, router, and transfer flags |
 | [Engine Compatibility](modules/model-deployment/engine-versions.md) | Check engine releases, store versions, and transports |
 | [Prefill and Decode](modules/model-deployment/prefill-decode.md) | Pair disaggregated prefill and decode roles |
 | [Prefill and Decode Benchmark](modules/model-deployment/prefill-decode-benchmark.md) | Compare equal-GPU H100 aggregated and disaggregated serving |
@@ -221,20 +212,15 @@
 | [External DP](modules/model-deployment/external-dp.md) | Serve a fixed data-parallel group behind a managed router |
 | [External DP Benchmark](modules/model-deployment/external-dp-benchmark.md) | Compare External DP ranks against wide tensor parallelism |
 | [Model Deployment Scaling](modules/model-deployment/scaling.md) | Plan replica counts from serving signals and capacity priors |
-| [Model Deployment Scaling Simulation](modules/model-deployment/scaling-simulation.md) | Compare scaler algorithms on identical synthetic traffic |
 | [Model Deployment Scaling Benchmark](modules/model-deployment/scaling-benchmark.md) | Measure H100 and H200 scaling latency and limits |
 | [Online Runtime Control](modules/model-deployment/runtime-control.md) | Tune serving parameters, pause roles, and isolate managed routers live |
 | [Model Deployment Routing](modules/model-deployment/routing.md) | Configure routing policies and verify router serving |
-| [Model Deployment Metrics](modules/model-deployment/metrics.md) | Inspect serving, role, and router Prometheus series |
-| [Model Deployment Status](modules/model-deployment/status.md) | Diagnose conditions, retirements, and scaler annotations |
-| [Model Deployment Shutdown](modules/model-deployment/shutdown.md) | Follow replica retirement, drain, and unadmitted removal |
 
 ### GPU Instances
 
 | Page | Description |
 | --- | --- |
 | [GPU Instances](modules/instances/_index.md) | Launch accelerator-backed container workspaces |
-| [Instance Metrics Reference](modules/instances/metrics.md) | Inspect per-instance accelerator utilization metrics |
 
 ### Operations
 
@@ -247,15 +233,30 @@
 | [Upgrading to an Enforced Binding Dtype](operate/migration/enforced-binding-dtype.md) | Verify binding dtypes before upgrading |
 | [Migration Troubleshooting](operate/migration/troubleshooting.md) | Recover stuck upgrades and namespace deletions |
 
-### Reference
+## Reference
 
 | Page | Description |
 | --- | --- |
+| [LLM Reference](reference/README.md) | Navigate flat reference contracts, exact aliases, and evidence labels |
 | [Command Reference](reference/commands.md) | Look up `gpustack-operator` subcommands, flags, and exit codes |
 | [Settings & Environment Variables](reference/settings.md) | Look up `Setting` resources and `GPUSTACK_*` variables |
 | [Instance Type Unit Resources Reference](reference/instance-type-unit-resources.md) | Look up CPU and memory unit presets |
+| [Device Discovery](reference/devices-discovery.md) | Trace hardware detection, slicing, and allocation |
+| [Scheduling Chain](reference/devices-scheduling.md) | Map node capacity labels to Kueue queues |
+| [Admission](reference/devices-admission.md) | Review webhook checks and admission gates |
+| [Network Topology](reference/rdma-network-topology.md) | Inspect NIC discovery, PCI roots, and link states |
+| [Topology-Aware Scheduling](reference/topology-scheduling.md) | Map topology snapshots into Kueue TAS placement |
+| [KV Cache Injection Reference](reference/kv-cache-injection.md) | Attach a Pod to a KV cache pool |
+| [Model Artifact API](reference/model-delivery-artifact-api.md) | Query public artifact and node cache APIs |
+| [Node Model Store](reference/model-delivery-node-store.md) | Inspect node cache state, CSI mounts, and collection |
+| [Parameters](reference/model-deployment-parameters.md) | Inspect synthesized engine, router, and transfer flags |
+| [Model Deployment Metrics](reference/model-deployment-metrics.md) | Inspect serving, role, and router Prometheus series |
+| [Model Deployment Status](reference/model-deployment-status.md) | Diagnose conditions, retirements, and scaler annotations |
+| [Model Deployment Shutdown](reference/model-deployment-shutdown.md) | Follow replica retirement, drain, and unadmitted removal |
+| [Model Deployment Scaling Simulation](reference/model-deployment-scaling-simulation.md) | Compare scaler algorithms on identical synthetic traffic |
+| [Instance Metrics Reference](reference/instances-metrics.md) | Inspect per-instance accelerator utilization metrics |
 
-### Contribution
+## Contribute
 
 | Page | Description |
 | --- | --- |
@@ -265,7 +266,7 @@
 
 ## Conventions
 
-- Every page except this index opens with a short intro, carries `## Contents`, and ends with `**See also**` / `**Next**`.
-- Every `All pages` label matches its page H1 exactly and follows site navigation order.
-- Links in `Module map` route to evidence; verify implemented behavior against current code.
-- Update this index when adding or moving pages, then run `make lint docs`.
+- Public pages (`All pages`) open with a short intro, carry `## Contents`, stay within `H1`–`H3`, and end with `**See also**` / `**Next**` without linking to `reference/` or `contribute/`.
+- Flat `reference/*.md` topic pages state an opening evidence label, carry `## Contents`, and end with `**See also**` only; `reference/README.md` is the flat navigation hub.
+- Every `All pages`, `Reference`, and `Contribute` label matches its page H1 character for character; `All pages` follows site navigation order.
+- Links in `Module map` route to evidence; update this index when adding or moving pages, then run `make lint docs`.

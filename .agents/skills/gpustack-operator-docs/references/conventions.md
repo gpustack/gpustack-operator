@@ -26,9 +26,8 @@ Links run one way: from the reference and contributor zones toward the public si
 
 A public page that needs a fact from `docs/reference/` carries the operator task itself: the symptom,
 the command or configuration, the expected signal and the next action. Keep the exhaustive table in
-the reference page and do not point the reader at it. Strict zone checks activate once the hub
-`reference/README.md` exists under `docs/reference/`; until then, remove any public link into an
-excluded zone whenever you edit the page.
+the reference page and do not point the reader at it. Strict zone checks are active whenever the hub
+`docs/reference/README.md` exists; never add a public link into an excluded zone.
 
 ### Reference pages and hub
 
@@ -42,7 +41,7 @@ Open each reference topic page by stating its evidence type, using one label fro
 | recorded capture | Output from a live run | Keep versions, hardware and genericized node names |
 | synthetic simulation | Output from a model or simulator, not hardware | Label it as simulation wherever it is cited beside hardware runs |
 
-The hub `reference/README.md` is the flat navigation entry for agents. It holds three parts:
+The hub `docs/reference/README.md` is the flat navigation entry for agents. It holds three parts:
 
 - **Task routing**: one row per task, naming the reference page and the public page that owns the operator task.
 - **Exact aliases**: API kinds, field paths, condition types and reasons, each mapped to its reference page.

@@ -4,7 +4,7 @@ pin_table_first_col: true
 
 # Settings & Environment Variables
 
-GPUStack Operator reads configuration from two places: the `Setting` resource, which you can change
+Evidence: contract. GPUStack Operator reads configuration from two places: the `Setting` resource, which you can change
 at runtime, and environment variables, which the worker reads when it starts.
 
 > **The worker aligns every `Setting` on every start.** A `GPUSTACK_*` variable present in the worker
@@ -187,7 +187,7 @@ request that reaches a webhook. Neither window needs a restart.
 | `node-management-manual`<br/>(`GPUSTACK_NODE_MANAGEMENT_MANUAL`) | Effect window: Next trigger<br/>Default: `false`<br/>Usage: Skip auto-managing nodes. When `false`, the operator auto-onboards discovered nodes by injecting the `gpustack.ai/managed=true` label; when `true`, an administrator must opt nodes in manually. Read per-reconcile. |
 | `kv-cache-backend-image`<br/>(`GPUSTACK_KV_CACHE_BACKEND_IMAGE`) | Effect window: Next trigger<br/>Default: `gpustack/mirrored-mooncake:0.3.13.post1-cpu`<br/>Usage: Image every role of a [KV cache backend](../modules/kv-cache/backend.md) runs when the object does not name one itself. The default is this project's own build — a CPU build carrying TCP and EFA over DRAM, and the only image that can run [`leader.electionBackend`](../modules/kv-cache/leader.md#high-availability). The per-vendor variant builds, their tags and which one a VRAM group needs are under [GPUStack build variants](../modules/kv-cache/backend.md#gpustack-build-variants). **It does not fit every backend**: a backend on another transport or runtime names its own *`spec.image`*, which always wins over this. **Clearing this `Setting` restores the admission refusal** for a backend naming no image anywhere. Why one default cannot fit every backend, and what having one costs, is under [Image](../modules/kv-cache/backend.md#image). |
 | `model-artifact-ca-bundle`<br/>(`GPUSTACK_MODEL_ARTIFACT_CA_BUNDLE`) | Effect window: Next trigger<br/>Default: *(blank)*<br/>Usage: Name of a `ConfigMap` in the worker's namespace whose `ca.crt` the resolution and the node plugin trust beside the system pool. **It is not given to engine `Pod`s**: they run in tenant namespaces, which cannot mount it. |
-| `model-artifact-delivery-mode`<br/>(`GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE`, *chart-rendered*) | Effect window: Immediate<br/>Default: `Engine`<br/>Usage: How a hub artifact's weights reach a `ModelDeployment`: `Engine`, the engine downloads them, or `Node`, the node's [`model-manager` plugin](../modules/model-delivery/node-store.md) mounts a verified copy. The chart declares `Node` when it deploys the plugin, and the chart owns the `Setting` from then on: a runtime edit is reverted at the next worker start. Deploying or removing the plugin (`modelManager.enabled`) is what changes the value. `Node` is refused while the `CSIDriver` `model.csi.gpustack.ai` does not exist. **Changing it rolls every deployment using a hub artifact once**; see [Switch delivery](../modules/model-delivery/operations.md#switch-delivery). |
+| `model-artifact-delivery-mode`<br/>(`GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE`, *chart-rendered*) | Effect window: Immediate<br/>Default: `Engine`<br/>Usage: How a hub artifact's weights reach a `ModelDeployment`: `Engine`, the engine downloads them, or `Node`, the node's [`model-manager` plugin](model-delivery-node-store.md) mounts a verified copy. The chart declares `Node` when it deploys the plugin, and the chart owns the `Setting` from then on: a runtime edit is reverted at the next worker start. Deploying or removing the plugin (`modelManager.enabled`) is what changes the value. `Node` is refused while the `CSIDriver` `model.csi.gpustack.ai` does not exist. **Changing it rolls every deployment using a hub artifact once**; see [Switch delivery](../modules/model-delivery/operations.md#switch-delivery). |
 | `model-artifact-https-proxy`<br/>(`GPUSTACK_MODEL_ARTIFACT_HTTPS_PROXY`) | Effect window: Next trigger<br/>Default: *(blank)*<br/>Usage: HTTPS proxy for resolution, revalidation and the node plugin's downloads, and the `HTTPS_PROXY` given to an engine downloading the weights, where a role's own value wins. Blank keeps the worker's own environment and renders nothing. Only an `http` or `https` URL without credentials is accepted, because the value reaches tenant `Pod`s; a value from the environment that is not refuses the worker's start. |
 | `model-artifact-huggingface-endpoint`<br/>(`GPUSTACK_MODEL_ARTIFACT_HUGGINGFACE_ENDPOINT`) | Effect window: Next trigger<br/>Default: `https://huggingface.co`<br/>Usage: The Hugging Face Hub a [`ModelArtifact`](../modules/model-delivery/artifact.md) resolves and revalidates against, and the `HF_ENDPOINT` an engine downloading the weights is given; the node plugin downloads from it too. What changing it does is under [Engine delivery](../modules/model-delivery/artifact.md#engine-delivery). |
 | `model-artifact-modelscope-endpoint`<br/>(`GPUSTACK_MODEL_ARTIFACT_MODELSCOPE_ENDPOINT`) | Effect window: Next trigger<br/>Default: `https://www.modelscope.cn`<br/>Usage: The ModelScope hub a [`ModelArtifact`](../modules/model-delivery/artifact.md) resolves and revalidates against and the node plugin downloads from; an engine downloading the weights gets its host as `MODELSCOPE_DOMAIN` — the runners' SDK takes a bare host. What changing it does is under [Engine delivery](../modules/model-delivery/artifact.md#engine-delivery). |
@@ -207,7 +207,7 @@ request that reaches a webhook. Neither window needs a restart.
 | `model-store-low-watermark`<br/>(`GPUSTACK_MODEL_STORE_LOW_WATERMARK`) | Effect window: Immediate<br/>Default: `70`<br/>Usage: The usage percent a collection removes down to; at least `1`, below the high watermark. |
 | `model-store-peer-sync`<br/>(`GPUSTACK_MODEL_STORE_PEER_SYNC`) | Effect window: Immediate<br/>Default: `true`<br/>Usage: Whether a node's plugin may pull a model's content from the plugins of other nodes that hold it published, instead of the hub. |
 | `settings-default-tracking` | Effect window: Next trigger<br/>Default: `instance-ssh-server-image`, `kv-cache-backend-image`, `model-deployment-modelexpress-server-image`, `model-deployment-router-image`, `model-deployment-router-proxy-image`, `model-deployment-routing-sidecar-image`, `model-prefetch-warmup-image`<br/>Usage: Comma-separated names of the `Setting`s the operator rewrites with its built-in default on every worker start, so that a default shipped in a later release reaches a cluster that never chose a value. A name in the list makes its `Setting` follow rule 3 ([who owns a value](#value-ownership)); removing a name is what keeps an image pin across an operator upgrade ([keeping a pin](#keeping-an-image-pin)). An empty value tracks nothing, and whitespace, duplicates and unregistered names are dropped ([the tracking list](#tracking-list)). No environment variable reads this `Setting`, so nothing on the `Deployment` can take the list over. |
-| `workload-fit-affinity`<br/>(`GPUSTACK_WORKLOAD_FIT_AFFINITY`) | Effect window: Immediate<br/>Default: `true`<br/>Usage: Whether the `Workload` webhook pins a logical slice, or a shared request of two or more accelerators, on an operator queue to nodes whose [fit labels](../modules/devices/scheduling.md#per-card-fit-labels) show that one accelerator can still host it. When `true`, Kueue's topology-aware scheduling skips a fragmented node; when `false`, `Workload`s pass unchanged while the fit labels are still published, so the pin can be switched off on its own. Read on every webhook call, so a change takes up to 30s to reach it, and it applies to `Workload`s created or updated after that. |
+| `workload-fit-affinity`<br/>(`GPUSTACK_WORKLOAD_FIT_AFFINITY`) | Effect window: Immediate<br/>Default: `true`<br/>Usage: Whether the `Workload` webhook pins a logical slice, or a shared request of two or more accelerators, on an operator queue to nodes whose [fit labels](devices-scheduling.md#per-card-fit-labels) show that one accelerator can still host it. When `true`, Kueue's topology-aware scheduling skips a fragmented node; when `false`, `Workload`s pass unchanged while the fit labels are still published, so the pin can be switched off on its own. Read on every webhook call, so a change takes up to 30s to reach it, and it applies to `Workload`s created or updated after that. |
 
 ### Authoring the InstanceType
 
@@ -217,8 +217,8 @@ Accelerated pools retain their derived `AcceleratorType` and canonical queue. Fl
 already authored; the derived marker is provenance, and nothing auto-removes a type.
 
 No `ClusterQueue` gains a reference to the node-devices feasibility gate in this mode. That
-[AdmissionCheck](../modules/devices/admission.md#gate-3-per-accelerator-admissioncheck) has one
-writer, [`NodeQueueReconciler`](../modules/devices/scheduling.md#queue-quota-and-draining),
+[AdmissionCheck](devices-admission.md#gate-3-per-accelerator-admissioncheck) has one
+writer, [`NodeQueueReconciler`](devices-scheduling.md#queue-quota-and-draining),
 which reads this setting as a cluster-wide switch, not as "was this queue derived".
 
 So with the switch on, every accelerated queue carries the reference once the check reports `Active`,
@@ -241,7 +241,7 @@ whatever this setting says.
 It answers `Ready` at once for every `Workload` that is not a replica of a multi-role `ModelDeployment`,
 so the only thing it changes in this mode is that such a deployment is admitted as a set; see
 [Prefill and decode](../modules/model-deployment/configuration.md#prefill-and-decode), and
-[Status](../modules/model-deployment/status.md#status) for a set that stays short of quota.
+[Status](model-deployment-status.md#status) for a set that stays short of quota.
 
 Write the `InstanceType` against the `InstanceTypeFlavor` catalog. It is the read-only,
 os/arch-agnostic view of the pools that actually exist (one entry per grouping the settings above
@@ -670,5 +670,3 @@ user-facing settings, listed for completeness.
 **See also** — [Architecture](../getting-started/architecture.md) (what each setting regroups) ·
 [Installation Modes](../operate/installation-modes.md) (which flags a mode sets for you) ·
 [High Availability Operations](../operate/high-availability.md)
-
-**Next** → [Walkthrough](../walkthroughs/devices/scheduling.md) — a setting flipped on a live cluster, before and after.

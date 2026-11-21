@@ -21,7 +21,7 @@ NFD labels nodes → DeviceManager detects accelerators → Worker profiles capa
   ⊢ node-devices AdmissionCheck gates per-card feasibility
 ```
 
-- Chain detail → [architecture.md](../../../docs/getting-started/architecture.md) (overview), then [scheduling-chain.md](../../../docs/modules/devices/scheduling.md) for the reconcilers and [admission.md](../../../docs/modules/devices/admission.md) for the five gates / four-view math these cases assert; the unified-pool refactor this suite tracks → `specs/2026-06-29-instancetype-unified-pool-refactor.md`.
+- Chain detail → [architecture.md](../../../docs/getting-started/architecture.md) (overview), then [devices-scheduling.md](../../../docs/reference/devices-scheduling.md) for the reconcilers and [devices-admission.md](../../../docs/reference/devices-admission.md) for the five gates / four-view math these cases assert; the unified-pool refactor this suite tracks → `specs/2026-06-29-instancetype-unified-pool-refactor.md`.
 - Accelerated cases run **GPU-less by approximation**: mock a fake accelerator NodeFeature + a per-card `Devices` ledger. The derivation and the four-view/AdmissionCheck math are **NOT** mocked — that is the verification.
 
 ## Orchestration

@@ -1,6 +1,6 @@
 # Network Topology
 
-The Device Manager records a node's network interfaces and accelerator fabric in `Devices`. It
+Evidence: contract. The Device Manager records a node's network interfaces and accelerator fabric in `Devices`. It
 checks *remote direct memory access (RDMA)* links before publishing the labels and resource keys used for scheduling.
 
 ## Contents
@@ -120,7 +120,7 @@ The check is not per-manufacturer: it reads the *RDMA* subsystem's own port attr
 to every *RDMA* device there is. `preflight` runs this same pass rather than reimplementing it, which
 makes the two readings interpret the host identically. The readings are not identical to each other,
 since `preflight` reads sysfs when it is invoked and the published record is as old as the last pass
-that had a reason to run. See [Preflight Checks](../devices/preflight.md).
+that had a reason to run. See [Preflight Checks](../modules/devices/preflight.md).
 
 ## Three node labels
 
@@ -213,7 +213,7 @@ endpoint reaches this gate only when it names an *RDMA* device.
 An invalid policy, conflicting policies or unknown resolution selects no HCAs. All *RDMA* tokens
 then report `Unhealthy`. Unselected endpoints retain their advertised IDs, just like failed endpoints.
 Policy updates change subsequent advertisements and allocation calls without draining the node or
-disrupting running containers. Read [Selection policy](operations.md#selection-policy) for status
+disrupting running containers. Read [Selection policy](../modules/rdma/operations.md#selection-policy) for status
 and failure behavior.
 
 **A `Failed` endpoint keeps its tokens rather than dropping them.** The kubelet checkpoints the
@@ -240,7 +240,7 @@ The `partitioned` family is the one place an *RDMA* token publishes a hint where
 counterpart publishes none: an *RDMA* partition token names exactly one virtual function, whose
 affinity a hint can honor, while an accelerator partition token names no accelerator at all. What
 that means for a request pairing the two is stated with the request rules
-([Accelerator Requests](../devices/requests.md#co-location-conditions)).
+([Accelerator Requests](../modules/devices/requests.md#co-location-conditions)).
 
 > **Why** one interface serves many shared holders — its multiple queue pairs are how the hardware
 > is meant to be used, with the isolation done by firmware and kernel, so several processes on one
@@ -277,7 +277,7 @@ local verbs observations and the active selection policy. The container receives
   were granted, and only where the host has one;
 - `GPUSTACK_RDMA_DEVICES`, the sorted, unique comma-joined HCA names without `=`, and an exact
   `NCCL_IB_HCA` filter with one leading `=`, in all modes
-  ([values and startup use](operations.md#injected-devices)).
+  ([values and startup use](../modules/rdma/operations.md#injected-devices)).
 
 When no granted endpoint remains eligible under the active selection policy, the response sets
 `GPUSTACK_RDMA_DEVICES=""` and `NCCL_IB_HCA=""` and injects no character device nodes. Existing
@@ -449,11 +449,9 @@ to check when a selector on the gate stops picking a node that still has the har
 
 ---
 
-**See also** — [Device Discovery](../devices/discovery.md) (the accelerator side of the same ledger) ·
-[Scheduling Chain](../devices/scheduling.md) (how a node label reaches a flavor selector) ·
-[Accelerator Requests](../devices/requests.md) (the request rules the *RDMA* keys obey) ·
-[RDMA Operations](operations.md) (how many endpoints a workload asks for, and the kubelet
+**See also** — [Device Discovery](devices-discovery.md) (the accelerator side of the same ledger) ·
+[Scheduling Chain](devices-scheduling.md) (how a node label reaches a flavor selector) ·
+[Accelerator Requests](../modules/devices/requests.md) (the request rules the *RDMA* keys obey) ·
+[RDMA Operations](../modules/rdma/operations.md) (how many endpoints a workload asks for, and the kubelet
 policy that aligns them with its accelerators) ·
-[Preflight Checks](../devices/preflight.md) (the same link check, before anything is installed)
-
-**Next** → [Scheduling Chain](../devices/scheduling.md) — how these labels become `ResourceFlavor`s.
+[Preflight Checks](../modules/devices/preflight.md) (the same link check, before anything is installed)

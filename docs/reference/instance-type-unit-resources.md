@@ -1,6 +1,6 @@
 # Instance Type Unit Resources Reference
 
-With `instance-type-derived-from-node` enabled, the operator summarizes a node into an
+Evidence: contract. With `instance-type-derived-from-node` enabled, the operator summarizes a node into an
 `InstanceType` and stamps its **unit resources**: the CPU and RAM for *one unit*, which for an
 acceleratable type is **one whole accelerator**.
 
@@ -253,8 +253,6 @@ at the top of that file; when either changes, compare the rows here with the pre
 
 ---
 
-**See also** — [Scheduling Chain](../modules/devices/scheduling.md#unit-spec-defaults)
-(where the unit spec is stamped) · [Admission](../modules/devices/admission.md#type-and-instance-webhooks)
+**See also** — [Scheduling Chain](devices-scheduling.md#unit-spec-defaults)
+(where the unit spec is stamped) · [Admission](devices-admission.md#type-and-instance-webhooks)
 (what the webhooks enforce on it) · [Walkthrough](../walkthroughs/devices/scheduling.md#step-4-manage-a-custom-instancetype)
-
-**Next** → [Settings](settings.md#settings) — configure resource derivation and CPU awareness.

@@ -979,7 +979,7 @@ if [ "$STRICT_ZONES" -eq 1 ]; then
           host = strip_default_port(substr(rest, 1, slash - 1), sch)
           upath = norm_relpath(url_decode(substr(rest, slash + 1)))
           if (host == "docs.gpustack.ai") {
-            return (upath ~ /^(gpustack-operator\/[^\/]+\/)?(reference|docs\/reference|docs\/contribute)(\/|$)/)
+            return (upath ~ /^(gpustack-operator\/([^\/]+\/)?)?(reference|docs\/reference|docs\/contribute)(\/|$)/)
           }
           if (host == "github.com") {
             return (upath ~ /^gpustack\/gpustack-operator\/(blob|tree)\/[^\/]+\/docs\/(reference|contribute)(\/|$)/)
@@ -988,7 +988,7 @@ if [ "$STRICT_ZONES" -eq 1 ]; then
         }
         if (substr(u, 1, 1) == "/") {
           np = norm_relpath(url_decode(substr(u, 2)))
-          return (np ~ /^(gpustack-operator\/[^\/]+\/)?(reference|docs\/reference|docs\/contribute)(\/|$)/)
+          return (np ~ /^(gpustack-operator\/([^\/]+\/)?)?(reference|docs\/reference|docs\/contribute)(\/|$)/)
         }
         u = url_decode(u)
         fdir = dir_of(src)

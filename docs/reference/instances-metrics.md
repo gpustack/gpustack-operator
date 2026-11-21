@@ -1,6 +1,6 @@
 # Instance Metrics Reference
 
-The `instances/<name>/metrics` subresource returns utilization for one `Instance`. The Device
+Evidence: contract. The `instances/<name>/metrics` subresource returns utilization for one `Instance`. The Device
 Manager's Prometheus exporter publishes it for every `Instance` on a node. Both use the same
 calculation code.
 
@@ -538,7 +538,6 @@ it is accepted and never enforced, so the port stays open.
 
 ---
 
-**See also** — [Architecture](../../getting-started/architecture.md) · [Device
-Discovery](../devices/discovery.md) for how the Device Manager samples accelerators ·
-[Internals](../../contribute/internals.md) for the Device Manager's subcommands and flags.
-**Next** → [Accelerator Requests](../devices/requests.md)
+**See also** — [Architecture](../getting-started/architecture.md) · [Device
+Discovery](devices-discovery.md) for how the Device Manager samples accelerators ·
+[Internals](../contribute/internals.md) for the Device Manager's subcommands and flags.

@@ -4,7 +4,7 @@ title: Documentation
 
 # Documentation
 
-Install the operator, configure a capability, or find the reference for a running workload.
+Install the operator, configure a capability, or troubleshoot a running workload.
 
 ## Getting started
 
@@ -22,7 +22,6 @@ Install the operator, configure a capability, or find the reference for a runnin
 - [Model Deployment](modules/model-deployment/)
 - [GPU Instances](modules/instances/)
 
-## Operations and reference
+## Operations
 
 - [Operations](operate/) covers installation, availability and upgrades.
-- [Reference](reference/) lists commands, settings and resource presets.

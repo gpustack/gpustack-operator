@@ -355,6 +355,18 @@ T="$(clone_strict iso-same-origin)"
 printf '\nSee [Ref](https://docs.gpustack.ai/gpustack-operator/main/reference/guide-parameters.md).\n' >>"${T}/docs/getting-started/guide.md"
 expect_fail "iso-same-origin" "${T}" "public page links to excluded zone"
 
+T="$(clone_strict iso-root-alias-no-version)"
+printf '\nSee [Ref](https://docs.gpustack.ai/gpustack-operator/reference/settings.md).\n' >>"${T}/docs/getting-started/guide.md"
+expect_fail "iso-root-alias-no-version" "${T}" "public page links to excluded zone"
+
+T="$(clone_strict iso-root-alias-protocol-relative)"
+printf '\nSee [Ref](//docs.gpustack.ai/gpustack-operator/reference/settings.md).\n' >>"${T}/docs/getting-started/guide.md"
+expect_fail "iso-root-alias-protocol-relative" "${T}" "public page links to excluded zone"
+
+T="$(clone_strict iso-root-alias-path)"
+printf '\nSee [Ref](/gpustack-operator/reference/settings.md).\n' >>"${T}/docs/getting-started/guide.md"
+expect_fail "iso-root-alias-path" "${T}" "public page links to excluded zone"
+
 T="$(clone_strict iso-origin-upper-port)"
 printf '\nSee [Ref](HTTPS://DOCS.GPUSTACK.AI:443/reference/guide-parameters.md).\n' >>"${T}/docs/getting-started/guide.md"
 expect_fail "iso-origin-upper-port" "${T}" "public page links to excluded zone"

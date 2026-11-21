@@ -28,7 +28,7 @@ RETIRED_MODULE_SLUGS = frozenset(
     }
 )
 SAME_ORIGIN_EXCLUDED_RE = re.compile(
-    r"^(?:gpustack-operator/[^/]+/)?(?:reference|docs/reference|docs/contribute)(?:/|$)"
+    r"^(?:gpustack-operator/(?:[^/]+/)?)?(?:reference|docs/reference|docs/contribute)(?:/|$)"
 )
 DEFAULT_PORTS = {"http": 80, "https": 443}
 

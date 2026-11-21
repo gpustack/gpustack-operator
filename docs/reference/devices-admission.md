@@ -1,6 +1,6 @@
 # Admission
 
-A workload passes admission gates before a container receives a device. Kueue accounts for
+Evidence: contract. A workload passes admission gates before a container receives a device. Kueue accounts for
 pool capacity, while GPUStack checks whether individual accelerators can satisfy the request.
 
 ## Contents
@@ -32,7 +32,7 @@ point on the path.
 ### Gate 1: Pod webhook
 
 A `pods` CREATE webhook (objectSelector `kueue.x-k8s.io/queue-name`, `failurePolicy: Fail`) enforces the
-[normative request rules](requests.md#request-rules) and folds each family's credit
+[normative request rules](../modules/devices/requests.md#request-rules) and folds each family's credit
 input:
 
 - **logical slice** — `.sliced.memory-percentage` / `.sliced.memory-mib` into `.sliced.units`: the
@@ -44,7 +44,7 @@ Memory thus reaches the `credits` fold-down before Kueue scores it. The webhook 
 `.sliced.cores-percentage` to 100, prefers `.sliced.memory-percentage` over `.sliced.memory-mib`, and
 always recomputes the fold, since no trusted path sets it.
 
-It then validates the [request rules](requests.md#request-rules). Each rule includes
+It then validates the [request rules](../modules/devices/requests.md#request-rules). Each rule includes
 an accepted and a rejected example.
 
 The divisor is the pool's per-card memory, resolved from an operator-owned `AcceleratorType` or
@@ -68,10 +68,10 @@ the `Workload` with `Retry` when the fit fails.
 The worker applies the `gpustack-node-devices` `AdmissionCheck` at startup, retrying
 until Kueue's CRD is established — the chart cannot ship it, since Kueue templates its own CRDs and
 nothing orders them ahead of a custom resource in the same render (see [Install
-modes](../../operate/installation-modes.md#deployed-and-applied-resources)).
+modes](../operate/installation-modes.md#deployed-and-applied-resources)).
 
 The worker keeps it `Active`; an accelerated queue references it in *`spec.admissionChecksStrategy`*
-only once it is ([Queue quota and draining](scheduling.md#queue-quota-and-draining)).
+only once it is ([Queue quota and draining](devices-scheduling.md#queue-quota-and-draining)).
 
 Once Kueue reserves quota, the check reads each node's `Devices` ledger for per-accelerator
 `Remaining ≥ demand`: a whole accelerator for exclusive, `.sliced.units` for sliced, an owner share for
@@ -88,7 +88,7 @@ admits them. A second `Workload` judged in that window would see the first one's
   `kueue.x-k8s.io/workload` annotation and `kueue.x-k8s.io/podset` label tie it to its `Workload`.
 - The ledger and the held `Pod`s come from the same read, so no `Pod` is counted twice or missed.
 - A finished `Pod`, in phase `Succeeded` or `Failed`, still counts as held, while the ledger stops
-  charging the cards the kubelet took back from it ([device discovery](discovery.md#container-identification)).
+  charging the cards the kubelet took back from it ([device discovery](devices-discovery.md#container-identification)).
   A replacement `Pod` its `Workload` creates is then counted by neither until `Allocate` records it.
 - The check judges one `Workload` at a time, and remembers each `Ready` it wrote until the cache shows it.
 
@@ -120,11 +120,11 @@ node named there must host its own share of the PodSet from its own accelerators
 > - a node's free `.sliced.units` may be spread over accelerators none of which fits the slice;
 > - a node's 10 shared tokens per accelerator let a node with too few accelerators take `.shared: N`.
 >   The `Pod` webhook's card-count pin keeps such a request off those nodes and their flavors. Where the
->   pin misses ([Limitations](requests.md#limitations)) it never frees, since Kueue
+>   pin misses ([Limitations](../modules/devices/requests.md#limitations)) it never frees, since Kueue
 >   restarts the flavor scan at the smallest node after every eviction.
 >
 > Left alone, TAS prefers such a node, the check answers `Retry`, and TAS places the `Workload` there
-> again every 30 s. The [per-card fit labels](scheduling.md#per-card-fit-labels) close that
+> again every 30 s. The [per-card fit labels](devices-scheduling.md#per-card-fit-labels) close that
 > loop for a pinned `Workload`: TAS skips the node, and when no node fits, the `Workload` stays pending
 > on `excluded: affinity` and holds no quota.
 >
@@ -143,7 +143,7 @@ any one container asks for.
 - It acts on an UPDATE only while the old `Workload` holds no quota reservation, which is when Kueue
   rebuilds a suspended job's spec and still lets PodSets change.
 - It never denies. Its *`failurePolicy`* is `Ignore`, and the setting
-  [`workload-fit-affinity`](../../reference/settings.md#settings) turns it off while the labels keep being published.
+  [`workload-fit-affinity`](settings.md#settings) turns it off while the labels keep being published.
 - The pin never reaches the `Pod` or its owner's template: Kueue copies only labels, annotations, a
   *`nodeSelector`*, tolerations and scheduling gates onto them. A `Pod`-level pin would be unsafe, because
   the kubelet re-admits running `Pod`s against current node labels when it restarts.
@@ -169,7 +169,7 @@ partitioned accelerator: it stays queued, not admitted into a permanent `Pending
 geometry allows.
 
 **Feasibility is per role.** A `Workload` composed from a `Pod` group carries one PodSet per role, and
-[each PodSet gets its own ResourceFlavor](scheduling.md#stage-4-kueue-chain) — so a demand
+[each PodSet gets its own ResourceFlavor](devices-scheduling.md#stage-4-kueue-chain) — so a demand
 is judged against the accelerators of the flavor its own PodSet was assigned, never against every
 accelerator in the pool.
 
@@ -199,8 +199,8 @@ re-opens evaluation.
 ### Gate 4: Default scheduler and kubelet
 
 `Node`-level counting of each family's remaining keys — the bare `.sliced` / `.partitioned` token
-plus its [logical](scheduling.md#logical-slicing-capacities) or
-[partitioned](scheduling.md#hardware-partitioning-capacities) counting keys — checks the node
+plus its [logical](devices-scheduling.md#logical-slicing-capacities) or
+[partitioned](devices-scheduling.md#hardware-partitioning-capacities) counting keys — checks the node
 against those keys.
 
 On a TAS queue it does not choose the node: TAS assigned one at quota reservation and the `Pod` is
@@ -223,10 +223,10 @@ runtime isolation, and records the allocation in the `Devices` ledger. "Settles"
 The slice refusal is the one gate every path reaches — a `Pod` outside the scheduling chain, or a hint
 the kubelet declined — so a slice the gates above let through by mistake fails its `Pod` rather than
 oversubscribing an accelerator. Its controller recreates the `Pod`; the refusal and its off switch are
-in [Container identification](discovery.md#container-identification).
+in [Container identification](devices-discovery.md#container-identification).
 
 Both paths, and the per-manufacturer isolation each slice gets — it covers every sliceable manufacturer
-— are in [Device Discovery](discovery.md#device-plugin-allocator). The `Pod` webhook caps
+— are in [Device Discovery](devices-discovery.md#device-plugin-allocator). The `Pod` webhook caps
 `.sliced` and `.partitioned` at exactly **1**, so the manufacturer-specific multi-slice divergence that
 cap hid can no longer be requested.
 
@@ -305,7 +305,7 @@ representation.
 ## Type and Instance webhooks
 
 The unit spec lives **only** on the `InstanceType`: a derived type is stamped with its [per-product
-preset](scheduling.md#unit-spec-defaults) at creation, and an admin
+preset](devices-scheduling.md#unit-spec-defaults) at creation, and an admin
 edit touches only the `InstanceType`, never a `Node` or the `ClusterQueue` notes.
 
 - **`AcceleratorType` validating and defaulting** — requires *`acceleratorGroup`*, `os`, and `arch` on
@@ -343,7 +343,7 @@ edit touches only the `InstanceType`, never a `Node` or the `ClusterQueue` notes
 ## KV cache injection webhook
 
 A second mutating webhook on `Pod`s writes the client configuration an inference engine needs to use a
-[KV cache pool](../kv-cache/injection.md). It sits **outside** the admission gates:
+[KV cache pool](kv-cache-injection.md). It sits **outside** the admission gates:
 
 - It admits or refuses on its own inputs, consumes no `.sliced.*` or `.partitioned.*` value, produces
   none, and never touches *`resources`*.
@@ -409,7 +409,7 @@ cluster/local queue names onto `Pod` labels; long `ClusterQueue` names would not
 
 `TopologyAwareScheduling` is enabled. Generated `ResourceFlavor`s reference Kueue `Topology` resources, and the
 `Pod` integration converts a `ModelDeployment` role's required-level annotation into the `Workload`
-PodSet request described in [Topology-Aware Scheduling](../topology/scheduling.md).
+PodSet request described in [Topology-Aware Scheduling](topology-scheduling.md).
 
 It also sets `resources.quotaCheckStrategy: IgnoreUndeclared`, so a single-dimension queue (only `cpu`,
 or only the manufacturer `credits`) does not reject a `Workload` for the `Pod` resources it does not cover
@@ -419,12 +419,10 @@ node-feature tables by `make generate chart`.
 The same strategy makes a queue with **no resource groups** admit every `Workload`: it declares no
 resource, so nothing is checked, the `Workload` gets no flavor, and with no flavor it carries no
 `AdmissionCheck`. The operator never leaves such a queue admitting — see
-[Queue quota and draining](scheduling.md#queue-quota-and-draining).
+[Queue quota and draining](devices-scheduling.md#queue-quota-and-draining).
 
 ---
 
-**See also** — [Accelerator Requests](requests.md) (the normative request contract) ·
-[Device Discovery](discovery.md#device-plugin-allocator) (gate 5 in detail) ·
-[Walkthrough](../../walkthroughs/devices/scheduling.md) (the four views moving on a live cluster)
-
-**Next** → [Installation Modes](../../operate/installation-modes.md) — how the chain gets deployed.
+**See also** — [Accelerator Requests](../modules/devices/requests.md) (the normative request contract) ·
+[Device Discovery](devices-discovery.md#device-plugin-allocator) (gate 5 in detail) ·
+[Walkthrough](../walkthroughs/devices/scheduling.md) (the four views moving on a live cluster)

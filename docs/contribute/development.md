@@ -169,9 +169,12 @@ page structure, index entries and rendered site links. CI runs the same gate.
 
 The [shared module map](../README.md#module-map) connects guides, specs, code and skills for code
 changes. Update its routing in the same PR when those entry points or associations change.
-`make site` also generates `/llms.txt` from that index and *`index.md`* beside each article's HTML.
-Markdown exports preserve the prose and code blocks, with links adjusted for the website.
-Hugo watches the shared index and article sources during `make site-serve`.
+`make site` also generates `/llms.txt` from that index, *`index.md`* beside each public article's
+HTML, and rewritten static `/reference/*.md` exports from `docs/reference/*.md`.
+
+Hugo watches the shared index and public article sources during `make site-serve`. `hack/site.sh`
+stages `docs/reference/*.md` into `site/resources/reference/` before starting Hugo, so restart
+`make site-serve` after editing `docs/reference/*.md` to refresh the static `/reference/*.md` bytes.
 
 `make lint docs` runs the same build and checks module coverage, skill inputs, generated index
 coverage, Markdown content and local links. These checks cannot establish whether a design record
@@ -202,6 +205,7 @@ files fails publication.
 | `/charts/index.yaml` | Existing Helm chart index; its address stays unchanged. |
 | `/versions.json` | Generated version list and source revisions. |
 | `/llms.txt` | Index for the documentation selected by the root redirect. |
+| `/reference/*.md` | Flat LLM reference Markdown synced from the default release when present. |
 
 These paths are relative to `https://docs.gpustack.ai/gpustack-operator/`. A stable version has a
 `vMAJOR.MINOR.PATCH` tag without a prerelease suffix. Only versions actually published by the Site

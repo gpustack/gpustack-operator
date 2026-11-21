@@ -24,8 +24,8 @@ flowchart LR
   Deliver -> Run["04 · Run: ModelDeployment, ModelDeploymentScaler & GPU Instances"]
 -->
 
-1. **Discover:** NFD and Device Manager identify accelerators and RDMA interfaces. See [Device Discovery](./docs/modules/devices/discovery.md).
-2. **Schedule:** The worker builds pools, `AcceleratorType`s and `InstanceType`s; Kueue and admission checks place workloads. See [Admission](./docs/modules/devices/admission.md).
+1. **Discover:** NFD and Device Manager identify accelerators and RDMA interfaces. See [Device Discovery](./docs/reference/devices-discovery.md).
+2. **Schedule:** The worker builds pools, `AcceleratorType`s and `InstanceType`s; Kueue and admission checks place workloads. See [Admission](./docs/reference/devices-admission.md).
 3. **Deliver:** Optional model prefetch and shared KV cache support workloads. See [Model Delivery](./docs/modules/model-delivery/_index.md) and [KV Cache](./docs/modules/kv-cache/_index.md).
 4. **Run:** Model deployments and instances serve workloads. See [Model Deployment](./docs/modules/model-deployment/_index.md) and [GPU Instances](./docs/modules/instances/_index.md).
 
@@ -417,7 +417,7 @@ A Pod requests one resource family in one container group. For NVIDIA, the reque
 | MIG partition | `nvidia.com/gpu.partitioned: "1"`<br>`nvidia.com/gpu.partitioned.mig-3g.40gb: "1"` |
 
 See [Accelerator Requests](./docs/modules/devices/requests.md) for the exact keys and rules, and
-[Device Discovery](./docs/modules/devices/discovery.md) for each manufacturer's slicing behavior.
+[Device Discovery](./docs/reference/devices-discovery.md) for each manufacturer's slicing behavior.
 
 ## License
 
