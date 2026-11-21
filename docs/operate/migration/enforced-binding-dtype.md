@@ -1,9 +1,9 @@
 # Upgrading to an Enforced Binding Dtype
 
-From this release, a Binding's *`spec.domain.dtype`* stops being a declaration and becomes the engine's
-`--kv-cache-dtype`, changing objects a running cluster already holds. The rule itself is stated once,
-under
-[The dtype is handed to the engine](../../modules/kv-cache/pool.md#engine-dtype).
+Starting in this release, `KVCachePoolBinding` *`spec.domain.dtype`* is rendered onto attached engines
+as `--kv-cache-dtype` instead of acting only as metadata. Check existing Bindings and deployments
+before upgrading; see [Engine dtype](../../modules/kv-cache/pool.md#engine-dtype) for the underlying
+contract.
 
 ## Contents
 
@@ -15,37 +15,35 @@ under
 
 ## Changes on upgrade
 
-- Every pool-attached `ModelDeployment` rolls once. Its replicas gain an argument, which moves
-  their spec hash, so each is replaced at the deployment's first reconcile after the upgrade.
-- The `dtype` reaches the engine verbatim. A spelling that engine rejects (`bf16` on vLLM,
-  `fp8` or `float16` on SGLang) makes every new `Pod` fail argument parsing, so each replica the
-  rollout replaces stops serving.
-- A role's own `--kv-cache-dtype` is refused while it attaches a pool. A deployment already
-  stored with one keeps running on its own value, which wins because it comes later on the command
-  line, until its next update is refused.
-- A `Pod` opting into injection is refused when its container passes the flag itself, so its
-  owner reports `FailedCreate` until the flag is removed.
-- A new Binding may not declare `auto`. One stored with it keeps working and stays updatable.
+- **One-time replica rollout**: every pool-attached `ModelDeployment` gains `--kv-cache-dtype`, changing
+  its pod-spec hash and rolling replicas once.
+- **Engine argument parsing**: *`spec.domain.dtype`* passes verbatim to the engine. Invalid engine
+  spellings (`bf16` on vLLM; `fp8` or `float16` on SGLang) make replaced `Pod`s fail startup.
+- **Owned role flag**: admission refuses `--kv-cache-dtype` in *`roles[].extraArgs`* on pool-attached
+  `ModelDeployment`s. Existing stored deployments keep running with their explicit flag until next
+  edited.
+- **Owned `Pod` injection flag**: `Pod` injection refuses containers that pass `--kv-cache-dtype`,
+  causing `FailedCreate` on the owning controller until removed.
+- **No new `auto` Bindings**: admission rejects `dtype: auto` on new Bindings while allowing existing
+  `auto` Bindings to keep running and updating.
 
 ## Step 1: Check every Binding
 
-List every Binding's dtype, then compare each with the engines of the deployments that name it:
+List every `KVCachePoolBinding` and compare *`spec.domain.dtype`* against the engines attached to it:
 
 ```bash
 kubectl get kvcachepoolbindings -A \
   -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,DTYPE:.spec.domain.dtype
 ```
 
-Each engine's accepted spellings are listed once, under
-[The dtype is handed to the engine](../../modules/kv-cache/pool.md#engine-dtype). A
-Binding whose deployments run both engines needs a value in both rows there. A spelling its engine
-does not accept is what the next two sections recover from, and fixing it before upgrading is
-cheaper.
+Compare each value against the accepted spellings in
+[Engine dtype](../../modules/kv-cache/pool.md#engine-dtype). If both vLLM and SGLang attach to one
+Binding, *`dtype`* must be valid in both engines. Fix incompatible Bindings before upgrading to avoid
+startup failures.
 
 ## Step 2: Find roles with flags
 
-These deployments keep their own value after the upgrade, and their next edit is refused until the
-flag is gone from *`extraArgs`*:
+Find pool-attached managed roles that still declare `--kv-cache-dtype` in *`extraArgs`*:
 
 ```bash
 kubectl get modeldeployments -A -o json | jq -r '.items[]
@@ -54,20 +52,18 @@ kubectl get modeldeployments -A -o json | jq -r '.items[]
   | "\($md.metadata.namespace)/\($md.metadata.name) role \(.name)"'
 ```
 
-Remove the flag once the Binding's dtype is the one the role should run.
+Remove `--kv-cache-dtype` from *`extraArgs`* once the attached Binding declares the intended `dtype`.
 
 ## Troubleshooting
 
-When new `Pod`s fail argument parsing, the dtype is immutable, so the Binding cannot be corrected in
-place. Turn the `Setting` off first, which renders and refuses nothing and recreates the replicas
-without the flag:
+If upgraded `Pod`s fail argument parsing, you cannot edit *`spec.domain.dtype`* in place because
+*`domain`* is immutable. Disable `model-deployment-kv-cache-dtype-owned` first to stop rendering and
+restore serving immediately:
 
 ```bash
 kubectl -n gpustack-system patch setting model-deployment-kv-cache-dtype-owned \
   --type merge -p '{"spec":{"value":"false"}}'
 ```
-
-The patch changes the `Setting` as follows:
 
 ```diff
  apiVersion: gpustack.ai/v1
@@ -80,22 +76,21 @@ The patch changes the `Setting` as follows:
 +  value: "false"
 ```
 
-Then move the workloads to a Binding with a spelling the engine accepts, and turn the `Setting` back on:
+Then migrate workloads to a valid Binding and re-enable enforcement:
 
-1. Create a new Binding on the same pool with the corrected `dtype` and a new *`domain.name`*; the old
-   name stays claimed until the old Binding is gone.
-2. Recreate each deployment with *`spec.kvCache.poolRef.name`* naming the new Binding. *`kvCache`* is an
-   identity field, so it is a new deployment rather than an edit.
-3. Delete the old deployments; the old Binding's deletion completes once none of them holds it.
-4. Patch the `Setting` back to `"true"`.
+1. Create a new `KVCachePoolBinding` on the same pool with a valid *`dtype`* and a new *`domain.name`*.
+2. Recreate each `ModelDeployment` pointing *`spec.kvCache.poolRef.name`* at the new Binding
+   (*`spec.kvCache`* is immutable on an existing deployment).
+3. Delete the old `ModelDeployment`s, then delete the old `KVCachePoolBinding`.
+4. Patch `Setting/model-deployment-kv-cache-dtype-owned` back to `"true"`.
 
-The cache under the old domain is not carried over. It was written without a binding dtype, so it
-is not worth keeping.
+Cached blocks under the old domain are discarded intentionally because they were written without an
+enforced dtype.
 
 ## Verification
 
-Every replica of a pool-attached role carries the Binding's value as two entries of its *`command`*,
-because the operator owns that role's whole argv and folds every argument into it:
+Confirm that every managed replica of a pool-attached `ModelDeployment` carries `--kv-cache-dtype` in
+its synthesized *`command`*:
 
 ```bash
 kubectl -n <namespace> get pods -l app.kubernetes.io/instance=<deployment> \
@@ -103,12 +98,13 @@ kubectl -n <namespace> get pods -l app.kubernetes.io/instance=<deployment> \
   | grep -o -- '--kv-cache-dtype","[^"]*'
 ```
 
-An injected `Pod` carries the same two entries at the end of its `args`, where the webhook appends.
+On webhook-injected standalone `Pod`s, the same two entries appear at the end of `containers[].args`.
 
 ---
 
-**See also** — [KV Cache Pools and Bindings](../../modules/kv-cache/pool.md) (the dtype rule) ·
-[ModelDeployment](../../modules/model-deployment/configuration.md#operator-owned-keys) (what the operator owns) ·
-[Installation Modes](../installation-modes.md#settings-and-precedence) (runtime `Setting` precedence across restarts)
+**See also** — [KV Cache Pools and Bindings](../../modules/kv-cache/pool.md) (accepted engine dtype
+spellings) · [Configuration](../../modules/model-deployment/configuration.md#operator-owned-keys)
+(operator-owned engine flags) · [Installation Modes](../installation-modes.md#settings-and-precedence)
+(runtime `Setting` startup precedence)
 
-**Next** → [Migration Troubleshooting](troubleshooting.md) — when an upgrade wedges for another reason.
+**Next** → [Migration Troubleshooting](troubleshooting.md) — recover wedged upgrades and stuck namespaces.

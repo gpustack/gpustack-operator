@@ -425,7 +425,7 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
 
 #### Wave 5 — Full-Corpus Editorial Rewrite and Visual Charts (Parallel Disjoint Batches)
 
-- [ ] **T11 · Editorial rewrite: remaining 13 Walkthroughs, Getting Started, and Operations**
+- [x] **T11 · Editorial rewrite: remaining 13 Walkthroughs, Getting Started, and Operations**
       Blocked by: T10
       Owns: `docs/getting-started/**`, `docs/operate/**`, `docs/walkthroughs/_index.md`, `docs/walkthroughs/devices/**`, `docs/walkthroughs/rdma/**`, `docs/walkthroughs/topology/**`, `docs/walkthroughs/kv-cache/**`, `docs/walkthroughs/model-deployment/**`
       Acceptance: Applies the pilot-approved editorial standard across all remaining 13 walkthroughs (natural human voice, immutable inputs preserved, unreferenced hashes/Pod UIDs/long raw dumps stripped), `getting-started/` (`architecture.md <= 200` lines), and `operate/` (80% ASD-STE100, unified terminology and singular/plural forms, concise headings and footnotes).

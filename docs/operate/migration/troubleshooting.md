@@ -1,10 +1,9 @@
 # Migration Troubleshooting
 
-Chart-mode installs are fixed in current releases: the worker `Deployment` defaults to `Recreate`
-(`worker.strategyType`), abandoned Helm pending records repair without a destructive rollback,
-and a terminating worker removes the `APIService`s backed by its namespace. Image mode is not —
-the server still renders `RollingUpdate` (#128), so the wedged-upgrade recovery below stays
-live guidance, for older releases and for the reset any release can meet too.
+Current chart-mode releases use `Recreate` on the worker `Deployment` (`worker.strategyType`), repair
+interrupted Helm pending records automatically, and remove system-namespace `APIService`s during
+namespace deletion. Image mode still renders `RollingUpdate` on the worker (#128), so the procedures
+below apply to image-mode upgrades, older chart releases, and full cluster resets.
 
 ## Contents
 
@@ -16,90 +15,66 @@ live guidance, for older releases and for the reset any release can meet too.
 
 ## Worker CrashLoopBackOff
 
-The symptom: after an in-place upgrade (re-applied server-rendered manifests in image mode, `helm
-upgrade` in chart mode) the new worker `Pod` never leaves `CrashLoopBackOff`, yet the `Deployment` reports
-ready, because the old `ReplicaSet`'s `Pod` is still serving. The aggregated API answers with the old
-binary's surface: `kubectl api-resources --api-group=worker.gpustack.ai -o wide` shows the old verbs,
-and writes to `instancetypes` are refused.
+**Symptom**: after an in-place upgrade, the new worker `Pod` crash-loops while the `Deployment` still
+reports Ready on the old `ReplicaSet`. `kubectl api-resources --api-group=worker.gpustack.ai -o wide`
+still serves old verbs and rejects `instancetypes` writes, while the new worker logs:
 
-The new `Pod`'s log carries the chain:
-
-```
+```text
 customresourcedefinitions.apiextensions.k8s.io "admissionchecks.kueue.x-k8s.io" not found
 release gpustack-operator-device-manager: ... rolled back due to atomic being set: context canceled
 ```
 
-What happened: the boot's atomic Helm upgrade of `gpustack-operator-device-manager` was interrupted and
-rolled back, and the rollback deleted Kueue CRDs the interrupted upgrade had just adopted. On every
-later boot the worker then fails while patching a CRD that the release record still references but the
-cluster no longer has, and a `Pod` that fails its install never becomes Ready.
+**Cause**: an interrupted atomic Helm upgrade of `gpustack-operator-device-manager` rolled back and
+deleted adopted Kueue CRDs while the old `ReplicaSet` (`maxUnavailable: 0`) kept holding the install
+lease.
 
-> **Why the old `Pod` keeps serving** — the pre-fix worker `Deployment` rolled with maxUnavailable 0, so the
-> old `Pod` is held Ready until the new one passes its probes. The new one never does: its install fails
-> before it opens its port.
-
-Recover:
+**Recovery**:
 
 ```bash
 NS=gpustack-system
 
-# 1. Confirm the wedge: the device-manager release is failed/pending, and an older worker ReplicaSet
-#    is still Ready beside the crash-looping one.
+# 1. Confirm a failed/pending release and an older Ready ReplicaSet holding the install lease:
 helm -n "$NS" list -a
 kubectl -n "$NS" get pods,rs
-kubectl -n "$NS" get lease applications.worker.gpustack.ai -o yaml   # who holds the install lease
+kubectl -n "$NS" get lease applications.worker.gpustack.ai -o yaml
 
-# 2. Free the lease: delete the OLD ReplicaSet (its pod predates the upgrade). With the old holder
-#    stopped, the new pod's next restart repairs the release with exclusive access.
+# 2. Delete the old ReplicaSet so the new worker Pod acquires the lease and repairs the release:
 kubectl -n "$NS" delete rs <old-replicaset>
 
-# 3. Watch the new pod converge, then verify the aggregated API flipped to the new surface.
+# 3. Wait for rollout completion and verify the updated aggregated API surface:
 kubectl -n "$NS" rollout status deploy/gpustack-operator-worker
 kubectl api-resources --api-group=worker.gpustack.ai -o wide
 ```
 
-If the `Pod` still fails on a missing Kueue CRD, check whether the CRD itself is stuck `Terminating`
-(`kubectl get crd | grep kueue`); that is the finalizer deadlock of [Migrating from
-v0.5.x](from-v0.5.md#kueue-finalizer-deadlock), which the chart's
-migrate-pre hook reaps on the next boot. When neither repair converges, take the full reset below.
+If the new `Pod` still fails because a Kueue CRD is stuck in `Terminating`, follow
+[Kueue CRDs stuck Terminating](#kueue-crds-stuck-terminating) or [Full-reset order](#full-reset-order).
 
 ## Namespace stuck Terminating
 
-The symptom: `kubectl delete ns gpustack-system` never finishes, and `kubectl describe ns
-gpustack-system` reports `NamespaceDeletionDiscoveryFailure`: the `APIService`s `v1.gpustack.ai`,
-`v1.worker.gpustack.ai` and Kueue's two `visibility.kueue.x-k8s.io` ones stand at `False
-(ServiceNotFound)`. They are cluster-scoped and outlive their namespaced backing `Service`s, and
-namespace GC cannot finish discovery while they do.
+**Symptom**: `kubectl delete ns gpustack-system` hangs, and `kubectl describe ns gpustack-system`
+reports `NamespaceDeletionDiscoveryFailure` on `v1.gpustack.ai`, `v1.worker.gpustack.ai`, or
+`visibility.kueue.x-k8s.io` (`ServiceNotFound`).
 
-Current releases remove the `APIService`s backed by the system namespace, including Kueue's pair,
-when that namespace is Terminating. On an older release, or if registrations remain, delete them
-by backing `Service`, not by name, and stop the worker first: its ensurer recreates them within
-~30 seconds while it runs.
+**Recovery**: on older releases where cluster-scoped `APIService`s remain registered, stop the worker
+first (otherwise its ensurer recreates them within ~30 s) and delete `APIService`s targeting the
+namespace:
 
 ```bash
 NS=gpustack-system
 
-# 1. Stop the worker so nothing re-registers (chart mode shown; in image mode delete the worker
-#    Deployment instead).
+# 1. Stop the worker (in image mode, delete deploy/gpustack-operator-worker instead):
 kubectl -n "$NS" scale deploy/gpustack-operator-worker --replicas=0
 
-# 2. Delete every APIService proxying into the namespace.
+# 2. Delete every APIService backed by the terminating namespace:
 kubectl get apiservices -o jsonpath='{.items[?(@.spec.service.namespace=="'"$NS"'")].metadata.name}' \
   | xargs -r kubectl delete apiservice
 ```
 
-The namespace then finalizes within about a minute. If it still hangs, describe it again; the
-condition names the next discovery group that cannot be listed, and the same two steps clear it.
+After the namespace finishes terminating, clean up two cluster-scoped leftovers before reinstalling:
 
-Two more kinds of debris outlive the namespace and bite **after** it is gone. Neither blocks the
-finalizer, which is why they surface only on the next operation:
-
-- The `kueue-*` and `gpustack-worker-*` `MutatingWebhookConfiguration`s and `ValidatingWebhookConfiguration`s keep
-  intercepting creates and updates **cluster-wide** (`Deployment`s included) with
-  `failurePolicy: Fail`, calling `Service`s that no longer exist, so the next `kubectl apply` of any
-  `Deployment` fails with `service "kueue-webhook-service" not found`. Name patterns only nominate
-  the sweep (an external Kueue install matches them too), so confirm by the backing `Service`'s
-  namespace before deleting:
+- **Residual `MutatingWebhookConfiguration`s and `ValidatingWebhookConfiguration`s** (`failurePolicy: Fail`),
+  which otherwise reject cluster-wide `Deployment` writes with `service "kueue-webhook-service" not found`.
+  Filter by backing `Service` namespace so external Kueue installs stay untouched:
 
   ```bash
   kubectl get mutatingwebhookconfigurations,validatingwebhookconfigurations -o name \
@@ -109,117 +84,85 @@ finalizer, which is why they surface only on the next operation:
       done
   ```
 
-- Orphaned cluster-scoped RBAC and `CSIDriver` objects still carry
-  `meta.helm.sh/release-name` of a release whose record died with the namespace, so a reinstall
-  CrashLoops the worker on `invalid ownership metadata`, and no adoption re-fires (it gates on
-  the legacy release records, exactly what is gone). Current `cleanup.sh` sweeps them; on an
-  older copy the same pattern over `clusterrole,clusterrolebinding,csidriver` clears them, plus
+- **Residual `ClusterRole`, `ClusterRoleBinding`, and `CSIDriver` objects** carrying stale
+  `meta.helm.sh/release-name` annotations, which cause `invalid ownership metadata` on reinstall. Run
+  current `deploy/gpustack-operator/chart/files/cleanup.sh "$NS"`, or delete matching objects plus
   `kubectl -n kube-system delete rolebinding kueue-visibility-server-auth-reader`.
 
-**Never** force-finalize a stuck namespace (`kubectl replace --raw .../finalize`, or patching
-*`metadata.finalizers`* away): the namespace object vanishes while whatever the deletion had not reached
-stays behind (CRs, `Secret`s, the very `APIService`s above), orphaned for good.
+**Never force-finalize a stuck namespace** (`kubectl replace --raw .../finalize` or stripping
+*`metadata.finalizers`*); doing so orphans remaining namespaced and cluster-scoped objects.
 
 ## Kueue CRDs stuck Terminating
 
-The symptom: after an image-mode teardown, or after removing a v0.5.x install, some
-`kueue.x-k8s.io` CRDs stay `Terminating`, and their `ClusterQueue`s, `ResourceFlavor`s, `Topology` resources or
-`AdmissionCheck`s still carry `kueue.x-k8s.io/resource-in-use`. The next install under another release
-name, such as a chart-mode `helm install`, fails on `CustomResourceDefinition
-"admissionchecks.kueue.x-k8s.io" ... exists and cannot be imported into the current release`.
+**Symptom**: after tearing down image mode or v0.5.x, `kueue.x-k8s.io` CRDs remain `Terminating`
+because child objects still hold `kueue.x-k8s.io/resource-in-use`, and a fresh `helm install` fails
+before hooks run with `CustomResourceDefinition "admissionchecks.kueue.x-k8s.io" ... cannot be imported`.
 
-What happened: uninstalling the release that owns Kueue removes the controller and its templated
-CRDs in one pass, so nothing is left to clear the finalizers. `cleanup.sh` strips them, but a copy
-from v0.8.6 or earlier recognizes only a Kueue owned by the release in its third argument,
-`gpustack-operator` by default. It skips the `gpustack-operator-device-manager` (image mode) and
-`gpustack-kueue` (v0.5.x) ones.
+**Cause**: uninstalling Kueue deleted its controller and templated CRDs together, and `cleanup.sh` from
+v0.8.6 or earlier matched only release name `gpustack-operator` unless passed a third argument.
 
-The chart's migrate-pre hook cannot reap them either: Helm refuses the install on ownership before
-any hook runs.
-
-Recover:
+**Recovery**:
 
 ```bash
 NS=gpustack-system
 
-# 1. Confirm the wedge: which Kueue CRDs are Terminating, and which release owns them.
+# 1. Inspect Terminating Kueue CRDs and their owning release annotation:
 kubectl get crd -o custom-columns='NAME:.metadata.name,DELETING:.metadata.deletionTimestamp,RELEASE:.metadata.annotations.meta\.helm\.sh/release-name' \
   | grep kueue
 
-# 2. Run the current cleanup script, which recognizes all three release names.
+# 2. Run current cleanup.sh (handles gpustack-operator, gpustack-operator-device-manager, and gpustack-kueue):
 bash deploy/gpustack-operator/chart/files/cleanup.sh "$NS"
-#    With a copy from v0.8.6 or earlier, name the owning release from step 1 as the third
-#    argument instead (the second is the worker's certificate Secret):
-bash cleanup.sh "$NS" gpustack-operator-worker-cert gpustack-operator-device-manager
+#    On cleanup.sh from v0.8.6 or earlier, pass the owning release name as arg 3 instead:
+#    bash cleanup.sh "$NS" gpustack-operator-worker-cert gpustack-operator-device-manager
 
-# 3. Verify (expect no row).
+# 3. Confirm zero Kueue CRDs remain (expect empty output):
 kubectl get crd -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletionTimestamp | grep kueue
 ```
 
 ## NFD prune Job hangs
 
-The symptom: removing a v0.5.x install whose own Node Feature Discovery install had failed, the
-teardown spends minutes on `helm uninstall gpustack-node-feature-discovery`, never reports that
-release as uninstalled, and leaves a `Job` `node-feature-discovery-prune` in the namespace that never
-completes.
+**Symptom**: during v0.5.x teardown after a failed NFD install, `helm uninstall gpustack-node-feature-discovery`
+hangs waiting on `Job/node-feature-discovery-prune` because its `ServiceAccount` is already gone.
 
-What happened: the NFD chart runs that `Job` as its post-delete hook, to strip NFD's labels from the
-nodes, and Helm waits for it. Here it cannot finish, for example because its `ServiceAccount` is
-already gone. A healthy v0.5.x install, a fresh install and a current chart's uninstall do not meet
-this.
-
-It blocks nothing. No component reads the `Job`, the namespace still deletes, and a later install
-still succeeds: the bundled NFD takes the node labels over, and its own hook replaces a `Job` of that
-name. Deleting it is safe.
-
-Recover:
+**Recovery**: delete the orphaned hook `Job` directly (nothing depends on it, and bundled NFD takes
+over node labels on reinstall):
 
 ```bash
 NS=gpustack-system
 
-# 1. Confirm: the Job exists and has not completed.
 kubectl -n "$NS" get job node-feature-discovery-prune
-
-# 2. Delete it. Nothing waits on it, and nothing else goes with it.
 kubectl -n "$NS" delete job node-feature-discovery-prune --ignore-not-found
 
-# 3. During a teardown only: if the legacy release is still listed, finish its removal without
-#    running the hook again. After an upgrade, leave it to the chart's migrate-post hook, which
-#    retires legacy release records; uninstalling one then deletes objects the chart adopted.
+# During full teardown only (never after an in-place subchart upgrade!):
 helm -n "$NS" list -a | grep gpustack-node-feature-discovery \
   && helm -n "$NS" uninstall gpustack-node-feature-discovery --no-hooks
 ```
 
 ## Full-reset order
 
-Re-registering a cluster against a different GPUStack server means wiping the worker install. Done in
-this order, the namespace never wedges:
+To wipe an existing worker installation cleanly (for example, before registering the cluster to a
+different GPUStack server), execute these four steps in order:
 
 ```bash
 NS=gpustack-system
 
-# 1. Stop the worker, as above.
+# 1. Stop the worker so it stops re-registering APIServices:
 kubectl -n "$NS" scale deploy/gpustack-operator-worker --replicas=0
 
-# 2. Run the chart's cleanup script — runtime-installed releases, CRDs and their finalizers,
-#    APIServices and webhooks. It ships under files/ in the chart. A copy from v0.8.6 or earlier
-#    leaves an image-mode Kueue Terminating; see the section above.
+# 2. Run the chart cleanup script (or helm uninstall with cleanupOnUninstall=true in chart mode):
 bash deploy/gpustack-operator/chart/files/cleanup.sh "$NS"
-#    Chart-mode alternative: helm uninstall gpustack-operator -n "$NS" with cleanupOnUninstall=true.
 
-# 3. Verify nothing still proxies into the namespace (expect empty).
+# 3. Confirm zero APIServices still target the namespace (expect empty output):
 kubectl get apiservices -o jsonpath='{.items[?(@.spec.service.namespace=="'"$NS"'")].metadata.name}'
 
-# 4. Delete the namespace.
+# 4. Delete the namespace:
 kubectl delete ns "$NS"
 ```
 
 ---
 
-**See also** — [Migrating to Bundled Subcharts](bundled-subcharts.md) (the ownership transfer whose
-interruption the CrashLoop section repairs) · [Migrating from v0.5.x](from-v0.5.md) (the Kueue
-finalizer deadlock behind a stuck CRD) · [Installation Modes](../installation-modes.md)
-(the modes the commands mark at each step)
+**See also** — [Migrating to Bundled Subcharts](bundled-subcharts.md) (subchart ownership transfer) ·
+[Migrating from v0.5.x](from-v0.5.md) (Kueue finalizer deadlock background) ·
+[Installation Modes](../installation-modes.md) (chart mode vs image mode)
 
-**Next** → [High Availability Operations](../high-availability.md) — the replica settings a
-recovered install is worth revisiting.
+**Next** → [High Availability Operations](../high-availability.md) — configure multi-replica control-plane failover.

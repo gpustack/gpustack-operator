@@ -1,8 +1,8 @@
 # Prefill and Decode Walkthrough
 
-Deploy a disaggregated large language model (LLM) topology with dedicated *prefill* and *decode* roles
-fronted by a Router. Observe joint admission across both roles, then send completion requests through
-the router's single endpoint.
+Deploy a disaggregated serving topology with dedicated *Prefill* and *Decode* roles behind a managed
+`llm-d-router`, inspect joint Kueue admission, and verify completion requests through the router's
+single endpoint.
 
 ## Contents
 
@@ -18,61 +18,47 @@ the router's single endpoint.
 
 ## Summary
 
-*Prefill/Decode (PD)* disaggregation separates compute-bound prompt *prefill* from memory-bandwidth-bound
-token decoding. A compute-heavy *Prefill* role processes initial prompt context. A memory-bandwidth-bound
-*Decode* role generates subsequent tokens.
-
-A managed Router fronts both roles and exposes one cluster-internal HTTP endpoint. It parses prompt
-requests, forwards *prefill* work, and coordinates key-value (KV) cache transfer to decoders. Kueue
-schedules both roles as a joint unit, preventing half-admitted workloads.
-
-The H100 comparison allocated six GPUs to each configuration.
-It supports *PD* when smoother generation under long-prompt concurrency outweighs first-token delay.
-At concurrency 16, long-prompt *inter-token latency (ITL)* p99 improved **25.6×–27.8×**, while first-token latency rose substantially.
-The mixed steady stream had **23.3× lower maximum ITL**, with no p99 improvement.
-See [Prefill and Decode Benchmark](../../modules/model-deployment/prefill-decode-benchmark.md) for throughput, tails and the decode-heavy outlier.
+*Prefill/decode (PD)* disaggregation separates compute-bound prompt *prefill* from
+memory-bandwidth-bound token *decode*. A managed router fronts both roles under one cluster HTTP
+endpoint, coordinates Mooncake KV cache transfer between roles, and waits for Kueue to admit the full
+role set atomically:
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
-| `ModelArtifact` | namespace | user | the Qwen3-32B weights the deployment serves |
-| `ModelPrefetch` | namespace | user | the artifact cached onto the H100 node before serving |
-| `AcceleratorType` | cluster | operator | the H100 accelerator group each role requests |
-| `ModelDeployment` | namespace | user | one *Prefill* and two *Decode* replicas behind a router |
-| Router `Deployment` and `Service` | namespace | operator | the one HTTP endpoint requests are sent to |
+| `ModelArtifact` | namespace | user | Resolves and pins `Qwen/Qwen3-32B` weights |
+| `ModelPrefetch` | namespace | user | Warms `qwen3-32b` onto the H100 node before serving |
+| `AcceleratorType` | cluster | operator | H100 pool requested by both roles |
+| `ModelDeployment` | namespace | user | Declares 1 *Prefill* and 2 *Decode* replicas behind `llm-d-router` |
+| Router `Deployment` and `Service` | namespace | operator | Single HTTP entrypoint routing requests across roles |
+
+On one 8-GPU H100 SXM5 node (6 GPUs per arm), *PD* cut concurrency-16 long-prompt *inter-token
+latency (ITL)* p99 by **25.6×–27.8×** (and cut mixed steady-stream max *ITL* by **23.3×** with no p99
+gain) at the cost of higher *time to first token (TTFT)* and lower total throughput in 15 of 16
+cells; see [Prefill and Decode Benchmark](../../modules/model-deployment/prefill-decode-benchmark.md).
 
 ## Environment
 
-The deployment and probe below were captured on this cluster:
-
 | Item | Value |
 |---|---|
-| Cluster | Kubernetes 1.35.7; one CPU node and one GPU node (`gpu-node-0`) |
-| GPUs | 8 × NVIDIA H100 80 GB HBM3 SXM5; six GPUs assigned to serving |
-| `InstanceType` | `bench-gpu`, configured for the H100 accelerator group |
-| Model | `Qwen/Qwen3-32B` from `ModelArtifact` `qwen3-32b` through node model delivery |
+| Cluster | Kubernetes v1.35.7; 1 CPU node and 1 GPU node (`gpu-node-0`) |
+| GPUs | 8 × NVIDIA H100 80 GB HBM3 SXM5 (6 GPUs allocated to serving) |
+| Pool | Captured on custom `InstanceType` `bench-gpu`; reusable manifest uses `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
+| Model | `Qwen/Qwen3-32B` via `ModelArtifact` `qwen3-32b` (node model delivery) |
 | Engine and router | vLLM `gpustack/runner:cuda13.0-vllm0.30.0` with `llm-d-router` |
-| KV transfer | Mooncake over TCP; the default protocol renders as `tcp` |
+| KV transfer | Mooncake over TCP (`mooncake_protocol: "tcp"`) |
 
-Each engine `Pod` exposed only its two assigned GPUs, with private IPC and `/dev/shm`.
-No *remote direct memory access (RDMA)* interface was attached.
-NVLink carried *TP* = 2 traffic inside each `Pod`.
-**Cross-`Pod` Mooncake KV transfer used TCP sockets over `eth0`**, despite the host's NVLink fabric.
+Each engine `Pod` saw only its two assigned GPUs with private IPC, private `/dev/shm`, and no *remote
+direct memory access (RDMA)* interface. Intra-`Pod` *tensor parallelism (TP)* (`*TP* = 2`) used
+NVLink, while **cross-`Pod` Mooncake KV transfer ran over TCP on `eth0`**.
 
 ## Step 1: Start disaggregated serving
 
-Enable [node model delivery](../../modules/model-delivery/operations.md) and follow the
-[model prefetch procedure](../model-delivery/prefetch.md#step-1-create-artifact-and-prefetch) with namespace `gpustack-bench`.
-Create `ModelArtifact` `qwen3-32b` from `Qwen/Qwen3-32B` at revision
-`9216db5781bf21249d130ec9da846c4624c16137`, then prefetch it onto the H100 node.
-Use that artifact and namespace throughout the procedure instead of its DeepSeek example.
+Enable [node model delivery](../../modules/model-delivery/operations.md) and run
+[Model Prefetch](../model-delivery/prefetch.md#step-1-create-artifact-and-prefetch) in namespace
+`gpustack-bench` for `ModelArtifact` `qwen3-32b` (`Qwen/Qwen3-32B` at revision
+`9216db5781bf21249d130ec9da846c4624c16137`). Wait until `ModelPrefetch` reports `Available=True`.
 
-The captured run used the custom `bench-gpu` `InstanceType` for the same H100 accelerator group.
-This reusable manifest uses the discovered H100 `AcceleratorType` name.
-
-The deployment requests one *Prefill* replica and two *Decode* replicas, each with two GPUs. All
-three engine `Pod`s and the Router ran on `gpu-node-0`.
-
-Save the following manifest as `pd-deployment.yaml`:
+Save `pd-deployment.yaml` (1 *Prefill* × 2 GPUs + 2 *Decode* × 2 GPUs = 6 GPUs):
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -131,42 +117,48 @@ spec:
         - --enable-scale-out
 ```
 
-Apply the manifest and inspect the captured status:
+Apply `pd-deployment.yaml` and confirm the deployment reaches `Ready` (`1R1P2D`):
 
 ```bash
 kubectl apply -f pd-deployment.yaml
 kubectl get modeldeployment pd-arm2-pd -n gpustack-bench \
   -o custom-columns=NAME:.metadata.name,ENGINE:.spec.engine.name,ROLES:.status.roleSummary,PHASE:.status.phase
+kubectl get pods -n gpustack-bench -l app.kubernetes.io/instance=pd-arm2-pd \
+  -o custom-columns=NAME:.metadata.name,READY:.status.containerStatuses[*].ready,STATUS:.status.phase,NODE:.spec.nodeName
 ```
+
+Captured output:
 
 ```text
 NAME        ENGINE   ROLES    PHASE
 pd-arm2-pd  vLLM     1R1P2D   Ready
-```
 
-The recorded `Pod`s were ready and co-located on `gpu-node-0`:
-
-```text
 NAME                                READY   STATUS    NODE
 pd-arm2-pd-decode-2xglg             2/2     Running   gpu-node-0
 pd-arm2-pd-decode-r2zt4             2/2     Running   gpu-node-0
 pd-arm2-pd-prefill-xmjvs            1/1     Running   gpu-node-0
-pd-arm2-pd-router-6b9fcd6b75-5ngnj   2/2     Running   gpu-node-0
+pd-arm2-pd-router-6b9fcd6b75-5ngnj  2/2     Running   gpu-node-0
 ```
 
-Each engine process uses *tensor parallelism (TP)* across its two requested accelerators. The
-`--tensor-parallel-size 2` flag sets *TP* = 2. The deployment has no *Encode* role, so both roles set
-`--enable-scale-out`; see [Counting engine tokens](../../modules/model-deployment/prefill-decode.md#counting-engine-tokens).
+Because this deployment has no *Encode* role, both roles set `--enable-scale-out` for router token
+counting ([Counting engine tokens](../../modules/model-deployment/prefill-decode.md#counting-engine-tokens)).
+If `PHASE` stays `Starting`, inspect deployment conditions and match the reason in
+[Troubleshooting](#troubleshooting).
 
 ## Step 2: Select the transfer backend
 
-Disaggregated serving requires prompt KV tensors to flow from *prefill* workers to *decode* workers.
-The recorded pair requests no fabric interfaces, so its default Mooncake backend uses TCP.
-To select the same backend explicitly, add `spec.kvTransfer.backend: Mooncake` to the manifest.
-To use RDMA, request `resources.interface` on both roles; see the
-[RDMA walkthrough](../rdma/network-endpoints.md#step-3-request-interfaces-per-role).
+Without *`resources.interface`*, the operator defaults *`spec.kvTransfer.backend`* to `Mooncake` over
+`tcp`. Inspect the rendered transfer flags across *Prefill* and *Decode*:
 
-The captured engine commands rendered these transfer settings:
+```bash
+kubectl -n gpustack-bench get pods -l app.kubernetes.io/instance=pd-arm2-pd -o json |
+  jq '.items[] | select(.metadata.labels["app.kubernetes.io/component"] != "router") |
+      {pod: .metadata.name, role: .metadata.labels["app.kubernetes.io/component"],
+       command: .spec.containers[0].command,
+       proxyArgs: (.spec.initContainers // [] | map(select(.name=="routing-proxy"))[0].args)}'
+```
+
+Captured output:
 
 ```text
 Prefill main:
@@ -183,28 +175,19 @@ Decode routing-proxy init container:
   --mooncake-bootstrap-port=8998 --secure-proxy=false
 ```
 
-The [InfiniBand RDMA follow-up](../../modules/model-deployment/prefill-decode-benchmark.md#infiniband-rdma-comparison)
-requested *`resources.interface`* = `"2"` on both roles.
-Runtime logs verified the InfiniBand KV path; the configuration change alone is not transport proof.
-
-A shared store through *`spec.kvCache.poolRef`* is part of the deployment identity. Declare it in the first
-apply. Adding it later is refused because a different cache describes a different deployment. See
-[deployment identity fields](../../modules/model-deployment/configuration.md#deployment-identity-fields).
+To switch KV transfer to *RDMA*, request *`resources.interface`* on both roles ([RDMA Walkthrough](../rdma/network-endpoints.md#step-3-request-interfaces-per-role)) and verify InfiniBand transport in engine logs ([InfiniBand RDMA comparison](../../modules/model-deployment/prefill-decode-benchmark.md#infiniband-rdma-comparison)).
+If you also attach a shared KV store via *`spec.kvCache.poolRef`*, declare it at creation because *`spec.kvCache`* is immutable ([Deployment identity fields](../../modules/model-deployment/configuration.md#deployment-identity-fields)).
 
 ## Step 3: Verify the router
 
-The captured Router endpoint is:
-
-```text
-http://pd-arm2-pd-router.gpustack-bench.svc:8000
-```
-
-Send a completion request through the Router from inside the cluster:
+Confirm *`status.endpoint`* is populated and send a chat completion naming `Qwen/Qwen3-32B`:
 
 ```bash
+ENDPOINT=$(kubectl -n gpustack-bench get modeldeployment pd-arm2-pd -o jsonpath='{.status.endpoint}')
+echo "$ENDPOINT"
 kubectl -n gpustack-bench run test-client --rm -i --restart=Never \
   --image=curlimages/curl -- \
-  curl -s http://pd-arm2-pd-router.gpustack-bench.svc:8000/v1/chat/completions \
+  curl -fsS "$ENDPOINT/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Qwen/Qwen3-32B",
@@ -213,26 +196,34 @@ kubectl -n gpustack-bench run test-client --rm -i --restart=Never \
   }'
 ```
 
-The recorded burst probe sent 16 requests at concurrency 8, with 8,192 input tokens and 64 output tokens.
-**All 16 succeeded, with zero empty bodies or errors:**
+Captured output:
+
+```text
+http://pd-arm2-pd-router.gpustack-bench.svc:8000
+```
+
+In the recorded burst probe (16 requests at concurrency 8, 8,192 input tokens, 64 output tokens),
+all 16 requests succeeded with zero errors:
+
+Captured output:
 
 ```json
 {"requests":16,"concurrency":8,"input_tokens":8192,"output_tokens":64,"ok":16,"empty":0,"bad":0}
 ```
 
-The Router delegates prompt processing and coordinates the roles. Mooncake transfers KV tensors
-between the engines, and the Router returns generated tokens.
-*`status.endpoint`* remains empty until the Router `Pod` passes its readiness check.
+If *`status.endpoint`* is empty or requests return `503`, check `RouterReady` and `EndpointEligibility`
+conditions on `ModelDeployment/pd-arm2-pd`.
 
 ## Step 4: Inspect joint admission
 
-The operator manages Kueue workloads across all declared roles simultaneously. The captured workloads were
-all admitted into the captured custom `bench-gpu` queue. The reusable discovered `AcceleratorType`
-admits into the shared canonical pool queue:
+Verify that Kueue admitted one `Workload` per engine replica (`1` *Prefill* + `2` *Decode* = `3`
+`Workload`s):
 
 ```bash
 kubectl -n gpustack-bench get workloads
 ```
+
+Captured output:
 
 ```text
 NAME                              QUEUE                             RESERVED IN   ADMITTED
@@ -241,21 +232,19 @@ gpustack-fnv64-ab5122bc91eceb29   gpustack-fnv64-889bba71d87d29e2   bench-gpu   
 gpustack-fnv64-d6b4e8ae20539d37   gpustack-fnv64-889bba71d87d29e2   bench-gpu     True
 ```
 
-You can adjust *`replicas`* independently on either role to balance prompt versus token throughput.
-See [Rollout behavior](../../modules/model-deployment/configuration.md#rollout-behavior) for editable
-role fields and replica replacement semantics.
+You can edit *`replicas`* independently on *Prefill* or *Decode* without rolling surviving replicas;
+see [Rollout behavior](../../modules/model-deployment/configuration.md#rollout-behavior).
 
 ## Step 5: Release the application
 
-After testing disaggregated serving, delete the deployment to release GPUs and Router services:
+Delete `pd-arm2-pd` and confirm owned `Pod`s, `Service`s, and GPU allocations clear:
 
 ```bash
 kubectl -n gpustack-bench delete modeldeployment pd-arm2-pd
 kubectl -n gpustack-bench get pods,services -l app.kubernetes.io/instance=pd-arm2-pd
 ```
 
-Verify that all application GPU claims are released. The post-deletion *PD* `Devices` snapshot
-recorded the following availability:
+Captured output (post-deletion `Devices` summary on `gpu-node-0`):
 
 ```text
 node: gpu-node-0
@@ -264,43 +253,35 @@ count: 8
 remaining per accelerator: 1600000
 ```
 
-This snapshot establishes released accelerator claims. Model-cache contents and cluster infrastructure remain outside its scope.
+Deleting `ModelDeployment` leaves prefetched weights in `NodeModelStore` untouched.
 
 ## Limitations
 
-- The recording uses one GPU node with eight H100 accelerators and co-locates all six serving GPUs and
-  the Router on that node. It does not measure placement across multiple GPU nodes.
-- The captured transfer path is TCP through Mooncake. RDMA, EFA, CANN and ROCM paths require their own
-  device requests and runtime validation.
-- The short completion probe covers readiness and inference. The separate
-  [benchmark](../../modules/model-deployment/prefill-decode-benchmark.md) measures all 16 fixed-shape cells
-  and mixed traffic; its results remain limited to the captured H100 configuration.
-- Joint gang admission across all roles (`PodGroup`), role-set immutability after creation and per-replica
-  rollout replacement are covered in [Prefill and decode](../../modules/model-deployment/configuration.md#prefill-and-decode)
-  and [Rollout behavior](../../modules/model-deployment/configuration.md#rollout-behavior).
-- Disaggregated serving requires a ready Router (*`status.endpoint`* is populated only while the Router
-  `Pod` is ready); see [Router configuration](../../modules/model-deployment/prefill-decode.md#router-configuration).
+- Captured on a single 8-GPU H100 node over TCP; cross-node placement and *RDMA* / EFA / CANN / ROCm
+  transports require separate validation.
+- See [Prefill and Decode Benchmark](../../modules/model-deployment/prefill-decode-benchmark.md) for
+  full concurrency sweeps and
+  [Router configuration](../../modules/model-deployment/prefill-decode.md#router-configuration) for
+  router lifecycle contracts.
 
 ## Troubleshooting
 
-| Symptom | Signal | Check & Mitigation |
+| Symptom | Signal | Resolution |
 |---|---|---|
-| `ModelDeployment` stuck in `Starting`, Kueue composes no `Workload` | Condition: `QuotaReserved=False/PodGroupIncomplete` | Fewer replicas exist than a role declares. Read the message for the counts, then check the missing or unschedulable `Pod`s |
-| No `Workload` asks for quota any more | Condition: `QuotaReserved=False/Parked` | The groups could not all be placed, so their `Workload`s were deactivated. An identical re-apply does not clear this. Free the capacity and reactivate the `Workload`s, or recreate the deployment |
-| Part of the deployment was taken by another workload | Condition: `QuotaReserved=False/PreemptedInPart` | A higher-priority workload reclaimed some replicas. The replicas that kept their quota hold accelerators until the reclaimed ones are admitted again or the deployment is deleted. Check what took the quota |
-| *`status.endpoint`* is empty | Condition: `RouterReady=False/NoReadyReplicas` | The Router has no ready replica. It may still pull its image or fail readiness. Inspect the Router `Pod` |
-| Router is not created | Condition: `RouterReady=False/RenderFailed` | The Router render was refused as a spec problem, so no Router `Pod` exists. Read the condition message and check *`spec.router`* |
-| Disaggregated roles fail KV transfer | Log: engine logs on both roles | The protocol is deployment-wide, so the two ends cannot name different values. Check that the image carries the matching Mooncake build, that the device request fits the protocol and that the nodes can reach each other |
-| Router sees no cache events | Condition: `KVEventsPublishing=False/PublisherDisabled` | A role that produces cache blocks renders no publisher. A routed SGLang deployment always reports this because only vLLM renders one. The condition reports configuration, not traffic. See [KV events](../../modules/model-deployment/configuration.md#operator-owned-keys) |
-| Missing role readiness | Condition: `RoleKindsReady=False` | One of the role kinds (*Prefill* or *Decode*) has zero ready replicas; check failed engine `Pod`s |
+| `ModelDeployment` stuck in `Starting`, missing `Workload`s | `QuotaReserved=False/PodGroupIncomplete` | Read the condition message on `ModelDeployment` and inspect unschedulable or rejected role `Pod`s. |
+| `Workload`s stop requesting quota | `QuotaReserved=False/Parked` | Joint placement timed out and deactivated the `Workload`s; free pool capacity and reactivate the `Workload`s or recreate the `ModelDeployment` (re-applying identical YAML does not unpark). |
+| Partial preemption holds remaining GPUs | `QuotaReserved=False/PreemptedInPart` | Higher-priority work preempted part of the deployment; free pool quota so preempted replicas re-admit, or delete the `ModelDeployment`. |
+| *`status.endpoint`* stays empty with Router `Pod` present | `RouterReady=False/NoReadyReplicas` | Inspect Router `Pod` events and logs for image pull or readiness probe failures. |
+| No Router `Deployment` or `Pod` exists | `RouterReady=False/RenderFailed` | Read `RouterReady` on `ModelDeployment` and fix invalid fields under *`spec.router`*. |
+| KV transfer fails between *Prefill* and *Decode* | Engine transfer errors in both role logs | Verify matching Mooncake build versions in the runner image, valid *`resources.interface`* counts, and pod-to-pod network reachability. |
+| `KVEventsPublishing=False/PublisherDisabled` | Expected on routed SGLang or disabled publisher | Informational condition reporting configuration rather than runtime failure ([Operator-owned keys](../../modules/model-deployment/configuration.md#operator-owned-keys)). |
+| `RoleKindsReady=False` | Zero Ready replicas in *Prefill* or *Decode* | Inspect `Pod` logs and events for the unready role named in the condition message. |
 
 ---
 
-**See also** — [Prefill and Decode](../../modules/model-deployment/prefill-decode.md) (configuration and transfer) ·
-[Prefill and Decode Benchmark](../../modules/model-deployment/prefill-decode-benchmark.md) (H100 SXM5 results) ·
-[Routing](../../modules/model-deployment/routing.md) (Router engine combinations) ·
-[Elastic EP Walkthrough](elastic-ep.md) (collective expansion) ·
-[External DP Walkthrough](external-dp.md) (fixed per-rank serving) ·
-[Encode, Prefill and Decode Walkthrough](encode-prefill-decode.md) (multimodal disaggregation)
+**See also** — [Prefill and Decode](../../modules/model-deployment/prefill-decode.md) (pairing and
+transfer contracts) · [Prefill and Decode Benchmark](../../modules/model-deployment/prefill-decode-benchmark.md)
+(H100 SXM5 latency and throughput) · [Model Deployment Routing](../../modules/model-deployment/routing.md)
+(router policies and qualification)
 
-**Next** → [Multi-Host Serving Walkthrough](multi-host.md) — scale models across multiple GPU nodes.
+**Next** → [Encode, Prefill and Decode Walkthrough](encode-prefill-decode.md) — disaggregate multimodal encode, prefill, and decode roles.
