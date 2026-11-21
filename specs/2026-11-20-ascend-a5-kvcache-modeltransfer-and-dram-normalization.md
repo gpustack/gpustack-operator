@@ -1,7 +1,6 @@
 # Spec: Ascend A5 KVCacheBackend and ModelTransfer Communication Resource Support, HIXL Routing Admission, and Mooncake DRAM Normalization
 
-Status: Built
-Blocked on: end-of-build review and shipping via `/my-ship`.
+Status: Shipped
 Type: Feature
 
 - **Related Specs**: [2026-11-19-model-deployment-ascend-a5-comm-res.md](2026-11-19-model-deployment-ascend-a5-comm-res.md) · [2026-09-05-kv-cache-media-and-scaling.md](2026-09-05-kv-cache-media-and-scaling.md) · [2026-11-17-modular-loopwright-auto-sync.md](2026-11-17-modular-loopwright-auto-sync.md)
