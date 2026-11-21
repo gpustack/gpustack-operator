@@ -218,6 +218,10 @@ Every page under `docs/`, in all three zones, uses at most three heading levels:
 When content seems to need a fourth level, change its shape instead:
 
 - **A set of peer entries**: put them in a table, or make each entry a linkable `###` under one `##`.
+- **Child sub-items under a peer category**: keep them as bold lead-ins or a table inside that `###`
+  section. Never promote child sub-items to the same `###` level as peer categories (for example,
+  keep Ascend A5 details as bold lead-ins under `### Ascend`, never as sibling `###` headings next
+  to AMD and Cambricon).
 - **A long subsection**: promote it to `##`, or move its lookup detail to a `docs/reference/` page.
 - **A thin subsection**: merge it into its parent. One short paragraph does not earn a heading.
 
@@ -227,8 +231,13 @@ flattened heading changes its words.
 Keep every H2–H3 heading to at most four words and 32 visible characters. Exclude a numbered prefix
 such as `Step 2:` or `Rule 3:` from both counts. Count hyphenated parts as separate words. This is a
 hard limit, including in `--report` mode. Move conditions, quantities and explanations into the
-first paragraph. Omit an initial `The` unless it belongs to an official name. Do not bold,
-italicize or add code formatting to headings; exact identifiers in body text keep their format.
+first paragraph.
+
+Omit articles (`a`, `an`, `the`) from topic and guide H2–H3 headings and use crisp noun phrases
+(such as `Key selection`, `Image build` or `Partition requests`), unless an article belongs to an
+official name. Only numbered walkthrough `Step N:` imperative headings may retain natural articles
+when clearer. Do not bold, italicize or add code formatting to headings; exact identifiers in body
+text keep their format.
 
 - Number dependent operations as `Step N: <short imperative>`, such as `Step 1: Create the deployment`.
   Restart at 1 for each independent procedure. When steps are direct `##` headings, omit a redundant

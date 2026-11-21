@@ -33,10 +33,10 @@ order:
   /docs/walkthroughs/model-deployment/:
     - prefill-decode
     - encode-prefill-decode
-    - scaling
-    - runtime-control
     - elastic-ep
     - external-dp
+    - scaling
+    - runtime-control
     - multi-host
   /docs/modules/devices/:
     - preflight

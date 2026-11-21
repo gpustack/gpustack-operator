@@ -416,7 +416,7 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
 
 #### Wave 4 — Three-Page Editorial Pilot Calibration
 
-- [ ] **T10 · Three-page editorial pilot (Walkthrough + Configuration + Benchmark) and `gpt-6.2-astra` taste approval**
+- [x] **T10 · Three-page editorial pilot (Walkthrough + Configuration + Benchmark) and `gpt-6.2-astra` taste approval**
       Blocked by: T9
       Owns: `docs/walkthroughs/model-delivery/prefetch.md`, `docs/modules/model-deployment/configuration.md`, `docs/modules/model-deployment/prefill-decode-benchmark.md`, `docs/assets/diagrams/prefill-decode-benchmark-*.svg`, `.agents/skills/gpustack-operator-docs/references/conventions.md`
       Gate: review

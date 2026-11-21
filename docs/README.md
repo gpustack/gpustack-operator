@@ -142,10 +142,10 @@
 | [Model Deployment Walkthroughs](walkthroughs/model-deployment/_index.md) | Select a serving topology, hardware, and `AcceleratorType` example |
 | [Prefill and Decode Walkthrough](walkthroughs/model-deployment/prefill-decode.md) | Deploy H100 prefill and decode roles with tested TCP transfer |
 | [Encode, Prefill and Decode Walkthrough](walkthroughs/model-deployment/encode-prefill-decode.md) | Deploy encode, prefill, and decode roles for multimodal serving |
-| [Model Deployment Scaling Walkthrough](walkthroughs/model-deployment/scaling.md) | Configure Shadow and Active scaling, algorithms, and retirement |
-| [Online Runtime Control Walkthrough](walkthroughs/model-deployment/runtime-control.md) | Tune vLLM and SGLang live, pause roles, and resize Elastic EP |
 | [Elastic EP Walkthrough](walkthroughs/model-deployment/elastic-ep.md) | Expand an H100 collective from four to eight GPUs in place |
 | [External DP Walkthrough](walkthroughs/model-deployment/external-dp.md) | Deploy four fixed H100 ranks and verify Router coverage |
+| [Model Deployment Scaling Walkthrough](walkthroughs/model-deployment/scaling.md) | Configure Shadow and Active scaling, algorithms, and retirement |
+| [Online Runtime Control Walkthrough](walkthroughs/model-deployment/runtime-control.md) | Tune vLLM and SGLang live, pause roles, and resize Elastic EP |
 | [Multi-Host Serving Walkthrough](walkthroughs/model-deployment/multi-host.md) | Scale serving models across multiple GPU nodes |
 
 ### Heterogeneous Devices
