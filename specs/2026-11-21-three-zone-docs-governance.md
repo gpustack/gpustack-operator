@@ -1,7 +1,6 @@
 # Spec: Three-Zone Documentation Governance (Public Site, LLM Reference, and Contributor Docs)
 
-Status: Building
-Blocked on: Implementation and verification of T1-T14 via my-build before PR merge.
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -445,7 +444,7 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
 
 #### Wave 6 — End-to-End Verification and Final Sign-Off
 
-- [ ] **T14 · End-to-end parity verification, operator-journey audit, and final `gpt-6.2-astra` sign-off**
+- [x] **T14 · End-to-end parity verification, operator-journey audit, and final `gpt-6.2-astra` sign-off**
       Blocked by: T2, T11, T12, T13
       Owns: `specs/2026-11-21-three-zone-docs-governance.md`
       Gate: review
