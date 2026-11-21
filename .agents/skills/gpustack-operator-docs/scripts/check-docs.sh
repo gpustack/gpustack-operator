@@ -6,6 +6,9 @@
 #   * page structure and index coverage — docs/**/*.md only
 #   * strict three-zone governance (activates when docs/reference/README.md exists):
 #       - max heading depth H3 across docs/**/*.md (including blockquoted H4+);
+#       - public-page H2 cap (<= 8), no layout-container heading nouns, no leading articles on non-Step H2-H3;
+#       - no blank "not recorded" environment rows or dev-journal "recorded on" stamps in public config guides;
+#       - architecture.md <= 200 lines and ## Components synced with cmd/ subcommands and staged runtime packages;
 #       - flat docs/reference/ layout (zero subdirectories);
 #       - one-way link isolation from public docs/ and site/content/** pages;
 #       - three-table docs/README.md coverage (All pages, Reference, Contribute) + H1 label parity;
@@ -84,7 +87,9 @@ LINKED_PAGES=$( {
 PARA_LINE_CAP=5     # source lines in one prose paragraph
 PARA_CHAR_CAP=500   # characters of rendered text in one prose paragraph
 PAGE_LINE_CAP=1000  # lines in one page — a backstop against a page nobody split, not a budget
-H2_CAP=10           # "##" sections in one page
+ARCH_LINE_CAP=200   # max lines in docs/getting-started/architecture.md in strict three-zone mode
+H2_CAP=10           # "##" sections in one page (contribute / legacy mode)
+PUBLIC_H2_CAP=8     # "##" sections in one public page in strict three-zone mode
 HEADING_WORD_CAP=4  # visible words after a numbered prefix, if any
 HEADING_CHAR_CAP=32 # visible characters after a numbered prefix, if any
 MAX_HEADING_DEPTH=3 # H1-H3 ceiling across docs/** in strict three-zone mode
@@ -622,7 +627,8 @@ long_paragraphs_of() {
 # H1-H6 headings in authored reader Markdown (including blockquoted H4+ in strict depth mode).
 heading_issues_of() {
   awk -v wcap="$HEADING_WORD_CAP" -v ccap="$HEADING_CHAR_CAP" \
-      -v interrogatives="${2:-0}" -v max_depth="${3:-0}" "$AWK_LIB"'
+      -v interrogatives="${2:-0}" -v max_depth="${3:-0}" \
+      -v strict_heading_style="${4:-0}" "$AWK_LIB"'
     function trim(t) {
       sub(/^[[:space:]]+/, "", t)
       sub(/[[:space:]]+$/, "", t)
@@ -680,6 +686,7 @@ heading_issues_of() {
       }
       if (length(level) == 1) next
       topic = visible
+      is_step = (topic ~ /^Step[[:space:]]+[[:alnum:].-]+:[[:space:]]*/)
       if (sub(/^(Step|Stage|Gate|Rule|Suite|State|Path)[[:space:]]+[[:alnum:].-]+:[[:space:]]*/, "", topic)) {
         topic = trim(topic)
         first = topic
@@ -687,10 +694,83 @@ heading_issues_of() {
         if (topic ~ /^[[:lower:]]/ && first !~ /^(vLLM|llm-d-router|eBPF)$/)
           printf "%d\tcase\t\t%s\n", FNR, visible
       }
+      if (strict_heading_style) {
+        cbad = tolower(topic)
+        gsub(/[^[:alnum:]]+/, " ", cbad)
+        cn = split(cbad, ctokens, /[[:space:]]+/)
+        for (ci = 1; ci <= cn; ci++) {
+          if (ctokens[ci] ~ /^(rows?|tables?|columns?|guides?|entries|sections?)$/) {
+            printf "%d\tcontainer\t%s\t%s\n", FNR, ctokens[ci], visible
+            break
+          }
+        }
+        if (!is_step && tolower(topic) ~ /^(a|an|the)[[:space:]]+/) {
+          art = tolower(topic)
+          sub(/[[:space:]].*$/, "", art)
+          printf "%d\tarticle\t%s\t%s\n", FNR, art, visible
+        }
+      }
       words = word_count(topic)
       chars = length(topic)
       if (words > wcap || chars > ccap)
         printf "%d\tlength\t%d words / %d characters\t%s\n", FNR, words, chars, visible
+    }
+  ' "$1"
+}
+
+# Authored-prose noise findings on public docs as "line<TAB>kind<TAB>snippet".
+# check_recorded_on=1 bans dev-journal "recorded on" version stamps in non-benchmark config guides.
+prose_noise_issues_of() {
+  awk -v check_recorded_on="${2:-0}" "$AWK_LIB"'
+    BEGIN { md_prev_blank = 1 }
+    FNR == 1 && $0 == "---" { frontmatter = 1; next }
+    frontmatter { if ($0 == "---") frontmatter = 0; next }
+    !html_comment && !md_in_indent {
+      if (!fence) {
+        fo = fence_open($0)
+        if (fo != "") { fence = 1; fopen = fo; md_prev_blank = 0; next }
+      } else {
+        if (fence_close($0, fopen)) fence = 0
+        md_prev_blank = 0
+        next
+      }
+    }
+    fence { next }
+    !html_comment && is_indented_code_line($0) { next }
+    {
+      line = uncomment($0)
+      low = tolower(line)
+      if (low ~ /not recorded with this capture|versions? not recorded/) {
+        printf "%d\tblank_recorded\t%s\n", FNR, line
+      }
+      if (check_recorded_on && low ~ /(^|[^[:alnum:]_])recorded[[:space:]]+on([^[:alnum:]_]|$)/) {
+        printf "%d\trecorded_on\t%s\n", FNR, line
+      }
+    }
+  ' "$1"
+}
+
+# Extract ## Components section of docs/getting-started/architecture.md outside code fences/comments.
+arch_components_of() {
+  awk "$AWK_LIB"'
+    BEGIN { md_prev_blank = 1 }
+    !html_comment && !md_in_indent {
+      if (!fence) {
+        fo = fence_open($0)
+        if (fo != "") { fence = 1; fopen = fo; md_prev_blank = 0; next }
+      } else {
+        if (fence_close($0, fopen)) fence = 0
+        md_prev_blank = 0
+        next
+      }
+    }
+    fence { next }
+    !html_comment && is_indented_code_line($0) { next }
+    {
+      line = uncomment($0)
+      if (line ~ /^## Components([ \t]*$)/) { in_sec = 1; next }
+      if (in_sec && line ~ /^## /) { in_sec = 0 }
+      if (in_sec) print line
     }
   ' "$1"
 }
@@ -817,12 +897,16 @@ run_selftest() {
   cat > "$WORK/style-self-test.md" <<'STYLE_TEST'
 # WHAT is included
 ## Why now
+## Host-state rows
+## The resource keys
+## Step 1: Create the pod
 #### Too deep
 Bad `Pods` and `Topology`s but good `Pod`s and `--nodes`.
 | Valid | Which mode | The value |
 |---|---|---|
 ```
 # Where ignored
+## Fenced rows
 #### Fence H4
 Bad `Nodes`
 | Who ignored |
@@ -833,15 +917,18 @@ Bad `Nodes`
 
 <!--
 ## When ignored
+## Comment table
 #### Comment H4 `Workloads`
 -->
 STYLE_TEST
-  heading_issues_of "$WORK/style-self-test.md" 1 3 > "$WORK/heading-test.out"
+  heading_issues_of "$WORK/style-self-test.md" 1 3 1 > "$WORK/heading-test.out"
   table_header_issues_of "$WORK/style-self-test.md" > "$WORK/table-test.out"
   kind_plural_issues_of "$WORK/style-self-test.md" > "$WORK/plural-test.out"
-  [ "$(wc -l < "$WORK/heading-test.out" | tr -d ' ')" -eq 3 ] &&
+  [ "$(wc -l < "$WORK/heading-test.out" | tr -d ' ')" -eq 5 ] &&
     grep -q 'word.*what' "$WORK/heading-test.out" &&
     grep -q 'word.*why' "$WORK/heading-test.out" &&
+    grep -q 'container.*rows' "$WORK/heading-test.out" &&
+    grep -q 'article.*the' "$WORK/heading-test.out" &&
     grep -q 'depth.*H4' "$WORK/heading-test.out" &&
     [ "$(wc -l < "$WORK/table-test.out" | tr -d ' ')" -eq 2 ] &&
     grep -q 'word.*which' "$WORK/table-test.out" &&
@@ -1147,8 +1234,18 @@ for f in $PAGES; do
 
   exempt "$f" "$LINE_CAP_EXEMPT" || [ "$lines" -le "$PAGE_LINE_CAP" ] \
     || shape_err "$f: $lines lines, over the ${PAGE_LINE_CAP}-line cap"
-  exempt "$f" "$H2_CAP_EXEMPT" || [ "$h2" -le "$H2_CAP" ] \
-    || shape_err "$f: $h2 '##' sections, over the cap of $H2_CAP"
+  if [ "$STRICT_ZONES" -eq 1 ] && [ "$f" = "docs/getting-started/architecture.md" ] && [ "$lines" -gt "$ARCH_LINE_CAP" ]; then
+    shape_err "$f: $lines lines, over the ${ARCH_LINE_CAP}-line architecture overview cap"
+  fi
+  page_h2_cap="$H2_CAP"
+  if [ "$STRICT_ZONES" -eq 1 ]; then
+    case "$f" in
+      docs/README.md|docs/reference/*|docs/contribute/*) ;;
+      *) page_h2_cap="$PUBLIC_H2_CAP" ;;
+    esac
+  fi
+  exempt "$f" "$H2_CAP_EXEMPT" || [ "$h2" -le "$page_h2_cap" ] \
+    || shape_err "$f: $h2 '##' sections, over the cap of $page_h2_cap"
 
   printf '%s\t%s\t%s\t%s\t%s\n' \
     "$f" "$bytes" "$lines" "$h2" "$(wc -l < "$WORK/paras" | tr -d ' ')" >> "$WORK/metrics"
@@ -1190,9 +1287,11 @@ for f in $HEADING_PAGES; do
   [ -f "$f" ] || continue
   check_interrogatives=0
   max_depth=0
+  strict_heading_style=0
   case "$f" in README.md|docs/*) check_interrogatives=1 ;; esac
   if [ "$STRICT_ZONES" -eq 1 ]; then
     case "$f" in docs/*) max_depth="$MAX_HEADING_DEPTH" ;; esac
+    case "$f" in docs/README.md) ;; docs/*) strict_heading_style=1 ;; esac
   fi
   while IFS="$(printf '\t')" read -r at kind detail title; do
     case "$kind" in
@@ -1200,8 +1299,10 @@ for f in $HEADING_PAGES; do
       case) err "$f:$at: capitalize the first word after the numbered prefix: '$title'" ;;
       length) err "$f:$at: heading topic is $detail; cap is ${HEADING_WORD_CAP} words / ${HEADING_CHAR_CAP} characters: '$title'" ;;
       word) err "$f:$at: heading contains interrogative word '$detail': '$title'" ;;
+      container) err "$f:$at: heading uses layout-container noun '$detail'; name the topic instead: '$title'" ;;
+      article) err "$f:$at: non-Step heading starts with article '$detail'; omit leading articles: '$title'" ;;
     esac
-  done < <(heading_issues_of "$f" "$check_interrogatives" "$max_depth")
+  done < <(heading_issues_of "$f" "$check_interrogatives" "$max_depth" "$strict_heading_style")
 done
 
 # Rule 11: table header limits
@@ -1237,7 +1338,7 @@ for f in README.md $PAGES; do
   done < <(table_header_issues_of "$f")
 done
 
-# Rule 12: authored-prose kind-plural check (strict mode; docs/** and site/content/** only)
+# Rule 12: authored-prose kind-plural check, public noise filter, and architecture component sync (strict mode)
 if [ "$STRICT_ZONES" -eq 1 ]; then
   echo "==> authored-prose kind plurals"
   PLURAL_PAGES=$( {
@@ -1252,6 +1353,60 @@ if [ "$STRICT_ZONES" -eq 1 ]; then
       err "$f:$at: malformed kind plural $bad in authored prose; write $fix"
     done < <(kind_plural_issues_of "$f")
   done
+
+  echo "==> public prose noise and architecture components"
+  for f in $PAGES; do
+    case "$f" in
+      docs/README.md|docs/reference/*|docs/contribute/*) continue ;;
+    esac
+    check_recorded_on=1
+    case "$f" in
+      *-benchmark.md|docs/modules/model-deployment/engine-versions.md) check_recorded_on=0 ;;
+    esac
+    while IFS="$(printf '\t')" read -r at kind _snippet; do
+      case "$kind" in
+        blank_recorded) err "$f:$at: omit blank 'not recorded' placeholder rows from public docs" ;;
+        recorded_on) err "$f:$at: avoid dev-journal 'recorded on' stamps in public guides; state contract or version floor directly" ;;
+      esac
+    done < <(prose_noise_issues_of "$f" "$check_recorded_on")
+  done
+
+  if [ -f "docs/getting-started/architecture.md" ]; then
+    arch_components_of "docs/getting-started/architecture.md" > "$WORK/arch-components"
+    if [ -f "cmd/gpustack-operator/main.go" ]; then
+      while IFS= read -r pkgname; do
+        [ -n "$pkgname" ] || continue
+        subcmd=$(awk '
+          /Use:[[:space:]]*"/ {
+            s = $0
+            sub(/^.*Use:[[:space:]]*"/, "", s)
+            sub(/".*$/, "", s)
+            sub(/[[:space:]].*$/, "", s)
+            print s
+            exit
+          }
+        ' "pkg/${pkgname}"/*.go 2>/dev/null || true)
+        [ -n "$subcmd" ] || continue
+        if ! grep -Fq "$subcmd" "$WORK/arch-components"; then
+          err "docs/getting-started/architecture.md: ## Components missing runtime subcommand '$subcmd' (from cmd/gpustack-operator/main.go)"
+        fi
+      done < <(awk '
+        /AddCommand\([[:alnum:]_]+\.NewCommand\(\)\)/ {
+          s = $0
+          sub(/^.*AddCommand\(/, "", s)
+          sub(/\.NewCommand\(\)\).*$/, "", s)
+          print s
+        }
+      ' "cmd/gpustack-operator/main.go")
+    fi
+    for pyproj in */python/pyproject.toml; do
+      [ -f "$pyproj" ] || continue
+      comp="${pyproj%%/python/pyproject.toml}"
+      if ! grep -Fq "$comp" "$WORK/arch-components"; then
+        err "docs/getting-started/architecture.md: ## Components missing staged runtime component '$comp'"
+      fi
+    done
+  fi
 fi
 
 if [ "$REPORT" -eq 1 ]; then

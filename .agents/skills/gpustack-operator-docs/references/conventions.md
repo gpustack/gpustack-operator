@@ -209,9 +209,32 @@ Benchmark summaries use `Benefits` and `Trade-offs` for observed gains and costs
 measurement boundaries in `Limitations`; do not create competing `Limitations` headings on one page.
 
 In README and docs, exclude `what`, `where`, `when`, `how`, `which`, `why`, `who`, `whose` and
-`whom` from all headings, regardless of case. Name headings after the subject or task rather than
-page layout or containers (avoid nouns such as `rows`, `table`, `columns`, or `guide` as heading
-labels). Use concise topic names instead.
+`whom` from all headings, regardless of case. Name headings after the subject or task so an operator
+understands the section at first glance from the table of contents alone; avoid page-layout nouns
+(`rows`, `table`, `columns`, `guide`) and cryptic negative or insider labels (`No policy flag`,
+`Two kinds by scope`, `Zero grants`).
+
+Keep public page outlines scannable (typically 5–8 top-level `##` sections). Do not flatten 9+
+micro-topics into peer `##` headings: group related configuration choices, verification steps, or
+lifecycle operations as `###` children under one clear `##` parent.
+
+Same-archetype public pages share one canonical H2 order so readers build muscle memory across
+sibling guides:
+
+| Page archetype | Canonical H2 skeleton |
+| --- | --- |
+| Module landing (`docs/modules/*/_index.md`) | `Overview` → `Configuration` → `Operations` → `Troubleshooting` |
+| Serving topology (`prefill-decode`, `encode-prefill-decode`, `elastic-ep`, `external-dp`) | Intro + SVG flowchart → `Configuration` → topology mechanism sections → `Operations` / `Troubleshooting` → `Limitations` [→ `Results`] |
+| Benchmark (`*-benchmark.md`) | `Summary` (`### Benefits`, `### Trade-offs`) → `Environment` → `Results` / `Suite N` → `Verification` → `InfiniBand RDMA comparison` → `Limitations` |
+| Vendor MIG (`*-mig.md`) | `Prerequisites` → `Partition profile discovery` → `Partition requests` → `Operations` → [capacity scenarios] → `Limitations` |
+| Walkthrough (`docs/walkthroughs/**`) | `Summary` (`### Environment`) → phased `##` groups with `### Step N:` children → `Cleanup` → `Limitations` → `Troubleshooting` |
+
+Avoid dev-journal version stamps in public configuration guides (`recorded on vLLM 0.29.0`,
+`verified on v0.23.0`) and blank `not recorded` environment rows. State hard version floors
+(`>= X.Y`) directly, route engine compatibility matrices to
+`docs/modules/model-deployment/engine-versions.md`, and state hardware/engine context once in a
+benchmark or walkthrough `Environment` table rather than repeating `In the recorded run...` in every
+step.
 
 ### Heading depth
 
@@ -759,7 +782,7 @@ capacity, timing or a safety limit.
   anchor others can link to, and it is the deepest level allowed. Merge a subsection back into its
   parent when it holds one short paragraph.
 - **Prefer a table for enumerable topics** such as modes, vendors and gates. For CR fields, use
-  annotated Pretty YAML as required by [YAML examples](../SKILL.md#yaml-examples).
+  annotated Pretty YAML as required by [Hard rules](../SKILL.md#hard-rules).
 - **Keep table headers short.** Every column header must contain 1 to 3 words and must not use `a`,
   `an`, `the`, `this`, `that`, `these`, `those`, `what`, `where`, `when`, `how`, `which`, `why`,
   `who`, `whose`, or `whom`, regardless of case. Use precise names such as `Resource`, `Scope` or
@@ -770,7 +793,7 @@ capacity, timing or a safety limit.
   link — the numbering breaks the moment a page is split.
 - **Wrap at about 100 columns**, and keep tables on one line each (a wrapped table row is unreadable in
   a diff).
-- **Write Pretty YAML.** Follow [YAML examples](../SKILL.md#yaml-examples), including its rules for
+- **Write Pretty YAML.** Follow [Hard rules](../SKILL.md#hard-rules), including its rules for
   empty collections, comments and preserving values when formatting.
 - **Links are relative** (`../settings.md`, `architecture/admission.md`), never absolute GitHub URLs —
   the exception is the chart README, which is rendered outside the repo on Artifact Hub. Every link

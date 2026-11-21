@@ -559,4 +559,139 @@ Malformed `Nodes` in site content.
 EOF
 expect_fail "plural-site-content" "${T}" "kind plural"
 
+# Strict heading style: reject layout-container nouns and leading articles on non-Step H2-H3.
+T="$(clone_strict heading-container-noun)"
+cat >>"${T}/docs/getting-started/guide.md" <<'EOF'
+
+### Host-state rows
+
+Container heading should fail.
+EOF
+expect_fail "heading-container-noun" "${T}" "layout-container noun 'rows'"
+
+T="$(clone_strict heading-leading-article)"
+cat >>"${T}/docs/getting-started/guide.md" <<'EOF'
+
+### The resource keys
+
+Leading article should fail on non-Step heading.
+EOF
+expect_fail "heading-leading-article" "${T}" "non-Step heading starts with article 'the'"
+
+# Public H2 cap (<= 8 content H2 sections).
+T="$(clone_strict public-h2-cap-exceeded)"
+cat >"${T}/docs/getting-started/guide.md" <<'EOF'
+# Operator Guide
+
+Short intro.
+
+## Contents
+
+- [Section 1](#section-1)
+- [Section 2](#section-2)
+- [Section 3](#section-3)
+- [Section 4](#section-4)
+- [Section 5](#section-5)
+- [Section 6](#section-6)
+- [Section 7](#section-7)
+- [Section 8](#section-8)
+- [Section 9](#section-9)
+
+## Section 1
+
+Body.
+
+## Section 2
+
+Body.
+
+## Section 3
+
+Body.
+
+## Section 4
+
+Body.
+
+## Section 5
+
+Body.
+
+## Section 6
+
+Body.
+
+## Section 7
+
+Body.
+
+## Section 8
+
+Body.
+
+## Section 9
+
+Body.
+
+---
+
+**See also** — [Operator](../../README.md) (overview)
+EOF
+expect_fail "public-h2-cap-exceeded" "${T}" "9 '##' sections, over the cap of 8"
+
+# Public prose noise filter: reject blank 'not recorded' rows and dev-journal 'recorded on' stamps.
+T="$(clone_strict prose-blank-not-recorded)"
+cat >>"${T}/docs/getting-started/guide.md" <<'EOF'
+
+Software versions not recorded with this capture.
+EOF
+expect_fail "prose-blank-not-recorded" "${T}" "omit blank 'not recorded' placeholder rows"
+
+T="$(clone_strict prose-recorded-on-guide)"
+cat >>"${T}/docs/getting-started/guide.md" <<'EOF'
+
+Behavior recorded on vLLM 0.29.0.
+EOF
+expect_fail "prose-recorded-on-guide" "${T}" "avoid dev-journal 'recorded on' stamps"
+
+# Architecture component sync gate: require cmd subcommands and */python/pyproject.toml in ## Components.
+T="$(clone_strict arch-missing-component)"
+mkdir -p "${T}/engine-sentinel/python" "${T}/cmd/gpustack-operator" "${T}/pkg/worker"
+touch "${T}/engine-sentinel/python/pyproject.toml"
+cat >"${T}/cmd/gpustack-operator/main.go" <<'EOF'
+package main
+func main() { c.AddCommand(worker.NewCommand()) }
+EOF
+cat >"${T}/pkg/worker/cmd.go" <<'EOF'
+package worker
+var cmd = Command{Use: "worker"}
+EOF
+cat >"${T}/docs/getting-started/architecture.md" <<'EOF'
+# Architecture
+
+Overview.
+
+## Contents
+
+- [Components](#components)
+
+## Components
+
+Only `worker` is listed here.
+
+---
+
+**See also** — [Operator Guide](guide.md) (guide)
+EOF
+awk '
+  /^\| \[Operator Guide\]/ {
+    print
+    print "| [Architecture](getting-started/architecture.md) | Architecture overview |"
+    next
+  }
+  { print }
+' "${T}/docs/README.md" >"${T}/docs/README.md.tmp"
+mv "${T}/docs/README.md.tmp" "${T}/docs/README.md"
+expect_fail "arch-missing-component" "${T}" "## Components missing staged runtime component 'engine-sentinel'"
+
 echo "OK: check-docs self-test passed"

@@ -3,412 +3,99 @@ name: gpustack-operator-docs
 description: "Write or update the GPUStack Operator documentation: route a new fact to the page that owns it, and keep each page's title, Contents, footer and the docs/README.md index in sync. Also adding a page or reviewing a docs diff."
 ---
 
-# GPUStack Operator — documentation
+# GPUStack Operator — Documentation
 
-Use [the shared module map](../../../docs/README.md#module-map) to locate the relevant guides,
-owning specs, code entry points and related modules. [AGENTS.md](../../../AGENTS.md#finding-sources)
-owns the retrieval and evidence rules; this skill owns its execution procedure.
+Route every change through the three-zone contract and keep context lean by loading detail files
+only when needed:
 
-The docs split into three zones registered in one shared index: public human site guides
-(`docs/getting-started/`, `docs/walkthroughs/`, curated `docs/modules/`, `docs/operate/`), flat
-LLM reference pages (`docs/reference/*.md`), and repo-only contributor guides (`docs/contribute/*.md`).
-Generated chart documentation is still pinned to code. This skill routes a change to the page that owns it.
+- **Routing & index (read first)**: [`docs/README.md`](../../../docs/README.md) (`All pages`,
+  `Reference`, `Contribute`, and `#module-map`) and [references/page-map.md](references/page-map.md)
+  (per-page ownership and exclusion boundaries).
+- **Style, templates & diagrams**: [references/conventions.md](references/conventions.md) (read when
+  drafting/rewriting prose, YAML, tables, or SVG/Mermaid diagrams).
+- **Automated gate**: `make lint docs` (`scripts/check-docs.sh`, `check-specs.sh`, `check-crossrefs.sh`,
+  `skills.sh`, Hugo build, `site-links.py`, `agent-index.py`).
 
-**Read the index first**: [`docs/README.md`](../../../docs/README.md) — it carries the reading paths and
-the three zone tables (`All pages`, `Reference`, `Contribute`) you must update when adding or moving a page.
+## Three-Zone Contract
 
-## Shared index and generated exports
+| Zone | Paths | Site HTML / Search / Sidebar | `/llms.txt` | Outbound link policy |
+| --- | --- | --- | --- | --- |
+| Public Human Site | `docs/{getting-started,walkthroughs,modules,operate}/` | Included (`navigation.yaml`) | `/docs/<page>/index.md` | Public pages, `docs/assets/`, non-`docs/` repo files; **never** `reference/` or `contribute/` |
+| LLM Reference | `docs/reference/*.md` (flat, zero subdirs) | Excluded | `/reference/*.md` (rewritten) | Sibling `reference/*.md`, public pages, assets, repo/`contribute/` (GitHub URLs) |
+| Contributor | `docs/contribute/*.md` | Excluded | `## Optional` (GitHub URLs) | Any repository path |
 
-`docs/README.md` owns the three zone tables (`All pages`, `Reference`, `Contribute`) and the module map. Each module entry uses
-single-line `ID`, `Use for`, `Aliases`, `Guides`, `Code` and `Skills` fields; `Specs` and `Related`
-link to applicable design records and neighboring module headings. Keep IDs stable when display
-names change. A capability directory needs its own entry; API changes, installation and development
-have shared task entries. Navigation points to evidence and does not establish implemented behavior.
+- Keep design rationale in `specs/`, not `docs/`; guides carry only brief `> **Why**` notes when
+  needed to prevent operators from undoing a rule.
+- Keep `docs/README.md` labels equal to each page's H1 character for character, in navigation order.
+  Update `docs/README.md`, `docs/reference/README.md`, `site/data/navigation.yaml`, and
+  `references/page-map.md` in the same PR when adding, moving, or renaming pages.
 
-Update routing in the same PR when adding or moving a page, changing a code entry point or module
-boundary, replacing an owning spec, or changing a skill's document inputs. Update the owning guide
-and spec for contract changes; edit routing only when the association changes. Pure wording edits
-need no mechanical index update. Preserve existing spec status and evidence limits.
+## Hard rules
 
-Hugo generates `/llms.txt` from the `All pages`, `Reference` and `Contribute` tables in `docs/README.md`,
-renders Markdown exports beside public HTML pages, and serves rewritten static `/reference/*.md` files
-staged by `hack/site/rewrite_reference.py`. Do not
-maintain a separate copy or summary. `make site` and `make lint docs` verify module coverage, skill
-consumers, local source paths, zone isolation, the generated index, exported prose and code blocks, and site links.
-These checks establish structure and synchronization; review must establish semantic completeness.
-The local module map, `docs/reference/`, and `docs/contribute/` stay out of the site's HTML article list, search index, sitemap and sidebar navigation.
+- **Headings & outlines**: Hard `H1`–`H3` ceiling (`H4+` forbidden across `docs/**`). Public pages
+  stay at `<= 8` content `##` sections—group related subtopics as `###` children rather than
+  flattening 9+ peer `##`s. Every H2–H3 is `<= 4` words and `<= 32` visible chars (excluding
+  `Step N:` / `Rule N:` / `Stage N:` / `Gate N:` / `Suite N:` prefixes; hyphenated parts count as
+  separate words), sentence case below H1, zero interrogatives (`what/where/when/how/which/why/who`),
+  zero layout-container nouns (`rows`, `table`, `columns`, `guide`, `entries`, `section`), zero
+  leading articles (`a`, `an`, `the`) on non-`Step N:` headings, and self-explanatory at first
+  glance (no cryptic negative/insider labels like `No policy flag` or `Zero grants`).
+- **Flattening H4s**: Keep child sub-items under a peer category (e.g. Ascend A5 under `### Ascend`)
+  as bold lead-ins or tables inside that `###`—never promote them to sibling `###` next to peer
+  categories.
+- **Page & module shape**: Every page (except `docs/README.md` and `docs/reference/README.md`) has
+  an intro, `## Contents` mirroring its `##` headings, and `**See also**` footer (public adds
+  `**Next**` where applicable; `docs/reference/*.md` omits `**Next**` and declares `contract`,
+  `recorded capture`, or `synthetic simulation`). Capability modules cover Overview, Configuration,
+  Operations, and Troubleshooting without `<150`-line orphan sub-pages. Converge multi-module flows
+  into `docs/walkthroughs/`, matching outer capability sidebar order.
+- **No dev-journal noise**: Never write `recorded on <old-version>` / `verified on <old-version>`
+  stamps or blank `not recorded` rows in public configuration guides. State hard version floors
+  (`>= X.Y`) directly, route compatibility matrices to
+  `docs/modules/model-deployment/engine-versions.md` (sidebar label: `Compatibility`), and state
+  benchmark/walkthrough hardware once in `## Environment` rather than repeating `In the recorded
+  run...` in every step.
+- **Tested facts & combinations**: Document only verified behavior and complete configurable
+  combinations (never partial sets that imply false exclusivity). Use `worker.gpustack.ai/v1` for
+  public APIs (`v1alpha1` only in `docs/contribute/`).
+- **YAML, tables & prose**: Pretty block YAML only (no inline JSON objects/arrays); full resource
+  headers (`apiVersion`, `kind`, `metadata`) on every Kubernetes resource and `diff` block. Show one
+  annotated macro YAML + micro constraint bullets (`<= 20` words) or uniform tables (1–3 word
+  headers, no articles/demonstratives)—never duplicate full CR schemas in field tables. Prose stays
+  `<= 5` lines / `500` chars per paragraph, imperative for instructions, objective for behavior,
+  backtick kinds with outside-backtick plurals (`` `Pod`s ``, `` `Topology` resources ``,
+  `` `Devices` objects ``).
+- **Diagrams & site**: Use light/dark WCAG-AA SVGs under `docs/assets/diagrams/` paired with hidden
+  Mermaid source comments (`->` / `..>` instead of `-->` / `-.->`). Never hand-edit generated chart
+  docs. Keep `docs/getting-started/architecture.md` `<= 200` lines.
 
-## The rule that keeps the overview small
+## Sync Invariants (Code ↔ Docs)
 
-`docs/getting-started/architecture.md` is the **front door**: what the operator builds, the scheduling chain, one worked
-request trace, the vocabulary. It is capped at ~200 lines and must stay readable in under 10 minutes.
+| Doc | Pinned to | Breakage / Gate |
+| --- | --- | --- |
+| `docs/getting-started/architecture.md` `## Components` | `cmd/gpustack-operator/main.go` subcommands, `*/python/pyproject.toml` (`engine-sentinel`, `model-transfer`), `csrc/` | `check-docs.sh` fails on missing runtime subcommand/package or `> 200` lines |
+| `docs/reference/instance-type-unit-resources.md` | `pkg/nodefeature/unit_resources_preset.yaml` | Compare preset rows manually when either changes |
+| `deploy/gpustack-operator/chart/README.md`, `values.schema.json` | `values.yaml` + `README.md.gotmpl` via `make generate chart` | Generated—never hand-edit; `chart.yml` fails on drift |
+| `README.md` accelerator matrix & Usage examples | `pkg/nodefeature/knowns.go`, `pkg/devicemanager/detector/*/device.go`, `docs/modules/devices/requests.md` (*Resource keys*, *Pod request examples*) | Silent drift; update both together |
+| `configuration.md`, `model-deployment-internals.md`, `model-deployment-parameters.md` | `modelDeploymentOwnedKeys` | Compare owned keys per engine when rendering changes |
+| `docs/reference/settings.md` | `pkg/worker/settings` & `GPUSTACK_*` readers (also `.auto-sync/*`) | Keep exact path; sync defaults and effect windows |
+| `docs/modules/model-delivery/remote.md` | `.auto-sync/*` | Keep exact path; verify via `hack/check/autosync-selftest.sh` |
+| `docs/README.md` zone tables & `docs/reference/README.md` | All files under `docs/` and H1 titles | `check-docs.sh` and `agent-index.py` fail |
 
-Cover each major capability and its role in the workload flow, including model delivery. Keep the
-diagram, workflow and vocabulary aligned. Put mechanisms, rationale and detailed configuration on
-the owning deep page, then link to it. Add a deep page when no existing page owns the detail.
-
-## Where a fact belongs
-
-| Topic | Page |
-|---|---|
-| Flat LLM reference navigation hub: task routing, exact API/field/condition aliases, and evidence labels | `docs/reference/README.md` |
-| Ascend A5 canonical UB/UBG/UBoE/Host RoCE rendering, ranktable, conditional host mount and scenario matrices | `docs/reference/ascend-a5-matrix.md` |
-| NFD labels, the `gpustack-cpu-info` rule, the manufacturer map | `docs/reference/devices-discovery.md` |
-| Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/reference/devices-discovery.md` |
-| Verbatim three-configuration H100 NVIDIA MIG live transcripts | `docs/reference/devices-mig-transcripts.md` |
-| Raw multi-object `kubectl` YAML captures from the scheduling walkthrough | `docs/reference/devices-scheduling-capture.md` |
-| The NIC/RDMA interface inventory, `pciRootId`/`pciSwitches`, the three link states, the `rdma.*` node labels, the RDMA resource keys | `docs/reference/rdma-network-topology.md` |
-| Capacity labels, flavor/queue/AcceleratorType/InstanceType naming and grouping, the scheduling controllers | `docs/reference/devices-scheduling.md` |
-| Topograph's boundary, `TopologySource`, topology profiles, Kueue Topologies and TAS capacity semantics, and the placement preference toward nodes holding a model | `docs/reference/topology-scheduling.md` |
-| Any admission gate, the four-view status, InstanceType/Instance/Pod webhook rules, drain-stop | `docs/reference/devices-admission.md` |
-| Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/operate/installation-modes.md` |
-| Startup ordering, the gateway mirror, the device-plugin registration loop, per-manufacturer packages, CGO bindings, the 63-char rule | `docs/contribute/internals.md` |
-| A `KVCacheBackend`'s workloads, its admin surface, its phase or capacity | `docs/modules/kv-cache/backend.md` |
-| `KVCacheBackend` rendering internals, Mooncake env/argv mapping, full condition catalog and teardown mechanics | `docs/reference/kv-cache-backend-internals.md` |
-| The leader process itself: its Deployment, Service, probes, health document and Lease election | `docs/modules/kv-cache/leader.md` |
-| The local disk tier (`members[].localDisks`) and disk-heavy node sizing: bucket bounds, eviction, host directory, thin-segment shape and memory floor | `docs/modules/kv-cache/local-disk-tier.md` |
-| A `KVCachePool` or `KVCachePoolBinding`: the grant, the reuse domain, a quota ceiling or grant, what a full quota does | `docs/modules/kv-cache/pool.md` |
-| Standing a cache up end to end, or which object comes first: the pasteable four-object sequence | `docs/walkthroughs/kv-cache/shared-cache.md` |
-| How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/reference/kv-cache-injection.md` |
-| A `ModelArtifact`: its sources (Hugging Face, ModelScope, PVC, and OCI `image` digest contract, image-volume delivery, version floors and kubelet GC), resolution, manifest digest, and mount or download delivery | `docs/modules/model-delivery/artifact.md` |
-| A `ModelStore`, `ModelStoreBinding` or `ModelPrefetch` (budget, pinning, TTL, warm-up pod) and node-to-node peer sync (peer port, token auth, NetworkPolicy, checkpoint resume and peer metrics) | `docs/modules/model-delivery/prefetch.md` |
-| The public APIs for `ModelArtifact` and `NodeModelStore`, the `progress` subresource and who may read it, the GPUStack server capability map | `docs/reference/model-delivery-artifact-api.md` |
-| A `NodeModelStore` or the `model-manager` plugin: a field and its writer, the status guard, mount authorization, materialization, a failure reason, collection, a metric | `docs/reference/model-delivery-node-store.md` |
-| Running node delivery: the chart values, where the node's configuration comes from, reading a node, the watermark cap, switching delivery, where replicas land and turning the preference off, upgrading, removing the cache | `docs/modules/model-delivery/operations.md` |
-| Remote weight delivery: the `Require` and `Prefer` policies and their fallback rules, source preparation and the `sourceMemory` grant, metadata-only mounts, session credentials, control and payload networks, the remote status view, troubleshooting and rollback | `docs/modules/model-delivery/remote.md` |
-| Remote weight delivery source-memory arithmetic, manifest/journal bounds, reader session protocol, ModelExpress injected env and raw sweep budgets | `docs/reference/model-delivery-remote-internals.md` |
-| Injected engine, router, sidecar and transfer parameters, ownership and defaults | `docs/reference/model-deployment-parameters.md` |
-| `ModelDeployment` `Pod` metadata, exhaustive owned-key matrix, render-version upgrade mechanics, full refusal catalog and Ascend transfer ports | `docs/reference/model-deployment-internals.md` |
-| The `ModelDeployment` contract: AcceleratorType, explicit role resources, CPU-only scheduling, the inherited reuse domain, the three override tiers, the owned-key table, the runner-image formula, prefill/decode pairing, the topology-placement field contract | `docs/modules/model-deployment/configuration.md` |
-| `ModelDeploymentScaler` capacity-prior catalog schema, disaggregated unit math, identity normalization, persistence internals and full status schemas | `docs/reference/model-deployment-scaling-internals.md` |
-| The measured replica-scaling comparison across algorithms and engines, its latency and throughput, scale-out timing, retirement observations and failure limits | `docs/modules/model-deployment/scaling-benchmark.md` |
-| The synthetic three-algorithm scaler comparison on identical seeds, its measured request outcomes, adjustment-dynamics timelines and true per-token latencies | `docs/reference/model-deployment-scaling-simulation.md` |
-| Configuring and observing `ModelDeploymentScaler`, Shadow and Active modes, algorithm selection, EPD ratios and retirement | `docs/walkthroughs/model-deployment/scaling.md` |
-| How an Elastic EP (`runtimeControl.parameters["elastic.dataParallelWidth"]`) profile resizes a serving instance's expert-parallel collective in place without replacing surviving pods | `docs/modules/model-deployment/elastic-ep.md` |
-| The measured comparison of an expert-parallel collective before, during, and after a live `elastic.dataParallelWidth` resize | `docs/modules/model-deployment/elastic-ep-benchmark.md` |
-| A recorded Elastic EP expansion, its captured CR output and inference checks | `docs/walkthroughs/model-deployment/elastic-ep.md` |
-| A recorded model prefetch sequence and captured artifact, prefetch and node-store output | `docs/walkthroughs/model-delivery/prefetch.md` |
-| How External DP runs one fixed data-parallel collective with an HTTP endpoint on every rank behind `vllm-router` or `sglang-gateway` | `docs/modules/model-deployment/external-dp.md` |
-| The measured comparison of External DP per-rank serving against a monolithic wide tensor-parallel group | `docs/modules/model-deployment/external-dp-benchmark.md` |
-| A fixed External DP group, its minimum arguments, per-rank requests, or measured Router coverage | `docs/walkthroughs/model-deployment/external-dp.md` |
-| A `ModelDeployment` metrics snapshot, which series each field reads per engine, role and router, cache-hit scope or Pod scrape annotation | `docs/reference/model-deployment-metrics.md` |
-| What a `ModelDeployment` status condition or published field means, and how to read them when a deployment misbehaves | `docs/reference/model-deployment-status.md` |
-| How a prefill role and a decode role are paired: the connector each engine and router renders, `spec.router` and its fields, `spec.kvTransfer`, roles on different hardware, a role's own Service | `docs/modules/model-deployment/prefill-decode.md` |
-| The measured comparison of disaggregated prefill/decode serving against an equal-GPU aggregated group across uniform and mixed prompt lengths | `docs/modules/model-deployment/prefill-decode-benchmark.md` |
-| How an `Encode` role pairs with `Prefill` and `Decode`: the admitted EPD matrix, encoder-cache connectors (`ECCPUConnector`, `ECExampleConnector`), shared RWX PVC rules, soft co-location affinity, and bounded encoder drain | `docs/modules/model-deployment/encode-prefill-decode.md` |
-| The measured comparison of aggregated, prefill/decode and EPD serving: latency and throughput at each concurrency, the hardware and workload behind it, and the conditions under which EPD does not help | `docs/modules/model-deployment/encode-prefill-decode-benchmark.md` |
-| A recorded three-role EPD deployment (`Encode` + `Prefill` + `Decode` + `llm-d-router`), its captured CR/Pod output and multimodal inference check | `docs/walkthroughs/model-deployment/encode-prefill-decode.md` |
-| Which replica a managed router picks, its default routing policy, switching it through `spec.router.extraArgs`, the router's own per-replica series | `docs/modules/model-deployment/routing.md` |
-| `runtimeControl.parameters`, `pause`, `gpustack-engine-sentinel`, reserved `loraAdapters`, router inference allowlist, and router hash decoupling | `docs/modules/model-deployment/runtime-control.md` |
-| What a `ModelDeployment` replica does between its Pod's delete and its engine's exit: the drain hook, its timings, what it does not cover | `docs/reference/model-deployment-shutdown.md` |
-| The lowest engine release a deployment configuration runs on, the Mooncake client its runner image carries, the store line it needs, which transport each engine can use on each path | `docs/modules/model-deployment/engine-versions.md` |
-| A resource key, a request rule, a request example | `docs/modules/devices/requests.md` |
-| How many RDMA endpoints a workload asks for, setting or reading the kubelet TopologyManager policy, what to do about RDMA keys no queue meters, the engine image an EFA path needs | `docs/modules/rdma/operations.md` |
-| Enabling Topograph, publishing topology snapshots, webhook trust, requesting a level, TAS diagnosis or EKS validation | `docs/modules/topology/operations.md` |
-| A `Setting` or a `GPUSTACK_*` variable | `docs/reference/settings.md` |
-| A make target, a subchart patch, code generation, a vendored dependency | `docs/contribute/development.md` |
-| An administrator procedure (MIG mode, replicas) | `docs/modules/devices/*-mig.md`, `docs/operate/*.md` |
-| An upgrade path between versions | `docs/operate/migration/*.md` |
-| Recovery from a wedged upgrade or a stuck namespace deletion | `docs/operate/migration/troubleshooting.md` |
-| A per-product preset value | `docs/reference/instance-type-unit-resources.md` |
-| GPU Instance configuration: resource requests, node pinning, `InstanceSSHPublicKey`, `InstanceImagePullSecret`, persistent/additional/model volumes and custom `InstanceType`s | `docs/modules/instances/configuration.md` |
-| GPU Instance operations: `spec.stop` and `Service` lifecycle, tenant `NetworkPolicy` isolation, `metrics`/`log`/`events` subresources and Pending troubleshooting | `docs/modules/instances/operations.md` |
-| Instance resource-use metrics schema and Prometheus exporter internals | `docs/reference/instances-metrics.md` |
-| A subcommand, one of its flags, its exit codes, its invocation | `docs/reference/commands.md` |
-| A user-visible capability, a vendor's slicing support, the install flow | `README.md` |
-| Vendor prerequisites, third-party dependencies, vendor GPU Operator coexistence | `docs/getting-started/vendor-prerequisites.md` |
-| A recorded run or cross-module configuration example | `docs/walkthroughs/**`, or the walkthrough section of `docs/modules/devices/nvidia-mig.md` |
-
-A decision *record* — why an approach was chosen over another — belongs in `specs/`, not in `docs/`.
-The docs state the rule that resulted; a `> **Why**` note carries only as much rationale as a reader
-needs to not undo it.
-
-Full routing, including what does **not** belong on a page, is in
-[references/page-map.md](references/page-map.md).
-
-## Capability module structure
-
-Every capability module under `docs/modules/<module>/` (`devices`, `rdma`, `topology`, `kv-cache`,
-`model-delivery`, `model-deployment`, `instances`) must cover four functional areas across its
-`_index.md` and subordinate pages while preserving existing file paths and URLs:
-
-- **Overview**: Open with a concise value proposition, scope boundaries, and a directional SVG flowchart showing component and resource relationships, paired with its hidden
-  Mermaid flowgraph source.
-- **Configuration**: Present a macro annotated Pretty YAML example paired with micro constraint
-  bullets (`<=20` words each) and uniform enum or validation tables.
-- **Operations**: Provide ordered imperatives (`Step N: <short imperative>`), `Verification` checks
-  with expected output, and monitoring or metrics pointers.
-- **Troubleshooting**: List observable failure symptoms, diagnostic commands, webhook or status
-  error messages, and recovery actions.
-
-Converge any scenario that links configuration across multiple capability modules (for example,
-`ModelArtifact` + `ModelPrefetch` + `KVCachePoolBinding` + `ModelDeployment` +
-`ModelDeploymentScaler`) into `docs/walkthroughs/`. Module pages link to the walkthrough instead of
-duplicating multi-module setup sequences.
-
-## Tested facts and configuration combinations
-
-REQUIRED: a page states only what a recorded run or the source establishes. Do not write about
-behaviour nobody has tested: no untested scenarios, no "should" or "would" narrations, no PoC
-anecdotes standing in for verified results. When Go struct comments or code logic already explain
-internal implementation details that do not affect user configuration or operations, omit them from
-`docs/` and document only the operational logic and configuration contract. When a capability is
-unverified, either say so in the page's Summary or Limitations with the versions that were verified,
-or leave the topic out.
-
-REQUIRED: a feature whose value comes from a combination of configurable parts — engines paired
-with routers, backends with protocols, modes with policies — is documented as the whole
-combination set or not at all. Writing one combination and omitting its siblings misleads a
-reader into thinking the written one is the supported one. Two exceptions admit a partial write:
-when the operator renders and owns every choice inline, the page says so in one sentence and
-lists no user steps; and when a feature activates only when the user supplies a specific value,
-the page documents exactly that value and the field it activates, marked as the special case it
-is.
-
-## Public API versions
-
-User-facing manifests and API calls use `worker.gpustack.ai/v1`. The `v1alpha1` types are internal
-controller storage; do not ask users to switch between versions or describe public resources as
-"v1 views". Document internal types only when explaining implementation under `docs/contribute/`.
-An inventory snapshot's format version is separate from a Kubernetes resource API version.
-
-## YAML examples
-
-REQUIRED: write Pretty YAML in `README.md`, `docs/` and site content. Expand nonempty mappings and sequences
-into block style with two-space indentation, one field or list item per line. Do not embed
-JSON-style objects or arrays in YAML examples, including commented alternatives. Empty collections
-use `{}` or `[]`; removing their delimiters would change them to null.
-
-REQUIRED: in `docs/`, present a **macro** annotated Pretty YAML example for a Kubernetes custom
-resource (CR), adding **micro** constraint breakdowns only where fields carry non-obvious constraints
-or compare choices:
-
-- **Macro configuration**: Provide a complete, runnable Pretty YAML resource (`apiVersion`, `kind`,
-  and `metadata` included) with inline `#` comments marking required fields, optional defaults, and
-  immutability (`# required`, `# optional, default: ...`, `# enum: ...`). Never use field-by-field
-  Markdown tables to duplicate full CR schemas.
-- **Micro configuration**: Add short constraint bullets (`- **<Field or rule>**: <Explanation in <=20 words>`)
-  or uniform Markdown tables (`| Value | Meaning | Constraints |` or `| Condition | Reason | Resolution |`)
-  immediately beneath the Pretty YAML only when they state real constraints, admission gates, or choices;
-  do not restate self-evident YAML fields.
-
-Every YAML block that represents a Kubernetes resource (`Pod`, `Instance`, `ModelDeployment`,
-`ModelDeploymentScaler`, `ModelArtifact`, `ModelPrefetch`, `NodeModelStore`, `KVCacheBackend`,
-`KVCachePool`, `KVCachePoolBinding`, `Devices`, `DevicesRDMASelectionPolicy`, vendor CRs, etc.)
-must include the complete resource header (`apiVersion`, `kind` and `metadata`) rather than starting
-at an inner fragment such as `spec:`, `status:`, `resources:` or `volumes:`. Typed Kubernetes
-component configuration objects (such as `KubeletConfiguration`) must also include their
-`apiVersion` and `kind`. Generated Helm chart documentation is excluded. Tables for other purposes
-remain allowed.
-
-Every table column header must contain 1 to 3 words and must not use `a`, `an`, `the`, `this`,
-`that`, `these`, or `those`.
-
-REQUIRED: when showing a CR configuration change, use a `diff` code block with the complete YAML
-header (`apiVersion`, `kind` and `metadata`) and the changed `spec` fields. Do not substitute a
-partial YAML fragment or a field table for the change.
-
-When formatting is requested, preserve field order, values, scalar types, quoting and intentional
-invalid examples. Preserve the facts in comments. Correct stale comments only after checking the
-current API, defaults or rendering code. A string whose consumer requires JSON and a captured JSON
-response keep that format.
-
-Attach each comment to the field it explains. Put a long comment immediately above that field at
-the same indentation. Keep inline comments at least two spaces after the value. Align adjacent
-short comments when this needs little padding; do not align an entire block to its longest value.
-Write short, factual comments for defaults, constraints and non-obvious behavior. Keep commented
-alternatives indented like the active fields. Avoid arrows, all-capital emphasis and vague references
-such as "the same". Review every changed comment against its field and source.
-
-For comment or whitespace edits, compare parsed YAML before and after to verify that values and
-scalar types are unchanged. Check commented alternatives separately; parsers ignore them.
-
-## Reader documentation and technical ownership
-
-Apply the reader boundary in `references/conventions.md` before adding implementation detail.
-User guides retain public configuration, operational behavior and constraints; the owning `specs/`
-document retains source analysis, internal routes and measured implementation evidence. Compare the
-actual spec contents before moving a fact, supplement missing material, and update skills that need
-that technical input. A guide must not become a source-file walkthrough.
-
-## Site rendering
-
-Module and architecture flowcharts use clean SVGs under `docs/assets/diagrams/` or
-`site/assets/images/`. Place the directional Mermaid flowgraph in an HTML comment immediately below each image, separated
-by a blank line, so Markdown exports preserve it for LLMs. Inside the comment, replace Mermaid
-`-->` with `->` and `-.->` with `..>`: HTML treats `-->` as the end of the comment. Restore the
-original arrow syntax before rendering the graph with Mermaid.
-Give SVG nodes generous padding; never enclose text in tight pill borders. Keep graph nodes,
-labeled edges and subgraph boundaries consistent with the SVG. Use high-contrast light and dark
-themes with a bordered outer canvas, tinted domain containers with colored header bands, and white
-or dark node cards with colored accent bars. Use cobalt for discovery, violet for scheduling, teal
-for delivery and cache, and amber for workloads. Choose an architecture, swimlane, feedback loop,
-transfer or hierarchy diagram when it explains the verified relationships more clearly. Other Mermaid charts may remain
-in fenced blocks. `docs/README.md` remains the agent index and is excluded from the site; link
-site readers to the module landing pages.
-`make lint docs` checks source links, page structure and the rendered site's internal links.
-Published Markdown allows hidden flowgraph comments and raw HTML only for attribute-free
-`<br>` or `<br/>` line breaks. Keep
-HTML examples inside fenced or inline code. The existing site gate checks this allowlist;
-link templates retain automatic URL escaping.
-When adding a public page, add its order and short menu label to `site/data/navigation.yaml` (flat
-`docs/reference/*.md` and `docs/contribute/*.md` pages never appear in `navigation.yaml`). Put setup
-and configuration before operations and diagnosis; keep related vendor procedures together.
-Name top-level groups for capabilities, such as `Heterogeneous Devices`, `RDMA Networking` and `Topology`.
-Use component names such as `Device Manager` when describing those components.
-Use short, Title-Cased nouns or noun phrases for menu labels at every depth, including child menus.
-Name the article's purpose within
-its hierarchy and omit the parent module's name. Use `children` for subordinate pages, such as
-`Benchmark` under a serving mode.
-Walkthrough module links use the same names and order as the outer capability groups.
-
-Choose titles from the page's task or subject. Check them against its introduction and main sections.
-For example, use `Election and Failover` for the menu of a page about those tasks.
-Article H1 titles may retain module names and useful `Operations`, `Reference` or `Walkthrough` suffixes.
-Keep accurate existing titles. Change a title only when it is unclear, misstates the content or conflicts with its menu label.
-The menu label and H1 must describe the same subject; they need not use identical words.
-Breadcrumbs use the page title and its source parent. Sidebar child groups do not change that parent.
-Review the rendered sidebar, breadcrumb and H1 together; each must identify the same article and capability.
-Use `Overview` for a module introduction. Give a page about preparation or example selection a label that names that purpose.
-The `All pages` labels in `docs/README.md` must match each page's H1 character for character.
-Keep that table in navigation order, with child articles immediately after their parent.
-
-## Page shape
-
-Every page in `docs/` (`docs/README.md` and `docs/reference/README.md` excepted) opens with a short
-introduction, has a `## Contents` list mirroring its `##` headings, and ends with a `**See also**`
-footer. Public site pages include `**Next**` wherever a next step exists and never link to
-`docs/reference/` or `docs/contribute/`; `docs/reference/*.md` topic pages state an opening evidence
-label (`contract`, `recorded capture`, or `synthetic simulation`) and omit `**Next**`. Templates and
-the writing rules are in
-[references/conventions.md](references/conventions.md).
-Apply its [section names and steps](references/conventions.md#section-names-and-steps) rules:
-use one name for each section purpose, concise plain headings and `Step N: <short imperative>`
-for ordered operations. Enforce a three-level heading ceiling (`H1`–`H3`; zero `H4`–`H6` across `docs/**`)
-and keep every H2–H3 heading within four words and 32 visible characters,
-excluding a numbered prefix such as `Step 2:`. In numbered headings, capitalize the first word after
-the colon and use sentence case for the rest. Preserve the meaning of architecture stages, admission
-gates and request rules. In README and docs, exclude interrogative words (`what`, `where`, `when`,
-`how`, `which`, `why`, `who`, `whose`, `whom`) from headings and table headers, regardless of case.
-Table headers also contain 1 to 3 words and exclude articles and demonstratives.
-Apply its [terminology and numbers](references/conventions.md#terminology-and-numbers) rules to
-guides, operations, benchmarks and reference pages as well as walkthroughs. Expand unfamiliar
-abbreviations, italicize the defined concept terms, roles and fields, and use consistent degree and unit notation.
-Use inline code for Kubernetes resource kinds (plurals add `s` outside backticks: `` `Pod`s ``); add bold when a resource needs emphasis.
-Keep identifiers and captured evidence intact. Search related pages for competing names before editing.
-Apply the [narrative voice](references/conventions.md#narrative-voice) to README, docs and site content:
-use imperative instructions and objective descriptions. Name technical subjects directly; avoid author
-first person and page self-description.
-
-## Sync invariants
-
-These pages are not free text. Changing one side without the other breaks a build or a reader's trust.
-
-| Doc | Pinned to | How it breaks |
-|---|---|---|
-| `docs/getting-started/architecture.md` `## Components` | top-level runtime subcommands and staged packages (`cmd/`, `engine-sentinel/`, `model-transfer/`, `csrc/`) | nothing fails; a newly shipped component disappears from the front-door architecture overview. Update `## Components` in the same PR whenever a runtime component is added or changes role |
-| `docs/reference/instance-type-unit-resources.md` | `pkg/nodefeature/unit_resources_preset.yaml` | compare the product rows with the preset data when either changes; no Go documentation test pins this table |
-| `deploy/gpustack-operator/chart/README.md`, `values.schema.json` | `values.yaml` + `README.md.gotmpl` via `make generate chart` | generated — never hand-edit; a doc path quoted in a `values.yaml` comment needs a regenerate, and `chart.yml` fails on drift |
-| `README.md` accelerator matrix | `pkg/nodefeature/knowns.go` (resource names, `SharedResourceMaxSize`, `_ManufacturerPartitionKindMap`) and **whether** each `pkg/devicemanager/detector/<mfr>/device.go` sets `LogicalSliced` at all | nothing fails; the table silently lies about what a vendor can do. The matrix is deliberately Yes/— only — per-card slice counts and the per-vendor isolation mechanism live in `docs/reference/devices-discovery.md`, not on the front page |
-| `README.md` Usage accelerator examples | `docs/modules/devices/requests.md` — *The resource keys* and *Worked example per family* | nothing fails; the front page and the normative contract drift apart. This copy is the one sanctioned exception to "state a fact once" (the README is the shop window) — change both together |
-| `docs/modules/model-deployment/configuration.md`, `docs/reference/model-deployment-internals.md` and `docs/reference/model-deployment-parameters.md` ownership tables | `modelDeploymentOwnedKeys` | compare the owned keys with each engine's table row when either changes; the Go documentation test was removed |
-| `docs/reference/settings.md` tables | `pkg/worker/settings` and the `GPUSTACK_*` readers | nothing fails; an operator configures something that no longer exists |
-| `docs/README.md` zone tables (`All pages`, `Reference`, `Contribute`) and `docs/reference/README.md` hub | the set of files under `docs/` and flat `docs/reference/*.md` | `check-docs.sh` and `agent-index.py` fail |
-| `docs/README.md` page **labels** | each page's `#` H1, character for character across all three zone tables | `check-docs.sh` and `agent-index.py` fail when an index label differs from its page title |
-
-## Before you finish
+## Before You Finish
 
 ```bash
-make lint docs                                                             # the gate, as CI runs it
-bash .agents/skills/gpustack-operator-docs/scripts/check-docs.sh --report   # while writing
+make lint docs                                                             # full CI gate
+bash .agents/skills/gpustack-operator-docs/scripts/check-docs.sh --report  # per-page metrics
+SITE_BASE_URL=https://docs.gpustack.ai/gpustack-operator/main/ make site   # when changing site/templates
 ```
 
-It verifies relative links and `#anchor`s across `README.md`, `AGENTS.md`, `docs/**` and
-`.agents/skills/**`; and — for `docs/**` only — flat `docs/reference/` layout, one-way link
-isolation from public pages, each page's `## Contents` against its headings, `**See also**` /
-`**Next**` zone footer rules, registration in the `All pages`, `Reference` and `Contribute` tables
-of `docs/README.md` plus `docs/reference/README.md` hub coverage, H1 label parity, authored-prose
-kind plurals, `H1`–`H3` heading depth, and the size caps for paragraphs, page length, section count
-and H2–H3 heading length (see `references/conventions.md`). The heading word and character limits and
-numbered-heading capitalization apply to all authored Markdown under `docs/` and `site/content/`,
-plus `README.md`, `ADOPTERS.md` and the two csrc READMEs. Interrogative words are forbidden in
-README and docs H1–H3 headings and table headers; table headers also have word and article limits.
-These checks remain fatal under `--report`; `--selftest` exercises the heading and table checks.
-`--report` demotes the paragraph, page-length, section-count and index-label checks to warnings and
-prints the per-page metrics. The gate also resolves literal `docs/*.md` paths named across skills,
-so a moved page cannot leave a skill reading a missing file.
+Automated gates verify links, anchors, zone isolation, H1–H3 depth, `<= 8` public H2s, heading
+length/nouns/articles, kind plurals, noise stamps, `architecture.md` components/cap, `/llms.txt`,
+and HTML/Markdown exports. Review manually for what gates cannot check:
 
-`make lint docs` checks source links and page shape, including Copilot instruction links. It also
-builds the Hugo site and checks HTML links, module routing, `llms.txt` and Markdown exports.
-`.github/workflows/docs.yml` runs the same gate. The target also checks spec status and task
-completion. Report the failing subcheck when unrelated spec work prevents a clean result; do not
-mark unfinished tasks complete to make the gate pass.
-
-It still does **not** read prose: everything below is on you.
-
-- [ ] `wc -l docs/getting-started/architecture.md` is still ≤ ~200.
-- [ ] The new fact is stated **once**; every other page links to it.
-- [ ] Terminology matches related guides, operations, benchmarks, reference pages and walkthroughs.
-      Name configurations, transfer paths, criteria and settings directly; avoid unexplained metaphors.
-      Expand unfamiliar abbreviations; walkthroughs may use established terms from a linked owning guide.
-      The concept terms listed in the conventions use italics in prose; component names remain plain.
-      Resource kinds use code, emphasized resources use bold code, and roles and fields use italics.
-      Check degree notation, units and measured precision against `references/conventions.md`.
-- [ ] Changed a title or navigation label? Compare the page's subject, sidebar, breadcrumb and H1 in
-      the rendered site. Check capitalization at every menu depth and the `All pages` index alignment.
-- [ ] Instructions use imperatives, behavior uses objective statements, and authors and pages are not
-      the subject. Preserve captured evidence and explicit measurement limits.
-- [ ] Same-purpose sections use the shared names, including `Prerequisites` and `Limitations`.
-      Headings are short, plain and free of unnecessary `The`; numbered headings use a colon.
-      Step headings state reader actions. Update Contents and every inbound anchor after renaming.
-      For a full sweep, account for every authored page, including pages that need no edit.
-- [ ] CR API, configuration and status structures use annotated Pretty YAML (macro view), adding
-      `<=20`-word constraint bullets or uniform enum/validation tables (micro view) only where fields
-      carry non-obvious constraints or compare choices, never full field tables.
-      Every Kubernetes resource YAML block and CR configuration `diff` block includes full
-      `apiVersion`, `kind` and `metadata` headers (not inner fragments). Generated Helm chart
-      documentation is excluded.
-- [ ] Capability modules cover all four functional areas (`Overview`, `Configuration`, `Operations`,
-      `Troubleshooting`), and multi-module configuration linkages converge in `docs/walkthroughs/`.
-- [ ] Prose follows 80% ASD-STE100 short-sentence discipline (`<=20` words for instructions, `<=25`
-      words for descriptions) and the visual expression rules in `references/conventions.md` (1-logic
-      bullets `<=20` words, 2-logic uniform tables, multi-logic SVG flowcharts with hidden Mermaid flowgraphs).
-- [ ] Check diagram edges against each source and mode. Mark optional actions and verify named gates.
-      Avoid broad claims that apply only to one transport or configuration.
-- [ ] Check that admission examples reach the intended webhook. Include the required selector labels.
-- [ ] Check commands against asynchronous reconciliation. Do not wait on a resource before it exists.
-      Troubleshooting commands must read the object that owns each listed condition.
-- [ ] Check isolation claims for additive policies, protocol exceptions and independent allocation families.
-- [ ] When adapting a manifest, check model-specific filters, digest anchors, referenced names and placement.
-      Check that each image supports the resource's defaulted features.
-- [ ] Keep captured output intact. Explain when its interpretation differs from the current API.
-- [ ] For site diagrams, inspect desktop and mobile in both themes. Verify motion and reduced motion,
-      keyboard access and readable content, including horizontally scrollable diagrams.
-- [ ] YAML comments describe the correct fields and current contracts. Check indentation, local
-      alignment and commented alternatives; compare parsed values when formatting examples.
-- [ ] Read the diff once for the prose tells in `references/conventions.md` (*Prose tells*): not-X-but-Y
-      contrasts, one-line closers, forced triads, dashes as connectors, stock AI words, bold labels.
-- [ ] Touched `docs/reference/instance-type-unit-resources.md`? Compare its rows with
-      `pkg/nodefeature/unit_resources_preset.yaml`.
-- [ ] Touched `values.yaml`? Run `make generate chart` and commit the regenerated chart README/schema.
-- [ ] Moved or renamed a page? Search tracked files for the old path and update each active reference.
-      Historical specs may keep their original wording, but a path that points to a moved page must
-      resolve to its new location.
-
-## Keeping this skill honest
-
-Found a doc that a test, a generator or a CI job pins, and it is not in the invariants table? Add the
-row. Split or added a page? Add it to the routing table above and to `docs/README.md`. The tables are
-the memory — they are only as good as their coverage.
-
-## Publication and languages
-
-Site publication is owned by `.github/workflows/site.yml` and `hack/site/publish.py`; chart and
-Pages jobs share the `github-pages` queue. Preserve `/charts/index.yaml` and chart packages when
-changing publication. Versioned builds use their exact source revision; do not publish current
-prose as documentation for an older tag. Run the existing site link and export gates with a
-production `SITE_BASE_URL` when changing templates or publication paths.
-
-English is the active language. Translation files share their original stem with a language
-suffix; Chinese remains disabled until its content, interface and checks are ready. Keep language
-switches limited to real translations and search indexes scoped to the selected language.
+- [ ] Every changed fact matches current Go/Python source, webhooks, and async reconcile behavior.
+- [ ] Facts are stated once and linked elsewhere; terminology/italics match `references/conventions.md`.
+- [ ] Sidebar label, breadcrumb, and H1 align in rendered HTML; diagrams are legible in light & dark themes.
+- [ ] Zero prose tells (`references/conventions.md`); YAML comments match actual defaults and types.
+- [ ] `values.yaml` changes regenerated via `make generate chart`; moved paths updated across tracked files.
