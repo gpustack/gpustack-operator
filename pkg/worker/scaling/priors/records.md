@@ -34,25 +34,67 @@ The 2026-11-14 InferenceX sync was qualified under these rules:
 
 ## Active Sources
 
-### 2026-11-19 — Refresh InferenceX snapshot digests without profile changes
+### 2026-11-22 — Refresh InferenceX snapshot digests without profile changes
 
-This digest-only refresh supersedes the 2026-11-14 record, which is archived under the
+This digest-only refresh supersedes the 2026-11-19 record, which is archived under the
 `## Historical sources` section below. The staged preflight re-merged the refreshed snapshots
 into the catalog and the merge changed no profile, so `pkg/worker/scaling/priors/priors.yaml`
 is untouched and still holds all 385 profiles: 205 aggregated and 180 disaggregated. No shape
 was retired and no new shape qualified, so the retirement log gained no entry on this date.
-Four snapshots changed their SHA-256 (`DeepSeek-V4-Pro`, `GLM-5.2`, `MiniMax-M3` and
-`Qwen-3.5-397B-A17B`), and `GLM-5.2` grew from 154 to 163 rows; every other row count and every
+Two benchmark snapshots changed their SHA-256 (`Qwen-3.5-397B-A17B` and `Qwen3.8-Flash-Next`):
+`Qwen-3.5-397B-A17B` grew from 1034 to 1051 rows and `Qwen3.8-Flash-Next` grew from 77 to 86
+rows, while both kept their per-dataset profile counts (22 aggregated and 10 disaggregated for
+`Qwen-3.5-397B-A17B`, none for `Qwen3.8-Flash-Next`); every other row count and every
 per-dataset profile count is unchanged. Counts below were read from the staged preflight report
-captured on 2026-11-19.
+captured on 2026-11-22.
 The benchmark URLs use `https://inferencex.semianalysis.com/api/v1/benchmarks?model=<query ID>`.
 The downloaded availability file from https://inferencex.semianalysis.com/api/v1/availability has
-SHA-256 `77a0706ff087420d56728cd351dc2baae70bcd4643ea20b9cd6b082b36f5a786`, replacing the digest
-recorded in the archived 2026-11-14 entry.
+SHA-256 `ff5fde329e1616eb88abd6494f6f7451a50337d85d5d9175bd76d3dc0525129f`, replacing the digest
+recorded in the archived 2026-11-19 entry.
 
 The refreshed availability snapshot also lists the slugs `dsv41flash`, `glm5.3flash`, `kimik3.1`,
 `minimaxm31flash` and `musespark`. None of them carries a verified canonical Hugging Face
 repository, so none was imported and no mapping was guessed; see the refusal table below.
+
+| Query ID | Rows | Aggregated | Disaggregated | SHA-256 |
+|---|---:|---:|---:|---|
+| `DeepSeek-R1-0528` | 1333 | 16 | 50 | `00aa63c54f0dcb71d8b3427891c74f669c800e73671f9639374f91f2127e655f` |
+| `DeepSeek-V4-Pro` | 935 | 18 | 11 | `fc71ff287c04c319c5029e99c1f34c0aabf55826e473cfbed586c1a4858c7299` |
+| `GLM-5` | 512 | 10 | 12 | `b19824dbb7a0fa07b731a99adf8e11638c2cc578bf76ee0bcbb8f23cecbfa4c3` |
+| `GLM-5.2` | 163 | 0 | 0 | `f3149c8091739ea5b71804d6015419da2b7f439f18ad536eef71314534d7f3ef` |
+| `gpt-oss-120b` | 439 | 22 | 0 | `52f3415e51a8be80ebf8e93673a444d967f1382090e41849fcb92ea26bcb7d95` |
+| `Kimi-K2.5` | 381 | 18 | 10 | `f39d8be9d7c7ce81eb4ad04ec513b9a23cb995ac17735394a0bcf32d9775d6a4` |
+| `Kimi-K3` | 114 | 1 | 0 | `855ffc967496da61ba888931e10d6797b8e79bff9f7d329253b9a10c37abc31a` |
+| `Llama-3.3-70B-Instruct-FP8` | 681 | 31 | 0 | `d2ce48fdbd84936994d68bb28413f0e842da3b01a2c7a0958e4041699dc19792` |
+| `MiniMax-M2.5` | 704 | 35 | 65 | `2d24657c2e27b03bf1d80c6ce8d4ea32296f7510e3b17f7ebbb576e3b509d85c` |
+| `MiniMax-M3` | 1247 | 32 | 22 | `ad08a27315cfd6f6c57ce4047e5b977f43ba58a489d6550badf206c8534ad096` |
+| `Qwen-3.5-397B-A17B` | 1051 | 22 | 10 | `a244cbc5eccdaf250bf2fc2b353a2bf24253cf0d2fe922c26131d943522107aa` |
+| `Qwen3.8-Flash-Next` | 86 | 0 | 0 | `63f09abd7e47e3b49281be800b4ef6cb6d45c0c51e6eaf278d7a3f217c77510c` |
+
+All rows in the two zero-profile datasets used speculative decoding or unsupported engines.
+Checksums were computed from the downloaded JSON files with `shasum -a 256`.
+
+## Historical sources
+
+### InferenceX, captured 2026-11-19 (superseded by the 2026-11-22 digest refresh)
+
+This record was the active source table until the 2026-11-22 digest refresh above replaced its
+snapshot digests without changing any profile. The text and table are archived as recorded.
+
+#### 2026-11-19 — Refresh InferenceX snapshot digests without profile changes
+
+This digest-only refresh superseded the 2026-11-14 record below. The staged preflight re-merged
+the refreshed snapshots into the catalog and the merge changed no profile, so
+`pkg/worker/scaling/priors/priors.yaml` held all 385 profiles: 205 aggregated and 180
+disaggregated. No shape was retired and no new shape qualified, so the retirement log gained no
+entry on that date. Four snapshots changed their SHA-256 (`DeepSeek-V4-Pro`, `GLM-5.2`,
+`MiniMax-M3` and `Qwen-3.5-397B-A17B`), and `GLM-5.2` grew from 154 to 163 rows; every other
+row count and every per-dataset profile count was unchanged. Counts below were read from the
+staged preflight report captured on 2026-11-19.
+The benchmark URLs use `https://inferencex.semianalysis.com/api/v1/benchmarks?model=<query ID>`.
+The downloaded availability file from https://inferencex.semianalysis.com/api/v1/availability has
+SHA-256 `77a0706ff087420d56728cd351dc2baae70bcd4643ea20b9cd6b082b36f5a786`, replacing the digest
+recorded in the archived 2026-11-14 entry.
 
 | Query ID | Rows | Aggregated | Disaggregated | SHA-256 |
 |---|---:|---:|---:|---|
@@ -71,8 +113,6 @@ repository, so none was imported and no mapping was guessed; see the refusal tab
 
 All rows in the two zero-profile datasets used speculative decoding or unsupported engines.
 Checksums were computed from the downloaded JSON files with `shasum -a 256`.
-
-## Historical sources
 
 ### InferenceX, captured 2026-11-14 (superseded by the 2026-11-19 digest refresh)
 
@@ -150,7 +190,7 @@ Source URLs and capture dates, per row:
 | MLPerf Inference v6.1 single-QPS Server runs (inspected NVIDIA B300x8 DeepSeek-R1 run) | Publishes TTFT and TPOT P95, no direct ITL, no same-config multi-load boundary | Offline Server throughput has no equivalent interactive SLO; TPOT constraints do not establish an ITL quantile. No eligible capacity profile. |
 | NVIDIA `nv_inference_benchmark.json` (519 rows, snapshot SHA-256 `af85101e389e5b7b479c10ed2d1b3660d268dc31d031895b2bceaf5e89219351`) | No P95/P99 TTFT or ITL, no image, revision, source URL or cache-missed count fields | Missing required latency quantiles and provenance; summaries must not be converted into fabricated P95 observations. |
 | ROCm ATOM dashboard (inspected Qwen3.5-397B FP8, 4x MI355X, TP4 run) | `measurement_valid: false`, precision `null`, inter-token metric measured over collector chunk gaps, engine unsupported by this operator, artifacts expire in 15 days | Unsupported engine and unverifiable measurement validity; vendor results cannot seed another vendor's capacity without lineage. |
-| InferenceX availability slugs `dsv41flash`, `glm5.3flash`, `kimik3.1`, `minimaxm31flash`, `musespark` (2026-11-19 availability snapshot) | Slugs listed by the availability endpoint with no canonical mapping among the staged benchmark queries or catalog models | No verified Hugging Face repository; identity is never guessed, so these entries stay unimported. |
+| InferenceX availability slugs `dsv41flash`, `glm5.3flash`, `kimik3.1`, `minimaxm31flash`, `musespark` (2026-11-22 availability snapshot) | Slugs listed by the availability endpoint with no canonical mapping among the staged benchmark queries or catalog models | No verified Hugging Face repository; identity is never guessed, so these entries stay unimported. |
 
 Refusals are evidence about the inspected snapshot or run, not blanket exclusions of the
 source; any future import must pin the actual data snapshot and pass the same qualification.
