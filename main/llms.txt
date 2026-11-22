@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers accelerators, organizes capacity into pools, and schedules Kubernetes workloads for interactive use and model serving.
 
-Documentation version: main. Source revision: 32060adf4b91a454a80584b9c29b9f0b1212682f.
+Documentation version: main. Source revision: d1f5d13c1be7321e809945f85caa45857d380627.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -126,7 +126,7 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/32060adf4b91a454a80584b9c29b9f0b1212682f/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
-- [Development](https://github.com/gpustack/gpustack-operator/blob/32060adf4b91a454a80584b9c29b9f0b1212682f/docs/contribute/development.md): Build, generate, test, and lint the repository
-- [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/32060adf4b91a454a80584b9c29b9f0b1212682f/docs/contribute/local-cluster-setup.md): Provision a local kind cluster for tests
-- [Internals](https://github.com/gpustack/gpustack-operator/blob/32060adf4b91a454a80584b9c29b9f0b1212682f/docs/contribute/internals.md): Review startup order, bindings, and naming limits
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/d1f5d13c1be7321e809945f85caa45857d380627/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Development](https://github.com/gpustack/gpustack-operator/blob/d1f5d13c1be7321e809945f85caa45857d380627/docs/contribute/development.md): Build, generate, test, and lint the repository
+- [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/d1f5d13c1be7321e809945f85caa45857d380627/docs/contribute/local-cluster-setup.md): Provision a local kind cluster for tests
+- [Internals](https://github.com/gpustack/gpustack-operator/blob/d1f5d13c1be7321e809945f85caa45857d380627/docs/contribute/internals.md): Review startup order, bindings, and naming limits
