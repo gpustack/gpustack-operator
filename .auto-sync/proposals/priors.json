@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
-  "summary": "Digest-only InferenceX refresh captured 2026-11-19: availability and four benchmark snapshots changed SHA-256 without altering priors.yaml profiles; records.md digests, capture date and proposal versions updated",
+  "summary": "Digest-only InferenceX refresh captured 2026-11-22: availability and two benchmark snapshots changed SHA-256 without altering priors.yaml profiles; records.md digests, capture date and proposal versions updated",
   "versions": {
-    "inferencex-repo": "6ed37742453271fc5851b873fd1c8009f37520b1",
-    "inferencex-availability": "77a0706ff087420d56728cd351dc2baae70bcd4643ea20b9cd6b082b36f5a786"
+    "inferencex-repo": "0bbcce1d5b04f01e5692bd9e0b7ee2d7c375656d",
+    "inferencex-availability": "ff5fde329e1616eb88abd6494f6f7451a50337d85d5d9175bd76d3dc0525129f"
   },
   "subscriptions": [
     {
       "id": "inferencex-repo",
       "kind": "git-commit",
       "source": "SemiAnalysisAI/InferenceX",
-      "version": "6ed37742453271fc5851b873fd1c8009f37520b1"
+      "version": "0bbcce1d5b04f01e5692bd9e0b7ee2d7c375656d"
     },
     {
       "id": "inferencex-availability",
       "kind": "http-json",
       "source": "https://inferencex.semianalysis.com/api/v1/availability",
-      "version": "77a0706ff087420d56728cd351dc2baae70bcd4643ea20b9cd6b082b36f5a786"
+      "version": "ff5fde329e1616eb88abd6494f6f7451a50337d85d5d9175bd76d3dc0525129f"
     }
   ]
 }
