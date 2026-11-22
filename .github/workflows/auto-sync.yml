@@ -82,139 +82,93 @@ jobs:
         (contains(github.event.comment.body, '/loopwright') || contains(github.event.comment.body, '/auto-sync'))
       )
     outputs:
-      domains: ${{ steps.resolve.outputs.domains }}
-      runner: ${{ steps.resolve.outputs.runner }}
-      has_domains: ${{ steps.resolve.outputs.has_domains }}
-      comment_command: ${{ steps.resolve.outputs.comment_command }}
-      pr_head_sha: ${{ steps.resolve.outputs.pr_head_sha }}
+      matrix: ${{ steps.suite.outputs.matrix }}
+      runner: ${{ steps.dispatch.outputs.runner }}
+      checkout_ref: ${{ steps.dispatch.outputs.checkout_ref }}
+      has_domains: ${{ steps.meta.outputs.has_domains }}
+      comment_command: ${{ steps.meta.outputs.comment_command }}
+      pr_head_sha: ${{ steps.meta.outputs.pr_head_sha }}
     steps:
-      - name: Resolve target domains
-        id: resolve
+      - name: Validate dispatch and resolve runner
+        id: dispatch
         env:
           EVENT_NAME: ${{ github.event_name }}
-          SCHEDULE_CRON: ${{ github.event.schedule }}
           DISPATCH_REF: ${{ github.ref }}
-          INPUT_DOMAIN: ${{ inputs.domain || 'all' }}
           INPUT_DRY_RUN: ${{ (inputs.dry-run == true || inputs.dry-run == 'true') && 'true' || 'false' }}
           INPUT_RUNNER_PROFILE: ${{ inputs.runner_profile || 'normal' }}
           AUTOSYNC_RUNNER: ${{ vars.AUTOSYNC_RUNNER }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.issue.number }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          profile="${INPUT_RUNNER_PROFILE:-normal}"
+          case "${profile}" in
+            normal) runner="${AUTOSYNC_RUNNER:-ubuntu-24.04}" ;;
+            4x) runner="ubuntu-24.04-4x" ;;
+            8x) runner="ubuntu-24.04-8x" ;;
+            *)
+              echo "ERROR: unsupported runner_profile: '${profile}'" >&2
+              exit 1
+              ;;
+          esac
+          checkout_ref="refs/heads/main"
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            if [[ "${DISPATCH_REF}" != "refs/heads/main" && "${INPUT_DRY_RUN}" != "true" ]]; then
+              echo "ERROR: workflow_dispatch requires refs/heads/main unless dry-run is true (got '${DISPATCH_REF}')" >&2
+              exit 1
+            fi
+            if [[ "${INPUT_DRY_RUN}" == "true" && -n "${DISPATCH_REF}" ]]; then
+              checkout_ref="${DISPATCH_REF}"
+            fi
+          fi
+          {
+            echo "runner=${runner}"
+            echo "checkout_ref=${checkout_ref}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout suite
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.dispatch.outputs.checkout_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve target domains
+        id: suite
+        uses: gpustack/loopwright@d280c9162fe08a6007ca6600d374ad06ff3e5368 # main
+        with:
+          suite-path: .auto-sync/suite.yaml
+          domain: ${{ github.event_name == 'workflow_dispatch' && inputs.domain != '' && inputs.domain != 'all' && inputs.domain || '' }}
+          resolve-suite-only: 'true'
+          allow-privileged-execution: 'true'
+          allow-custom-base-url: 'true'
+          event-name: ${{ github.event_name }}
+          event-path: ${{ github.event_path }}
+          run-root: ${{ runner.temp }}/loopwright-suite-resolve
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-app-id: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_APP_ID || vars.CI_GPUSTACK_LOOPWRIGHT_APP_ID || secrets.LOOPWRIGHT_APP_ID }}
+          github-app-private-key: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_APP_PRIVATE_KEY || secrets.LOOPWRIGHT_APP_PRIVATE_KEY }}
+
+      - name: Extract suite dispatch metadata
+        id: meta
+        env:
+          SUITE_MATRIX: ${{ steps.suite.outputs.matrix }}
+          SUITE_RESULT: ${{ steps.suite.outputs.result }}
         run: |
           python3 - <<'PY'
           import json
           import os
-          import re
-          import subprocess
-          import sys
 
-          ALL_DOMAINS = [
-              "slicing",
-              "kv-transfer",
-              "router",
-              "priors",
-              "charts",
-              "k8s-deps",
-          ]
-          SCHEDULE_MAP = {
-              "0 1 1 */2 *": ["priors"],
-              "0 2 * * 1": ["slicing"],
-              "0 2 * * 2": ["kv-transfer"],
-              "0 3 * * 2": ["router"],
-              "0 2 * * 3": ["charts"],
-              "0 2 * * 4": ["k8s-deps"],
-          }
-          normal_runner = os.environ.get("AUTOSYNC_RUNNER", "").strip() or "ubuntu-24.04"
-          RUNNER_MAP = {
-              "normal": normal_runner,
-              "4x": "ubuntu-24.04-4x",
-              "8x": "ubuntu-24.04-8x",
-          }
+          matrix = json.loads(os.environ.get("SUITE_MATRIX") or '{"include":[]}')
+          result = json.loads(os.environ.get("SUITE_RESULT") or "{}")
+          cells = matrix.get("include") if isinstance(matrix, dict) else []
+          if not isinstance(cells, list):
+              cells = []
 
-          event_name = os.environ.get("EVENT_NAME", "").strip()
-          profile = os.environ.get("INPUT_RUNNER_PROFILE", "normal").strip() or "normal"
-          if profile not in RUNNER_MAP:
-              print(f"ERROR: unsupported runner_profile: {profile!r}", file=sys.stderr)
-              sys.exit(1)
-          runner = RUNNER_MAP[profile]
+          suite_info = result.get("suite") if isinstance(result, dict) else {}
+          comment_info = suite_info.get("comment") if isinstance(suite_info, dict) else {}
+          comment_command = str(comment_info.get("command") or "") if isinstance(comment_info, dict) else ""
+          pr_head_sha = str(cells[0].get("headSha") or "") if cells and isinstance(cells[0], dict) else ""
+          has_domains = "true" if cells else "false"
 
-          domains = []
-          comment_command = ""
-          pr_head_sha = ""
-
-          if event_name == "schedule":
-              cron = os.environ.get("SCHEDULE_CRON", "").strip()
-              if cron not in SCHEDULE_MAP:
-                  print(f"ERROR: unexpected schedule cron expression: {cron!r}", file=sys.stderr)
-                  sys.exit(1)
-              domains = SCHEDULE_MAP[cron]
-          elif event_name == "workflow_dispatch":
-              dispatch_ref = os.environ.get("DISPATCH_REF", "").strip()
-              dry_run = os.environ.get("INPUT_DRY_RUN", "false").strip().lower() == "true"
-              if dispatch_ref != "refs/heads/main" and not dry_run:
-                  print(
-                      f"ERROR: workflow_dispatch requires refs/heads/main unless dry-run is true (got {dispatch_ref!r})",
-                      file=sys.stderr,
-                  )
-                  sys.exit(1)
-              selected = os.environ.get("INPUT_DOMAIN", "all").strip() or "all"
-              if selected == "all":
-                  domains = list(ALL_DOMAINS)
-              elif selected in ALL_DOMAINS:
-                  domains = [selected]
-              else:
-                  print(f"ERROR: unsupported dispatch domain: {selected!r}", file=sys.stderr)
-                  sys.exit(1)
-          elif event_name == "issue_comment":
-              lines = os.environ.get("COMMENT_BODY", "").lstrip().splitlines()
-              first = lines[0].strip() if lines else ""
-              rest = "\n".join(lines[1:]).strip()
-              cmd_match = re.match(r"^/(?:loopwright|auto-sync)(?:[ \t]+(retry|revise|status))?(?=$|\s)", first)
-              valid_cmd = cmd_match is not None and (
-                  cmd_match.group(1) is not None or (first in ("/loopwright", "/auto-sync") and bool(rest))
-              )
-              if valid_cmd:
-                  pr_number = os.environ.get("PR_NUMBER", "").strip()
-                  repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
-                  if not pr_number.isdigit() or not repo:
-                      print("ERROR: missing PR_NUMBER or GITHUB_REPOSITORY for issue_comment", file=sys.stderr)
-                      sys.exit(1)
-                  out = subprocess.check_output(
-                      [
-                          "gh",
-                          "pr",
-                          "view",
-                          pr_number,
-                          "--repo",
-                          repo,
-                          "--json",
-                          "headRefName,baseRefName,headRefOid",
-                      ],
-                      text=True,
-                  )
-                  pr_info = json.loads(out)
-                  base_ref = str(pr_info.get("baseRefName") or "")
-                  head_ref = str(pr_info.get("headRefName") or "")
-                  branch_match = re.fullmatch(
-                      r"auto-sync-(slicing|kv-transfer|router|priors|charts|k8s-deps)/main",
-                      head_ref,
-                  )
-                  if base_ref == "main" and branch_match:
-                      domains = [branch_match.group(1)]
-                      comment_command = cmd_match.group(1) or "revise"
-                      pr_head_sha = str(pr_info.get("headRefOid") or "")
-          else:
-              print(f"ERROR: unsupported event_name: {event_name!r}", file=sys.stderr)
-              sys.exit(1)
-
-          has_domains = "true" if domains else "false"
-          domains_json = json.dumps(domains, separators=(",", ":"))
-
-          gh_out = os.environ["GITHUB_OUTPUT"]
-          with open(gh_out, "a", encoding="utf-8") as f:
-              f.write(f"domains={domains_json}\n")
-              f.write(f"runner={runner}\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write(f"has_domains={has_domains}\n")
               f.write(f"comment_command={comment_command}\n")
               f.write(f"pr_head_sha={pr_head_sha}\n")
@@ -227,17 +181,16 @@ jobs:
     runs-on: ${{ needs.resolve-domains.outputs.runner }}
     timeout-minutes: 75
     concurrency:
-      group: auto-sync-domain-${{ matrix.domain }}
+      group: auto-sync-domain-${{ matrix.domainId }}
       cancel-in-progress: false
     strategy:
       fail-fast: false
-      matrix:
-        domain: ${{ fromJSON(needs.resolve-domains.outputs.domains) }}
+      matrix: ${{ fromJSON(needs.resolve-domains.outputs.matrix) }}
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: refs/heads/main
+          ref: ${{ needs.resolve-domains.outputs.checkout_ref || 'refs/heads/main' }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -259,7 +212,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.issue.number }}
-          EXPECTED_PR_HEAD_SHA: ${{ needs.resolve-domains.outputs.pr_head_sha }}
+          EXPECTED_PR_HEAD_SHA: ${{ matrix.headSha || needs.resolve-domains.outputs.pr_head_sha }}
           MAIN_SHA: ${{ steps.record-main.outputs.main_sha }}
           SERVER_URL: ${{ github.server_url }}
         run: |
@@ -319,11 +272,11 @@ jobs:
           go-version-file: go.mod
 
       - name: Setup uv
-        if: matrix.domain == 'k8s-deps'
+        if: matrix.domainId == 'k8s-deps'
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
 
       - name: Setup awk
-        if: matrix.domain == 'priors' || matrix.domain == 'kv-transfer' || matrix.domain == 'router'
+        if: matrix.domainId == 'priors' || matrix.domainId == 'kv-transfer' || matrix.domainId == 'router'
         run: |
           sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 update
           sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 install -y --no-install-recommends original-awk
@@ -331,7 +284,7 @@ jobs:
           awk --version 2>&1 | head -1
 
       - name: Setup crane
-        if: matrix.domain == 'kv-transfer' || matrix.domain == 'router' || matrix.domain == 'charts'
+        if: matrix.domainId == 'kv-transfer' || matrix.domainId == 'router' || matrix.domainId == 'charts'
         run: |
           if command -v crane >/dev/null 2>&1; then
             crane version
@@ -343,7 +296,7 @@ jobs:
           "${RUNNER_TEMP}/bin/crane" version
 
       - name: Setup Buildx
-        if: matrix.domain == 'slicing' || matrix.domain == 'kv-transfer' || matrix.domain == 'router'
+        if: matrix.domainId == 'slicing' || matrix.domainId == 'kv-transfer' || matrix.domainId == 'router'
         uses: docker/setup-buildx-action@v3
 
       - name: Setup bubblewrap
@@ -371,10 +324,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/gpustack-autosync-stage/.sbin
-          key: autosync-sbin-${{ runner.os }}-${{ runner.arch }}-${{ matrix.domain }}-${{ hashFiles('hack/lib/*.sh') }}
+          key: autosync-sbin-${{ runner.os }}-${{ runner.arch }}-${{ matrix.domainId }}-${{ hashFiles('hack/lib/*.sh') }}
 
       - name: Cache uv runtime
-        if: matrix.domain == 'k8s-deps'
+        if: matrix.domainId == 'k8s-deps'
         uses: actions/cache@v4
         with:
           path: |
@@ -384,24 +337,26 @@ jobs:
 
       - name: Run Loopwright
         id: loopwright
-        # Env-visibility contract (verified at pinned SHA in packages/github-app/src/{preflight,action,turnkey}.ts):
+        # Env-visibility contract (verified at pinned SHA in packages/taskpack/src/{preflight,turnkey}.ts
+        # and packages/github-app/src/action.ts):
         # - spec.preflight and command.v1 gates construct scrubbed child environments forwarding ONLY
         #   non-secret names listed in spec.preflight.env / command.v1 parameters.env (enforced in-repo
         #   by hack/check/autosync-selftest.sh) and unconditionally strip INPUT_*, GITHUB_TOKEN,
         #   GitHub App credentials, Loopwright signing keys, and LOOPWRIGHT_PROVIDER_TOKEN.
         # - Candidate model turns and command.v1 checks run inside bubblewrap under spec.execution.mode: strict.
-        uses: gpustack/loopwright@6d281028848473fc52b96a5a3b1cea49fc1a731f # main
+        uses: gpustack/loopwright@d280c9162fe08a6007ca6600d374ad06ff3e5368 # main
         env:
           LOOPWRIGHT_PROVIDER_TOKEN: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_LLM_AUTH_TOKEN || secrets.CI_GPUSTACK_CODEREVIEW_LLM_AUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_SHA: ${{ steps.record-main.outputs.main_sha }}
           GITHUB_REF: refs/heads/main
-          AUTOSYNC_STAGE_DIR: /tmp/gpustack-autosync-stage/${{ matrix.domain }}
+          AUTOSYNC_STAGE_DIR: /tmp/gpustack-autosync-stage/${{ matrix.domainId }}
           AUTOSYNC_FORCE: ${{ (inputs.force == true || inputs.force == 'true') && 'true' || 'false' }}
           AUTOSYNC_TARGET_TAG: ${{ inputs.target_tag || '' }}
           COMMENT_COMMAND: ${{ needs.resolve-domains.outputs.comment_command }}
         with:
-          taskpack-path: .auto-sync/${{ matrix.domain }}-taskpack.yaml
+          suite-path: .auto-sync/suite.yaml
+          domain: ${{ matrix.domainId }}
           mode: auto
           # Dual-key operator unlock required for strict-mode taskpacks declaring spec.preflight,
           # read-only command.v1 toolchainPaths (allowHostPath), or check-only allowCheckNetwork.
@@ -409,8 +364,8 @@ jobs:
           allow-privileged-execution: 'true'
           event-name: ${{ github.event_name }}
           event-path: ${{ github.event_path }}
-          run-root: ${{ runner.temp }}/loopwright-${{ matrix.domain }}
-          run-id: auto-sync-${{ matrix.domain }}-${{ github.run_id }}-${{ github.run_attempt }}
+          run-root: ${{ runner.temp }}/loopwright-${{ matrix.domainId }}
+          run-id: auto-sync-${{ matrix.domainId }}-${{ github.run_id }}-${{ github.run_attempt }}
           storage-profile: actions-basic
           allow-custom-base-url: 'true'
           provider-token-env: LOOPWRIGHT_PROVIDER_TOKEN
@@ -423,7 +378,7 @@ jobs:
       - name: Sanitize diagnostics
         if: always()
         env:
-          DIAG_ROOT: ${{ runner.temp }}/loopwright-${{ matrix.domain }}
+          DIAG_ROOT: ${{ runner.temp }}/loopwright-${{ matrix.domainId }}
           CHECK_PROVIDER_TOKEN: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_LLM_AUTH_TOKEN || secrets.CI_GPUSTACK_CODEREVIEW_LLM_AUTH_TOKEN }}
           CHECK_GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -438,10 +393,11 @@ jobs:
           diag_root = sys.argv[1]
           patterns = [
               os.path.join(diag_root, "*", "run.json"),
+              os.path.join(diag_root, "*", "run-eval.json"),
               os.path.join(diag_root, "*", "memory-publication.json"),
               os.path.join(diag_root, "*", "artifacts", "**", "*.json"),
-              os.path.join(diag_root, "lw-action-*", "config", "config.yaml"),
-              os.path.join(diag_root, "lw-action-*", "registry", "registry.yaml"),
+              os.path.join(diag_root, "lw-action*", "config", "config.yaml"),
+              os.path.join(diag_root, "lw-action*", "registry", "registry.yaml"),
           ]
           secrets_to_block = [
               val for key in ("CHECK_PROVIDER_TOKEN", "CHECK_GH_TOKEN")
@@ -467,17 +423,18 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: auto-sync-diagnostics-${{ matrix.domain }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: auto-sync-diagnostics-${{ matrix.domainId }}-${{ github.run_id }}-${{ github.run_attempt }}
           # Loopwright runs assertCleanArtifact(scrubber) before writing config.yaml and registry.yaml
           # (which store credential env-var names, never secret values); Sanitize diagnostics also
           # deletes secrets.json and *.sqlite* before upload.
           path: |
-            ${{ runner.temp }}/loopwright-${{ matrix.domain }}/*/run.json
-            ${{ runner.temp }}/loopwright-${{ matrix.domain }}/*/memory-publication.json
-            ${{ runner.temp }}/loopwright-${{ matrix.domain }}/*/artifacts/**/*.json
-            ${{ runner.temp }}/loopwright-${{ matrix.domain }}/lw-action-*/config/config.yaml
-            ${{ runner.temp }}/loopwright-${{ matrix.domain }}/lw-action-*/registry/registry.yaml
-            !${{ runner.temp }}/loopwright-${{ matrix.domain }}/**/secrets.json
-            !${{ runner.temp }}/loopwright-${{ matrix.domain }}/**/*.sqlite*
+            ${{ runner.temp }}/loopwright-${{ matrix.domainId }}/*/run.json
+            ${{ runner.temp }}/loopwright-${{ matrix.domainId }}/*/run-eval.json
+            ${{ runner.temp }}/loopwright-${{ matrix.domainId }}/*/memory-publication.json
+            ${{ runner.temp }}/loopwright-${{ matrix.domainId }}/*/artifacts/**/*.json
+            ${{ runner.temp }}/loopwright-${{ matrix.domainId }}/lw-action*/config/config.yaml
+            ${{ runner.temp }}/loopwright-${{ matrix.domainId }}/lw-action*/registry/registry.yaml
+            !${{ runner.temp }}/loopwright-${{ matrix.domainId }}/**/secrets.json
+            !${{ runner.temp }}/loopwright-${{ matrix.domainId }}/**/*.sqlite*
           retention-days: 30
           if-no-files-found: ignore

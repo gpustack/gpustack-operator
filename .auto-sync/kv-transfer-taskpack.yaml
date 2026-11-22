@@ -156,6 +156,8 @@ spec:
     commentPrefixes:
       - /loopwright
       - /auto-sync
+  baselineAlignment:
+    policy: extract-context
   models:
     - provider: zai-coding-cn
       id: glm-5.3

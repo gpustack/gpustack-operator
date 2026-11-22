@@ -369,9 +369,10 @@ clones, and Helm tarballs across runs, and set `GPUSTACK_DEPS_OFFLINE=true` to r
 when the cache misses.
 
 Scheduled and manual upstream dependency refreshes across six domains (`priors`, `slicing`,
-`kv-transfer`, `router`, `charts`, and `k8s-deps`) live in `.auto-sync/` and `.github/workflows/auto-sync.yml`.
+`kv-transfer`, `router`, `charts`, and `k8s-deps`) live in `.auto-sync/` (coordinated by
+`.auto-sync/suite.yaml`) and `.github/workflows/auto-sync.yml`.
 Run `bash hack/check/autosync-selftest.sh` (also invoked by `make lint`) to run fast static syntax,
-shellcheck, Python compile, and manifest/schema checks for `.auto-sync/` and `auto-sync.yml`.
+shellcheck, Python compile, and suite/manifest/schema checks for `.auto-sync/` and `auto-sync.yml`.
 
 ---
 
