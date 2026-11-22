@@ -132,13 +132,13 @@ jobs:
 
       - name: Resolve target domains
         id: suite
-        uses: gpustack/loopwright@3275576e9c5e96258fd6b7ddcb9836427a422694 # main
+        uses: gpustack/loopwright@cc0b76b660e615385ce7195c6c7d3b1fa2cc2eb3 # main
         with:
           suite-path: .auto-sync/suite.yaml
           domain: ${{ github.event_name == 'workflow_dispatch' && inputs.domain != '' && inputs.domain != 'all' && inputs.domain || '' }}
           resolve-suite-only: 'true'
           allow-privileged-execution: 'true'
-          allow-docker-socket: 'true'
+          allow-host-mounts: /var/run/docker.sock
           allow-custom-base-url: 'true'
           event-name: ${{ github.event_name }}
           event-path: ${{ github.event_path }}
@@ -345,7 +345,7 @@ jobs:
         #   by hack/check/autosync-selftest.sh) and unconditionally strip INPUT_*, GITHUB_TOKEN,
         #   GitHub App credentials, Loopwright signing keys, and LOOPWRIGHT_PROVIDER_TOKEN.
         # - Candidate model turns and command.v1 checks run inside bubblewrap under spec.execution.mode: strict.
-        uses: gpustack/loopwright@3275576e9c5e96258fd6b7ddcb9836427a422694 # main
+        uses: gpustack/loopwright@cc0b76b660e615385ce7195c6c7d3b1fa2cc2eb3 # main
         env:
           LOOPWRIGHT_PROVIDER_TOKEN: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_LLM_AUTH_TOKEN || secrets.CI_GPUSTACK_CODEREVIEW_LLM_AUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -360,10 +360,10 @@ jobs:
           domain: ${{ matrix.domainId }}
           mode: auto
           # Dual-key operator unlock required for strict-mode taskpacks declaring spec.preflight,
-          # read-only command.v1 toolchainPaths (allowHostPath), or check-only allowCheckNetwork.
+          # read-only command.v1 toolchainPaths (allowHostPath), check-only allowCheckNetwork, or host mounts.
           # Candidate model turns and command.v1 checks still run inside bubblewrap without tokens.
           allow-privileged-execution: 'true'
-          allow-docker-socket: 'true'
+          allow-host-mounts: /var/run/docker.sock
           event-name: ${{ github.event_name }}
           event-path: ${{ github.event_path }}
           run-root: ${{ runner.temp }}/loopwright-${{ matrix.domainId }}

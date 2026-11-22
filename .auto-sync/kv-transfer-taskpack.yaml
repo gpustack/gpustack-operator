@@ -17,7 +17,6 @@ spec:
     capabilities:
       allowHostPath: true
       allowCheckNetwork: true
-      allowDockerSocket: true
     digests:
       pinDigests: true
       lockfile: .auto-sync/digests/kv-transfer.lock.json
@@ -136,6 +135,9 @@ spec:
             - AUTOSYNC_FAST_SELFTEST
             - AUTOSYNC_DOCKER_BUILD_CMD
             - GITHUB_ACTIONS
+          mounts:
+            - source: /var/run/docker.sock
+              mode: rw
     externalGates: []
   publication:
     mode: pull_request

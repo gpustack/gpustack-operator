@@ -18,7 +18,6 @@ spec:
     capabilities:
       allowHostPath: true
       allowCheckNetwork: true
-      allowDockerSocket: true
     digests:
       pinDigests: true
       lockfile: .auto-sync/digests/router.lock.json
@@ -107,6 +106,9 @@ spec:
             - AUTOSYNC_ROUTER_BUILD_RUNNER
             - AUTOSYNC_ALLOW_MISSING_STAGED_REPO
             - GITHUB_ACTIONS
+          mounts:
+            - source: /var/run/docker.sock
+              mode: rw
     externalGates: []
   publication:
     mode: pull_request
