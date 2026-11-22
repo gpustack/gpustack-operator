@@ -147,7 +147,7 @@ for pf in "${PY_FILES[@]}"; do
   fi
 done
 
-echo "== Taskpack 2.0 manifest, digest lockfile, proposal, holds, and workflow validation =="
+echo "== TaskpackSuite, Taskpack 2.0 manifests, digests, memory, proposals, holds, and workflow validation =="
 if python3 -B - "${ROOT_DIR}" <<'PY'
 import glob
 import hashlib
@@ -342,7 +342,7 @@ def check_scope_glob(pattern: object, label: str) -> None:
 
 
 def sha256_tree(dir_path: str) -> str:
-    # Matches Loopwright's computeDirectoryTreeDigest in packages/github-app/src/digests.ts.
+    # Matches Loopwright's computeDirectoryTreeDigest in packages/taskpack/src/digests.ts.
     rows: list[tuple[str, int, str]] = []
     for cur_root, dirs, files in os.walk(dir_path):
         dirs.sort()
@@ -360,18 +360,50 @@ def sha256_tree(dir_path: str) -> str:
     return h.hexdigest()
 
 
+def canonical_json(value: object) -> str:
+    # Matches @loopwright/memory canonical() in packages/memory/src/schema.ts.
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if isinstance(value, list):
+        return "[" + ",".join(canonical_json(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return (
+            "{"
+            + ",".join(
+                json.dumps(k, ensure_ascii=False, separators=(",", ":")) + ":" + canonical_json(value[k])
+                for k in sorted(value.keys())
+            )
+            + "}"
+        )
+    raise TypeError(f"unsupported JSON type: {type(value)!r}")
+
+
 FORBIDDEN_ENV_RE = re.compile(
     r"(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|CREDENTIAL)(?:$|_)"
 )
 FORBIDDEN_ENV_PREFIXES = ("LOOPWRIGHT_", "GITHUB_APP_", "INPUT_", "ACTIONS_", "RUNNER_", "GIT_")
+EXPECTED_DOMAINS = ["slicing", "kv-transfer", "router", "priors", "charts", "k8s-deps"]
+MAX_LOOPWRIGHT_PATTERNS = 128
+GITHUB_BUILT_IN_PROTECTED = {
+    ".git",
+    ".github",
+    ".loopwright",
+    ".agents",
+    ".claude",
+    ".codex",
+    "AGENTS.md",
+    "CLAUDE.md",
+}
 
 taskpacks = sorted(glob.glob(os.path.join(autosync_dir, "*-taskpack.yaml")))
 if len(taskpacks) != 6:
     raise AssertionError(f"expected 6 *-taskpack.yaml files under .auto-sync, found {len(taskpacks)}")
 
 seen_lockfiles: set[str] = set()
+manifest_by_rel: dict[str, dict] = {}
+
 for tp in taskpacks:
-    rel_tp = os.path.relpath(tp, root)
+    rel_tp = os.path.relpath(tp, root).replace(os.sep, "/")
     doc = load_yaml(tp)
     if not isinstance(doc, dict):
         raise AssertionError(f"{rel_tp}: expected YAML mapping")
@@ -453,7 +485,8 @@ for tp in taskpacks:
     if not isinstance(instructions, list) or not instructions:
         raise AssertionError(f"{rel_tp}: spec.instructions must be a non-empty list")
     for idx, instr in enumerate(instructions):
-        check_repo_file(instr, f"{rel_tp} spec.instructions[{idx}]")
+        instr_path = instr.get("path") if isinstance(instr, dict) else instr
+        check_repo_file(instr_path, f"{rel_tp} spec.instructions[{idx}]")
 
     proposal = spec.get("proposal")
     if not isinstance(proposal, dict):
@@ -461,6 +494,20 @@ for tp in taskpacks:
     check_repo_file(proposal.get("path"), f"{rel_tp} spec.proposal.path")
     if proposal.get("path") not in writable:
         raise AssertionError(f"{rel_tp}: spec.proposal.path must appear as an exact file in spec.scope.writable")
+
+    baseline_align = spec.get("baselineAlignment")
+    if not isinstance(baseline_align, dict) or baseline_align.get("policy") not in ("extract-context", "fail-fast"):
+        raise AssertionError(
+            f"{rel_tp}: spec.baselineAlignment.policy must be 'extract-context' or 'fail-fast', got {baseline_align!r}"
+        )
+    if "maxConflictFiles" in baseline_align:
+        mcf = baseline_align["maxConflictFiles"]
+        if isinstance(mcf, bool) or not isinstance(mcf, int) or not (1 <= mcf <= 64):
+            raise AssertionError(f"{rel_tp}: spec.baselineAlignment.maxConflictFiles out of range: {mcf!r}")
+    if "maxConflictBytes" in baseline_align:
+        mcb = baseline_align["maxConflictBytes"]
+        if isinstance(mcb, bool) or not isinstance(mcb, int) or not (1024 <= mcb <= 262144):
+            raise AssertionError(f"{rel_tp}: spec.baselineAlignment.maxConflictBytes out of range: {mcb!r}")
 
     verification = spec.get("verification")
     if not isinstance(verification, dict):
@@ -500,13 +547,120 @@ for tp in taskpacks:
     if not isinstance(output_cfg, dict) or set(output_cfg.get("formats") or []) < {"json", "github-step-summary"}:
         raise AssertionError(f"{rel_tp}: spec.output.formats must include json and github-step-summary")
 
+    manifest_by_rel[rel_tp] = doc
     print(f"PASS  taskpack {rel_tp}")
+
+suite_rel = ".auto-sync/suite.yaml"
+suite_path = check_repo_file(suite_rel, suite_rel)
+suite_doc = load_yaml(suite_path)
+if not isinstance(suite_doc, dict):
+    raise AssertionError(f"{suite_rel}: expected YAML mapping")
+if suite_doc.get("apiVersion") != "loopwright.dev/v1alpha1":
+    raise AssertionError(f"{suite_rel}: apiVersion must be loopwright.dev/v1alpha1")
+if suite_doc.get("kind") != "TaskpackSuite":
+    raise AssertionError(f"{suite_rel}: kind must be TaskpackSuite")
+suite_meta = suite_doc.get("metadata") or {}
+if not isinstance(suite_meta.get("name"), str) or not suite_meta["name"].strip():
+    raise AssertionError(f"{suite_rel}: missing metadata.name")
+suite_spec = suite_doc.get("spec")
+if not isinstance(suite_spec, dict):
+    raise AssertionError(f"{suite_rel}: missing spec mapping")
+suite_domains = suite_spec.get("domains")
+if not isinstance(suite_domains, list) or len(suite_domains) != 6:
+    raise AssertionError(f"{suite_rel}: expected 6 spec.domains entries, got {suite_domains!r}")
+
+suite_domain_ids: list[str] = []
+suite_schedules: set[str] = set()
+head_prefixes: list[tuple[str, str]] = []
+for idx, d_entry in enumerate(suite_domains):
+    if not isinstance(d_entry, dict):
+        raise AssertionError(f"{suite_rel}: spec.domains[{idx}] must be a mapping")
+    did = d_entry.get("id")
+    dtp = d_entry.get("taskpack")
+    if not isinstance(did, str) or not did:
+        raise AssertionError(f"{suite_rel}: spec.domains[{idx}] missing id")
+    if did in suite_domain_ids:
+        raise AssertionError(f"{suite_rel}: duplicate domain id {did!r}")
+    suite_domain_ids.append(did)
+    expected_tp_rel = f".auto-sync/{did}-taskpack.yaml"
+    if dtp != expected_tp_rel or dtp not in manifest_by_rel:
+        raise AssertionError(
+            f"{suite_rel}: domain {did!r} taskpack must be {expected_tp_rel!r}, got {dtp!r}"
+        )
+    if d_entry.get("enabled", True) is not True:
+        raise AssertionError(f"{suite_rel}: domain {did!r} must be enabled")
+    scheds = d_entry.get("schedules")
+    if not isinstance(scheds, list) or not scheds or not all(isinstance(s, str) and s.strip() for s in scheds):
+        raise AssertionError(f"{suite_rel}: domain {did!r} must declare non-empty schedules")
+    suite_schedules.update(scheds)
+    pub = (manifest_by_rel[dtp].get("spec") or {}).get("publication") or {}
+    hbp = str(pub.get("headBranchPrefix") or "")
+    if not hbp:
+        raise AssertionError(f"{dtp}: missing spec.publication.headBranchPrefix")
+    for prev_id, prev_hbp in head_prefixes:
+        if hbp.startswith(prev_hbp) or prev_hbp.startswith(hbp):
+            raise AssertionError(
+                f"{suite_rel}: colliding headBranchPrefix between {prev_id!r} ({prev_hbp!r}) and {did!r} ({hbp!r})"
+            )
+    head_prefixes.append((did, hbp))
+
+if set(suite_domain_ids) != set(EXPECTED_DOMAINS):
+    raise AssertionError(
+        f"{suite_rel}: domain set {suite_domain_ids!r} != expected {EXPECTED_DOMAINS!r}"
+    )
+
+# Verify Loopwright suite-wide and per-domain protected-path union stays well within 128 patterns.
+suite_union: set[str] = set(GITHUB_BUILT_IN_PROTECTED) | {
+    suite_rel,
+    ".auto-sync/policies",
+    ".auto-sync/checks",
+    ".auto-sync/scripts",
+    ".auto-sync/memory",
+    ".auto-sync/taskpack.yaml",
+    ".auto-sync/taskpack.yml",
+    ".auto-sync/taskpack.json",
+    ".auto-sync/digests.lock.json",
+}
+for entry_name in sorted(os.listdir(autosync_dir)):
+    rel_entry = f".auto-sync/{entry_name}"
+    if rel_entry == ".auto-sync/proposals":
+        for prop_name in sorted(os.listdir(os.path.join(autosync_dir, "proposals"))):
+            suite_union.add(f".auto-sync/proposals/{prop_name}")
+    else:
+        suite_union.add(rel_entry)
+for rel_tp, mdoc in manifest_by_rel.items():
+    suite_union.add(rel_tp)
+    mspec = mdoc["spec"]
+    suite_union.add(mspec["execution"]["digests"]["lockfile"])
+    suite_union.add(mspec["preflight"]["script"])
+    suite_union.add(mspec["memory"]["directory"])
+    for instr in mspec["instructions"]:
+        suite_union.add(instr["path"] if isinstance(instr, dict) else instr)
+    for chk in mspec["verification"]["localChecks"]:
+        if chk.get("implementation") == "command.v1":
+            suite_union.add(chk["parameters"]["script"])
+
+if len(suite_union) > MAX_LOOPWRIGHT_PATTERNS:
+    raise AssertionError(
+        f"{suite_rel}: suiteProtectedPaths union ({len(suite_union)}) exceeds {MAX_LOOPWRIGHT_PATTERNS}"
+    )
+for rel_tp, mdoc in manifest_by_rel.items():
+    mspec = mdoc["spec"]
+    prop_path = mspec["proposal"]["path"]
+    dom_protected = set(mspec["scope"]["protected"]) | (
+        (suite_union - GITHUB_BUILT_IN_PROTECTED) - {prop_path}
+    )
+    if len(dom_protected) > MAX_LOOPWRIGHT_PATTERNS:
+        raise AssertionError(
+            f"{rel_tp}: merged suite protectedPaths ({len(dom_protected)}) exceeds {MAX_LOOPWRIGHT_PATTERNS}"
+        )
+print(f"PASS  suite {suite_rel} (protected union={len(suite_union)}/{MAX_LOOPWRIGHT_PATTERNS})")
 
 proposals = sorted(glob.glob(os.path.join(autosync_dir, "proposals", "*.json")))
 if len(proposals) != 6:
     raise AssertionError(f"expected 6 proposal JSON files under .auto-sync/proposals, found {len(proposals)}")
 for prop in proposals:
-    rel_prop = os.path.relpath(prop, root)
+    rel_prop = os.path.relpath(prop, root).replace(os.sep, "/")
     with open(prop, "r", encoding="utf-8") as f:
         pdata = json.load(f)
     if not isinstance(pdata, dict):
@@ -515,6 +669,37 @@ for prop in proposals:
     if isinstance(sv, bool) or sv != 1:
         raise AssertionError(f"{rel_prop}: schema_version must be 1, got {sv!r}")
     print(f"PASS  proposal {rel_prop}")
+
+memory_indices = sorted(glob.glob(os.path.join(autosync_dir, "memory", "*", "index.json")))
+for midx in memory_indices:
+    rel_midx = os.path.relpath(midx, root).replace(os.sep, "/")
+    raw_bytes = open(midx, "rb").read()
+    if not raw_bytes.endswith(b"\n") or raw_bytes.endswith(b"\n\n"):
+        raise AssertionError(f"{rel_midx}: must end with a single trailing LF")
+    mdoc = json.loads(raw_bytes.decode("utf-8"))
+    if not isinstance(mdoc, dict) or mdoc.get("version") != 1:
+        raise AssertionError(f"{rel_midx}: expected version=1 memory index object")
+    expected_tp_dir = os.path.basename(os.path.dirname(midx))
+    if mdoc.get("taskpack") != expected_tp_dir:
+        raise AssertionError(f"{rel_midx}: taskpack {mdoc.get('taskpack')!r} != {expected_tp_dir!r}")
+    digest_base = {
+        "version": mdoc["version"],
+        "taskpack": mdoc["taskpack"],
+        "repository": mdoc["repository"],
+        "updatedAtMs": mdoc["updatedAtMs"],
+        "entries": mdoc["entries"],
+        "retired": mdoc["retired"],
+    }
+    want_digest = hashlib.sha256(
+        b"loopwright.dev/memory/memory-store-index/v1alpha1\0"
+        + canonical_json(digest_base).encode("utf-8")
+    ).hexdigest()
+    got_digest = (mdoc.get("storeDigest") or {}).get("hex")
+    if got_digest != want_digest:
+        raise AssertionError(
+            f"{rel_midx}: storeDigest mismatch: got {got_digest!r}, expected {want_digest!r}"
+        )
+    print(f"PASS  memory {rel_midx}")
 
 holds_mod_path = os.path.join(autosync_dir, "checks", "setting_image_holds.py")
 holds_json_path = os.path.join(autosync_dir, "setting-image-holds.json")
@@ -532,19 +717,74 @@ if not os.path.isfile(workflow_path):
 wf_doc = load_yaml(workflow_path)
 if not isinstance(wf_doc, dict):
     raise AssertionError(".github/workflows/auto-sync.yml: expected YAML mapping")
+
+wf_on = wf_doc.get("on") if "on" in wf_doc else wf_doc.get(True)
+if not isinstance(wf_on, dict):
+    raise AssertionError("auto-sync.yml: missing top-level 'on' trigger block")
+wf_crons = {
+    str(item.get("cron") or "").strip()
+    for item in (wf_on.get("schedule") or [])
+    if isinstance(item, dict) and str(item.get("cron") or "").strip()
+}
+if wf_crons != suite_schedules:
+    raise AssertionError(
+        f"auto-sync.yml: on.schedule crons {sorted(wf_crons)!r} != suite.yaml schedules {sorted(suite_schedules)!r}"
+    )
+
 jobs = wf_doc.get("jobs") or {}
-sync_steps = ((jobs.get("auto-sync") or {}).get("steps")) or []
+resolve_job = jobs.get("resolve-domains") or {}
+resolve_steps = resolve_job.get("steps") or []
+resolve_lw_steps = [
+    s for s in resolve_steps if isinstance(s, dict) and str(s.get("uses") or "").startswith("gpustack/loopwright@")
+]
+if len(resolve_lw_steps) != 1:
+    raise AssertionError("auto-sync.yml: resolve-domains must contain exactly one gpustack/loopwright step")
+resolve_lw_uses = str(resolve_lw_steps[0].get("uses") or "")
+resolve_lw_ref = resolve_lw_uses.split("@", 1)[1].strip()
+if not re.fullmatch(r"[0-9a-f]{40}", resolve_lw_ref):
+    raise AssertionError(
+        f"auto-sync.yml: resolve-domains gpustack/loopwright must be pinned to a 40-char SHA, got {resolve_lw_uses!r}"
+    )
+resolve_with = resolve_lw_steps[0].get("with") or {}
+if resolve_with.get("suite-path") != suite_rel:
+    raise AssertionError(
+        f"auto-sync.yml: resolve-domains must set suite-path: {suite_rel}, got {resolve_with.get('suite-path')!r}"
+    )
+if str(resolve_with.get("resolve-suite-only")).lower() != "true":
+    raise AssertionError("auto-sync.yml: resolve-domains must set resolve-suite-only: 'true'")
+
+auto_sync_job = jobs.get("auto-sync") or {}
+strategy_matrix = str((auto_sync_job.get("strategy") or {}).get("matrix") or "")
+if "needs.resolve-domains.outputs.matrix" not in strategy_matrix:
+    raise AssertionError("auto-sync.yml: auto-sync strategy.matrix must consume needs.resolve-domains.outputs.matrix")
+concurrency_group = str((auto_sync_job.get("concurrency") or {}).get("group") or "")
+if "matrix.domainId" not in concurrency_group:
+    raise AssertionError("auto-sync.yml: auto-sync concurrency.group must be keyed by matrix.domainId")
+
+sync_steps = auto_sync_job.get("steps") or []
 lw_steps = [s for s in sync_steps if isinstance(s, dict) and str(s.get("uses") or "").startswith("gpustack/loopwright@")]
 if len(lw_steps) != 1:
-    raise AssertionError(".github/workflows/auto-sync.yml: expected exactly one gpustack/loopwright step")
+    raise AssertionError(".github/workflows/auto-sync.yml: expected exactly one gpustack/loopwright step in auto-sync")
 lw_uses = str(lw_steps[0].get("uses") or "")
 lw_ref = lw_uses.split("@", 1)[1].strip()
 if not re.fullmatch(r"[0-9a-f]{40}", lw_ref):
     raise AssertionError(f"auto-sync.yml: gpustack/loopwright must be pinned to a 40-char commit SHA, got {lw_uses!r}")
+if lw_ref != resolve_lw_ref:
+    raise AssertionError(
+        f"auto-sync.yml: resolve-domains ({resolve_lw_ref}) and auto-sync ({lw_ref}) must pin identical Loopwright SHAs"
+    )
 fetch_pr_steps = [s for s in sync_steps if isinstance(s, dict) and s.get("name") == "Fetch PR head"]
-if len(fetch_pr_steps) != 1 or "needs.resolve-domains.outputs.pr_head_sha" not in str((fetch_pr_steps[0].get("env") or {}).get("EXPECTED_PR_HEAD_SHA") or ""):
-    raise AssertionError("auto-sync.yml: Fetch PR head step must verify EXPECTED_PR_HEAD_SHA from resolve-domains")
+expected_pr_expr = str((fetch_pr_steps[0].get("env") or {}).get("EXPECTED_PR_HEAD_SHA") or "") if len(fetch_pr_steps) == 1 else ""
+if len(fetch_pr_steps) != 1 or (
+    "needs.resolve-domains.outputs.pr_head_sha" not in expected_pr_expr
+    and "matrix.headSha" not in expected_pr_expr
+):
+    raise AssertionError("auto-sync.yml: Fetch PR head step must verify EXPECTED_PR_HEAD_SHA from suite resolution")
 lw_with = lw_steps[0].get("with") or {}
+if lw_with.get("suite-path") != suite_rel:
+    raise AssertionError(f"auto-sync.yml: Loopwright step must set suite-path: {suite_rel}, got {lw_with.get('suite-path')!r}")
+if "matrix.domainId" not in str(lw_with.get("domain") or ""):
+    raise AssertionError(f"auto-sync.yml: Loopwright step must set domain: ${{{{ matrix.domainId }}}}, got {lw_with.get('domain')!r}")
 if lw_with.get("mode") != "auto":
     raise AssertionError(f"auto-sync.yml: Loopwright step must set mode: auto, got {lw_with.get('mode')!r}")
 if str(lw_with.get("allow-privileged-execution")).lower() != "true":
@@ -557,9 +797,9 @@ for legacy_key in ("upstream-records", "source-revision"):
 print("PASS  workflow .github/workflows/auto-sync.yml")
 PY
 then
-  pass "Taskpack 2.0 manifest, digest lockfile, proposal, holds, and workflow static checks"
+  pass "TaskpackSuite, Taskpack 2.0 manifests, digests, memory, proposals, holds, and workflow static checks"
 else
-  fail "Taskpack 2.0 manifest, digest lockfile, proposal, holds, and workflow static checks"
+  fail "TaskpackSuite, Taskpack 2.0 manifests, digests, memory, proposals, holds, and workflow static checks"
 fi
 
 echo

@@ -1,0 +1,30 @@
+apiVersion: loopwright.dev/v1alpha1
+kind: TaskpackSuite
+metadata:
+  name: gpustack-operator-auto-sync
+spec:
+  domains:
+    - id: slicing
+      taskpack: .auto-sync/slicing-taskpack.yaml
+      schedules:
+        - '0 2 * * 1'
+    - id: kv-transfer
+      taskpack: .auto-sync/kv-transfer-taskpack.yaml
+      schedules:
+        - '0 2 * * 2'
+    - id: router
+      taskpack: .auto-sync/router-taskpack.yaml
+      schedules:
+        - '0 3 * * 2'
+    - id: priors
+      taskpack: .auto-sync/priors-taskpack.yaml
+      schedules:
+        - '0 1 1 */2 *'
+    - id: charts
+      taskpack: .auto-sync/charts-taskpack.yaml
+      schedules:
+        - '0 2 * * 3'
+    - id: k8s-deps
+      taskpack: .auto-sync/k8s-deps-taskpack.yaml
+      schedules:
+        - '0 2 * * 4'

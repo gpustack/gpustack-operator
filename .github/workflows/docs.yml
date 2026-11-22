@@ -124,8 +124,8 @@ jobs:
           sudo update-alternatives --set awk /usr/bin/original-awk
           awk --version 2>&1 | head -1
           make lint docs
-          # Run the fast auto-sync static checks here to validate shell/Python syntax, all taskpack
-          # YAML manifests, proposal JSON schemas, holds schema, and auto-sync.yml syntax.
+          # Run the fast auto-sync static checks here to validate shell/Python syntax, the suite and
+          # taskpack YAML manifests, proposal/memory JSON schemas, holds schema, and auto-sync.yml syntax.
           bash hack/check/autosync-selftest.sh .
       - name: Check versioned build
         env:
