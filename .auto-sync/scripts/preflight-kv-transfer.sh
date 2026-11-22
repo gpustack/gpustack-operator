@@ -56,6 +56,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 repo_root, stage_dir, fixture_dir, discovery_path, probe_list_path, base_sha = sys.argv[1:7]
@@ -234,19 +235,47 @@ def fetch_github_releases(repo: str, fixture_file: str, fixture_root: str, max_p
 
     url = f"https://api.github.com/repos/{repo}/releases?per_page=100"
     all_releases: list = []
-    for _ in range(max_pages):
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            page_data = json.loads(resp.read().decode("utf-8"))
-            link_hdr = resp.headers.get("Link") or ""
-        if isinstance(page_data, list):
-            all_releases.extend(page_data)
-        elif page_data is not None:
-            all_releases.append(page_data)
-        next_url = parse_next_link(link_hdr)
-        if not next_url:
-            break
-        url = next_url
+    try:
+        for _ in range(max_pages):
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                page_data = json.loads(resp.read().decode("utf-8"))
+                link_hdr = resp.headers.get("Link") or ""
+            if isinstance(page_data, list):
+                all_releases.extend(page_data)
+            elif page_data is not None:
+                all_releases.append(page_data)
+            next_url = parse_next_link(link_hdr)
+            if not next_url:
+                break
+            url = next_url
+    except urllib.error.HTTPError as exc:
+        if exc.code in (403, 429):
+            print(
+                f"WARN: GitHub Releases API returned HTTP {exc.code} for {repo}; falling back to git ls-remote tags",
+                file=sys.stderr,
+            )
+            out = subprocess.check_output(
+                [
+                    "git",
+                    "ls-remote",
+                    "--tags",
+                    "--refs",
+                    f"https://github.com/{repo}.git",
+                ],
+                text=True,
+                timeout=30,
+            )
+            fallback_releases = []
+            for line in out.splitlines():
+                parts = line.strip().split("\t", 1)
+                if len(parts) != 2 or not parts[1].startswith("refs/tags/"):
+                    continue
+                tag = parts[1][len("refs/tags/"):].strip()
+                if tag:
+                    fallback_releases.append({"tag_name": tag, "draft": False, "prerelease": False})
+            return fallback_releases
+        raise
     return all_releases
 
 
