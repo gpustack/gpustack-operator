@@ -509,6 +509,9 @@ with open(out_path, "w", encoding="utf-8") as f:
     json.dump(
         {
             "detail": summary[:1024],
+            "metrics": {
+                "passed": passed_str == "true",
+            },
         },
         f,
         indent=2,
