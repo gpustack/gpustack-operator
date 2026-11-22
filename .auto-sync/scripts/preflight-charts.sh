@@ -50,6 +50,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -270,8 +271,41 @@ def cache_archive(
     return dst, actual_sha256
 
 
+def load_github_releases_via_git_tags(repo_slug: str) -> list[dict]:
+    out = subprocess.check_output(
+        [
+            "git",
+            "ls-remote",
+            "--tags",
+            "--refs",
+            f"https://github.com/{repo_slug}.git",
+        ],
+        text=True,
+        timeout=30,
+    )
+    releases = []
+    for line in out.splitlines():
+        parts = line.strip().split("\t", 1)
+        if len(parts) != 2 or not parts[1].startswith("refs/tags/"):
+            continue
+        tag = parts[1][len("refs/tags/"):].strip()
+        if tag:
+            releases.append({"tag_name": tag, "draft": False, "prerelease": False, "assets": []})
+    return releases
+
+
 def resolve_github_release_chart(repo_slug: str, asset_prefix: str, fallback_url_tmpl: str, pinned_ver: str, pinned_url: str):
-    releases = fetch_json(f"https://api.github.com/repos/{repo_slug}/releases?per_page=20")
+    try:
+        releases = fetch_json(f"https://api.github.com/repos/{repo_slug}/releases?per_page=20")
+    except urllib.error.HTTPError as exc:
+        if exc.code in (403, 429):
+            print(
+                f"WARN: GitHub Releases API returned HTTP {exc.code} for {repo_slug}; falling back to git ls-remote tags",
+                file=sys.stderr,
+            )
+            releases = load_github_releases_via_git_tags(repo_slug)
+        else:
+            raise
     candidates = []
     for rel in releases:
         if not isinstance(rel, dict) or rel.get("prerelease") or rel.get("draft"):
