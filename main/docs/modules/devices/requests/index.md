@@ -29,7 +29,7 @@ views (`EX`, `SH`, `SL`, and `PT`).
 ### Resource keys
 
 `<base>` is the vendor extended resource (`nvidia.com/gpu`, `huawei.com/npu`, `amd.com/gpu`, and
-others in [Accelerator Support](https://github.com/gpustack/gpustack-operator/blob/8ed4a0acaea93847d38a3ab3434849d91603a342/README.md#accelerator-support)):
+others in [Accelerator Support](https://github.com/gpustack/gpustack-operator/blob/d54da1e92384de4af0e33812ffe426b0a06fde72/README.md#accelerator-support)):
 
 | Key | Provider | Eligible cards | Request value | `Node` capacity |
 |---|---|---|---|---|

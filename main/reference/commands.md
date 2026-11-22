@@ -383,5 +383,5 @@ answering.
 
 **See also** — [Preflight](../docs/modules/devices/preflight/index.md) for the procedure and the per-manufacturer
 tables · [Settings](settings.md) for what is configured through the `Setting` CR ·
-[Internals](https://github.com/gpustack/gpustack-operator/blob/8ed4a0acaea93847d38a3ab3434849d91603a342/docs/contribute/internals.md) for startup order and the invariants these commands rest
+[Internals](https://github.com/gpustack/gpustack-operator/blob/d54da1e92384de4af0e33812ffe426b0a06fde72/docs/contribute/internals.md) for startup order and the invariants these commands rest
 on.
