@@ -91,7 +91,7 @@ run_prompts() {
 echo "=== rule 1 fires on a pointer that leads nowhere ==="
 build
 run
-if printf '%s' "$out" | grep -q 'dangling.md:3: (Z9) appears on no other line'; then
+if grep -q 'dangling.md:3: (Z9) appears on no other line' <<< "$out"; then
   pass "(Z9) is reported"
 else
   fail "(Z9) is not reported -- got: $out"
@@ -99,12 +99,12 @@ fi
 
 echo
 echo "=== rule 1 stays quiet on the pointers that do land ==="
-if printf '%s' "$out" | grep -q 'good.md.*lands nowhere'; then
+if grep -q 'good.md.*lands nowhere' <<< "$out"; then
   fail "good.md's (F6) was wrongly reported"
 else
   pass "good.md's (F6) is not reported"
 fi
-if printf '%s' "$out" | grep -q 'figure.md.*lands nowhere'; then
+if grep -q 'figure.md.*lands nowhere' <<< "$out"; then
   fail "figure.md's (F6) was wrongly reported by rule 1"
 else
   pass "figure.md's (F6) is not reported by rule 1 -- the label DOES exist, which is the trap"
@@ -112,12 +112,12 @@ fi
 
 echo
 echo "=== rule 2 is counted but not listed unless asked ==="
-if printf '%s' "$out" | grep -qE '^  [0-9]+ finding\(s\), not listed'; then
+if grep -qE '^  [0-9]+ finding\(s\), not listed' <<< "$out"; then
   pass "the default run states the count and withholds the list"
 else
   fail "the default run did not state a withheld count -- got: $out"
 fi
-if printf '%s' "$out" | grep -q 'cites (F6) for a claim counting'; then
+if grep -q 'cites (F6) for a claim counting' <<< "$out"; then
   fail "rule 2 listed a finding without CROSSREFS_QUANTITY_PROMPTS -- got: $out"
 else
   pass "no rule 2 finding is listed by default"
@@ -126,12 +126,12 @@ fi
 echo
 echo "=== rule 2 fires on the known shape, and only on it ==="
 run_prompts
-if printf '%s' "$out" | grep -q 'figure.md:3: cites (F6) for a claim counting "five"'; then
+if grep -q 'figure.md:3: cites (F6) for a claim counting "five"' <<< "$out"; then
   pass "a claim counting \"five\" against a section that never says it is reported"
 else
   fail "rule 2 missed the known shape -- got: $out"
 fi
-if printf '%s' "$out" | grep -q 'good.md.*cites (F6)'; then
+if grep -q 'good.md.*cites (F6)' <<< "$out"; then
   fail "good.md was reported although its section does state \"two\""
 else
   pass "good.md is quiet -- rule 2 keys on the figure, not on the citation"
@@ -141,7 +141,7 @@ echo
 echo "=== rule 2 goes quiet when the section does state the figure ==="
 subst "$TREE/specs/figure.md" "two of the five replica" "two of the two replica"
 run_prompts
-if printf '%s' "$out" | grep -q 'figure.md:3: cites (F6)'; then
+if grep -q 'figure.md:3: cites (F6)' <<< "$out"; then
   fail "still reported after the figure was changed to one the section states"
 else
   pass "changing \"five\" to \"two\" removes the finding"
@@ -152,7 +152,7 @@ echo "=== rule 2 reports, it does not gate ==="
 build
 rm "$TREE/specs/dangling.md"
 run_prompts
-if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'cites (F6) for a claim counting "five"'; then
+if [ "$rc" -eq 0 ] && grep -q 'cites (F6) for a claim counting "five"' <<< "$out"; then
   pass "exit 0 with a prompt outstanding, and the summary says what green does not establish"
 else
   fail "expected exit 0 with the prompt still printed; rc=$rc out=$out"
@@ -170,7 +170,7 @@ cat > "$TREE/specs/seeref.md" <<'EOF'
 The classification is measured below (Z9), and the drain path is covered (see Z9).
 EOF
 run
-if printf '%s' "$out" | grep -q 'seeref.md.*(Z9) appears on no other line'; then
+if grep -q 'seeref.md.*(Z9) appears on no other line' <<< "$out"; then
   pass "(see Z9) does not count as somewhere (Z9) can land"
 else
   fail "(see Z9) was treated as a target, masking the dangling (Z9) -- got: $out"
@@ -184,7 +184,7 @@ rm "$TREE/specs/dangling.md"
 printf '# Spec: Fenced\n\nThe drain path is covered (Z9).\n\n```go\n// Z9 is a struct field name here, not a section.\ntype Z9 struct{}\n```\n' \
   > "$TREE/specs/fenced.md"
 run
-if printf '%s' "$out" | grep -q 'fenced.md.*(Z9) appears on no other line'; then
+if grep -q 'fenced.md.*(Z9) appears on no other line' <<< "$out"; then
   pass "a fenced occurrence does not mask a dangling pointer"
 else
   fail "the fenced Z9 was counted as a target -- got: $out"
@@ -197,7 +197,7 @@ build
 rm "$TREE/specs/dangling.md"
 printf '# Spec: Model\n\nSupported: Cambricon (MLU370), Hygon (Z100).\n' > "$TREE/specs/model.md"
 run
-if printf '%s' "$out" | grep -qE 'model.md.*\((LU370|100)\)'; then
+if grep -qE 'model.md.*\((LU370|100)\)' <<< "$out"; then
   fail "a model number was read as a label -- got: $out"
 else
   pass "(MLU370) and (Z100) are not read as labels"
@@ -219,7 +219,7 @@ The rebase happened twice on the same branch (Y8 and Z9), each time for a patch.
 Content.
 EOF
 run
-if printf '%s' "$out" | grep -q 'pair.md.*(Z9) appears on no other line'; then
+if grep -q 'pair.md.*(Z9) appears on no other line' <<< "$out"; then
   pass "the second label in \"(Y8 and Z9)\" is a pointer, not a target"
 else
   fail "(Z9) was masked by sharing a paren group with (Y8) -- got: $out"
@@ -235,7 +235,7 @@ rm "$TREE/specs/dangling.md"
 printf '# Spec: Vendors\n\nSupported: MetaX (C500, C550), NVIDIA (A100 / H100), Hygon (Z100, Z100L).\n' \
   > "$TREE/specs/vendors.md"
 run
-if printf '%s' "$out" | grep -qE 'vendors.md.*\((C550|H100|Z100L)\)'; then
+if grep -qE 'vendors.md.*\((C550|H100|Z100L)\)' <<< "$out"; then
   fail "a model name in a list was read as a dangling pointer -- got: $out"
 else
   pass "(C500, C550) and (A100 / H100) are lists, not citations"
@@ -258,7 +258,7 @@ Someone has to classify the media, and twofold growth is expected.
 #### F7 - something else
 EOF
 run_prompts
-if printf '%s' "$out" | grep -q 'word.md:3: cites (F6) for a claim counting "one"'; then
+if grep -q 'word.md:3: cites (F6) for a claim counting "one"' <<< "$out"; then
   pass "\"someone\" does not satisfy a claim counting \"one\""
 else
   fail "the substring match swallowed the finding -- got: $out"
@@ -280,7 +280,7 @@ Two independent problems.
 #### F7 - something else
 EOF
 run_prompts
-if printf '%s' "$out" | grep -q 'bare.md:3: cites (F6) for a claim counting "five"'; then
+if grep -q 'bare.md:3: cites (F6) for a claim counting "five"' <<< "$out"; then
   pass "a bare \"#### F6\" heading registers as the definition"
 else
   fail "the bare heading was not registered -- got: $out"
@@ -302,7 +302,7 @@ Content.
 Content.
 EOF
 run_prompts
-if printf '%s' "$out" | grep -q 'dupe.md.*(F6) is introduced by more than one heading'; then
+if grep -q 'dupe.md.*(F6) is introduced by more than one heading' <<< "$out"; then
   pass "the duplicate heading is reported"
 else
   fail "the duplicate was silently overwritten -- got: $out"
@@ -315,7 +315,7 @@ rm "$TREE/specs/dangling.md"
 printf '# Spec: Bare Pointer\n\nThe allocatable path is covered per Z9, which settles it.\n' \
   > "$TREE/specs/barecite.md"
 run
-if printf '%s' "$out" | grep -q 'barecite.md:3: the bare pointer to Z9 appears on no other line'; then
+if grep -q 'barecite.md:3: the bare pointer to Z9 appears on no other line' <<< "$out"; then
   pass "\"per Z9\" with no target is reported"
 else
   fail "a bare pointer was not read as a pointer -- got: $out"
@@ -335,7 +335,7 @@ The allocatable path is covered per Z9, which settles it.
 Content.
 EOF
 run
-if printf '%s' "$out" | grep -q 'barelands.md.*Z9'; then
+if grep -q 'barelands.md.*Z9' <<< "$out"; then
   fail "a bare pointer with a heading target was reported -- got: $out"
 else
   pass "\"per Z9\" is quiet when Z9 has a heading"
@@ -349,7 +349,7 @@ build
 rm "$TREE/specs/dangling.md"
 printf '# Spec: Loose\n\nThe key is set in Z9 and consumed by Y8.\n' > "$TREE/specs/loose.md"
 run
-if printf '%s' "$out" | grep -qE 'loose.md.*(Z9|Y8)'; then
+if grep -qE 'loose.md.*(Z9|Y8)' <<< "$out"; then
   fail "\"in Z9\" or \"by Y8\" was gated -- got: $out"
 else
   pass "\"in\" and \"by\" do not make a pointer"
@@ -369,7 +369,7 @@ cat > "$TREE/specs/tasknum.md" <<'EOF'
 The e2e asserts the label survives reconcile per T16.
 EOF
 run
-if printf '%s' "$out" | grep -q 'tasknum.md.*T16'; then
+if grep -q 'tasknum.md.*T16' <<< "$out"; then
   fail "\"per T16\" was reported although \"Task 16\" defines it -- got: $out"
 else
   pass "\"Task 16\" registers as the target of \"T16\""
@@ -381,7 +381,7 @@ build
 rm "$TREE/specs/dangling.md"
 printf '# Spec: Parens\n\nThe budget is capped (measured in Z9) and holds.\n' > "$TREE/specs/inparen.md"
 run
-if printf '%s' "$out" | grep -q 'inparen.md.*the bare pointer to Z9'; then
+if grep -q 'inparen.md.*the bare pointer to Z9' <<< "$out"; then
   fail "a parenthesised label was judged by the bare rule -- got: $out"
 else
   pass "\"(measured in Z9)\" is not read by the bare rule"
@@ -397,7 +397,7 @@ rm "$TREE/specs/dangling.md"
 printf '# Spec: Model After Connective\n\nThe figure is taken from A100 datasheets.\n' \
   > "$TREE/specs/modelconn.md"
 run
-if printf '%s' "$out" | grep -q 'modelconn.md.*the bare pointer to A100'; then
+if grep -q 'modelconn.md.*the bare pointer to A100' <<< "$out"; then
   pass "reported -- the documented limit of keying on a connective alone"
 else
   fail "expected the known false positive; if it is now handled, update this case -- got: $out"
@@ -411,7 +411,7 @@ mkdir -p "$TREE/pkg/thing"
 printf 'package thing\n\n// The master rewrites its own copy on every admin-API change (F6).\nfunc Thing() {}\n' \
   > "$TREE/pkg/thing/thing.go"
 run
-if printf '%s' "$out" | grep -q 'thing.go:3: (F6) names no document'; then
+if grep -q 'thing.go:3: (F6) names no document' <<< "$out"; then
   pass "a label in a Go comment is reported as naming no document"
 else
   fail "the Go comment reference was not reported -- got: $out"

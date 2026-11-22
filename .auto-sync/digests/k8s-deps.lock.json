@@ -15,7 +15,7 @@
     {
       "path": ".auto-sync/scripts/preflight-k8s-deps.sh",
       "kind": "file",
-      "sha256": "70ca1a841f65d296b72d0e500fba0e93e2bc4cf25e42946644479af3b2b163f7"
+      "sha256": "3bb589fec5c1394c7b9fcea791626145ecc188d1c75fac8022b8cb8cf3c2682c"
     }
   ]
 }
