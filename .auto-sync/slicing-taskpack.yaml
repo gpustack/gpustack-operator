@@ -105,7 +105,7 @@ spec:
     titleTemplate: "chore(pack): sync accelerator slicing shims"
   memory:
     directory: .auto-sync/memory/slicing-sync
-    apply: separate-pull-request
+    apply: inline-with-candidate
     onNoModelBudget: deterministic-observations-only
   triggers:
     schedule: true

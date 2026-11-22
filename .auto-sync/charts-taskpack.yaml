@@ -118,7 +118,7 @@ spec:
     titleTemplate: "chore(chart): sync vendored helm subcharts"
   memory:
     directory: .auto-sync/memory/charts-sync
-    apply: separate-pull-request
+    apply: inline-with-candidate
     onNoModelBudget: deterministic-observations-only
   triggers:
     schedule: true

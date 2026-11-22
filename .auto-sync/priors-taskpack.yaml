@@ -91,7 +91,7 @@ spec:
     titleTemplate: "chore(scaling): sync InferenceX capacity priors"
   memory:
     directory: .auto-sync/memory/priors-sync
-    apply: separate-pull-request
+    apply: inline-with-candidate
     onNoModelBudget: deterministic-observations-only
   triggers:
     schedule: true

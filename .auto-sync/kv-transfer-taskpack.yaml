@@ -146,7 +146,7 @@ spec:
     titleTemplate: "chore(model-transfer): sync kv-cache and transfer runtime recipes"
   memory:
     directory: .auto-sync/memory/kv-transfer-sync
-    apply: separate-pull-request
+    apply: inline-with-candidate
     onNoModelBudget: deterministic-observations-only
   triggers:
     schedule: true
