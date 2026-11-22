@@ -5,7 +5,7 @@
     {
       "path": ".auto-sync/checks",
       "kind": "directory",
-      "sha256": "728679d2a9a8a60bfd21d9c42325c9b832115e9a1c1045dc61bb6cfb3d8ab197"
+      "sha256": "c8ac266dcbc0bc62585bfeb2a117e7a346c7a02315ed1d9c37a1259801b17eb9"
     },
     {
       "path": ".auto-sync/instructions/priors.md",

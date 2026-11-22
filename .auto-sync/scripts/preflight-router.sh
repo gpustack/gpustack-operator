@@ -198,6 +198,15 @@ def sync_tagged_repo(repo_url: str, dst: str, pinned_tag: str, target_tag: str, 
             pass
 
     subprocess.run(["git", "-C", dst, "checkout", "-f", "-q", f"refs/tags/{target_tag}"], check=True)
+    if use_sparse:
+        # Discard output intentionally: running the exact archive command used by
+        # validate_router.sh forces the partial clone to fetch all needed blobs
+        # (including root .gitattributes when present) while the stage dir is writable.
+        subprocess.run(
+            ["git", "-C", dst, "archive", target_tag, "--", sparse_subpath],
+            stdout=subprocess.DEVNULL,
+            check=True,
+        )
 
 
 router_df = read_text(os.path.join(repo_root, "pack/llm-router/Dockerfile"))

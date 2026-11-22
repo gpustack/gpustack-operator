@@ -508,8 +508,10 @@ os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
 with open(out_path, "w", encoding="utf-8") as f:
     json.dump(
         {
-            "passed": passed_str == "true",
-            "summary": summary[:1024],
+            "detail": summary[:1024],
+            "metrics": {
+                "passed": passed_str == "true",
+            },
         },
         f,
         indent=2,

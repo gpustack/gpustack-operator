@@ -18,6 +18,7 @@ spec:
     capabilities:
       allowHostPath: true
       allowCheckNetwork: true
+      allowDockerSocket: true
     digests:
       pinDigests: true
       lockfile: .auto-sync/digests/router.lock.json

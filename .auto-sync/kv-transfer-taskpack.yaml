@@ -17,6 +17,7 @@ spec:
     capabilities:
       allowHostPath: true
       allowCheckNetwork: true
+      allowDockerSocket: true
     digests:
       pinDigests: true
       lockfile: .auto-sync/digests/kv-transfer.lock.json
