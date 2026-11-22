@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 440" role="img" aria-labelledby="title desc">
+  <title id="title">Devices and Kubernetes resources</title>
+  <desc id="desc">The Device Manager manages devices. Devices map to resources consumed by the device plugin and controllers.</desc>
+  <style>
+    :root{color-scheme:light dark;--bg:#f8fbff;--card:#fff;--ink:#12233d;--muted:#52677f;--line:#c9d9e7;--blue:#2563eb;--purple:#7c3aed;--grid:#dfeaf3;--wire:#52677f}
+    @media(prefers-color-scheme:dark){:root{--bg:#101d30;--card:#1a2c43;--ink:#f1f6ff;--muted:#bdcde0;--line:#526b83;--blue:#80adff;--purple:#c4a4ff;--grid:#29425b;--wire:#bdcde0}}
+    text{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;fill:var(--ink)}
+    .title{font-size:26px;font-weight:750;letter-spacing:-.4px}.label{font-size:11px;font-weight:700;letter-spacing:1.2px;fill:var(--muted)}
+    .sub,.detail{font-size:14px;fill:var(--muted)}.card-title{font-size:18px;font-weight:700}
+    .box{fill:var(--card);stroke:var(--line);stroke-width:1.2}.wire{fill:none;stroke:var(--wire);stroke-width:1.8}
+    .edge-label{font-size:12px;font-weight:600;fill:var(--muted)}
+  </style>
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="var(--grid)" stroke-width="1"/></pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0.5 L9 5 L0 9.5z" fill="var(--wire)"/></marker>
+  </defs>
+  <rect x="1" y="1" width="958" height="438" rx="14" fill="var(--bg)" stroke="var(--line)"/>
+  <rect x="2" y="2" width="956" height="436" rx="13" fill="url(#grid)" opacity=".65"/>
+  <text class="label" x="32" y="32">GPUSTACK OPERATOR  /  DEVICE DISCOVERY</text>
+  <text class="title" x="32" y="68">Devices and Kubernetes resources</text>
+  <text class="sub" x="32" y="94">From node hardware to the resource view</text>
+
+  <text class="label" x="38" y="130">NODE HARDWARE</text>
+  <text class="label" x="534" y="130">KUBERNETES</text>
+  <rect class="box" x="32" y="148" width="394" height="94" rx="12"/>
+  <rect x="32" y="160" width="4" height="70" rx="2" fill="var(--blue)"/>
+  <text class="card-title" x="52" y="180">Device Manager</text>
+  <text class="detail" x="52" y="207">Detector and allocator</text>
+  <rect class="box" x="528" y="148" width="400" height="94" rx="12"/>
+  <rect x="528" y="160" width="4" height="70" rx="2" fill="var(--purple)"/>
+  <text class="card-title" x="548" y="180">Device plugin and controllers</text>
+  <text class="detail" x="548" y="207">Consume Kubernetes resources</text>
+
+  <path class="wire" d="M229 242 V292" marker-end="url(#arrow)"/>
+  <text class="edge-label" x="243" y="272">manages</text>
+  <path class="wire" d="M728 242 V292" marker-end="url(#arrow)"/>
+  <text class="edge-label" x="742" y="272">consumes</text>
+  <rect class="box" x="32" y="298" width="394" height="110" rx="12"/>
+  <rect x="32" y="310" width="4" height="86" rx="2" fill="var(--blue)"/>
+  <text class="card-title" x="52" y="330">Device</text>
+  <text class="detail" x="52" y="355">Accelerator: GPU, TPU, XPU or NPU</text>
+  <text class="detail" x="52" y="378">Other device types may follow</text>
+  <rect class="box" x="528" y="298" width="400" height="110" rx="12"/>
+  <rect x="528" y="310" width="4" height="86" rx="2" fill="var(--purple)"/>
+  <text class="card-title" x="548" y="330">Resource</text>
+  <text class="detail" x="548" y="355">Resource = group and device</text>
+  <text class="detail" x="548" y="378">Resource token = resource and index</text>
+  <path class="wire" d="M426 352 H522" marker-end="url(#arrow)"/>
+  <text class="edge-label" x="477" y="341" text-anchor="middle">maps to</text>
+</svg>

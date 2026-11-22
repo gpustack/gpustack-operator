@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1272 560" role="img" aria-labelledby="title desc">
+<title id="title">GPUStack Operator Architecture</title>
+<desc id="desc">Four stages: discover hardware, schedule capacity, deliver weights and cache, and run workloads.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 1 L 8 5 L 0 9 z" fill="var(--border)"/></marker></defs>
+<style>
+  :root { color-scheme: light dark; --bg:#f8fafc; --panel:#fff; --card:#fff; --border:#64748b; --text:#0f172a; --muted:#334155; --discover-bg:#eff6ff; --schedule-bg:#f5f3ff; --deliver-bg:#f0fdfa; --run-bg:#fffbeb; --indigo:#4f46e5; --teal:#0d9488; --sky:#0284c7; --emerald:#047857; --amber:#d97706; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f8fafc; --panel:#fff; --card:#fff; --border:#64748b; --text:#0f172a; --muted:#334155; --discover-bg:#eff6ff; --schedule-bg:#f5f3ff; --deliver-bg:#f0fdfa; --run-bg:#fffbeb; --indigo:#4f46e5; --teal:#0d9488; --sky:#0284c7; --emerald:#047857; --amber:#d97706; } }
+  @media (prefers-color-scheme: dark) { :root { --bg:#15171a; --panel:#1a1d21; --card:#1e293b; --border:#94a3b8; --text:#f8fafc; --muted:#e2e8f0; --discover-bg:#172554; --schedule-bg:#2e1065; --deliver-bg:#042f2e; --run-bg:#451a03; --indigo:#818cf8; --teal:#2dd4bf; --sky:#38bdf8; --emerald:#6ee7b7; --amber:#fbbf24; } }
+  .bg { fill:var(--bg); stroke:var(--border); stroke-width:2; } .panel { fill:var(--panel); stroke:var(--border); stroke-width:2; }
+  .card { fill:var(--card); stroke-width:2; }
+  .discover { stroke:var(--sky); } .schedule { stroke:var(--indigo); } .deliver { stroke:var(--teal); } .run { stroke:var(--amber); }
+  .title { fill:var(--text); font:700 21px system-ui, sans-serif; }
+  .subtitle { fill:var(--muted); font:13px system-ui, sans-serif; }
+  .overline { font:700 11px system-ui, sans-serif; letter-spacing:1px; }
+  .heading { fill:var(--text); font:700 14px system-ui, sans-serif; }
+  .body { fill:var(--muted); font:12px system-ui, sans-serif; }
+  .small { fill:var(--muted); font:11px system-ui, sans-serif; }
+  .mono { fill:var(--muted); font:11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .gate { fill:var(--muted); font:9.5px system-ui, sans-serif; }
+  .link { fill:none; stroke:var(--border); stroke-width:2.5; marker-end:url(#arrow); }
+  .pulse { fill:var(--teal); }
+  @media (prefers-reduced-motion: reduce) { .pulse { display:none; } }
+</style>
+<text class="title" x="26" y="36">GPUStack Operator Architecture</text>
+<text class="subtitle" x="26" y="61">Kubernetes-native hardware discovery, Kueue pool admission, model weight &amp; KV-cache delivery, and disaggregated inference</text>
+<rect class="panel discover" style="fill:var(--discover-bg)" x="24" y="88" width="270" height="448" rx="12"/>
+<circle cx="50" cy="114" r="4" fill="var(--sky)"/>
+<text class="overline" x="63" y="119" fill="var(--sky)">01 · DISCOVER</text>
+<text class="heading" x="44" y="145">Hardware &amp; RDMA</text>
+<rect class="card discover" x="44" y="162" width="230" height="104" rx="8" stroke-opacity="1"/>
+<rect x="64" y="171" width="48" height="4" rx="2" fill="var(--sky)"/>
+<text class="heading" x="64" y="196">Node discovery</text>
+<text class="small" x="64" y="210">NFD labels nodes</text>
+<text class="small" x="64" y="229">Device Manager inventory</text>
+<text class="small" x="64" y="243">Devices CR · kubelet plugin</text>
+<rect class="card discover" x="44" y="278" width="230" height="104" rx="8" stroke-opacity="1"/>
+<rect x="64" y="287" width="48" height="4" rx="2" fill="var(--sky)"/>
+<text class="heading" x="64" y="312">Allocation modes</text>
+<text class="small" x="64" y="326">Whole · shared devices</text>
+<text class="mono" x="64" y="345">&lt;vendor&gt;.shared</text>
+<text class="mono" x="64" y="359">.sliced / .mig</text>
+<rect class="card discover" x="44" y="394" width="230" height="104" rx="8" stroke-opacity="1"/>
+<rect x="64" y="403" width="48" height="4" rx="2" fill="var(--sky)"/>
+<text class="heading" x="64" y="428">Network interfaces</text>
+<text class="small" x="64" y="442">RDMA discovery</text>
+<text class="small" x="64" y="461">Shared and exclusive endpoints</text>
+<path class="link" d="M 294 360 L 342 360"/><circle class="pulse" cx="0" cy="0" r="4"><animateMotion path="M 294 360 L 342 360" dur="2.4s" begin="-0.4s" repeatCount="indefinite"/></circle>
+<rect class="panel schedule" style="fill:var(--schedule-bg)" x="342" y="88" width="270" height="448" rx="12"/>
+<circle cx="368" cy="114" r="4" fill="var(--indigo)"/>
+<text class="overline" x="381" y="119" fill="var(--indigo)">02 · SCHEDULE</text>
+<text class="heading" x="362" y="145">Pools &amp; admission</text>
+<rect class="card schedule" x="362" y="162" width="230" height="104" rx="8" stroke-opacity="1"/>
+<rect x="382" y="171" width="48" height="4" rx="2" fill="var(--indigo)"/>
+<text class="heading" x="382" y="196">Worker capacity</text>
+<text class="small" x="382" y="210">Hardware pools · InstanceType</text>
+<text class="small" x="382" y="229">ResourceFlavor · queues</text>
+<rect class="card schedule" x="362" y="278" width="230" height="104" rx="8" stroke-opacity="1"/>
+<rect x="382" y="287" width="48" height="4" rx="2" fill="var(--indigo)"/>
+<text class="heading" x="382" y="312">Topology placement</text>
+<text class="small" x="382" y="326">TopologySource · Kueue TAS</text>
+<text class="small" x="382" y="345">Placement within domains</text>
+<rect class="card schedule" x="362" y="394" width="230" height="104" rx="8" stroke-opacity="1"/>
+<rect x="382" y="403" width="48" height="4" rx="2" fill="var(--indigo)"/>
+<text class="heading" x="382" y="428">Five Admission Gates</text>
+<text class="gate" x="382" y="442">1. Pod Webhook · 2. Kueue Quota</text>
+<text class="gate" x="382" y="461">3. Topology Fit · 4. Scheduler &amp; Kubelet</text>
+<text class="gate" x="382" y="475">5. Device Plugin Allocate</text>
+<path class="link" d="M 612 360 L 660 360"/><circle class="pulse" cx="0" cy="0" r="4"><animateMotion path="M 612 360 L 660 360" dur="2.4s" begin="-1.1s" repeatCount="indefinite"/></circle>
+<rect class="panel deliver" style="fill:var(--deliver-bg)" x="660" y="88" width="270" height="448" rx="12"/>
+<circle cx="686" cy="114" r="4" fill="var(--teal)"/>
+<text class="overline" x="699" y="119" fill="var(--teal)">03 · DELIVER</text>
+<text class="heading" x="680" y="145">Weights &amp; KV cache</text>
+<rect class="card deliver" x="680" y="162" width="230" height="104" rx="8" stroke-opacity="1"/>
+<rect x="700" y="171" width="48" height="4" rx="2" fill="var(--teal)"/>
+<text class="heading" x="700" y="196">Model weight delivery</text>
+<text class="small" x="700" y="210">ModelArtifact · ModelPrefetch</text>
+<text class="small" x="700" y="229">NodeModelStore · CSI mount</text>
+<rect class="card deliver" x="680" y="278" width="230" height="104" rx="8" stroke-opacity="1"/>
+<rect x="700" y="287" width="48" height="4" rx="2" fill="var(--teal)"/>
+<text class="heading" x="700" y="312">Shared KV cache</text>
+<text class="small" x="700" y="326">KVCacheBackend · KVCachePool</text>
+<text class="small" x="700" y="345">KVCachePoolBinding</text>
+<rect class="card deliver" x="680" y="394" width="230" height="104" rx="8" stroke-opacity="1"/>
+<rect x="700" y="403" width="48" height="4" rx="2" fill="var(--teal)"/>
+<text class="heading" x="700" y="428">Cache controls</text>
+<text class="small" x="700" y="442">Namespace quota ceiling</text>
+<text class="small" x="700" y="461">Weight identity for reuse</text>
+<path class="link" d="M 930 360 L 978 360"/><circle class="pulse" cx="0" cy="0" r="4"><animateMotion path="M 930 360 L 978 360" dur="2.4s" begin="-0.4s" repeatCount="indefinite"/></circle>
+<rect class="panel run" style="fill:var(--run-bg)" x="978" y="88" width="270" height="448" rx="12"/>
+<circle cx="1004" cy="114" r="4" fill="var(--amber)"/>
+<text class="overline" x="1017" y="119" fill="var(--amber)">04 · RUN</text>
+<text class="heading" x="998" y="145">Workloads &amp; scaling</text>
+<rect class="card run" x="998" y="162" width="230" height="104" rx="8" stroke-opacity="1"/>
+<rect x="1018" y="171" width="48" height="4" rx="2" fill="var(--amber)"/>
+<text class="heading" x="1018" y="196">ModelDeployment</text>
+<text class="small" x="1018" y="210">Serving replicas and routing</text>
+<text class="small" x="1018" y="229">Prefill / decode roles</text>
+<rect class="card run" x="998" y="278" width="230" height="104" rx="8" stroke-opacity="1"/>
+<rect x="1018" y="287" width="48" height="4" rx="2" fill="var(--amber)"/>
+<text class="heading" x="1018" y="312">ModelDeploymentScaler</text>
+<text class="small" x="1018" y="326">Scaling policies and metrics</text>
+<text class="small" x="1018" y="345">Shadow and Active modes</text>
+<rect class="card run" x="998" y="394" width="230" height="104" rx="8" stroke-opacity="1"/>
+<rect x="1018" y="403" width="48" height="4" rx="2" fill="var(--amber)"/>
+<text class="heading" x="1018" y="428">GPU Instances</text>
+<text class="small" x="1018" y="442">Accelerator workspaces</text>
+<text class="small" x="1018" y="461">SSH access</text>
+</svg>

@@ -1,0 +1,274 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 938" role="img" aria-labelledby="title desc">
+<title id="title">Elastic EP over TCP vs InfiniBand RDMA, width 2 and width 4</title>
+<desc id="desc">Four-panel line chart comparing Elastic EP width 2 (4 GPUs) and width 4 (8 GPUs) over TCP and InfiniBand RDMA across concurrency 1 to 64 for TTFT p50 (ms, log scale), output throughput (tok/s), ITL p50 (ms) and ITL p99 (ms). Over InfiniBand RDMA at concurrency 64, width 4 cuts TTFT p50 to 373.486 ms (8.23x below RDMA width 2 and 6.96x below TCP width 4) and raises output throughput to 3,755.290 tok/s (1.64x over RDMA width 2), while width 2 still leads output at concurrencies 1 through 32 and RDMA width 2 concurrency 4 shows an ITL p99 regression (68.396 vs 12.290 ms TCP).</desc>
+<style>
+:root{color-scheme:light dark;--bg:#f8fbff;--card:#fff;--ink:#12233d;--muted:#52677f;--line:#c9d9e7;--grid:#e4edf5;--axis:#8aa0b6;--c1:#2563eb;--c2:#c2410c;--c3:#0f766e;--c4:#7c3aed}
+@media(prefers-color-scheme:dark){:root{--bg:#101d30;--card:#1a2c43;--ink:#f1f6ff;--muted:#bdcde0;--line:#526b83;--grid:#2a4058;--axis:#7f97ae;--c1:#80adff;--c2:#ffa36b;--c3:#58d6c8;--c4:#c4b5fd}}
+text{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:var(--ink)}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:1.2px;fill:var(--muted)}
+.title{font-size:26px;font-weight:750;letter-spacing:-.3px}
+.sub{font-size:14px;fill:var(--muted)}
+.legend{font-size:13px;font-weight:600}
+.panel{fill:var(--card);stroke:var(--line);stroke-width:1.2}
+.shape{font-size:15px;font-weight:700}
+.cap{font-size:11px;fill:var(--muted)}
+.val{font:600 11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.tick{font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:var(--muted)}
+.axis-title{font-size:13px;font-weight:700;fill:var(--ink)}
+.x-title{font-size:12px;fill:var(--muted)}
+.note{font-size:12px;fill:var(--muted)}
+.grid{stroke:var(--grid);stroke-width:1}
+.base{stroke:var(--axis);stroke-width:1.2}
+.s1{stroke:var(--c1);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s2{stroke:var(--c2);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s3{stroke:var(--c3);fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-dasharray:7 4}
+.s3-solid{stroke:var(--c3);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s4{stroke:var(--c4);fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-dasharray:4 3}
+.s1-dash{stroke:var(--c1);fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:6 4}
+.s2-dash{stroke:var(--c2);fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:6 4}
+.m1{fill:var(--card);stroke:var(--c1);stroke-width:2.1}
+.m2{fill:var(--c2);stroke:var(--card);stroke-width:1}
+.m3{fill:var(--card);stroke:var(--c3);stroke-width:2.0;stroke-linejoin:miter}
+.m4{fill:var(--c4);stroke:var(--card);stroke-width:1}
+.v1{fill:var(--c1)}
+.v2{fill:var(--c2)}
+.v3{fill:var(--c3)}
+.v4{fill:var(--c4)}
+</style>
+<rect width="1200" height="938" fill="var(--bg)"/>
+<text class="eyebrow" x="40" y="42">MODEL DEPLOYMENT · ELASTIC EP BENCHMARK · RDMA FOLLOW-UP</text>
+<text class="title" x="40" y="78">Elastic EP over TCP vs InfiniBand RDMA, width 2 and width 4</text>
+<text class="sub" x="40" y="104">One 8 × H100 SXM5 node with 8 × ConnectX-7 InfiniBand adapters; 813/813 live-resize requests succeeded.</text>
+<line class="s1-dash" x1="40" y1="134" x2="74" y2="134"/>
+<circle class="m1" cx="57.0" cy="134.0" r="4.8"/>
+<text class="legend" x="84" y="139">Width 2 TCP (4 GPUs)</text>
+<line class="s2-dash" x1="280" y1="134" x2="314" y2="134"/>
+<rect class="m2" x="294.5" y="131.5" width="5.0" height="5.0"/>
+<text class="legend" x="324" y="139">Width 4 TCP (8 GPUs)</text>
+<line class="s4" x1="520" y1="134" x2="554" y2="134"/>
+<path class="m4" d="M537.0 128.0L543.0 138.8L531.0 138.8Z"/>
+<text class="legend" x="564" y="139">Width 2 RDMA (4 GPUs)</text>
+<line class="s3-solid" x1="780" y1="134" x2="814" y2="134"/>
+<path class="m3" d="M797.0 126.9L804.1 134.0L797.0 141.1L789.9 134.0Z"/>
+<text class="legend" x="824" y="139">Width 4 RDMA (8 GPUs)</text>
+<rect class="panel" x="100.0" y="180.0" width="492.0" height="324.0" rx="12"/>
+<text class="shape" x="116.0" y="204.0">TTFT p50 (ms, log scale)</text>
+<text class="cap" x="576.0" y="203.0" text-anchor="end">at concurrency 64</text>
+<circle class="m1" cx="122.0" cy="221.0" r="4.0"/>
+<text class="val v1" x="134.0" y="225.0">W2 TCP: 6,509.231</text>
+<path class="m4" d="M350.0 216.0L355.0 225.0L345.0 225.0Z"/>
+<text class="val v4" x="362.0" y="225.0">W2 RDMA: 3,073.825</text>
+<rect class="m2" x="119.9" y="236.9" width="4.2" height="4.2"/>
+<text class="val v2" x="134.0" y="243.0">W4 TCP: 2,598.867</text>
+<path class="m3" d="M350.0 233.1L355.9 239.0L350.0 244.9L344.1 239.0Z"/>
+<text class="val v3" x="362.0" y="243.0">W4 RDMA: 373.486</text>
+<line class="grid" x1="116.0" y1="448.8" x2="576.0" y2="448.8"/>
+<text class="tick" x="92.0" y="452.8" text-anchor="end">100</text>
+<line class="grid" x1="116.0" y1="353.4" x2="576.0" y2="353.4"/>
+<text class="tick" x="92.0" y="357.4" text-anchor="end">1,000</text>
+<line class="grid" x1="116.0" y1="258.0" x2="576.0" y2="258.0"/>
+<text class="tick" x="92.0" y="262.0" text-anchor="end">10,000</text>
+<line class="base" x1="116.0" y1="470.0" x2="576.0" y2="470.0"/>
+<text class="tick" x="124.0" y="488.0" text-anchor="middle">1</text>
+<text class="tick" x="272.0" y="488.0" text-anchor="middle">4</text>
+<text class="tick" x="346.0" y="488.0" text-anchor="middle">8</text>
+<text class="tick" x="420.0" y="488.0" text-anchor="middle">16</text>
+<text class="tick" x="494.0" y="488.0" text-anchor="middle">32</text>
+<text class="tick" x="568.0" y="488.0" text-anchor="middle">64</text>
+<path class="s1-dash" d="M124.0 445.3L272.0 431.0L346.0 408.6L420.0 393.0L494.0 370.6L568.0 275.8"/>
+<path class="s2-dash" d="M124.0 427.5L272.0 416.2L346.0 399.5L420.0 382.0L494.0 349.6L568.0 313.8"/>
+<path class="s4" d="M124.0 454.2L272.0 453.4L346.0 452.4L420.0 415.8L494.0 421.0L568.0 306.9"/>
+<path class="s3-solid" d="M124.0 451.3L272.0 431.1L346.0 441.4L420.0 422.0L494.0 423.2L568.0 394.2"/>
+<path class="m3" d="M124.0 444.5L130.8 451.3L124.0 458.1L117.2 451.3Z"/>
+<path class="m3" d="M272.0 424.3L278.8 431.1L272.0 437.9L265.2 431.1Z"/>
+<path class="m3" d="M346.0 434.6L352.8 441.4L346.0 448.2L339.2 441.4Z"/>
+<path class="m3" d="M420.0 415.2L426.8 422.0L420.0 428.9L413.2 422.0Z"/>
+<path class="m3" d="M494.0 416.4L500.8 423.2L494.0 430.1L487.2 423.2Z"/>
+<path class="m3" d="M568.0 387.4L574.8 394.2L568.0 401.0L561.2 394.2Z"/>
+<circle class="m1" cx="124.0" cy="445.3" r="4.6"/>
+<circle class="m1" cx="272.0" cy="431.0" r="4.6"/>
+<circle class="m1" cx="346.0" cy="408.6" r="4.6"/>
+<circle class="m1" cx="420.0" cy="393.0" r="4.6"/>
+<circle class="m1" cx="494.0" cy="370.6" r="4.6"/>
+<circle class="m1" cx="568.0" cy="275.8" r="4.6"/>
+<path class="m4" d="M124.0 448.4L129.8 458.8L118.2 458.8Z"/>
+<path class="m4" d="M272.0 447.7L277.8 458.0L266.2 458.0Z"/>
+<path class="m4" d="M346.0 446.7L351.8 457.0L340.2 457.0Z"/>
+<path class="m4" d="M420.0 410.1L425.8 420.4L414.3 420.4Z"/>
+<path class="m4" d="M494.0 415.3L499.8 425.6L488.2 425.6Z"/>
+<path class="m4" d="M568.0 301.1L573.8 311.5L562.2 311.5Z"/>
+<rect class="m2" x="121.6" y="425.2" width="4.8" height="4.8"/>
+<rect class="m2" x="269.6" y="413.8" width="4.8" height="4.8"/>
+<rect class="m2" x="343.6" y="397.1" width="4.8" height="4.8"/>
+<rect class="m2" x="417.6" y="379.6" width="4.8" height="4.8"/>
+<rect class="m2" x="491.6" y="347.2" width="4.8" height="4.8"/>
+<rect class="m2" x="565.6" y="311.4" width="4.8" height="4.8"/>
+<rect class="panel" x="668.0" y="180.0" width="492.0" height="324.0" rx="12"/>
+<text class="shape" x="684.0" y="204.0">Output (tok/s)</text>
+<text class="cap" x="1144.0" y="203.0" text-anchor="end">at concurrency 64</text>
+<circle class="m1" cx="690.0" cy="221.0" r="4.0"/>
+<text class="val v1" x="702.0" y="225.0">W2 TCP: 1,145.131</text>
+<path class="m4" d="M918.0 216.0L923.0 225.0L913.0 225.0Z"/>
+<text class="val v4" x="930.0" y="225.0">W2 RDMA: 2,292.536</text>
+<rect class="m2" x="687.9" y="236.9" width="4.2" height="4.2"/>
+<text class="val v2" x="702.0" y="243.0">W4 TCP: 1,121.379</text>
+<path class="m3" d="M918.0 233.1L923.9 239.0L918.0 244.9L912.1 239.0Z"/>
+<text class="val v3" x="930.0" y="243.0">W4 RDMA: 3,755.290</text>
+<line class="base" x1="684.0" y1="470.0" x2="1144.0" y2="470.0"/>
+<text class="tick" x="660.0" y="474.0" text-anchor="end">0</text>
+<line class="grid" x1="684.0" y1="417.0" x2="1144.0" y2="417.0"/>
+<text class="tick" x="660.0" y="421.0" text-anchor="end">1,000</text>
+<line class="grid" x1="684.0" y1="364.0" x2="1144.0" y2="364.0"/>
+<text class="tick" x="660.0" y="368.0" text-anchor="end">2,000</text>
+<line class="grid" x1="684.0" y1="311.0" x2="1144.0" y2="311.0"/>
+<text class="tick" x="660.0" y="315.0" text-anchor="end">3,000</text>
+<line class="grid" x1="684.0" y1="258.0" x2="1144.0" y2="258.0"/>
+<text class="tick" x="660.0" y="262.0" text-anchor="end">4,000</text>
+<text class="tick" x="692.0" y="488.0" text-anchor="middle">1</text>
+<text class="tick" x="840.0" y="488.0" text-anchor="middle">4</text>
+<text class="tick" x="914.0" y="488.0" text-anchor="middle">8</text>
+<text class="tick" x="988.0" y="488.0" text-anchor="middle">16</text>
+<text class="tick" x="1062.0" y="488.0" text-anchor="middle">32</text>
+<text class="tick" x="1136.0" y="488.0" text-anchor="middle">64</text>
+<path class="s1-dash" d="M692.0 464.2L840.0 451.3L914.0 442.2L988.0 430.2L1062.0 409.5L1136.0 409.3"/>
+<path class="s2-dash" d="M692.0 466.8L840.0 458.6L914.0 453.7L988.0 445.0L1062.0 431.8L1136.0 410.6"/>
+<path class="s4" d="M692.0 462.0L840.0 443.4L914.0 426.9L988.0 392.1L1062.0 345.8L1136.0 348.5"/>
+<path class="s3-solid" d="M692.0 462.9L840.0 444.9L914.0 433.5L988.0 399.9L1062.0 364.0L1136.0 271.0"/>
+<path class="m3" d="M692.0 456.1L698.8 462.9L692.0 469.7L685.2 462.9Z"/>
+<path class="m3" d="M840.0 438.1L846.8 444.9L840.0 451.7L833.2 444.9Z"/>
+<path class="m3" d="M914.0 426.7L920.8 433.5L914.0 440.3L907.2 433.5Z"/>
+<path class="m3" d="M988.0 393.1L994.8 399.9L988.0 406.7L981.2 399.9Z"/>
+<path class="m3" d="M1062.0 357.2L1068.8 364.0L1062.0 370.8L1055.2 364.0Z"/>
+<path class="m3" d="M1136.0 264.2L1142.8 271.0L1136.0 277.8L1129.2 271.0Z"/>
+<circle class="m1" cx="692.0" cy="464.2" r="4.6"/>
+<circle class="m1" cx="840.0" cy="451.3" r="4.6"/>
+<circle class="m1" cx="914.0" cy="442.2" r="4.6"/>
+<circle class="m1" cx="988.0" cy="430.2" r="4.6"/>
+<circle class="m1" cx="1062.0" cy="409.5" r="4.6"/>
+<circle class="m1" cx="1136.0" cy="409.3" r="4.6"/>
+<path class="m4" d="M692.0 456.2L697.8 466.6L686.2 466.6Z"/>
+<path class="m4" d="M840.0 437.6L845.8 448.0L834.2 448.0Z"/>
+<path class="m4" d="M914.0 421.1L919.8 431.5L908.2 431.5Z"/>
+<path class="m4" d="M988.0 386.4L993.8 396.7L982.2 396.7Z"/>
+<path class="m4" d="M1062.0 340.0L1067.8 350.4L1056.2 350.4Z"/>
+<path class="m4" d="M1136.0 342.7L1141.8 353.1L1130.2 353.1Z"/>
+<rect class="m2" x="689.6" y="464.4" width="4.8" height="4.8"/>
+<rect class="m2" x="837.6" y="456.2" width="4.8" height="4.8"/>
+<rect class="m2" x="911.6" y="451.3" width="4.8" height="4.8"/>
+<rect class="m2" x="985.6" y="442.7" width="4.8" height="4.8"/>
+<rect class="m2" x="1059.6" y="429.4" width="4.8" height="4.8"/>
+<rect class="m2" x="1133.6" y="408.2" width="4.8" height="4.8"/>
+<rect class="panel" x="100.0" y="540.0" width="492.0" height="324.0" rx="12"/>
+<text class="shape" x="116.0" y="564.0">ITL p50 (ms)</text>
+<text class="cap" x="576.0" y="563.0" text-anchor="end">at concurrency 64</text>
+<circle class="m1" cx="122.0" cy="581.0" r="4.0"/>
+<text class="val v1" x="134.0" y="585.0">W2 TCP: 16.522</text>
+<path class="m4" d="M350.0 576.0L355.0 585.0L345.0 585.0Z"/>
+<text class="val v4" x="362.0" y="585.0">W2 RDMA: 8.823</text>
+<rect class="m2" x="119.9" y="596.9" width="4.2" height="4.2"/>
+<text class="val v2" x="134.0" y="603.0">W4 TCP: 30.270</text>
+<path class="m3" d="M350.0 593.1L355.9 599.0L350.0 604.9L344.1 599.0Z"/>
+<text class="val v3" x="362.0" y="603.0">W4 RDMA: 10.838</text>
+<line class="base" x1="116.0" y1="830.0" x2="576.0" y2="830.0"/>
+<text class="tick" x="92.0" y="834.0" text-anchor="end">0</text>
+<line class="grid" x1="116.0" y1="769.4" x2="576.0" y2="769.4"/>
+<text class="tick" x="92.0" y="773.4" text-anchor="end">10</text>
+<line class="grid" x1="116.0" y1="708.9" x2="576.0" y2="708.9"/>
+<text class="tick" x="92.0" y="712.9" text-anchor="end">20</text>
+<line class="grid" x1="116.0" y1="648.3" x2="576.0" y2="648.3"/>
+<text class="tick" x="92.0" y="652.3" text-anchor="end">30</text>
+<line class="grid" x1="116.0" y1="618.0" x2="576.0" y2="618.0"/>
+<text class="tick" x="92.0" y="622.0" text-anchor="end">35</text>
+<text class="tick" x="124.0" y="848.0" text-anchor="middle">1</text>
+<text class="tick" x="272.0" y="848.0" text-anchor="middle">4</text>
+<text class="tick" x="346.0" y="848.0" text-anchor="middle">8</text>
+<text class="tick" x="420.0" y="848.0" text-anchor="middle">16</text>
+<text class="tick" x="494.0" y="848.0" text-anchor="middle">32</text>
+<text class="tick" x="568.0" y="848.0" text-anchor="middle">64</text>
+<path class="s1-dash" d="M124.0 778.1L272.0 777.6L346.0 761.7L420.0 738.1L494.0 732.4L568.0 729.9"/>
+<path class="s2-dash" d="M124.0 735.1L272.0 733.4L346.0 694.1L420.0 688.8L494.0 652.6L568.0 646.7"/>
+<path class="s4" d="M124.0 793.0L272.0 791.8L346.0 787.3L420.0 781.2L494.0 776.9L568.0 776.6"/>
+<path class="s3-solid" d="M124.0 787.7L272.0 786.7L346.0 779.7L420.0 776.1L494.0 768.9L568.0 764.4"/>
+<path class="m3" d="M124.0 780.9L130.8 787.7L124.0 794.5L117.2 787.7Z"/>
+<path class="m3" d="M272.0 779.9L278.8 786.7L272.0 793.5L265.2 786.7Z"/>
+<path class="m3" d="M346.0 772.9L352.8 779.7L346.0 786.5L339.2 779.7Z"/>
+<path class="m3" d="M420.0 769.3L426.8 776.1L420.0 782.9L413.2 776.1Z"/>
+<path class="m3" d="M494.0 762.1L500.8 768.9L494.0 775.7L487.2 768.9Z"/>
+<path class="m3" d="M568.0 757.5L574.8 764.4L568.0 771.2L561.2 764.4Z"/>
+<circle class="m1" cx="124.0" cy="778.1" r="4.6"/>
+<circle class="m1" cx="272.0" cy="777.6" r="4.6"/>
+<circle class="m1" cx="346.0" cy="761.7" r="4.6"/>
+<circle class="m1" cx="420.0" cy="738.1" r="4.6"/>
+<circle class="m1" cx="494.0" cy="732.4" r="4.6"/>
+<circle class="m1" cx="568.0" cy="729.9" r="4.6"/>
+<path class="m4" d="M124.0 787.2L129.8 797.6L118.2 797.6Z"/>
+<path class="m4" d="M272.0 786.0L277.8 796.4L266.2 796.4Z"/>
+<path class="m4" d="M346.0 781.6L351.8 791.9L340.2 791.9Z"/>
+<path class="m4" d="M420.0 775.4L425.8 785.8L414.3 785.8Z"/>
+<path class="m4" d="M494.0 771.2L499.8 781.5L488.2 781.5Z"/>
+<path class="m4" d="M568.0 770.8L573.8 781.2L562.2 781.2Z"/>
+<rect class="m2" x="121.6" y="732.7" width="4.8" height="4.8"/>
+<rect class="m2" x="269.6" y="731.1" width="4.8" height="4.8"/>
+<rect class="m2" x="343.6" y="691.7" width="4.8" height="4.8"/>
+<rect class="m2" x="417.6" y="686.4" width="4.8" height="4.8"/>
+<rect class="m2" x="491.6" y="650.2" width="4.8" height="4.8"/>
+<rect class="m2" x="565.6" y="644.3" width="4.8" height="4.8"/>
+<rect class="panel" x="668.0" y="540.0" width="492.0" height="324.0" rx="12"/>
+<text class="shape" x="684.0" y="564.0">ITL p99 (ms)</text>
+<text class="cap" x="1144.0" y="563.0" text-anchor="end">at concurrency 64</text>
+<circle class="m1" cx="690.0" cy="581.0" r="4.0"/>
+<text class="val v1" x="702.0" y="585.0">W2 TCP: 157.753</text>
+<path class="m4" d="M918.0 576.0L923.0 585.0L913.0 585.0Z"/>
+<text class="val v4" x="930.0" y="585.0">W2 RDMA: 75.314</text>
+<rect class="m2" x="687.9" y="596.9" width="4.2" height="4.2"/>
+<text class="val v2" x="702.0" y="603.0">W4 TCP: 155.538</text>
+<path class="m3" d="M918.0 593.1L923.9 599.0L918.0 604.9L912.1 599.0Z"/>
+<text class="val v3" x="930.0" y="603.0">W4 RDMA: 81.544</text>
+<line class="base" x1="684.0" y1="830.0" x2="1144.0" y2="830.0"/>
+<text class="tick" x="660.0" y="834.0" text-anchor="end">0</text>
+<line class="grid" x1="684.0" y1="777.0" x2="1144.0" y2="777.0"/>
+<text class="tick" x="660.0" y="781.0" text-anchor="end">45</text>
+<line class="grid" x1="684.0" y1="724.0" x2="1144.0" y2="724.0"/>
+<text class="tick" x="660.0" y="728.0" text-anchor="end">90</text>
+<line class="grid" x1="684.0" y1="671.0" x2="1144.0" y2="671.0"/>
+<text class="tick" x="660.0" y="675.0" text-anchor="end">135</text>
+<line class="grid" x1="684.0" y1="618.0" x2="1144.0" y2="618.0"/>
+<text class="tick" x="660.0" y="622.0" text-anchor="end">180</text>
+<text class="tick" x="692.0" y="848.0" text-anchor="middle">1</text>
+<text class="tick" x="840.0" y="848.0" text-anchor="middle">4</text>
+<text class="tick" x="914.0" y="848.0" text-anchor="middle">8</text>
+<text class="tick" x="988.0" y="848.0" text-anchor="middle">16</text>
+<text class="tick" x="1062.0" y="848.0" text-anchor="middle">32</text>
+<text class="tick" x="1136.0" y="848.0" text-anchor="middle">64</text>
+<path class="s1-dash" d="M692.0 819.2L840.0 815.5L914.0 725.5L988.0 722.8L1062.0 712.7L1136.0 644.2"/>
+<path class="s2-dash" d="M692.0 809.3L840.0 807.4L914.0 673.7L988.0 662.9L1062.0 645.6L1136.0 646.8"/>
+<path class="s4" d="M692.0 819.7L840.0 749.4L914.0 748.1L988.0 747.1L1062.0 742.4L1136.0 741.3"/>
+<path class="s3-solid" d="M692.0 819.0L840.0 815.6L914.0 743.0L988.0 735.8L1062.0 740.1L1136.0 734.0"/>
+<path class="m3" d="M692.0 812.2L698.8 819.0L692.0 825.8L685.2 819.0Z"/>
+<path class="m3" d="M840.0 808.8L846.8 815.6L840.0 822.4L833.2 815.6Z"/>
+<path class="m3" d="M914.0 736.2L920.8 743.0L914.0 749.8L907.2 743.0Z"/>
+<path class="m3" d="M988.0 729.0L994.8 735.8L988.0 742.6L981.2 735.8Z"/>
+<path class="m3" d="M1062.0 733.3L1068.8 740.1L1062.0 746.9L1055.2 740.1Z"/>
+<path class="m3" d="M1136.0 727.2L1142.8 734.0L1136.0 740.8L1129.2 734.0Z"/>
+<circle class="m1" cx="692.0" cy="819.2" r="4.6"/>
+<circle class="m1" cx="840.0" cy="815.5" r="4.6"/>
+<circle class="m1" cx="914.0" cy="725.5" r="4.6"/>
+<circle class="m1" cx="988.0" cy="722.8" r="4.6"/>
+<circle class="m1" cx="1062.0" cy="712.7" r="4.6"/>
+<circle class="m1" cx="1136.0" cy="644.2" r="4.6"/>
+<path class="m4" d="M692.0 813.9L697.8 824.3L686.2 824.3Z"/>
+<path class="m4" d="M840.0 743.7L845.8 754.0L834.2 754.0Z"/>
+<path class="m4" d="M914.0 742.3L919.8 752.7L908.2 752.7Z"/>
+<path class="m4" d="M988.0 741.3L993.8 751.7L982.2 751.7Z"/>
+<path class="m4" d="M1062.0 736.7L1067.8 747.0L1056.2 747.0Z"/>
+<path class="m4" d="M1136.0 735.5L1141.8 745.9L1130.2 745.9Z"/>
+<rect class="m2" x="689.6" y="806.9" width="4.8" height="4.8"/>
+<rect class="m2" x="837.6" y="805.0" width="4.8" height="4.8"/>
+<rect class="m2" x="911.6" y="671.4" width="4.8" height="4.8"/>
+<rect class="m2" x="985.6" y="660.5" width="4.8" height="4.8"/>
+<rect class="m2" x="1059.6" y="643.2" width="4.8" height="4.8"/>
+<rect class="m2" x="1133.6" y="644.4" width="4.8" height="4.8"/>
+<text class="x-title" x="630.0" y="886.0" text-anchor="middle">Concurrency (requests in flight, log scale)</text>
+<text class="note" x="40" y="902">RDMA follow-up used NCCL over InfiniBand GDRDMA with --gpu-memory-utilization 0.85 (vs 0.90 on TCP); 416/416 requests per width, 0 errors.</text>
+<text class="note" x="40" y="920">On RDMA, width 4 beat width 2 at c=64 (373.486 vs 3,073.825 ms; 3,755.290 vs 2,292.536 tok/s); width 2 led c=1–32 output; W2 c=4 ITL p99 rose to 68.396 ms.</text>
+</svg>

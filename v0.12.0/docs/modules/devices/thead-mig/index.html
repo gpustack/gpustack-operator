@@ -1,0 +1,1407 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.12.0/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  
+  <title>T-Head MIG Operations · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.12.0/docs/modules/devices/thead-mig/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.12.0/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.0/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.0/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.12.0/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.12.0/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.12.0"
+    data-home="/gpustack-operator/v0.12.0/" data-page="/gpustack-operator/v0.12.0/docs/modules/devices/thead-mig/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.12.0</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.12.0</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.12.0/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <a class="nav-home" href="/gpustack-operator/v0.12.0/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/v0.12.0/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/v0.12.0/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/v0.12.0/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/v0.12.0/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/v0.12.0/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/v0.12.0/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.12.0/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/v0.12.0/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/v0.12.0/docs/modules/devices/thead-mig/" aria-current="page">T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/v0.12.0/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/v0.12.0/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/v0.12.0/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.12.0/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/v0.12.0/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/v0.12.0/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/v0.12.0/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/v0.12.0/docs/modules/kv-cache/leader/" >Leader Election</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.12.0/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/v0.12.0/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/v0.12.0/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/v0.12.0/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/v0.12.0/docs/modules/model-delivery/remote/" >Remote Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/v0.12.0/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Configuration" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/v0.12.0/docs/modules/instances/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="GPU Instance Configuration" href="/gpustack-operator/v0.12.0/docs/modules/instances/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="GPU Instance Operations" href="/gpustack-operator/v0.12.0/docs/modules/instances/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/v0.12.0/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/v0.12.0/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.12.0/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.12.0/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.12.0/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/v0.12.0/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.12.0/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.12.0/docs/modules/devices/">Heterogeneous Devices</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">T-Head MIG Operations</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="t-head-mig-operations">T-Head MIG Operations</h1>
+<p>Administrators toggle T-Head PPU partitioning mode per card with <code>ppu-smi</code> and restart the Device
+Manager <code>DaemonSet</code> to re-detect. Once enabled, GPUStack dynamically creates and destroys GPU and
+Compute Instance pairs for scheduled workloads under <code>alibabacloud.com/ppu.partitioned.mig-&lt;profile&gt;</code>
+(<a href="/gpustack-operator/v0.12.0/docs/modules/devices/requests/#accelerator-resource-families">Accelerator Requests</a>
+).</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#prerequisites">Prerequisites</a>
+</li>
+<li><a href="#partition-profile-discovery">Partition profile discovery</a>
+</li>
+<li><a href="#partition-requests">Partition requests</a>
+</li>
+<li><a href="#operations">Operations</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+</ul>
+<h2 id="prerequisites">Prerequisites</h2>
+<p><strong>Stop all accelerator <code>Pod</code>s and the Device Manager <code>Pod</code> on the <code>Node</code> before toggling MIG mode.</strong>
+Any process opening the <code>alixpu</code> driver holds descriptors across <strong>all</strong> PPUs on the host (the
+worker <code>Pod</code> also opens PPU nodes briefly at startup), causing <code>ppu-smi</code> to fail with <code>MIG resources are in use</code> while <code>dmesg</code> logs <code>[alixpu] PPU00&lt;N&gt; contains &lt;k&gt; active process</code> (<code>PPU00&lt;N&gt;</code> is the
+card ordinal <code>&lt;N&gt;</code>).</p>
+<p>Verify zero open <code>alixpu</code> file descriptors before switching (no device reset is required once
+holders exit):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="k">for</span> p in /proc/<span class="o">[</span>0-9<span class="o">]</span>*<span class="p">;</span> <span class="k">do</span> <span class="nv">pid</span><span class="o">=</span><span class="si">${</span><span class="nv">p</span><span class="p">#/proc/</span><span class="si">}</span><span class="p">;</span> <span class="nv">n</span><span class="o">=</span><span class="k">$(</span>ls -l <span class="s2">&#34;</span><span class="nv">$p</span><span class="s2">&#34;</span>/fd 2&gt;/dev/null <span class="p">|</span> grep -c alixpu<span class="k">)</span><span class="p">;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">[</span> <span class="s2">&#34;</span><span class="nv">$n</span><span class="s2">&#34;</span> -gt <span class="m">0</span> <span class="o">]</span> 2&gt;/dev/null <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">&#34;pid=</span><span class="nv">$pid</span><span class="s2"> fds=</span><span class="nv">$n</span><span class="s2"> </span><span class="k">$(</span>tr -d <span class="s1">&#39;\0&#39;</span> &lt; <span class="s2">&#34;</span><span class="nv">$p</span><span class="s2">&#34;</span>/cmdline<span class="k">)</span><span class="s2">&#34;</span><span class="p">;</span> <span class="k">done</span></span></span></code></pre></div>
+</div>
+<p>Restart <code>gpustack-operator-device-manager-thead</code> after every mode change so <code>Devices</code> updates.</p>
+<h2 id="partition-profile-discovery">Partition profile discovery</h2>
+<p>Device Manager queries profiles and static legal placements from <code>hgml</code> (excluding nameless,
+invalid-segment, subdivided, or placement-less profiles):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">ppu-smi mig -i &lt;N&gt; -lgip   <span class="c1"># profiles, memory, and live Instances Free/Total</span>
+</span></span><span class="line"><span class="cl">ppu-smi mig -i &lt;N&gt; -lgipp  <span class="c1"># static legal {Start,...}:Size placements (unchanged by occupancy)</span></span></span></code></pre></div>
+</div>
+<p><strong>Normalized profile names:</strong> T-Head display names omit the dot separator (<code>MIG 4g48gb</code>,
+<code>MIG 8g96gb</code>). GPUStack normalizes two-number display names to match NVIDIA&rsquo;s spelling in Kubernetes
+keys and <code>InstanceType</code> inventories (<code>alibabacloud.com/ppu.partitioned.mig-4g.48gb</code> and
+<code>mig-8g.96gb</code>), while <code>ppu-smi</code> and raw <code>Devices</code> records keep <code>4g48gb</code>.</p>
+<h2 id="partition-requests">Partition requests</h2>
+<p>Request <code>alibabacloud.com/ppu.partitioned: &quot;1&quot;</code> and <code>alibabacloud.com/ppu.partitioned.mig-&lt;profile&gt;: &quot;1&quot;</code>
+on a Kueue-labeled <code>Pod</code>, or set <em><code>acceleratorPartitionedProfile</code></em> on an <code>Instance</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">thead-partition</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;local-queue&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;86400&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">alibabacloud.com/ppu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">alibabacloud.com/ppu.partitioned.mig-4g.48gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">thead-instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;thead-instance-type&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;86400&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratorPartitionedProfile</span><span class="p">:</span><span class="w"> </span><span class="l">4g.48gb</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">volume</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ephemeral</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="l">1Gi</span></span></span></code></pre></div>
+</div>
+<ul>
+<li><strong>Device-node injection</strong>: T-Head uses no environment variable hook; allocation injects the two
+shared control nodes, <code>/dev/alixpu_ppu&lt;ordinal&gt;</code> (built from the <strong>card ordinal</strong>, never the driver
+minor number <code>ordinal + 1</code> which points to the next PPU), and <code>/dev/alixpu-caps/alixpu-cap&lt;minor&gt;</code>
+read live from <code>/proc/driver/alixpu/capabilities/ppu&lt;N&gt;/mig/gi&lt;G&gt;{,/ci&lt;C&gt;}/access</code>.</li>
+<li><strong>Packing, SSH visibility, and reclaim</strong>: Follow the same fungible-token, sidecar-isolation, and
+reclaim rules as <a href="/gpustack-operator/v0.12.0/docs/modules/devices/nvidia-mig/#partition-requests">NVIDIA MIG Operations</a>
+.</li>
+</ul>
+<h2 id="operations">Operations</h2>
+<h3 id="enabling-partitioning">Enabling partitioning</h3>
+<p>Consult <a href="https://developer.t-head.cn/docs_center/doc_detail/index.html?projectId=33&amp;chapterId=117">T-Head&rsquo;s PPU MIG documentation</a>
+:</p>
+<ol>
+<li>
+<p>Satisfy <a href="#prerequisites">Prerequisites</a>
+ (zero <code>alixpu</code> file-descriptor holders).</p>
+</li>
+<li>
+<p>Enable MIG mode <strong>one PPU ordinal at a time</strong> using top-level <code>-mig 1</code> (<code>ppu-smi mig</code> rejects
+<code>-mig</code>, and comma-separated <code>-i</code> lists fail with <code>No devices were found</code>):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">ppu-smi -i &lt;N&gt; -mig <span class="m">1</span>
+</span></span><span class="line"><span class="cl">ppu-smi -q -i &lt;N&gt; <span class="p">|</span> grep -i -A2 <span class="s2">&#34;MIG Mode&#34;</span></span></span></code></pre></div>
+</div>
+<p>Captured output:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Enable MIG mode for PPU &lt;bus-id&gt;.
+</span></span><span class="line"><span class="cl">All done.
+</span></span><span class="line"><span class="cl">    MIG Mode
+</span></span><span class="line"><span class="cl">        Current                             : Enabled
+</span></span><span class="line"><span class="cl">        Pending                             : Enabled</span></span></code></pre></div>
+</div>
+</li>
+<li>
+<p>Restart <code>gpustack-operator-device-manager-thead</code> and verify <code>Devices</code> publishes partition
+profiles (<code>logicalSliced</code> drops on partitioned PPUs while unpartitioned PPUs keep logical
+slicing).</p>
+</li>
+</ol>
+<h3 id="disabling-partitioning">Disabling partitioning</h3>
+<ol>
+<li>
+<p>Drain partition <code>Pod</code>s on the PPU so instances reclaim, or destroy remaining instances manually
+(<strong>Compute Instance first</strong>, and always pass <code>-gi &lt;G&gt;</code> because bare <code>-dgi</code> destroys all instances
+on the PPU):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">ppu-smi mig -i &lt;N&gt; -gi &lt;G&gt; -ci &lt;C&gt; -dci
+</span></span><span class="line"><span class="cl">ppu-smi mig -i &lt;N&gt; -gi &lt;G&gt; -dgi</span></span></code></pre></div>
+</div>
+</li>
+<li>
+<p>Stop <code>alixpu</code> holders (<a href="#prerequisites">Prerequisites</a>
+), run <code>ppu-smi -i &lt;N&gt; -mig 0</code>, and restart
+<code>gpustack-operator-device-manager-thead</code>.</p>
+</li>
+</ol>
+<blockquote>
+<p><strong>Note:</strong> Leftover <code>/dev/alixpu-caps/alixpu-cap&lt;minor&gt;</code> device nodes are normal driver behavior
+after destroy; check live instances with <code>ppu-smi mig -i &lt;N&gt; -lgi</code>.</p>
+</blockquote>
+<h3 id="node-reboot-recovery">Node reboot recovery</h3>
+<p>After a host reboot, re-verify and re-run <a href="#enabling-partitioning">Enabling partitioning</a>
+, restart
+<code>gpustack-operator-device-manager-thead</code>, and delete/recreate pre-reboot partition <code>Pod</code>s.</p>
+<h2 id="limitations">Limitations</h2>
+<p>GPUStack creates and reclaims single-CI partition instances per <code>Pod</code> and cleans idle untracked
+instances. It never runs <code>ppu-smi -mig</code>, evicts <code>Pod</code>s on mode switches, or serves subdivided
+instances.</p>
+<ul>
+<li><strong>Manual mode lifecycle and no out-of-band carving</strong>: Administrators own <code>ppu-smi -mig</code> switches;
+hand-carved instances skew node accounting and are reclaimed when idle, while hand-subdivided
+instances block node-wide reclaim.</li>
+<li><strong>Single partition per PPU request</strong>: Request one <code>Pod</code> per partition (<a href="/gpustack-operator/v0.12.0/docs/modules/devices/requests/#rule-3-partition-count">Rule 3</a>
+),
+and leave a brief gap when replacing a deleted <code>Pod</code> to avoid the reclaim-debounce window.</li>
+<li><strong>Unconfirmed reboot persistence</strong>: Mode persistence across host reboots is unverified on hardware;
+always verify and re-apply after a reboot.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.12.0/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
+ (sibling MIG runbook and capacity math)</li><li><a href="/gpustack-operator/v0.12.0/docs/modules/devices/hygon-mig/">Hygon MIG Operations</a>
+ (node-wide MIG on Hygon DCUs)</li><li><a href="/gpustack-operator/v0.12.0/docs/modules/devices/requests/">Accelerator Requests</a>
+ (resource keys and request rules)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.12.0/docs/modules/devices/requests/">Accelerator Requests</a>
+ — review the full accelerator request contract.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#prerequisites">Prerequisites</a></li>
+    <li><a href="#partition-profile-discovery">Partition profile discovery</a></li>
+    <li><a href="#partition-requests">Partition requests</a></li>
+    <li><a href="#operations">Operations</a>
+      <ul>
+        <li><a href="#enabling-partitioning">Enabling partitioning</a></li>
+        <li><a href="#disabling-partitioning">Disabling partitioning</a></li>
+        <li><a href="#node-reboot-recovery">Node reboot recovery</a></li>
+      </ul>
+    </li>
+    <li><a href="#limitations">Limitations</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.12.0/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
+</body>
+</html>

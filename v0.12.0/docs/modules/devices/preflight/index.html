@@ -1,0 +1,1848 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.12.0/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  
+  <title>Preflight Checks · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.12.0/docs/modules/devices/preflight/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.12.0/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.0/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.0/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.12.0/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.12.0/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.12.0"
+    data-home="/gpustack-operator/v0.12.0/" data-page="/gpustack-operator/v0.12.0/docs/modules/devices/preflight/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.12.0</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.12.0</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.12.0/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <a class="nav-home" href="/gpustack-operator/v0.12.0/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/v0.12.0/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/v0.12.0/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/v0.12.0/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/v0.12.0/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/v0.12.0/docs/modules/devices/preflight/" aria-current="page">Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/v0.12.0/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.12.0/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/v0.12.0/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/v0.12.0/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/v0.12.0/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/v0.12.0/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/v0.12.0/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.12.0/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/v0.12.0/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/v0.12.0/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/v0.12.0/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/v0.12.0/docs/modules/kv-cache/leader/" >Leader Election</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.12.0/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/v0.12.0/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/v0.12.0/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/v0.12.0/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/v0.12.0/docs/modules/model-delivery/remote/" >Remote Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/v0.12.0/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Configuration" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/v0.12.0/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/v0.12.0/docs/modules/instances/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="GPU Instance Configuration" href="/gpustack-operator/v0.12.0/docs/modules/instances/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="GPU Instance Operations" href="/gpustack-operator/v0.12.0/docs/modules/instances/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/v0.12.0/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/v0.12.0/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.12.0/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.12.0/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.12.0/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/v0.12.0/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.12.0/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.12.0/docs/modules/devices/">Heterogeneous Devices</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Preflight Checks</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="preflight-checks">Preflight Checks</h1>
+<p>Run <code>device-manager preflight</code> on a bare host to verify accelerator detection, slicing isolation,
+RDMA link health, and kubelet <code>TopologyManager</code> configuration before joining a cluster. It drives
+each vendor&rsquo;s production allocator directly without needing CRDs, NFD labels, or a running cluster.</p>
+<p>Unlike read-only <code>detect</code> and <code>monitor</code>, <code>preflight</code> stages preload libraries and briefly toggles
+off-state sharing flags when required. It also launches non-privileged probe containers unless
+<code>--dry-run</code> is passed.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#prerequisites">Prerequisites</a>
+</li>
+<li><a href="#preflight-commands">Preflight commands</a>
+</li>
+<li><a href="#configuration">Configuration</a>
+</li>
+<li><a href="#probe-side-effects">Probe side effects</a>
+</li>
+<li><a href="#checks-by-manufacturer">Checks by manufacturer</a>
+</li>
+<li><a href="#result-format">Result format</a>
+</li>
+</ul>
+<h2 id="prerequisites">Prerequisites</h2>
+<p>Run <code>preflight</code> <strong>before</strong> scheduling live workloads on the host (or pass <code>--dry-run</code> for a zero-write
+plan):</p>
+<ul>
+<li><strong>Temporary occupancy</strong>: Probe containers hold each sliceable accelerator briefly while measuring
+quota enforcement.</li>
+<li><strong>Staged libraries</strong>: Copies <code>/var/lib/gpustack/operator/lib/&lt;manufacturer&gt;</code> onto the host; if the
+node already runs Device Manager, use the <strong>exact same operator image tag</strong> so staged preload
+libraries match.</li>
+<li><strong>Driver mode toggle</strong>: On Ascend (<code>container-share</code>) and Cambricon (<code>smlu-mode</code>), if the sharing
+flag is off, <code>preflight</code> enables it to confirm driver support and immediately restores it (reporting
+loudly if restore fails).</li>
+</ul>
+<p>Probe containers run <strong>unprivileged</strong>, receiving only the device nodes, mounts, and environment the
+production allocator injects (<code>--privileged</code> on the outer <code>preflight</code> container covers driver reads
+and <code>/dev</code> discovery).</p>
+<h2 id="preflight-commands">Preflight commands</h2>
+<p>Run the command for your hardware vendor. On <code>containerd</code>, replace <code>docker run</code> with <code>nerdctl run</code>
+(except on Moore Threads and NVIDIA, noted below). Verify each host driver path exists first, because
+<code>docker run -v</code> creates missing host directories empty and causes detection to report <code>0</code> cards.</p>
+<h3 id="amd">AMD</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /opt/rocm:/opt/rocm:ro -v /opt/rocm/lib:/opt/rocm/lib:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>amd</span></span></code></pre></div>
+</div>
+<p>Mount both <code>/opt/rocm</code> and <code>/opt/rocm/lib</code> so the host resolves ROCm symlinks on multi-version
+installations (or mount <code>-v /opt/rocm/core-&lt;ver&gt;:/opt/rocm:ro</code> to test one version).</p>
+<h3 id="ascend">Ascend</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /usr/local/Ascend:/usr/local/Ascend:ro -v /usr/local/dcmi:/usr/local/dcmi:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>ascend</span></span></code></pre></div>
+</div>
+<p>The outer container needs no <code>--runtime ascend</code> because <code>/dev</code> is already mounted; inner Ascend
+probe containers pass <code>--runtime ascend</code> automatically under <code>docker</code> (and emit commands under
+<code>nerdctl</code>).</p>
+<h3 id="cambricon">Cambricon</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /usr/local/neuware:/usr/local/neuware:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>cambricon</span></span></code></pre></div>
+</div>
+<h3 id="hygon">Hygon</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /opt/hyhal:/opt/hyhal:ro -v /opt/dtk:/opt/dtk:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /etc/dmi_mig_config:/etc/dmi_mig_config <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>hygon --probe-image<span class="o">=</span>&lt;image&gt;</span></span></code></pre></div>
+</div>
+<p><code>/etc/dmi_mig_config</code> is mounted writable for MIG registry operations, and <code>--probe-image</code> is
+required to measure slice checks (<a href="#container-probes">Container probes</a>
+).</p>
+<h3 id="iluvatar">Iluvatar</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /usr/local/corex:/usr/local/corex:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>iluvatar</span></span></code></pre></div>
+</div>
+<h3 id="metax">MetaX</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /opt/mxdriver:/opt/mxdriver:ro -v /opt/maca:/opt/maca:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>metax</span></span></code></pre></div>
+</div>
+<h3 id="moore-threads">Moore Threads</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host --runtime mthreads <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>mthreads</span></span></code></pre></div>
+</div>
+<p>The <code>mthreads</code> container runtime injects user-space libraries (<code>nerdctl --runtime</code> expects an OCI
+shim name and cannot invoke <code>mthreads</code> directly).</p>
+<h3 id="nvidia">NVIDIA</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host --runtime nvidia <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>nvidia</span></span></code></pre></div>
+</div>
+<p>Pass <code>--runtime nvidia</code> on <code>docker</code> or <code>--gpus all</code> on <code>nerdctl</code> (running under <code>runc</code> hides NVML
+and reports <code>accelerators: 0</code> with exit code <code>1</code>).</p>
+<h3 id="t-head">T-Head</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /usr/local/PPU_SDK:/usr/local/PPU_SDK:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>thead --probe-image<span class="o">=</span>&lt;image&gt;</span></span></code></pre></div>
+</div>
+<p>Supply <code>--probe-image</code> carrying the workload PPU SDK to measure slice rows.</p>
+<h3 id="all-manufacturers">All manufacturers</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --network<span class="o">=</span>host -v /:/host <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight</span></span></code></pre></div>
+</div>
+<p>Without vendor mounts, <code>preflight</code> cross-checks host CLIs on NVIDIA, Ascend, and AMD and prints the
+required vendor mounts for detected hardware.</p>
+<h3 id="device-manager-pod-checks">Device Manager Pod checks</h3>
+<p>Run <code>detect</code> or dry-run <code>preflight</code> inside an installed <code>gpustack-operator-device-manager-&lt;manufacturer&gt;</code>
+<code>Pod</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl <span class="nb">exec</span> -n gpustack-system &lt;device-manager-pod&gt; -- gpustack-operator device-manager detect
+</span></span><span class="line"><span class="cl">kubectl <span class="nb">exec</span> -n gpustack-system &lt;device-manager-pod&gt; -- <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>&lt;manufacturer&gt;</span></span></code></pre></div>
+</div>
+<p>The <code>DaemonSet</code> <code>Pod</code> omits <code>/:/host</code>, so <code>preflight</code> enters dry-run mode automatically. It runs
+detection, <code>device-health</code>, and read-only driver checks, emits container commands, and leaves the
+node untouched.</p>
+<h2 id="configuration">Configuration</h2>
+<h3 id="host-access">Host access</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Mount</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>-v /:/host</code></td>
+          <td>Enters host root via <code>chroot</code> to run the host container and vendor CLIs and stage preload libraries.</td>
+      </tr>
+      <tr>
+          <td><code>--network=host</code></td>
+          <td>Provides host DNS resolution when pulling probe images inside <code>chroot</code>.</td>
+      </tr>
+      <tr>
+          <td><code>-v /dev:/dev</code>, <code>-v /sys:/sys</code></td>
+          <td>Supplies device nodes and sysfs topology for in-process detection and driver reads.</td>
+      </tr>
+      <tr>
+          <td>Vendor mount or <code>--runtime</code></td>
+          <td>Loads user-space vendor management libraries into the <code>preflight</code> process.</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="command-flags">Command flags</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Flag</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--manufacturer</code></td>
+          <td>Comma-separated manufacturers to check (defaults to all).</td>
+      </tr>
+      <tr>
+          <td><code>--no-pci-check</code></td>
+          <td>Skips PCI presence filtering during detection.</td>
+      </tr>
+      <tr>
+          <td><code>--dry-run</code></td>
+          <td>Prints probe steps without writing host files, toggling driver modes, or starting containers.</td>
+      </tr>
+      <tr>
+          <td><code>--probe-image</code></td>
+          <td>Overrides the probe container image (required on Hygon and T-Head, or for air-gapped hosts).</td>
+      </tr>
+      <tr>
+          <td><code>--host-root</code></td>
+          <td>Host root mount path inside the container (default <code>/host</code>).</td>
+      </tr>
+      <tr>
+          <td><code>--runtime</code></td>
+          <td>Overrides CRI auto-detection (<code>docker</code>, <code>nerdctl</code>, or <code>ctr</code>; missing <code>/host/proc</code> requires explicit <code>--runtime</code>).</td>
+      </tr>
+  </tbody>
+</table>
+<p>By default, <code>preflight</code> reads the container runtime from kubelet CRI flags or
+<code>/var/lib/kubelet/{kubeadm-flags.env,config.yaml}</code>. Otherwise it falls back to <code>docker</code>, <code>nerdctl</code>,
+or <code>ctr</code>.</p>
+<h2 id="probe-side-effects">Probe side effects</h2>
+<p>On measured tiers, <code>preflight</code> runs one 50%-slice probe per card, then two concurrent slices to
+verify co-tenancy. Containers carry label <code>gpustack.ai/preflight=true</code> (containerd namespace
+<code>gpustack-preflight</code>) and are swept before and after each run.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Host write</th>
+          <th>Path</th>
+          <th>Lifecycle</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Preload libraries</td>
+          <td><code>/var/lib/gpustack/operator/lib/&lt;manufacturer&gt;</code></td>
+          <td>Kept on disk (matches Device Manager init-container staging).</td>
+      </tr>
+      <tr>
+          <td>Per-probe configs</td>
+          <td><code>/var/lib/gpustack/operator/preflight/</code></td>
+          <td>Removed at pass completion (isolated from live <code>.../operator/pods</code> state).</td>
+      </tr>
+      <tr>
+          <td>Process lock</td>
+          <td><code>/var/lib/gpustack/operator/preflight/lock</code></td>
+          <td>File stays; kernel <code>flock</code> releases automatically on process exit.</td>
+      </tr>
+      <tr>
+          <td>Driver sharing flag</td>
+          <td>Ascend / Cambricon driver state</td>
+          <td>Restored immediately within the same pass.</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Printed probe commands</strong>: Container probes skip execution under <code>--dry-run</code>, missing <code>/host</code>,
+read-only library paths, missing runtimes, <code>ctr</code>, or <code>nerdctl</code> on Ascend. In those cases,
+<code>preflight</code> prints the full command (<code>emitted</code>) without failing the exit code.</p>
+<h2 id="checks-by-manufacturer">Checks by manufacturer</h2>
+<p>Each accelerator reports only the modes it currently offers (for example, a MIG-enabled GPU reports
+partition checks and omits logical-slice rows).</p>
+<table>
+  <thead>
+      <tr>
+          <th>Tier</th>
+          <th>Manufacturers</th>
+          <th>Driver check</th>
+          <th>Capability checks</th>
+          <th>Deepest answer</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><strong>Full</strong></td>
+          <td>NVIDIA, Ascend, AMD, T-Head</td>
+          <td>Yes</td>
+          <td>Real container (<code>sidecar-visibility</code> simulated)</td>
+          <td><code>measured</code></td>
+      </tr>
+      <tr>
+          <td><strong>Container probe</strong></td>
+          <td>Hygon</td>
+          <td>No (<code>note</code> explains why)</td>
+          <td>Real container (<code>sidecar-visibility</code> simulated)</td>
+          <td><code>measured</code></td>
+      </tr>
+      <tr>
+          <td><strong>Driver + injection</strong></td>
+          <td>Cambricon, MetaX</td>
+          <td>Yes</td>
+          <td>Allocator injection only</td>
+          <td><code>simulated</code></td>
+      </tr>
+      <tr>
+          <td><strong>Injection only</strong></td>
+          <td>Iluvatar, MThreads</td>
+          <td>No (<code>note</code> explains why)</td>
+          <td>Allocator injection only</td>
+          <td><code>simulated</code></td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="injection-checks">Injection checks</h3>
+<p>Iluvatar and Moore Threads enforce slicing in the kernel module and container runtime rather than a
+user-space flag. <code>preflight</code> verifies allocator injection (<code>simulated</code>) and records an explanatory
+<code>note</code>.</p>
+<h3 id="container-probes">Container probes</h3>
+<p>Hygon runs real probe containers (<code>measured</code>) with <code>--probe-image</code> (any glibc image carrying <code>sh</code>,
+<code>cat</code>, <code>grep</code>, <code>awk</code>, <code>mkdir</code>, <code>sleep</code>, and <code>kill</code>). The probe runs <code>/opt/dtk</code> <code>BandwidthTest</code> and
+reads <code>kfd</code> vgpu sysfs because <code>hy-smi</code> always prints full physical VRAM.</p>
+<h3 id="supported-vendor-checks">Supported vendor checks</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Manufacturer</th>
+          <th>Detection API</th>
+          <th>Host cross-check</th>
+          <th>Driver check</th>
+          <th>Target mode</th>
+          <th>Container probe</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>NVIDIA</td>
+          <td>NVML</td>
+          <td><code>nvidia-smi -L</code></td>
+          <td><code>mig-partitioning</code></td>
+          <td><code>partitioned</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>Ascend</td>
+          <td>DCMI</td>
+          <td><code>npu-smi info -l</code></td>
+          <td><code>container-share</code></td>
+          <td><code>sliced</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>AMD</td>
+          <td>RSMI, AMDSMI, HSA</td>
+          <td><code>rocm-smi --showuniqueid</code></td>
+          <td><code>cu-mask-topology</code></td>
+          <td><code>sliced</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>T-Head</td>
+          <td>HGML</td>
+          <td>—</td>
+          <td><code>mig-partitioning</code></td>
+          <td><code>partitioned</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>Cambricon</td>
+          <td>CNDev</td>
+          <td>—</td>
+          <td><code>smlu-mode</code></td>
+          <td><code>sliced</code></td>
+          <td>—</td>
+      </tr>
+      <tr>
+          <td>MetaX</td>
+          <td>MXSML, sGPU sysfs</td>
+          <td>—</td>
+          <td><code>sgpu-mode</code></td>
+          <td><code>sliced</code></td>
+          <td>—</td>
+      </tr>
+      <tr>
+          <td>Hygon</td>
+          <td>RSMI, AMDGPU, HSA</td>
+          <td>—</td>
+          <td>—</td>
+          <td><code>sliced</code> / <code>partitioned</code></td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>Iluvatar</td>
+          <td>IXML</td>
+          <td>—</td>
+          <td>—</td>
+          <td><code>sliced</code></td>
+          <td>—</td>
+      </tr>
+      <tr>
+          <td>MThreads</td>
+          <td>MTML</td>
+          <td>—</td>
+          <td>—</td>
+          <td><code>sliced</code></td>
+          <td>—</td>
+      </tr>
+  </tbody>
+</table>
+<p>Compare vendors by the report&rsquo;s <code>mode</code> field rather than vendor-specific capability names.</p>
+<h3 id="driver-checks">Driver checks</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Check</th>
+          <th><code>ok</code> meaning</th>
+          <th><code>not-declared</code> meaning</th>
+          <th><code>unavailable</code> meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>mig-partitioning</code></td>
+          <td>Physical partition profile declared</td>
+          <td>MIG off or unsupported on card</td>
+          <td>Driver query failed</td>
+      </tr>
+      <tr>
+          <td><code>container-share</code></td>
+          <td>Flag on, or toggled on and restored</td>
+          <td>Generation has no flag</td>
+          <td>DCMI missing or refused</td>
+      </tr>
+      <tr>
+          <td><code>cu-mask-topology</code></td>
+          <td>HSA topology and CU atom validated</td>
+          <td>—</td>
+          <td>HSA init failed or card missing</td>
+      </tr>
+      <tr>
+          <td><code>smlu-mode</code></td>
+          <td>Mode on, or toggled on and restored</td>
+          <td>Card advertises no sMLU capacity</td>
+          <td>CNDev missing sMLU API or refused</td>
+      </tr>
+      <tr>
+          <td><code>sgpu-mode</code></td>
+          <td>sGPU sysfs registry readable</td>
+          <td>—</td>
+          <td>Registry unreadable</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="ascend-a5-host-checks">Ascend A5 host checks</h3>
+<p>On Atlas A5 (<code>950</code>) NPUs, <code>preflight</code> adds two node-level <code>declared</code> checks on every card:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Check</th>
+          <th>Reads</th>
+          <th><code>ok</code> meaning</th>
+          <th><code>unavailable</code> meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ascend-docker-runtime</code></td>
+          <td><code>/usr/local/Ascend</code> version</td>
+          <td>MindCluster <code>26.0.0+</code></td>
+          <td>Older or unreadable runtime</td>
+      </tr>
+      <tr>
+          <td><code>hccl-ranktable</code></td>
+          <td><code>/host/etc/hccl_rootinfo.json</code></td>
+          <td>Absent or JSON version <code>2.0</code></td>
+          <td>Wrong version, symlink, invalid JSON, or missing <code>/host</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>See <a href="/gpustack-operator/v0.12.0/docs/getting-started/vendor-prerequisites/#ascend">Vendor Prerequisites</a>
+ for remediation.</p>
+<h3 id="slice-probes">Slice probes</h3>
+<p>Each slice probe requests <strong>50%</strong> of one card (so a <code>24564 MiB</code> card reports <code>12282 MiB</code> inside the
+probe):</p>
+<table>
+  <thead>
+      <tr>
+          <th>Manufacturer</th>
+          <th>Default probe image</th>
+          <th>Vendor runtime</th>
+          <th>Probe reader</th>
+          <th>Cap source</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>NVIDIA</td>
+          <td><code>nvidia/cuda:&lt;CUDA major&gt;</code></td>
+          <td><code>--runtime nvidia</code> / <code>--gpus all</code></td>
+          <td><code>nvidia-smi --query-gpu=memory.total</code></td>
+          <td><code>CUDA_DEVICE_MEMORY_LIMIT_&lt;i&gt;</code></td>
+      </tr>
+      <tr>
+          <td>Ascend</td>
+          <td><code>quay.io/ascend/cann:&lt;CANN major&gt;-&lt;family&gt;</code></td>
+          <td><code>--runtime ascend</code> (<code>docker</code>)</td>
+          <td><code>enpu-monitor</code></td>
+          <td><code>npu_info.config</code> (<code>memory-quota</code>)</td>
+      </tr>
+      <tr>
+          <td>AMD</td>
+          <td><code>ubuntu:24.04</code></td>
+          <td>None</td>
+          <td><code>rocm-monitor</code></td>
+          <td><code>VROCM_DEVICE_MEMORY_LIMIT_&lt;i&gt;</code></td>
+      </tr>
+      <tr>
+          <td>T-Head</td>
+          <td>Required via <code>--probe-image</code></td>
+          <td>None</td>
+          <td><code>ppu-monitor</code></td>
+          <td><code>HGGC_DEVICE_MEMORY_LIMIT_&lt;i&gt;</code></td>
+      </tr>
+      <tr>
+          <td>Hygon</td>
+          <td>Required via <code>--probe-image</code></td>
+          <td>None</td>
+          <td><code>BandwidthTest</code> + <code>kfd</code> vgpu sysfs</td>
+          <td><code>vdev0.conf</code> (<code>mem</code>)</td>
+      </tr>
+  </tbody>
+</table>
+<p>Capability rows report <code>sliced-runtime-loaded</code> (shim or vgpu active), <code>sliced-quota-in-force</code> (50%
+VRAM cap), <code>sidecar-visibility</code> (<code>simulated</code> SSH grant), and <code>co-tenancy</code> (two slices on one card).</p>
+<h2 id="result-format">Result format</h2>
+<p><code>preflight</code> writes one YAML report to <code>stdout</code> with <code>accelerators</code>, <code>network</code>
+(<a href="/gpustack-operator/v0.12.0/docs/modules/rdma/operations/#nic-record-inspection">NIC record inspection</a>
+), and <code>topology</code> (configured
+kubelet <code>topologyManagerPolicy</code>, or <code>unknown</code> when unset):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">accelerators</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">detection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l">ok</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">depth</span><span class="p">:</span><span class="w"> </span><span class="l">declared</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"> </span><span class="m">8</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">checks</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">network</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2026-10-29T00:00:00Z&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">checks</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">topology</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2026-10-29T00:00:00Z&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">single-numa-node</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">depth</span><span class="p">:</span><span class="w"> </span><span class="l">declared</span></span></span></code></pre></div>
+</div>
+<h3 id="check-states-and-depth">Check states and depth</h3>
+<table>
+  <thead>
+      <tr>
+          <th>State</th>
+          <th>Meaning</th>
+          <th>Exit code</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ok</code></td>
+          <td>Capability verified at reported depth (<code>declared</code>, <code>simulated</code>, or <code>measured</code>)</td>
+          <td><code>0</code></td>
+      </tr>
+      <tr>
+          <td><code>not-declared</code></td>
+          <td>Hardware does not offer this capability</td>
+          <td><code>0</code></td>
+      </tr>
+      <tr>
+          <td><code>unavailable</code></td>
+          <td>Offered capability, detection, lock, crash guard, or stale sweep failed</td>
+          <td>Non-zero</td>
+      </tr>
+  </tbody>
+</table>
+<p>Broken RDMA links and <code>topology: unknown</code> or <code>none</code> do <strong>not</strong> fail the exit code because accelerator
+allocation still works. Concurrent runs fail closed on <code>/var/lib/gpustack/operator/preflight/lock</code>,
+vendor panics report <code>preflight-panicked</code>, and failed sweeps report <code>stale-container-sweep</code> (clean
+via <code>gpustack.ai/preflight=true</code> or <code>gpustack-preflight</code>).</p>
+<h3 id="unhealthy-accelerators">Unhealthy accelerators</h3>
+<p>Uncorrectable ECC or hardware faults (<code>status.unhealthy: true</code>) keep <code>detection</code> <code>ok</code> (<code>NVIDIA A100 x8 (1 unhealthy)</code>)
+while healthy cards run full checks. Each faulty card emits <code>capability: device-health</code>
+(<code>state: unavailable</code>, non-zero exit) because the device plugin withholds unhealthy cards.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.12.0/docs/getting-started/vendor-prerequisites/">Vendor Prerequisites</a>
+ (host drivers and runtimes per vendor)</li><li><a href="/gpustack-operator/v0.12.0/docs/modules/devices/requests/">Accelerator Requests</a>
+ (resource keys and admission rules)</li><li><a href="/gpustack-operator/v0.12.0/docs/modules/rdma/operations/">RDMA Operations</a>
+ (kubelet <code>TopologyManager</code> setup and NIC inspection)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.12.0/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
+ — enable and operate hardware MIG partitions.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#prerequisites">Prerequisites</a></li>
+    <li><a href="#preflight-commands">Preflight commands</a>
+      <ul>
+        <li><a href="#amd">AMD</a></li>
+        <li><a href="#ascend">Ascend</a></li>
+        <li><a href="#cambricon">Cambricon</a></li>
+        <li><a href="#hygon">Hygon</a></li>
+        <li><a href="#iluvatar">Iluvatar</a></li>
+        <li><a href="#metax">MetaX</a></li>
+        <li><a href="#moore-threads">Moore Threads</a></li>
+        <li><a href="#nvidia">NVIDIA</a></li>
+        <li><a href="#t-head">T-Head</a></li>
+        <li><a href="#all-manufacturers">All manufacturers</a></li>
+        <li><a href="#device-manager-pod-checks">Device Manager Pod checks</a></li>
+      </ul>
+    </li>
+    <li><a href="#configuration">Configuration</a>
+      <ul>
+        <li><a href="#host-access">Host access</a></li>
+        <li><a href="#command-flags">Command flags</a></li>
+      </ul>
+    </li>
+    <li><a href="#probe-side-effects">Probe side effects</a></li>
+    <li><a href="#checks-by-manufacturer">Checks by manufacturer</a>
+      <ul>
+        <li><a href="#injection-checks">Injection checks</a></li>
+        <li><a href="#container-probes">Container probes</a></li>
+        <li><a href="#supported-vendor-checks">Supported vendor checks</a></li>
+        <li><a href="#driver-checks">Driver checks</a></li>
+        <li><a href="#ascend-a5-host-checks">Ascend A5 host checks</a></li>
+        <li><a href="#slice-probes">Slice probes</a></li>
+      </ul>
+    </li>
+    <li><a href="#result-format">Result format</a>
+      <ul>
+        <li><a href="#check-states-and-depth">Check states and depth</a></li>
+        <li><a href="#unhealthy-accelerators">Unhealthy accelerators</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.12.0/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
+</body>
+</html>

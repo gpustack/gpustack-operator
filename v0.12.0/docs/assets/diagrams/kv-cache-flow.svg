@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 940" role="img" aria-labelledby="title desc"><title id="title">Distributed Shared KV Cache</title><desc id="desc">Reuse compatible prompt prefixes across serving replicas with dynamic tiered DRAM and NVMe storage bars.</desc><style>
+:root{color-scheme:light dark;--bg:#f8fbff;--card:#fff;--ink:#12233d;--muted:#52677f;--line:#c9d9e7;--blue:#2563eb;--purple:#7c3aed;--teal:#0d9488;--amber:#d97706;--emerald:#059669;--soft:#edf5fc;--grid:#dfeaf3}
+@media(prefers-color-scheme:dark){:root{--bg:#101d30;--card:#1a2c43;--ink:#f1f6ff;--muted:#bdcde0;--line:#526b83;--blue:#80adff;--purple:#c4a4ff;--teal:#58d6c8;--amber:#ffc273;--emerald:#5ce2af;--soft:#213b55;--grid:#29425b}}
+text{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;fill:var(--ink)}
+.title{font-size:29px;font-weight:750;letter-spacing:-.4px}
+.sub{font-size:14px;fill:var(--muted)}
+.label{font-size:12px;font-weight:700;letter-spacing:1.2px;fill:var(--muted)}
+.ct{font-size:15px;font-weight:700}
+.detail{font-size:12px;fill:var(--muted)}
+.small{font-size:11px;fill:var(--muted)}
+.mono{font:12px ui-monospace,SFMono-Regular,monospace;fill:var(--ink)}
+.badge{font-size:10px;font-weight:700;fill:var(--emerald);letter-spacing:.5px}
+.box{fill:var(--card);stroke:var(--line);stroke-width:1.2}
+.tint{fill:var(--soft);stroke:var(--line);stroke-width:1.1}
+.wire{fill:none;stroke:var(--teal);stroke-width:2;stroke-dasharray:5 5;opacity:.85}
+.dot{fill:var(--teal)}
+.headline{font-size:16px;font-weight:750;letter-spacing:.35px}
+.pill{font-size:12px;font-weight:650}
+.track{fill:var(--grid)}
+@media(prefers-reduced-motion:reduce){.dot,.anim{display:none}}
+</style><defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="var(--grid)" stroke-width="1"/></pattern></defs><rect width="1200" height="940" fill="var(--bg)"/><rect width="1200" height="940" fill="url(#grid)" opacity=".65"/>
+<text class="label" x="32" y="32">GPUSTACK OPERATOR  /  CAPABILITY OVERVIEW</text>
+<text class="title" x="32" y="70">Distributed Shared KV Cache</text>
+<text class="sub" x="32" y="94">Reuse compatible prompt prefixes across serving replicas</text>
+<rect x="1092" y="32" width="38" height="38" rx="9" fill="var(--blue)"/>
+<text class="headline" x="1111" y="59" text-anchor="middle" fill="white" style="fill:white">G</text>
+<rect x="28" y="112" width="346.0" height="20" rx="3" fill="var(--bg)"/>
+<text class="label" x="34" y="126">SERVING ENGINE REPLICAS  ·  PREFIX REUSE</text>
+<rect class="box" x="32" y="151" width="368" height="150" rx="12" /><rect x="32" y="163" width="4" height="126" rx="2" fill="var(--blue)"/>
+<g fill="none" stroke="var(--blue)" stroke-width="1.6"><rect x="47" y="168" width="24" height="20" rx="4"/><rect x="53" y="173" width="12" height="10" rx="2"/><path d="M44 174h3 m-3 8h3 m24-8h3 m-3 8h3"/></g>
+<text class="ct" x="82" y="182">vLLM replica 01</text><text class="detail" x="48" y="209">Mooncake store connector</text><text class="detail" x="48" y="228">Compatible reuse domain required</text><text class="badge" x="386" y="182" text-anchor="end">SERVING</text>
+<rect class="track" x="48" y="252" width="336" height="8" rx="4"/><rect x="48" y="252" width="260" height="8" rx="4" fill="var(--blue)"><animate class="anim" attributeName="width" values="190;295;240;310;190" dur="3.6s" repeatCount="indefinite"/></rect><text class="small" x="48" y="278">Prefix cache hit stream · TTFT reduced</text>
+<rect class="box" x="416" y="151" width="368" height="150" rx="12" /><rect x="416" y="163" width="4" height="126" rx="2" fill="var(--purple)"/>
+<g fill="none" stroke="var(--purple)" stroke-width="1.6"><rect x="431" y="168" width="24" height="20" rx="4"/><rect x="437" y="173" width="12" height="10" rx="2"/><path d="M428 174h3 m-3 8h3 m24-8h3 m-3 8h3"/></g>
+<text class="ct" x="466" y="182">SGLang replica 02</text><text class="detail" x="432" y="209">Mooncake HiCache</text><text class="detail" x="432" y="228">Compatible reuse domain required</text><text class="badge" x="770" y="182" text-anchor="end">SERVING</text>
+<rect class="track" x="432" y="252" width="336" height="8" rx="4"/><rect x="432" y="252" width="240" height="8" rx="4" fill="var(--purple)"><animate class="anim" attributeName="width" values="160;280;210;290;160" dur="4.0s" repeatCount="indefinite"/></rect><text class="small" x="432" y="278">Shared KV read / write · HiCache active</text>
+<rect class="box" x="800" y="151" width="368" height="150" rx="12" /><rect x="800" y="163" width="4" height="126" rx="2" fill="var(--teal)"/>
+<g fill="none" stroke="var(--teal)" stroke-width="1.6"><rect x="815" y="168" width="24" height="20" rx="4"/><rect x="821" y="173" width="12" height="10" rx="2"/><path d="M812 174h3 m-3 8h3 m24-8h3 m-3 8h3"/></g>
+<text class="ct" x="850" y="182">vLLM-Ascend replica 03</text><text class="detail" x="816" y="209">Ascend store connector</text><text class="detail" x="816" y="228">Compatible reuse domain required</text><text class="badge" x="1154" y="182" text-anchor="end">SERVING</text>
+<rect class="track" x="816" y="252" width="336" height="8" rx="4"/><rect x="816" y="252" width="225" height="8" rx="4" fill="var(--teal)"><animate class="anim" attributeName="width" values="150;265;195;275;150" dur="3.8s" repeatCount="indefinite"/></rect><text class="small" x="816" y="278">Ascend NPU prefix reuse · Store connected</text>
+<path class="wire" d="M 211 301 L 211 397"/><circle class="dot" r="3.5"><animateMotion path="M 211 301 L 211 397" dur="2.6s" begin="-0.0s" repeatCount="indefinite"/></circle>
+<path class="wire" d="M 221 397 L 221 301"/><circle class="dot" r="3.5"><animateMotion path="M 221 397 L 221 301" dur="2.6s" begin="-0.74s" repeatCount="indefinite"/></circle>
+<path class="wire" d="M 216 596 L 216 668"/><circle class="dot" r="3.5"><animateMotion path="M 216 596 L 216 668" dur="2.6s" begin="-1.11s" repeatCount="indefinite"/></circle>
+<path class="wire" d="M 595 301 L 595 397"/><circle class="dot" r="3.5"><animateMotion path="M 595 301 L 595 397" dur="2.6s" begin="-0.37s" repeatCount="indefinite"/></circle>
+<path class="wire" d="M 605 397 L 605 301"/><circle class="dot" r="3.5"><animateMotion path="M 605 397 L 605 301" dur="2.6s" begin="-1.11s" repeatCount="indefinite"/></circle>
+<path class="wire" d="M 600 596 L 600 668"/><circle class="dot" r="3.5"><animateMotion path="M 600 596 L 600 668" dur="2.6s" begin="-1.48s" repeatCount="indefinite"/></circle>
+<path class="wire" d="M 979 301 L 979 397"/><circle class="dot" r="3.5"><animateMotion path="M 979 301 L 979 397" dur="2.6s" begin="-0.74s" repeatCount="indefinite"/></circle>
+<path class="wire" d="M 989 397 L 989 301"/><circle class="dot" r="3.5"><animateMotion path="M 989 397 L 989 301" dur="2.6s" begin="-1.48s" repeatCount="indefinite"/></circle>
+<path class="wire" d="M 984 596 L 984 668"/><circle class="dot" r="3.5"><animateMotion path="M 984 596 L 984 668" dur="2.6s" begin="-1.85s" repeatCount="indefinite"/></circle>
+<rect class="box" x="32" y="397" width="1136" height="199" rx="16" style="stroke:var(--teal);stroke-width:1.8"/>
+<text class="headline" x="54" y="425" style="fill:var(--teal)">G</text>
+<text class="headline" x="82" y="425">GPUSTACK OPERATOR  ·  SHARED KV CACHE POOL  (MOONCAKE)</text>
+<text class="label" x="54" y="457">DRAM TIER  ·  LIVE UTILIZATION</text>
+<rect class="track" x="54" y="469" width="325" height="10" rx="5" />
+<rect x="54" y="469" width="234" height="10" rx="5" fill="var(--teal)"><animate class="anim" attributeName="width" values="175;290;220;275;175" dur="3.8s" repeatCount="indefinite"/></rect>
+<text class="small" x="54" y="500">Hot KV blocks in distributed memory</text>
+<text class="label" x="419" y="457">NVME SSD TIER  ·  SPILLOVER</text>
+<rect class="track" x="419" y="469" width="325" height="10" rx="5" />
+<rect x="419" y="469" width="156" height="10" rx="5" fill="var(--blue)"><animate class="anim" attributeName="width" values="95;205;145;190;95" dur="4.4s" repeatCount="indefinite"/></rect>
+<text class="small" x="419" y="500">Optional local disk tier expansion</text>
+<text class="label" x="784" y="457">TEAM-A QUOTA  ·  ACTIVE GRANT</text>
+<rect class="track" x="784" y="469" width="325" height="10" rx="5" />
+<rect x="784" y="469" width="162.5" height="10" rx="5" fill="var(--purple)"><animate class="anim" attributeName="width" values="125;225;162.5;210;125" dur="4.1s" repeatCount="indefinite"/></rect>
+<text class="small" x="784" y="500">4 GiB / 8 GiB ceiling · bfloat16 · blockSize 64</text>
+<rect class="tint" x="54" y="526" width="113" height="44" rx="7" style="stroke:var(--teal);stroke-width:1.6"><animate class="anim" attributeName="stroke-width" values="1.2;2.6;1.2" dur="2.4s" begin="0s" repeatCount="indefinite"/></rect><text class="mono" x="63" y="553">#01  HIT</text>
+<rect class="tint" x="179" y="526" width="113" height="44" rx="7" style="stroke:var(--teal);stroke-width:1.6"><animate class="anim" attributeName="stroke-width" values="1.2;2.6;1.2" dur="2.4s" begin="0.4s" repeatCount="indefinite"/></rect><text class="mono" x="188" y="553">#02  HIT</text>
+<rect class="tint" x="304" y="526" width="113" height="44" rx="7" style="stroke:var(--teal);stroke-width:1.6"><animate class="anim" attributeName="stroke-width" values="1.2;2.6;1.2" dur="2.4s" begin="0.8s" repeatCount="indefinite"/></rect><text class="mono" x="313" y="553">#03  HIT</text>
+<rect class="tint" x="429" y="526" width="113" height="44" rx="7" style="stroke:var(--teal);stroke-width:1.6"><animate class="anim" attributeName="stroke-width" values="1.2;2.6;1.2" dur="2.4s" begin="1.2s" repeatCount="indefinite"/></rect><text class="mono" x="438" y="553">#04  HIT</text>
+<rect class="tint" x="554" y="526" width="113" height="44" rx="7" style="stroke:var(--blue);stroke-width:1.5"><animate class="anim" attributeName="stroke-width" values="1.1;2.4;1.1" dur="2.4s" begin="1.6s" repeatCount="indefinite"/></rect><text class="mono" x="563" y="553">#05  WRITE</text>
+<rect class="tint" x="679" y="526" width="113" height="44" rx="7" style="stroke:var(--purple);stroke-width:1.5"><animate class="anim" attributeName="stroke-width" values="1.1;2.4;1.1" dur="2.4s" begin="2.0s" repeatCount="indefinite"/></rect><text class="mono" x="688" y="553">#06  WRITE</text>
+<text class="small" x="834" y="553">Dynamic prefix block hits &amp; writes</text>
+<text class="small" x="834" y="574">Bidirectional cache reads / writes</text>
+<rect x="28" y="630" width="445.6" height="20" rx="3" fill="var(--bg)"/>
+<text class="label" x="34" y="644">CLUSTER NODE STORAGE  ·  DISTRIBUTED DRAM &amp; NVME SSD</text>
+<rect class="box" x="32" y="668" width="368" height="165" rx="12" /><rect x="32" y="680" width="4" height="141" rx="2" fill="var(--blue)"/>
+<g fill="none" stroke="var(--blue)" stroke-width="1.5"><rect x="47" y="685" width="24" height="20" rx="4"/><path d="M51 699h16 M52 691h8"/><circle cx="66" cy="691" r="1"/></g>
+<text class="ct" x="82" y="699">node-01</text>
+<text class="small" x="48" y="724">DRAM cache segment</text>
+<rect class="track" x="48" y="732" width="320" height="8" rx="4"/><rect x="48" y="732" width="230" height="8" rx="4" fill="var(--blue)"><animate class="anim" attributeName="width" values="170;275;210;260;170" dur="3.7s" repeatCount="indefinite"/></rect>
+<text class="small" x="48" y="762">Local NVMe disk tier (optional)</text>
+<rect class="track" x="48" y="770" width="320" height="8" rx="4"/><rect x="48" y="770" width="145" height="8" rx="4" fill="var(--teal)"><animate class="anim" attributeName="width" values="90;185;135;170;90" dur="4.3s" repeatCount="indefinite"/></rect>
+<rect class="box" x="416" y="668" width="368" height="165" rx="12" /><rect x="416" y="680" width="4" height="141" rx="2" fill="var(--purple)"/>
+<g fill="none" stroke="var(--purple)" stroke-width="1.5"><rect x="431" y="685" width="24" height="20" rx="4"/><path d="M435 699h16 M436 691h8"/><circle cx="450" cy="691" r="1"/></g>
+<text class="ct" x="466" y="699">node-02</text>
+<text class="small" x="432" y="724">DRAM cache segment</text>
+<rect class="track" x="432" y="732" width="320" height="8" rx="4"/><rect x="432" y="732" width="210" height="8" rx="4" fill="var(--purple)"><animate class="anim" attributeName="width" values="150;260;195;245;150" dur="4.1s" repeatCount="indefinite"/></rect>
+<text class="small" x="432" y="762">Local NVMe disk tier (optional)</text>
+<rect class="track" x="432" y="770" width="320" height="8" rx="4"/><rect x="432" y="770" width="130" height="8" rx="4" fill="var(--teal)"><animate class="anim" attributeName="width" values="80;175;120;160;80" dur="4.6s" repeatCount="indefinite"/></rect>
+<rect class="box" x="800" y="668" width="368" height="165" rx="12" /><rect x="800" y="680" width="4" height="141" rx="2" fill="var(--teal)"/>
+<g fill="none" stroke="var(--teal)" stroke-width="1.5"><rect x="815" y="685" width="24" height="20" rx="4"/><path d="M819 699h16 M820 691h8"/><circle cx="834" cy="691" r="1"/></g>
+<text class="ct" x="850" y="699">node-03</text>
+<text class="small" x="816" y="724">DRAM cache segment</text>
+<rect class="track" x="816" y="732" width="320" height="8" rx="4"/><rect x="816" y="732" width="245" height="8" rx="4" fill="var(--teal)"><animate class="anim" attributeName="width" values="180;285;225;270;180" dur="3.9s" repeatCount="indefinite"/></rect>
+<text class="small" x="816" y="762">Local NVMe disk tier (optional)</text>
+<rect class="track" x="816" y="770" width="320" height="8" rx="4"/><rect x="816" y="770" width="160" height="8" rx="4" fill="var(--blue)"><animate class="anim" attributeName="width" values="105;195;145;180;105" dur="4.5s" repeatCount="indefinite"/></rect>
+<rect class="box" x="32" y="874" width="368" height="42" rx="10" /><circle cx="52.0" cy="895.5" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/><circle cx="52.0" cy="895.5" r="2.5" fill="var(--emerald)"/><text class="pill" x="67" y="900">Cross-replica prefix reuse</text><rect class="box" x="416" y="874" width="368" height="42" rx="10" /><circle cx="436.0" cy="895.5" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/><circle cx="436.0" cy="895.5" r="2.5" fill="var(--emerald)"/><text class="pill" x="451" y="900">DRAM + optional NVMe tier</text><rect class="box" x="800" y="874" width="368" height="42" rx="10" /><circle cx="820.0" cy="895.5" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/><circle cx="820.0" cy="895.5" r="2.5" fill="var(--emerald)"/><text class="pill" x="835" y="900">Namespace quota grants</text>
+</svg>
