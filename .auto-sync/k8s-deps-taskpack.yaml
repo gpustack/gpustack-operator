@@ -137,7 +137,7 @@ spec:
     titleTemplate: "chore(deps): sync kubernetes modules and cli toolchains"
   memory:
     directory: .auto-sync/memory/k8s-deps-sync
-    apply: separate-pull-request
+    apply: inline-with-candidate
     onNoModelBudget: deterministic-observations-only
   triggers:
     schedule: true

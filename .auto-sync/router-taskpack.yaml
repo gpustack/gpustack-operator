@@ -117,7 +117,7 @@ spec:
     titleTemplate: "chore(llm-router): sync disaggregated router versions and patches"
   memory:
     directory: .auto-sync/memory/router-sync
-    apply: separate-pull-request
+    apply: inline-with-candidate
     onNoModelBudget: deterministic-observations-only
   triggers:
     schedule: true
