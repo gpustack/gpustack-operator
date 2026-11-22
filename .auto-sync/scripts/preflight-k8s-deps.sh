@@ -106,6 +106,29 @@ def fetch_json(url: str):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def load_releases_via_git_tags(repo_slug: str) -> list[dict]:
+    out = subprocess.check_output(
+        [
+            "git",
+            "ls-remote",
+            "--tags",
+            "--refs",
+            f"https://github.com/{repo_slug}.git",
+        ],
+        text=True,
+        timeout=30,
+    )
+    releases = []
+    for line in out.splitlines():
+        parts = line.strip().split("\t", 1)
+        if len(parts) != 2 or not parts[1].startswith("refs/tags/"):
+            continue
+        tag = parts[1][len("refs/tags/"):].strip()
+        if tag:
+            releases.append({"tag_name": tag, "draft": False, "prerelease": False})
+    return releases
+
+
 def load_releases(fixture_name: str, repo_slug: str) -> list[dict]:
     if fixture_dir:
         fp = os.path.join(fixture_dir, fixture_name)
@@ -114,8 +137,17 @@ def load_releases(fixture_name: str, repo_slug: str) -> list[dict]:
         with open(fp, "r", encoding="utf-8") as f:
             raw = json.load(f)
         return raw if isinstance(raw, list) else [raw]
-    raw = fetch_json(f"https://api.github.com/repos/{repo_slug}/releases?per_page=30")
-    return raw if isinstance(raw, list) else []
+    try:
+        raw = fetch_json(f"https://api.github.com/repos/{repo_slug}/releases?per_page=30")
+        return raw if isinstance(raw, list) else []
+    except urllib.error.HTTPError as exc:
+        if exc.code in (403, 429):
+            print(
+                f"WARN: GitHub Releases API returned HTTP {exc.code} for {repo_slug}; falling back to git ls-remote tags",
+                file=sys.stderr,
+            )
+            return load_releases_via_git_tags(repo_slug)
+        raise
 
 
 def load_kustomize_tags() -> list[str]:
