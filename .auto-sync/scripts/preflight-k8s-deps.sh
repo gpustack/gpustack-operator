@@ -39,7 +39,7 @@ autosync::preflight::snapshot_baselines "${stage_dir}" \
   "go.mod" \
   "api"
 
-autosync::preflight::warm_caches "${stage_dir}" --sbin
+autosync::preflight::warm_caches "${stage_dir}" --sbin --go
 
 if [[ -n "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" && -d "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR}/deps-cache" ]]; then
   mkdir -p "${stage_dir}/deps-cache"

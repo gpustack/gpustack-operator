@@ -17,7 +17,6 @@ spec:
     capabilities:
       allowHostPath: true
       allowCheckNetwork: true
-      allowDockerSocket: true
     digests:
       pinDigests: true
       lockfile: .auto-sync/digests/slicing.lock.json
@@ -95,6 +94,9 @@ spec:
             - AUTOSYNC_XBUILD_RUNNER
             - AUTOSYNC_ALLOW_MISSING_STAGE_DIR
             - GITHUB_ACTIONS
+          mounts:
+            - source: /var/run/docker.sock
+              mode: rw
     externalGates: []
   publication:
     mode: pull_request
