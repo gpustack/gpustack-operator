@@ -132,12 +132,13 @@ jobs:
 
       - name: Resolve target domains
         id: suite
-        uses: gpustack/loopwright@2fb04b49310e381e3e84b8060da5dcf84d17ca24 # main
+        uses: gpustack/loopwright@3275576e9c5e96258fd6b7ddcb9836427a422694 # main
         with:
           suite-path: .auto-sync/suite.yaml
           domain: ${{ github.event_name == 'workflow_dispatch' && inputs.domain != '' && inputs.domain != 'all' && inputs.domain || '' }}
           resolve-suite-only: 'true'
           allow-privileged-execution: 'true'
+          allow-docker-socket: 'true'
           allow-custom-base-url: 'true'
           event-name: ${{ github.event_name }}
           event-path: ${{ github.event_path }}
@@ -323,7 +324,7 @@ jobs:
       - name: Cache preflight tools
         uses: actions/cache@v4
         with:
-          path: /tmp/gpustack-autosync-stage/.sbin
+          path: /tmp/gpustack-autosync-stage-${{ matrix.domainId }}/.shared/.sbin
           key: autosync-sbin-${{ runner.os }}-${{ runner.arch }}-${{ matrix.domainId }}-${{ hashFiles('hack/lib/*.sh') }}
 
       - name: Cache uv runtime
@@ -331,8 +332,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            /tmp/gpustack-autosync-stage/uv-cache
-            /tmp/gpustack-autosync-stage/uv-python
+            /tmp/gpustack-autosync-stage-${{ matrix.domainId }}/.shared/uv-cache
+            /tmp/gpustack-autosync-stage-${{ matrix.domainId }}/.shared/uv-python
           key: autosync-uv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('model-transfer/python/uv.lock', 'model-transfer/python/.python-version') }}
 
       - name: Run Loopwright
@@ -344,13 +345,13 @@ jobs:
         #   by hack/check/autosync-selftest.sh) and unconditionally strip INPUT_*, GITHUB_TOKEN,
         #   GitHub App credentials, Loopwright signing keys, and LOOPWRIGHT_PROVIDER_TOKEN.
         # - Candidate model turns and command.v1 checks run inside bubblewrap under spec.execution.mode: strict.
-        uses: gpustack/loopwright@2fb04b49310e381e3e84b8060da5dcf84d17ca24 # main
+        uses: gpustack/loopwright@3275576e9c5e96258fd6b7ddcb9836427a422694 # main
         env:
           LOOPWRIGHT_PROVIDER_TOKEN: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_LLM_AUTH_TOKEN || secrets.CI_GPUSTACK_CODEREVIEW_LLM_AUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_SHA: ${{ steps.record-main.outputs.main_sha }}
           GITHUB_REF: refs/heads/main
-          AUTOSYNC_STAGE_DIR: /tmp/gpustack-autosync-stage/${{ matrix.domainId }}
+          AUTOSYNC_STAGE_DIR: /tmp/gpustack-autosync-stage-${{ matrix.domainId }}
           AUTOSYNC_FORCE: ${{ (inputs.force == true || inputs.force == 'true') && 'true' || 'false' }}
           AUTOSYNC_TARGET_TAG: ${{ inputs.target_tag || '' }}
           COMMENT_COMMAND: ${{ needs.resolve-domains.outputs.comment_command }}
@@ -362,6 +363,7 @@ jobs:
           # read-only command.v1 toolchainPaths (allowHostPath), or check-only allowCheckNetwork.
           # Candidate model turns and command.v1 checks still run inside bubblewrap without tokens.
           allow-privileged-execution: 'true'
+          allow-docker-socket: 'true'
           event-name: ${{ github.event_name }}
           event-path: ${{ github.event_path }}
           run-root: ${{ runner.temp }}/loopwright-${{ matrix.domainId }}

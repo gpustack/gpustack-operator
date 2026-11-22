@@ -5,7 +5,7 @@
     {
       "path": ".auto-sync/checks",
       "kind": "directory",
-      "sha256": "728679d2a9a8a60bfd21d9c42325c9b832115e9a1c1045dc61bb6cfb3d8ab197"
+      "sha256": "fef452d033abc63c3e42d00e02bf571e2c91962e7a801f63c305833df5aae71e"
     },
     {
       "path": ".auto-sync/instructions/router.md",
@@ -15,7 +15,7 @@
     {
       "path": ".auto-sync/scripts/preflight-router.sh",
       "kind": "file",
-      "sha256": "79eea9b5e91a68495768aeaaeb17ec56ac30ae411410c7d6bd6ad140e873aa20"
+      "sha256": "7a25e23528abca3e7c942889501c463a605f5a5642a96b7c1ae23abc31e67339"
     }
   ]
 }

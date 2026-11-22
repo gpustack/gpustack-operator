@@ -198,6 +198,12 @@ def sync_tagged_repo(repo_url: str, dst: str, pinned_tag: str, target_tag: str, 
             pass
 
     subprocess.run(["git", "-C", dst, "checkout", "-f", "-q", f"refs/tags/{target_tag}"], check=True)
+    if use_sparse:
+        subprocess.run(
+            ["git", "-C", dst, "archive", target_tag, "--", sparse_subpath],
+            stdout=subprocess.DEVNULL,
+            check=True,
+        )
 
 
 router_df = read_text(os.path.join(repo_root, "pack/llm-router/Dockerfile"))

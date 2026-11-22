@@ -5,7 +5,7 @@
     {
       "path": ".auto-sync/checks",
       "kind": "directory",
-      "sha256": "728679d2a9a8a60bfd21d9c42325c9b832115e9a1c1045dc61bb6cfb3d8ab197"
+      "sha256": "fef452d033abc63c3e42d00e02bf571e2c91962e7a801f63c305833df5aae71e"
     },
     {
       "path": ".auto-sync/instructions/kv-transfer.md",
