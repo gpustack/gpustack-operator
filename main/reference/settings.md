@@ -616,7 +616,7 @@ injection path. `auto` doing nothing on such a node is the correct answer, not a
 
 Which channel a node settled on, and why, is logged once per answer, but at the allocator's own
 verbosity, above what the `DaemonSet` ships with. [Runtime log
-verbosity](https://github.com/gpustack/gpustack-operator/blob/b4580484e22166b67c283f019a9e7327ac0d6b46/docs/contribute/development.md#runtime-log-verbosity) raises it on a running `Pod`.
+verbosity](https://github.com/gpustack/gpustack-operator/blob/93d7db6b404c16656ab9fa71baa390ea14d36812/docs/contribute/development.md#runtime-log-verbosity) raises it on a running `Pod`.
 
 One node-level variable feeds the same decision:
 
