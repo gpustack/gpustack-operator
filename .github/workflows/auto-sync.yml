@@ -132,7 +132,7 @@ jobs:
 
       - name: Resolve target domains
         id: suite
-        uses: gpustack/loopwright@a595aea42ea93e978a3a0c1c19d760f9c0fdc3c8 # main
+        uses: gpustack/loopwright@9fc93a1f0b48844f24d76dafb16575fd562947aa # v0.0.1
         with:
           suite-path: .auto-sync/suite.yaml
           domain: ${{ github.event_name == 'workflow_dispatch' && inputs.domain != '' && inputs.domain != 'all' && inputs.domain || '' }}
@@ -345,7 +345,7 @@ jobs:
         #   by hack/check/autosync-selftest.sh) and unconditionally strip INPUT_*, GITHUB_TOKEN,
         #   GitHub App credentials, Loopwright signing keys, and LOOPWRIGHT_PROVIDER_TOKEN.
         # - Candidate model turns and command.v1 checks run inside bubblewrap under spec.execution.mode: strict.
-        uses: gpustack/loopwright@a595aea42ea93e978a3a0c1c19d760f9c0fdc3c8 # main
+        uses: gpustack/loopwright@9fc93a1f0b48844f24d76dafb16575fd562947aa # v0.0.1
         env:
           LOOPWRIGHT_PROVIDER_TOKEN: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_LLM_AUTH_TOKEN || secrets.CI_GPUSTACK_CODEREVIEW_LLM_AUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
