@@ -180,12 +180,11 @@ jobs:
     secrets:
       dockerhub-password: ${{ secrets.CI_DOCKERHUB_PASSWORD }}
 
-  # The universal gpustack_model_transfer wheel and its sdist: one pure-Python artifact for
-  # every arch and accelerator runtime, built on every run so test workflows can
-  # download it, and attached to the GitHub Release on a tag. The vendor imports
-  # (torch, torch_npu, nixl, hixl) stay lazy inside the adapters, so the wheel is
-  # buildable on a stock runner with nothing installed.
-  model-transfer-wheel:
+  # Universal pure-Python wheels and sdists: one artifact per package for every arch
+  # and accelerator runtime, built on every run so test workflows can download them,
+  # and attached to the GitHub Release on a tag. Vendor imports stay lazy inside
+  # adapters, so every wheel is buildable on a stock runner with nothing installed.
+  wheel:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -199,20 +198,28 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - name: Build wheel and sdist
+      - name: Build wheels and sdists
         run: |
-          cd model-transfer/python
-          uv build
-          test -n "$(ls dist/gpustack_model_transfer-*-py3-none-any.whl 2>/dev/null)" || {
-            echo "::error::the universal wheel (py3-none-any) was not produced" >&2
-            exit 1
-          }
-          ls -la dist/
+          OUT_DIR="${RUNNER_TEMP}/wheels"
+          mkdir -p "${OUT_DIR}"
+          for pkg in \
+            "model-transfer/python:gpustack_model_transfer" \
+            "engine-sentinel/python:gpustack_engine_sentinel"
+          do
+            dir="${pkg%%:*}"
+            dist_name="${pkg##*:}"
+            (cd "${dir}" && uv build --out-dir "${OUT_DIR}")
+            test -n "$(ls "${OUT_DIR}/${dist_name}-"*-py3-none-any.whl 2>/dev/null)" || {
+              echo "::error::${dist_name}: the universal wheel (py3-none-any) was not produced" >&2
+              exit 1
+            }
+          done
+          ls -la "${OUT_DIR}/"
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gpustack-model-transfer-dist
-          path: model-transfer/python/dist/*
+          name: gpustack-python-dist
+          path: ${{ runner.temp }}/wheels/*
           if-no-files-found: error
           retention-days: 30
 
@@ -220,7 +227,7 @@ jobs:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs:
       - image
-      - model-transfer-wheel
+      - wheel
     timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
@@ -256,10 +263,10 @@ jobs:
                   "on_property": "title", "target": "$1" }
               ]
             }
-      - name: Download the model-transfer distribution
+      - name: Download Python distributions
         uses: actions/download-artifact@v4
         with:
-          name: gpustack-model-transfer-dist
+          name: gpustack-python-dist
           path: dist
       - name: Publish
         uses: softprops/action-gh-release@v2
