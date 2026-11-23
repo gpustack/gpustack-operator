@@ -123,7 +123,7 @@ A role replica owns one `Workload` and its *`size`* `Pod`s form the fate-sharing
 `replicas: 3` and `size: 8` produces three independent eight-`Pod` topology decisions, not one
 twenty-four-`Pod` decision. Different roles and replicas are not required to share a domain.
 
-Several roles still admit as one set. The [joint admission check](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/configuration/index.md#prefill-and-decode)
+Several roles still admit as one set. The [joint admission check](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/index.md#prefill-and-decode)
 holds every group until the whole set has reserved quota, and no role `Pod` binds to a `Node` before
 then. While the set waits, a group that fits keeps its quota reservation and topology assignment,
 so the domain it holds stays idle. When no role fits, no `Workload` of the set reserves anything.
@@ -135,7 +135,7 @@ so the domain it holds stays idle. When no role fits, no `Workload` of the set r
 > [status reference](model-deployment-status.md#status)).
 
 Omitting *`requiredLevel`* adds no explicit topology request. The queue is still topology-aware, and
-Kueue may choose any compatible hierarchy. The [field contract](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/configuration/index.md#topology-placement)
+Kueue may choose any compatible hierarchy. The [field contract](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/index.md#topology-placement)
 defines the implicit hostname level.
 
 ## Node-delivered model placement
@@ -166,7 +166,7 @@ term.
 A `Pod` carrying `kueue.x-k8s.io/podset-preferred-topology` gets no term: with `TASBalancedPlacement`
 on, as the chart has it, such a PodSet loses its affinity score. No `Pod` GPUStack renders carries it.
 `Engine` delivery and claim artifacts get no term either. Reading placements and turning the
-preference off are in [Model Store Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/operations/index.md#replica-placement).
+preference off are in [Model Store Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/operations/index.md#replica-placement).
 
 ## Capacity and lifecycle limits
 
@@ -207,9 +207,9 @@ upgraded by this path; create fresh managed objects for this release.
 
 GPUStack reflects Kueue's inadmissible message with the role and replica; it does not translate
 Kueue prose into a new stable reason. Operational checks and source examples are in
-[Topology-Aware Scheduling Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/topology/operations/index.md).
+[Topology-Aware Scheduling Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/topology/operations/index.md).
 
 ---
 
 **See also** — [Scheduling Chain](devices-scheduling.md) (the flavor and queue owners) ·
-[Admission](devices-admission.md) (the gates after queue admission) · [Model Deployment](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/configuration/index.md) (the user-facing field)
+[Admission](devices-admission.md) (the gates after queue admission) · [Model Deployment](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/index.md) (the user-facing field)

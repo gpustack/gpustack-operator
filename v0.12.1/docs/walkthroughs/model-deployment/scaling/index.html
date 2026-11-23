@@ -1,0 +1,2053 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.12.1/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  
+  <title>Model Deployment Scaling Walkthrough · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/scaling/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.12.1/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.1/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.1/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.12.1/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.12.1/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.12.1"
+    data-home="/gpustack-operator/v0.12.1/" data-page="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/scaling/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.12.1</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.12.1</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.12.1/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <a class="nav-home" href="/gpustack-operator/v0.12.1/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/v0.12.1/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/v0.12.1/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/v0.12.1/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/scaling/" aria-current="page">Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/v0.12.1/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/v0.12.1/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/v0.12.1/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.12.1/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/v0.12.1/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/v0.12.1/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/v0.12.1/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/v0.12.1/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/v0.12.1/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.12.1/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/leader/" >Leader Election</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/remote/" >Remote Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Configuration" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/v0.12.1/docs/modules/instances/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="GPU Instance Configuration" href="/gpustack-operator/v0.12.1/docs/modules/instances/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="GPU Instance Operations" href="/gpustack-operator/v0.12.1/docs/modules/instances/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/v0.12.1/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/v0.12.1/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.12.1/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.12.1/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.12.1/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/v0.12.1/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.12.1/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/">Model Deployment Walkthroughs</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Deployment Scaling Walkthrough</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-deployment-scaling-walkthrough">Model Deployment Scaling Walkthrough</h1>
+<p>Attach a <code>ModelDeploymentScaler</code> in <code>Shadow</code> mode to inspect replica recommendations, compare
+<code>Proportional</code>, <code>TokenThroughput</code>, <code>Predictive</code>, and catalog-prior algorithms, then switch to
+<code>Active</code> mode to observe scale-out and graceful replica retirement.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#summary">Summary</a>
+</li>
+<li><a href="#environment">Environment</a>
+</li>
+<li><a href="#scaler-deployment">Scaler deployment</a>
+</li>
+<li><a href="#step-3-choose-an-algorithm">Step 3: Choose an algorithm</a>
+</li>
+<li><a href="#live-scaling">Live scaling</a>
+</li>
+<li><a href="#verification">Verification</a>
+</li>
+<li><a href="#cleanup">Cleanup</a>
+</li>
+<li><a href="#troubleshooting">Troubleshooting</a>
+</li>
+</ul>
+<h2 id="summary">Summary</h2>
+<p>Start one vLLM <em>prefill/decode (PD)</em> target, verify recommendations safely in <code>Shadow</code> mode, select a
+scaling algorithm (including InferenceX catalog priors or <em>encode/prefill/decode (EPD)</em> role ratios),
+and switch to <code>Active</code> mode:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Object</th>
+          <th>Scope</th>
+          <th>Creator</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ModelArtifact</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>Resolves <code>Qwen/Qwen3-8B</code> weights (<code>qwen3-8b</code>)</td>
+      </tr>
+      <tr>
+          <td><code>AcceleratorType</code></td>
+          <td>cluster</td>
+          <td>operator</td>
+          <td>Whole-GPU pool requested by each role replica</td>
+      </tr>
+      <tr>
+          <td><code>ModelDeployment</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>Disaggregated <em>PD</em> target whose <em><code>replicas</code></em> the scaler controls</td>
+      </tr>
+      <tr>
+          <td><code>ModelDeploymentScaler</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>Autoscaling policy evaluated in <code>Shadow</code> and enforced in <code>Active</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>Manifests below are reusable configuration examples; captured lifecycle results from the standalone
+H100 and H200 runs are labeled explicitly in <a href="#verification">Verification</a>
+ and
+<a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling-benchmark/">Model Deployment Scaling Benchmark</a>
+.</p>
+<h2 id="environment">Environment</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Item</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>GPUs</td>
+          <td>2 free GPUs initially, up to 4 GPUs at max scale (1 GPU per replica)</td>
+      </tr>
+      <tr>
+          <td><code>AcceleratorType</code></td>
+          <td>Reusable example uses <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code> (substitute an <code>Active</code> pool from <code>kubectl get acctype</code>)</td>
+      </tr>
+      <tr>
+          <td>Namespace</td>
+          <td><code>gpustack-bench</code></td>
+      </tr>
+      <tr>
+          <td>Model</td>
+          <td><code>Qwen/Qwen3-8B</code> via <code>ModelArtifact</code> <code>qwen3-8b</code> at revision <code>b968826d9c46dd6066d109eabc6255188de91218</code></td>
+      </tr>
+      <tr>
+          <td>Tools</td>
+          <td><code>kubectl</code>, <code>jq</code>, and Python 3 with <code>aiohttp</code> (plus a repo checkout for <code>bench_client.py</code>)</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="prerequisites">Prerequisites</h3>
+<p>Complete <a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/#cluster-preparation">Cluster preparation</a>
+ and warm <code>qwen3-8b</code> in <code>gpustack-bench</code>
+via <a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-delivery/prefetch/#step-1-create-artifact-and-prefetch">Model Prefetch</a>
+. Confirm no
+other <code>ModelDeploymentScaler</code> already binds the target deployment; see
+<a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
+ and
+<a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/#gitops-sync">GitOps sync</a>
+.</p>
+<h2 id="scaler-deployment">Scaler deployment</h2>
+<h3 id="step-1-deploy-scaling-target">Step 1: Deploy scaling target</h3>
+<p>Save <code>scaling-target.yaml</code> (replace <em><code>acceleratorType</code></em> if not running on H100):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling-vllm-pd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-8B</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-8b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-d-router</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">tensor-parallel-size</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">max-model-len</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;16384&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">max-num-seqs</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;64&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">gpu-memory-utilization</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;0.90&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">enable-scale-out</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">VLLM_HTTP_TIMEOUT_KEEP_ALIVE</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;3600&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">tensor-parallel-size</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">max-model-len</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;16384&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">max-num-seqs</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;64&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">gpu-memory-utilization</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;0.90&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">enable-scale-out</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">VLLM_HTTP_TIMEOUT_KEEP_ALIVE</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;3600&#34;</span></span></span></code></pre></div>
+</div>
+<p>Apply <code>scaling-target.yaml</code> and wait until <code>PHASE=Ready</code> (<code>1R1P1D</code>) before generating load:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f scaling-target.yaml
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment autoscaling-vllm-pd -w</span></span></code></pre></div>
+</div>
+<p><code>--enable-scale-out</code> enables router token counting
+(<a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/prefill-decode/#router-token-counting">Router token counting</a>
+),
+and <code>VLLM_HTTP_TIMEOUT_KEEP_ALIVE=3600</code> matches the benchmark configuration (it reduces, without
+eliminating, scale-out connection drops).</p>
+<h3 id="step-2-review-shadow-recommendations">Step 2: Review Shadow recommendations</h3>
+<p>Save <code>scaling-policy.yaml</code> in <code>Shadow</code> mode so the scaler computes recommendations without writing
+target <em><code>replicas</code></em>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscale-vllm-pd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling-vllm-pd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Shadow</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sampling</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">intervalSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">10</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ratios</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">numeratorRole</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">denominatorRole</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># soft preference; add min/max only when hard ratio bounds are required</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Proportional</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">proportional</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l">RunningRequests</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">tolerance</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">roleTargets</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;3&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;3&#34;</span></span></span></code></pre></div>
+</div>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f scaling-policy.yaml
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-vllm-pd <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}{&#34;\n&#34;}{end}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment autoscaling-vllm-pd -o json <span class="p">|</span>
+</span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;{replicas: [.spec.roles[] | {name, replicas}],
+</span></span></span><span class="line"><span class="cl"><span class="s1">       binding: .metadata.annotations[&#34;modeldeployment.gpustack.ai/scaler-binding&#34;]}&#39;</span></span></span></code></pre></div>
+</div>
+<p>Confirm <code>Bound=True</code>, <code>Active=False</code> (<code>Reason: ShadowMode</code>), unchanged <code>replicas: 1</code>, and <code>binding: null</code>.
+Inspect <em><code>status.roles[].rawRecommendedReplicas</code></em>, <em><code>constrainedReplicas</code></em>, <em><code>signalState</code></em>, and
+<em><code>reason</code></em> together.</p>
+<p>Create an in-cluster load driver <code>Pod</code> (<code>default/bench-driver</code>) if absent, and send a 45 s baseline
+load against the router <code>Service</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n default run bench-driver --image<span class="o">=</span>python:3.11-slim --restart<span class="o">=</span>Never --command -- sleep infinity
+</span></span><span class="line"><span class="cl">kubectl -n default <span class="nb">wait</span> pod/bench-driver --for<span class="o">=</span><span class="nv">condition</span><span class="o">=</span>Ready --timeout<span class="o">=</span>300s
+</span></span><span class="line"><span class="cl">kubectl -n default <span class="nb">exec</span> bench-driver -- python3 -m pip install aiohttp</span></span></code></pre></div>
+</div>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">BENCH_INCLUSTER</span><span class="o">=</span><span class="m">1</span> python3 .agents/skills/gpustack-operator-benchmark/scripts/bench_client.py load <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --endpoint http://autoscaling-vllm-pd-router.gpustack-bench.svc:8000 <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --model Qwen/Qwen3-8B --arm shadow --suite autoscaling --label baseline <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --input-tokens <span class="m">1024</span> --output-tokens <span class="m">256</span> --concurrency <span class="m">2</span> --duration <span class="m">45</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --out /tmp/scaler-shadow.json --requests-out /tmp/scaler-shadow-requests.jsonl</span></span></code></pre></div>
+</div>
+<p>If <code>bench_client.py</code> reports local fallback, stop and fix <code>default/bench-driver</code> access because
+cluster-internal DNS will not resolve locally.</p>
+<h2 id="step-3-choose-an-algorithm">Step 3: Choose an algorithm</h2>
+<p>When switching algorithms in <code>scaling-policy.yaml</code>, replace the entire <em><code>spec.algorithm</code></em> block
+(admission rejects sub-blocks that do not match <em><code>algorithm.type</code></em>):</p>
+<table>
+  <thead>
+      <tr>
+          <th>Choice</th>
+          <th>Target scenario</th>
+          <th>Configuration guidance</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Predictive</code> + <em><code>capacityPrior</code></em></td>
+          <td>Latency-sensitive serving and traffic ramps where replica startup (~76 s on H200) must start ahead of peak load</td>
+          <td>Set <em><code>horizonSeconds</code></em> above startup time (<code>180–300</code> s), keep <em><code>headroom: &quot;0.75&quot;</code></em>, and cap step bursts via <em><code>behavior.scaleUp.maxStepReplicas</code></em>.</td>
+      </tr>
+      <tr>
+          <td><code>TokenThroughput</code> + <em><code>capacityPrior</code></em></td>
+          <td>Variable prompt lengths and prefix caching where GPU replica-seconds should track sustained token demand</td>
+          <td>Use <em><code>capacityPrior</code></em> (<code>headroom: &quot;0.75&quot;</code>) or set manual targets at 70–75% of single-replica saturation.</td>
+      </tr>
+      <tr>
+          <td><code>Proportional</code></td>
+          <td>Uniform request shapes using <code>RunningRequests</code> or <code>QueueDepth</code> without offline token sweeps</td>
+          <td>Set <em><code>roleTargets[].target</code></em> to per-replica concurrency within <em>TTFT</em> targets (<code>Proportional</code> rejects <em><code>capacityPrior</code></em>).</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="token-throughput">Token throughput</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeploymentScaler
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: autoscale-vllm-pd
+</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   algorithm:
+</span></span><span class="line"><span class="cl"><span class="gd">-    type: Proportional
+</span></span></span><span class="line"><span class="cl"><span class="gd">-    proportional:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      metric: RunningRequests
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      tolerance: &#34;0.1&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      roleTargets:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-        - name: prefill
+</span></span></span><span class="line"><span class="cl"><span class="gd">-          target: &#34;3&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd">-        - name: decode
+</span></span></span><span class="line"><span class="cl"><span class="gd">-          target: &#34;3&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    type: TokenThroughput
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    tokenThroughput:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      prefillTargetTokensPerSecond: &#34;1200&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      decodeTargetTokensPerSecond: &#34;300&#34;
+</span></span></span></code></pre></div>
+</div>
+<p>Allow two successive metric samples before evaluating rate recommendations. Before testing sustained
+SGLang <em>PD</em> traffic over TCP, review the
+<a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/engine-versions/#limitations">SGLang TCP limitation</a>
+.</p>
+<h3 id="predictive">Predictive</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeploymentScaler
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: autoscale-vllm-pd
+</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   algorithm:
+</span></span><span class="line"><span class="cl"><span class="gd">-    type: Proportional
+</span></span></span><span class="line"><span class="cl"><span class="gd">-    proportional:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      metric: RunningRequests
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      tolerance: &#34;0.1&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      roleTargets:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-        - name: prefill
+</span></span></span><span class="line"><span class="cl"><span class="gd">-          target: &#34;3&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd">-        - name: decode
+</span></span></span><span class="line"><span class="cl"><span class="gd">-          target: &#34;3&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    type: Predictive
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    predictive:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      horizonSeconds: 30
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      minPoints: 2
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      qLevel: &#34;0.5&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      qTrend: &#34;0.3&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      prefillTokenCapacityPerReplica: &#34;2000&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      decodeTokenCapacityPerReplica: &#34;2000&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      tokenThroughput:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        prefillTargetTokensPerSecond: &#34;1200&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        decodeTargetTokensPerSecond: &#34;300&#34;
+</span></span></span></code></pre></div>
+</div>
+<p>Nested <em><code>tokenThroughput</code></em> targets act as fallback while the predictor collects <em><code>minPoints</code></em>; inspect
+<em><code>status.predictors</code></em> and role reasons to distinguish forecast planning from fallback
+(<a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling-benchmark/#scale-out-timing">Scale-out timing</a>
+).</p>
+<h3 id="catalog-capacity-estimates">Catalog capacity estimates</h3>
+<p><em><code>spec.algorithm.capacityPrior</code></em> resolves omitted <code>TokenThroughput</code> or <code>Predictive</code> capacities from an
+embedded InferenceX <code>ModelDeploymentScalerCapacityPriorCatalog</code> (when <em><code>catalogRef</code></em> is omitted) or
+from a same-namespace <code>ConfigMap</code> (<code>priors.yaml</code> key by default; empty <code>catalogRef: {}</code> is rejected).
+See <a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/#catalog-matching-requirements">Catalog matching requirements</a>
+ and
+<a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/#capacity-priors">Capacity priors</a>
+.</p>
+<p>Because the embedded catalog omits <code>Qwen/Qwen3-8B</code>, create a reviewed <code>ConfigMap/autoscaling-priors</code>
+in <code>gpustack-bench</code> first (if multiple catalog quantizations match, pass <code>--quantization</code> or annotate
+the deployment with <code>worker.gpustack.ai/precision</code>):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscale-vllm-pd-prior</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling-vllm-pd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Shadow</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">6</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ratios</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">numeratorRole</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">denominatorRole</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">min</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;3&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;3&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">TokenThroughput</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2000&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPrior</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">catalogRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling-priors</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span></span></span></code></pre></div>
+</div>
+<p>For a single-role <code>Server</code> target (<code>catalog-server</code>), you can also combine an explicit fallback
+override with catalog-resolved forecast capacity:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">catalog-server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-8B</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-8b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscale-server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">catalog-server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Predictive</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">predictive</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">horizonSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minPoints</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">serverTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1200&#34;</span><span class="w">  </span><span class="c"># Explicit fallback override</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;500&#34;</span><span class="w">        </span><span class="c"># required for Server catalog resolution</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">          </span><span class="c"># required for Server catalog resolution</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPrior</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">catalogRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling-priors</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">priors.yaml</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span></span></span></code></pre></div>
+</div>
+<p>Verify resolved priors and conditions:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-server -o json <span class="p">|</span>
+</span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;{priors: .status.resolvedCapacityPriors,
+</span></span></span><span class="line"><span class="cl"><span class="s1">       conditions: [.status.conditions[] | select(.type == &#34;CapacityPriorsReady&#34; or .type == &#34;Blocked&#34;)]}&#39;</span></span></span></code></pre></div>
+</div>
+<p>When a target matches an embedded catalog profile, omit both <em><code>serverTargetTokensPerSecond</code></em> and
+<em><code>catalogRef</code></em>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeploymentScaler
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: autoscale-server
+</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   algorithm:
+</span></span><span class="line"><span class="cl">     type: Predictive
+</span></span><span class="line"><span class="cl">     predictive:
+</span></span><span class="line"><span class="cl">       tokenThroughput:
+</span></span><span class="line"><span class="cl"><span class="gd">-        serverTargetTokensPerSecond: &#34;1200&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span>         ttftTargetMilliseconds: &#34;500&#34;
+</span></span><span class="line"><span class="cl">         itlTargetMilliseconds: &#34;50&#34;
+</span></span><span class="line"><span class="cl">     capacityPrior:
+</span></span><span class="line"><span class="cl"><span class="gd">-      catalogRef:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-        name: autoscaling-priors
+</span></span></span><span class="line"><span class="cl"><span class="gd">-        key: priors.yaml
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span>       headroom: &#34;0.75&#34;
+</span></span></code></pre></div>
+</div>
+<p>To switch back to manual capacities, remove <em><code>capacityPrior</code></em> and supply explicit capacity fields:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeploymentScaler
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: autoscale-server
+</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   algorithm:
+</span></span><span class="line"><span class="cl">     type: Predictive
+</span></span><span class="line"><span class="cl">     predictive:
+</span></span><span class="line"><span class="cl"><span class="gi">+      serverTokenCapacityPerReplica: &#34;2000&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span>       tokenThroughput:
+</span></span><span class="line"><span class="cl"><span class="gi">+        serverTargetTokensPerSecond: &#34;1200&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span><span class="gd">-    capacityPrior:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      headroom: &#34;0.75&#34;
+</span></span></span></code></pre></div>
+</div>
+<p><code>CREATE</code> rejects an unresolved catalog prior when the target already exists, whereas <code>UPDATE</code> admits
+with a warning so you can switch to <code>Shadow</code>, remove <em><code>capacityPrior</code></em>, or supply manual capacities
+while reconciliation sets <code>CapacityPriorsReady=False</code> and <code>Blocked=True</code>.</p>
+<h3 id="encoder-replica-ratios">Encoder replica ratios</h3>
+<p>For a multimodal <em>EPD</em> target (<a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/encode-prefill-decode/">Encode, Prefill and Decode Walkthrough</a>
+),
+couple <em>encode</em> replica counts via <em><code>ratios</code></em> rather than an encode token-throughput target:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-scaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">epd-arm3-epd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">encode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">TokenThroughput</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prefillTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2000&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">decodeTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;800&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ratios</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">numeratorRole</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">denominatorRole</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">numeratorRole</span><span class="p">:</span><span class="w"> </span><span class="l">encode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">denominatorRole</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div>
+<h2 id="live-scaling">Live scaling</h2>
+<h3 id="step-4-activate-scaling">Step 4: Activate scaling</h3>
+<p>Change <em><code>spec.mode</code></em> to <code>Active</code> in <code>scaling-policy.yaml</code>, apply it, and confirm <code>Bound=True</code> and
+<code>Active=True</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f scaling-policy.yaml
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-vllm-pd -o json <span class="p">|</span>
+</span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;{conditions: .status.conditions, binding: .status.binding, roles: .status.roles}&#39;</span></span></span></code></pre></div>
+</div>
+<p>Do not hand-edit target <em><code>spec.roles[].replicas</code></em> while the scaler holds <code>Active=True</code>; the scaler
+owns those replica fields for its active binding term. Drive concurrency-24 load in one terminal and
+watch scale-out in another:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">BENCH_INCLUSTER</span><span class="o">=</span><span class="m">1</span> python3 .agents/skills/gpustack-operator-benchmark/scripts/bench_client.py load <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --endpoint http://autoscaling-vllm-pd-router.gpustack-bench.svc:8000 <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --model Qwen/Qwen3-8B --arm active --suite autoscaling --label ramp <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --input-tokens <span class="m">1024</span> --output-tokens <span class="m">256</span> --concurrency <span class="m">24</span> --duration <span class="m">75</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --out /tmp/scaler-ramp.json --requests-out /tmp/scaler-ramp-requests.jsonl</span></span></code></pre></div>
+</div>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment autoscaling-vllm-pd -w
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-vllm-pd -o json <span class="p">|</span>
+</span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;{roles: .status.roles, commit: .status.lastCommit,
+</span></span></span><span class="line"><span class="cl"><span class="s1">       pending: .status.pendingCohort, conditions: .status.conditions}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods,workloads</span></span></code></pre></div>
+</div>
+<p>Verify that <em><code>lastCommit</code></em> advances, new <code>Pod</code>s reach <code>Ready</code>, and router per-worker request counters
+increase on the added replicas. If <em><code>pendingCohort</code></em> stays non-null, inspect Kueue quota and <code>Pod</code>
+events before raising <em><code>maxReplicas</code></em>.</p>
+<h3 id="step-5-observe-replica-retirement">Step 5: Observe replica retirement</h3>
+<p>Drop load to concurrency 2 for 600 s (exceeding the default 300 s scale-down stabilization window plus
+router withdrawal and drain budgets; setting <code>0</code> stores the 300 s default):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">BENCH_INCLUSTER</span><span class="o">=</span><span class="m">1</span> python3 .agents/skills/gpustack-operator-benchmark/scripts/bench_client.py load <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --endpoint http://autoscaling-vllm-pd-router.gpustack-bench.svc:8000 <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --model Qwen/Qwen3-8B --arm active --suite autoscaling --label cooldown <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --input-tokens <span class="m">1024</span> --output-tokens <span class="m">256</span> --concurrency <span class="m">2</span> --duration <span class="m">600</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --out /tmp/scaler-cooldown.json --requests-out /tmp/scaler-cooldown-requests.jsonl</span></span></code></pre></div>
+</div>
+<p>Poll retirement and scale-down status during cooldown:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment autoscaling-vllm-pd -o json <span class="p">|</span>
+</span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;{roles: .status.roles, retirement: .status.retirement}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-vllm-pd -o json <span class="p">|</span>
+</span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;{roles: .status.roles, lastScaleDown: .status.lastScaleDown, conditions: .status.conditions}&#39;</span></span></span></code></pre></div>
+</div>
+<p>Retiring replicas step through endpoint withdrawal (<code>Disqualified</code>), <code>Draining</code>, and <code>Deleting</code>
+(<a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/runtime-control/#pause-and-retirement">Pause and retirement</a>
+). Keep
+<em><code>maxReplicas</code></em> at or above current counts so planning does not block on <code>BoundsConflict</code>.</p>
+<h2 id="verification">Verification</h2>
+<p>Captured output from the standalone single-role <code>Server</code> lifecycle verification run:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">PASS | the target&#39;s replica count rises under load | the count of the role server is 2 while the heavy phase runs
+</span></span><span class="line"><span class="cl">PASS | the scaler records the vector it committed | the scaler committed server=2 on term 1
+</span></span><span class="line"><span class="cl">PASS | the replica count falls when the scaler is narrowed | the count of the role server is 1 after the scaler was narrowed
+</span></span><span class="line"><span class="cl">PASS | the retirement that carried the count down is observed | the target carried the retirement states Disqualified,Draining</span></span></code></pre></div>
+</div>
+<p>That standalone <code>Server</code> run verified replica scale-out, new-replica traffic, and <code>Disqualified</code> →
+<code>Draining</code> retirement to 1 Ready survivor, while failing its zero-error gate due to request errors
+during scale-out (<a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling-benchmark/#retirement">Retirement</a>
+).</p>
+<h3 id="catalog-prior-resolution">Catalog prior resolution</h3>
+<p><code>Catalog.Resolve</code> converts an offline benchmark curve into a per-replica token capacity seed. Below is
+the shipped profile <code>(Server, deepseek-ai/DeepSeek-R1-0528, fp8, sglang, amd-mi325x, gpusPerReplica: 8, tensorParallel: 8)</code> from <code>pkg/worker/scaling/priors/priors.yaml</code> (illustrative <code>tokens/s/MW</code> assumes a
+~0.0115 MW 8-GPU node; interactivity is <code>1000 / ITL P90</code>):</p>
+<table>
+  <thead>
+      <tr>
+          <th>Concurrency</th>
+          <th style="text-align: right">Per-replica <code>tokens/s</code></th>
+          <th style="text-align: right"><code>tokens/s/MW</code></th>
+          <th style="text-align: right"><em>TTFT</em> P90 (ms)</th>
+          <th style="text-align: right"><em>ITL</em> P90 (ms)</th>
+          <th style="text-align: right"><code>tokens/s/user</code></th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>4</td>
+          <td style="text-align: right">1875.02</td>
+          <td style="text-align: right">~163k</td>
+          <td style="text-align: right">665.4</td>
+          <td style="text-align: right">16.95</td>
+          <td style="text-align: right">59.0</td>
+      </tr>
+      <tr>
+          <td>8</td>
+          <td style="text-align: right">3167.82</td>
+          <td style="text-align: right">~275k</td>
+          <td style="text-align: right">1001.7</td>
+          <td style="text-align: right">18.47</td>
+          <td style="text-align: right">54.1</td>
+      </tr>
+      <tr>
+          <td>16</td>
+          <td style="text-align: right">4988.96</td>
+          <td style="text-align: right">~434k</td>
+          <td style="text-align: right">1119.7</td>
+          <td style="text-align: right">20.82</td>
+          <td style="text-align: right">48.0</td>
+      </tr>
+      <tr>
+          <td>32</td>
+          <td style="text-align: right">6496.65</td>
+          <td style="text-align: right">~565k</td>
+          <td style="text-align: right">1516.6</td>
+          <td style="text-align: right">28.32</td>
+          <td style="text-align: right">35.3</td>
+      </tr>
+      <tr>
+          <td>64</td>
+          <td style="text-align: right">7630.2</td>
+          <td style="text-align: right">~663k</td>
+          <td style="text-align: right">2636.2</td>
+          <td style="text-align: right">44.44</td>
+          <td style="text-align: right">22.5</td>
+      </tr>
+  </tbody>
+</table>
+<p>Configure a scaler holding P90 <em>TTFT</em> <code>&lt;= 2000 ms</code> and P90 <em>ITL</em> <code>&lt;= 33 ms</code> (~30.3 <code>tokens/s/user</code>):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-scaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">TokenThroughput</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">latencyQuantile</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.90&#34;</span><span class="w">  </span><span class="c"># default: 0.95</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2000&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;33&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPrior</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span></span></span></code></pre></div>
+</div>
+<p>Resolution proceeds in four steps:</p>
+<ol>
+<li>Matches the normalized <code>(role, model, quantization, engine, hardware, topology)</code> tuple automatically.</li>
+<li>Filters sweep points against the P90 targets: concurrencies <code>4</code>–<code>32</code> pass, while <code>64</code> breaches both
+(<code>HigherLoadSLOFailure</code>; if all points pass, capacity caps at <code>64</code> as <code>ExplicitSaturation</code> without
+extrapolation).</li>
+<li>Picks the highest-throughput feasible point (<code>concurrency: 32</code> at <code>6496.65 tokens/s</code>).</li>
+<li>Multiplies by <em><code>headroom</code></em>: <code>6496.65 × 0.75 = 4872.49 tokens/s</code> per replica, so <code>15,000 tokens/s</code>
+demand plans <code>ceil(15000 / 4872.49) = 4</code> replicas.</li>
+</ol>
+<h3 id="capacity-estimate-comparison">Capacity estimate comparison</h3>
+<p>To compare <code>frozen-manual</code>, <code>tuned-manual</code>, and <code>catalog</code> configurations on a single-<code>Server</code>
+<code>ModelDeployment</code> (no <em><code>router</code></em>, <em><code>kvCache</code></em>, or <em><code>kvTransfer</code></em>, and offline <code>evaluationTraceID</code>
+disjoint from <code>fitRunIDs</code>), copy
+<code>.agents/skills/gpustack-operator-benchmark/manifests/autoscaling-comparison.json</code>, fill in
+<code>REPLACE_WITH_*</code> placeholders, and validate offline:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">bash .agents/skills/gpustack-operator-benchmark/cases/case-5-autoscaling.sh <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --capacity-comparison --config FILE --out DIR --validate-only
+</span></span><span class="line"><span class="cl">python3 .agents/skills/gpustack-operator-benchmark/scripts/autoscaling_report.py <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  ARM_DIR --out REPORT_JSON</span></span></code></pre></div>
+</div>
+<p><code>--validate-only</code> makes zero cluster calls and exits <code>0</code> (valid) or <code>2</code> (input error); <code>--execute</code>
+runs at least three repeats per configuration and writes <code>comparison.json</code> (<code>0</code> success, <code>1</code>
+round/cleanup failure, <code>2</code> validation error, <code>130</code> interrupt). See
+<a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling-benchmark/#capacity-estimate-comparison">Capacity estimate comparison</a>
+
+for the 18-round H200 benchmark results.</p>
+<h2 id="cleanup">Cleanup</h2>
+<p>Delete the <code>ModelDeploymentScaler</code> first so its finalizer clears the <code>scaler-binding</code> annotation, then
+delete the target <code>ModelDeployment</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench delete modeldeploymentscaler autoscale-vllm-pd --wait<span class="o">=</span><span class="nb">true</span>
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment autoscaling-vllm-pd -o json <span class="p">|</span>
+</span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;.metadata.annotations[&#34;modeldeployment.gpustack.ai/scaler-binding&#34;]&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench delete modeldeployment autoscaling-vllm-pd --wait<span class="o">=</span>true</span></span></code></pre></div>
+</div>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Symptom</th>
+          <th>Signal</th>
+          <th>Resolution</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Target <em><code>replicas</code></em> stay at <code>1</code></td>
+          <td><code>Active=False</code> (<code>Reason: ShadowMode</code>)</td>
+          <td>Expected in <code>Shadow</code> mode; set <code>spec.mode: Active</code> on <code>ModelDeploymentScaler</code> when ready.</td>
+      </tr>
+      <tr>
+          <td>Apply rejected with <code>AlreadyBound</code></td>
+          <td>Another scaler owns <code>scaler-binding</code></td>
+          <td>Edit the existing <code>ModelDeploymentScaler</code>, or delete it and wait for binding release first.</td>
+      </tr>
+      <tr>
+          <td><code>Reason: InvalidBinding</code></td>
+          <td>Corrupted <code>scaler-binding</code> annotation on target</td>
+          <td>Remove or repair <code>modeldeployment.gpustack.ai/scaler-binding</code> on the target <code>ModelDeployment</code>.</td>
+      </tr>
+      <tr>
+          <td><code>Reason: BoundsConflict</code> or <code>RatioConflict</code></td>
+          <td>Live replica counts fall outside policy bands</td>
+          <td>Widen <em><code>minReplicas</code></em>/<em><code>maxReplicas</code></em> or <em><code>ratios</code></em> on <code>ModelDeploymentScaler</code> to include current counts.</td>
+      </tr>
+      <tr>
+          <td><code>MetricsReady=False/WaitingForMetrics</code></td>
+          <td>Missing successive metric samples</td>
+          <td>Wait at least two sampling intervals and verify Ready role <code>Pod</code>s expose engine metrics.</td>
+      </tr>
+      <tr>
+          <td><code>CapacityPriorsReady=False</code></td>
+          <td><code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, or <code>IncompatibleMetric</code></td>
+          <td>Check <code>catalogRef</code>, precision annotation/<code>--quantization</code>, single-<code>Pod</code> role eligibility, and latency targets, or switch to explicit manual capacities.</td>
+      </tr>
+      <tr>
+          <td><code>Reason: ResourceExhausted</code></td>
+          <td>Scale-out blocked by Kueue quota</td>
+          <td>Inspect <em><code>status.pendingCohort</code></em>, <code>Workload</code>s, and <code>ClusterQueue</code> capacity.</td>
+      </tr>
+      <tr>
+          <td><code>Reason: ScaleDownAborted</code></td>
+          <td>Replica drain aborted</td>
+          <td>Inspect <em><code>status.lastScaleDown</code></em> and target <em><code>status.retirement</code></em>; wait out the abort cooldown after fixing drain blockers.</td>
+      </tr>
+      <tr>
+          <td><code>Reason: PacingBounded</code></td>
+          <td>Cooldown or step cap still active</td>
+          <td>Wait for <em><code>stabilizationWindowSeconds</code></em> and retirement grace timers to elapse.</td>
+      </tr>
+      <tr>
+          <td>Router errors during scale-out</td>
+          <td>Client 5xx or connection resets</td>
+          <td>Capture router and engine logs; <code>VLLM_HTTP_TIMEOUT_KEEP_ALIVE</code> reduces but does not eliminate all scale-out resets.</td>
+      </tr>
+      <tr>
+          <td>SGLang TCP KV transfer errors</td>
+          <td>Engine port-exhaustion logs</td>
+          <td>Enable <a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/engine-versions/#limitations"><code>model-deployment-tcp-tw-reuse</code></a>
+ after permitting <code>net.ipv4.tcp_tw_reuse</code> on kubelets.</td>
+      </tr>
+  </tbody>
+</table>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
+ (autoscaler
+contracts and capacity priors)</li><li><a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling-benchmark/">Model Deployment Scaling Benchmark</a>
+
+(H100 and H200 measurements)</li><li><a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/runtime-control/">Online Runtime Control</a>
+
+(role pause guard and retirement lifecycle)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/runtime-control/">Online Runtime Control Walkthrough</a>
+ — tune serving parameters live and test role pause.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#environment">Environment</a>
+      <ul>
+        <li><a href="#prerequisites">Prerequisites</a></li>
+      </ul>
+    </li>
+    <li><a href="#scaler-deployment">Scaler deployment</a>
+      <ul>
+        <li><a href="#step-1-deploy-scaling-target">Step 1: Deploy scaling target</a></li>
+        <li><a href="#step-2-review-shadow-recommendations">Step 2: Review Shadow recommendations</a></li>
+      </ul>
+    </li>
+    <li><a href="#step-3-choose-an-algorithm">Step 3: Choose an algorithm</a>
+      <ul>
+        <li><a href="#token-throughput">Token throughput</a></li>
+        <li><a href="#predictive">Predictive</a></li>
+        <li><a href="#catalog-capacity-estimates">Catalog capacity estimates</a></li>
+        <li><a href="#encoder-replica-ratios">Encoder replica ratios</a></li>
+      </ul>
+    </li>
+    <li><a href="#live-scaling">Live scaling</a>
+      <ul>
+        <li><a href="#step-4-activate-scaling">Step 4: Activate scaling</a></li>
+        <li><a href="#step-5-observe-replica-retirement">Step 5: Observe replica retirement</a></li>
+      </ul>
+    </li>
+    <li><a href="#verification">Verification</a>
+      <ul>
+        <li><a href="#catalog-prior-resolution">Catalog prior resolution</a></li>
+        <li><a href="#capacity-estimate-comparison">Capacity estimate comparison</a></li>
+      </ul>
+    </li>
+    <li><a href="#cleanup">Cleanup</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.12.1/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
+</body>
+</html>

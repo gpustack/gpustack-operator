@@ -295,7 +295,7 @@ In whole-unit aggregated fallback, *`status.resolvedCapacityPriors`* records one
 
 ## Local synthetic evaluation
 
-Evidence: synthetic simulation. The [capacity priors and local evaluation spec](https://github.com/gpustack/gpustack-operator/blob/8e2e3bb4bbc13e30f5876c97f4ecaceddb2c2e9e/specs/2026-10-26-inferencex-model-deployment-scaling.md)
+Evidence: synthetic simulation. The [capacity priors and local evaluation spec](https://github.com/gpustack/gpustack-operator/blob/016fe1d2b2b20bbdaeeec4c4f15d18c349393b24/specs/2026-10-26-inferencex-model-deployment-scaling.md)
 records `48` deterministic synthetic result rows across eight tuning traces (`manual`, `resolved`,
 and one `passive` candidate at seed factor `1`) plus two open-loop vs closed-loop examples, and two
 held-out traces (`heldout_bursts` and `heldout_length_cache_shift`, `11` rows each across `manual`
@@ -308,4 +308,4 @@ static seed control on `steady_noise` and `heldout_length_cache_shift` at seed f
 
 ---
 
-**See also** — [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling/index.md) (operator configuration, graceful retirement and troubleshooting) · [Model Deployment Scaling Simulation](model-deployment-scaling-simulation.md) (three-algorithm synthetic simulation) · [Model Deployment Metrics](model-deployment-metrics.md) (`/metrics` subresource and Prometheus series) · [Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling-benchmark/index.md) (H100 and H200 measurements)
+**See also** — [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/index.md) (operator configuration, graceful retirement and troubleshooting) · [Model Deployment Scaling Simulation](model-deployment-scaling-simulation.md) (three-algorithm synthetic simulation) · [Model Deployment Metrics](model-deployment-metrics.md) (`/metrics` subresource and Prometheus series) · [Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling-benchmark/index.md) (H100 and H200 measurements)

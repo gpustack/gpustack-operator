@@ -26,7 +26,7 @@ Ready instances by kind: `R` is managed router `Pod`s, `S` is ordinary servers, 
 servers; `1R1E1P1D` means one Ready router, one Ready encoder, one Ready prefiller and one Ready decoder.
 
 **During a replacement, status combines desired and observed fields.** See
-[Rollout behavior](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/configuration/index.md#rollout-behavior). `desired` and *`parallelism`* describe the current
+[Rollout behavior](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/index.md#rollout-behavior). `desired` and *`parallelism`* describe the current
 spec; they can differ from running replicas while replacement waits. `ready` counts replicas still
 serving their deployed configuration. `unmanaged` and cache conditions read deployed command mode.
 
@@ -71,7 +71,7 @@ engine's own `GET /health` on the port the `Service` targets, so `ready == desir
 answers" are one fact rather than two.
 
 The KV cache store's leader answers a route of the same name that is deliberately **not** a readiness
-signal; see [KV Cache Election and Failover](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/kv-cache/leader/index.md). They are different programs, and only the
+signal; see [KV Cache Election and Failover](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/leader/index.md). They are different programs, and only the
 engine's route is read here.
 
 **The startup gate allows thirty minutes per attempt, not in total.** A replica that has not
@@ -272,7 +272,7 @@ described in [Model Deployment Shutdown](model-deployment-shutdown.md#retirement
 
 Conditions describe states that a single phase cannot represent. They are independent: "quota reserved but
 cache not attached" is a real and actionable state. Most conditions are described below; `WeightsReady` is
-described with the artifact it reports on, in [Model Artifact](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/artifact/index.md#status).
+described with the artifact it reports on, in [Model Artifact](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/artifact/index.md#status).
 
 ### DomainRegistered
 
@@ -481,7 +481,7 @@ saw, and no pass that reports this has seen any.
 ### ElasticResize
 
 Whether an elastic scale stands blocked or terminally refused. It is
-written only for a deployment with an `elastic.dataParallelWidth` role; [Elastic EP](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/elastic-ep/index.md) owns the
+written only for a deployment with an `elastic.dataParallelWidth` role; [Elastic EP](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep/index.md) owns the
 resize lifecycle it reports on.
 
 | Value | Reason | Meaning |
@@ -495,7 +495,7 @@ levels back to `True` on its own once a later pass proves the live world again.
 
 ### RuntimeControlSynced
 
-Reports live convergence across answering `Pod`s and per-role status (`observedGeneration`, `synced`, `reason`, `message`, `paused`, `appliedConfigDigest`, `convergedPods`, `totalAnsweringPods`, `unsupportedFields`) in *`status.roles[*].runtimeControl`*; see [Online Runtime Control](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/runtime-control/index.md#step-3-verify-runtime-settings) for condition reasons and troubleshooting.
+Reports live convergence across answering `Pod`s and per-role status (`observedGeneration`, `synced`, `reason`, `message`, `paused`, `appliedConfigDigest`, `convergedPods`, `totalAnsweringPods`, `unsupportedFields`) in *`status.roles[*].runtimeControl`*; see [Online Runtime Control](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/runtime-control/index.md#step-3-verify-runtime-settings) for condition reasons and troubleshooting.
 
 ## Scaler annotations
 
@@ -505,13 +505,13 @@ replica count and which decision last changed it. They sit in *`metadata.annotat
 *`status`*, because the single-writer fence is enforced at admission and a status field cannot
 refuse a write.
 
-[Scaler ownership rules](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling/index.md#scaler-ownership-rules) owns the payload of both annotations, the
+[Scaler ownership rules](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/index.md#scaler-ownership-rules) owns the payload of both annotations, the
 admission rules for bound and unbound deployments, and the escape hatch when a scaler is gone;
-[GitOps sync](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling/index.md#gitops-sync) covers how a GitOps agent
+[GitOps sync](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/index.md#gitops-sync) covers how a GitOps agent
 ignores the fields the scaler owns.
 
 The scaler's own `status` reports what it observed, what it recommends and what blocks it;
-[Scaler status](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling/index.md#status) owns that contract.
+[Scaler status](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/index.md#status) owns that contract.
 
 ## Group status
 
@@ -603,8 +603,8 @@ a reader asks about when a rank fails.
 
 ---
 
-**See also** — [Model Deployment Configuration](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/configuration/index.md) (the contract this status reports on) ·
-[Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling/index.md) (the scaler that owns a bound replica count) ·
-[Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/prefill-decode/index.md) (pairing *prefill* and *decode* roles) ·
-[Encode, Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/encode-prefill-decode/index.md) (*encode*, *prefill* and *decode* disaggregation) ·
-[KV Cache Election and Failover](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/kv-cache/leader/index.md) (the leader process the conditions distinguish from the operator's own).
+**See also** — [Model Deployment Configuration](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/index.md) (the contract this status reports on) ·
+[Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/index.md) (the scaler that owns a bound replica count) ·
+[Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/prefill-decode/index.md) (pairing *prefill* and *decode* roles) ·
+[Encode, Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/encode-prefill-decode/index.md) (*encode*, *prefill* and *decode* disaggregation) ·
+[KV Cache Election and Failover](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/leader/index.md) (the leader process the conditions distinguish from the operator's own).

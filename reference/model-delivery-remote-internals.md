@@ -243,7 +243,7 @@ spec:
 ## Benchmark sweep details
 
 Evidence: recorded capture. Host RAM budgets, shard ceilings and detailed ModelExpress timing
-breakdowns backing the matched benchmark tables in [Remote Weight Delivery](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/remote/index.md#results).
+breakdowns backing the matched benchmark tables in [Remote Weight Delivery](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/remote/index.md#results).
 
 ### Ascend HIXL host budgets
 
@@ -272,4 +272,4 @@ breakdowns backing the matched benchmark tables in [Remote Weight Delivery](http
 
 ---
 
-**See also** — [Remote Weight Delivery](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/remote/index.md) (operator setup, matched benchmark tables, troubleshooting and rollback) · [Ascend A5 Matrix](ascend-a5-matrix.md#remote-delivery-matrix) (Ascend A5 remote transfer scenarios) · [Node Model Store](model-delivery-node-store.md) (node cache verification and CSI mounts)
+**See also** — [Remote Weight Delivery](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/remote/index.md) (operator setup, matched benchmark tables, troubleshooting and rollback) · [Ascend A5 Matrix](ascend-a5-matrix.md#remote-delivery-matrix) (Ascend A5 remote transfer scenarios) · [Node Model Store](model-delivery-node-store.md) (node cache verification and CSI mounts)

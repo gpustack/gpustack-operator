@@ -255,4 +255,4 @@ at the top of that file; when either changes, compare the rows here with the pre
 
 **See also** — [Scheduling Chain](devices-scheduling.md#unit-spec-defaults)
 (where the unit spec is stamped) · [Admission](devices-admission.md#type-and-instance-webhooks)
-(what the webhooks enforce on it) · [Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/devices/scheduling/index.md#step-4-manage-a-custom-instancetype)
+(what the webhooks enforce on it) · [Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/devices/scheduling/index.md#step-4-manage-a-custom-instancetype)

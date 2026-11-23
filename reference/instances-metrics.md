@@ -538,6 +538,6 @@ it is accepted and never enforced, so the port stays open.
 
 ---
 
-**See also** — [Architecture](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/getting-started/architecture/index.md) · [Device
+**See also** — [Architecture](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/getting-started/architecture/index.md) · [Device
 Discovery](devices-discovery.md) for how the Device Manager samples accelerators ·
-[Internals](https://github.com/gpustack/gpustack-operator/blob/8e2e3bb4bbc13e30f5876c97f4ecaceddb2c2e9e/docs/contribute/internals.md) for the Device Manager's subcommands and flags.
+[Internals](https://github.com/gpustack/gpustack-operator/blob/016fe1d2b2b20bbdaeeec4c4f15d18c349393b24/docs/contribute/internals.md) for the Device Manager's subcommands and flags.

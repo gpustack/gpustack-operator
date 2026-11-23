@@ -7,7 +7,7 @@ same node. The `model-manager` CSI plugin downloads missing content, verifies it
 read-only through the `model.csi.gpustack.ai` driver. `Pod`s using the same digest share the cached
 files while those files remain on the node.
 
-[Model Store Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/operations/index.md) covers enabling and managing the cache.
+[Model Store Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/operations/index.md) covers enabling and managing the cache.
 
 ## Contents
 
@@ -26,7 +26,7 @@ files while those files remain on the node.
 The following shows a worker-managed object returned by `kubectl get nodemodelstore -o yaml`.
 Do not apply it as a manifest: the public API supports reads and deletion, and the worker and
 node plugin maintain its configuration and status. Configure the cache through
-[Model Store Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/operations/index.md).
+[Model Store Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/operations/index.md).
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -279,11 +279,11 @@ It never removes a referenced tree or a partial being written, and it reads refe
 node's own mounts, never from the API.
 
 A digest listed in *`spec.pinned`* is never a candidate at all; the pins arrive from
-[`ModelPrefetch`](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/prefetch/index.md) retention and survive collection until the pin is withdrawn,
+[`ModelPrefetch`](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/prefetch/index.md) retention and survive collection until the pin is withdrawn,
 though it still counts toward the usage the watermarks read.
 
 How the watermarks are capped when the cache shares kubelet's filesystem is under [the capacity
-rule](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/operations/index.md#cache-capacity-accounting).
+rule](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/operations/index.md#cache-capacity-accounting).
 
 When the references cannot be read, no configuration has been applied yet, or the node's *`spec`*
 fails its check, a collection removes nothing, a stale partial included, and the `Ready` message
@@ -323,13 +323,13 @@ downloads from this port for live bytes between the status thresholds.
   [a node-delivered model prefers the nodes holding
   it](topology-scheduling.md#node-delivered-model-placement).
 - **A download comes from the Hub**, directly or through the proxy, or, when
-  [node-to-node sync](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/prefetch/index.md#node-to-node-sync) is on, from a peer node that already holds
+  [node-to-node sync](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/prefetch/index.md#node-to-node-sync) is on, from a peer node that already holds
   the tree.
 
 ---
 
-**See also** — [Model Artifact](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/artifact/index.md) for the artifact and its other
+**See also** — [Model Artifact](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/artifact/index.md) for the artifact and its other
 deliveries · [Model Artifact API](model-delivery-artifact-api.md) for resource status and
-`progress` · [Node-to-Node Sync](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/prefetch/index.md#node-to-node-sync) for where a node's bytes come from ·
-[Model Store Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/operations/index.md) for enabling, configuring and upgrading ·
+`progress` · [Node-to-Node Sync](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/prefetch/index.md#node-to-node-sync) for where a node's bytes come from ·
+[Model Store Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/operations/index.md) for enabling, configuring and upgrading ·
 [Settings](settings.md#settings) for the `Setting`s *`spec`* is built from.

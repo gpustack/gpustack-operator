@@ -196,4 +196,4 @@ Parallelism degrees and card counts are not inputs to this window calculation.
 
 ---
 
-**See also** — [Configuration](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/configuration/index.md) (operator override tiers, core manifests and status diagnosis) · [Parameters](model-deployment-parameters.md) (complete parameter injection tables) · [Model Deployment Status](model-deployment-status.md) (conditions and retirement fields) · [Model Deployment Shutdown](model-deployment-shutdown.md) (PreStop drain and retirement budgets)
+**See also** — [Configuration](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/index.md) (operator override tiers, core manifests and status diagnosis) · [Parameters](model-deployment-parameters.md) (complete parameter injection tables) · [Model Deployment Status](model-deployment-status.md) (conditions and retirement fields) · [Model Deployment Shutdown](model-deployment-shutdown.md) (PreStop drain and retirement budgets)

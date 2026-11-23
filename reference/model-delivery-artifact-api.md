@@ -35,8 +35,8 @@ kubectl get nodemodelstores.v1.worker.gpustack.ai
 - `NodeModelStore` supports reads and deletion. The worker manages its *`spec`*, and each node's plugin
   reports *`status`*. Deletion supports Kubernetes garbage collection; the worker recreates the object
   while its node runs the plugin.
-- Resource fields are described in [Model Artifact](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/artifact/index.md#configuration),
-  [Model Prefetch](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/prefetch/index.md), and [Node Model Store](model-delivery-node-store.md#resource).
+- Resource fields are described in [Model Artifact](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/artifact/index.md#configuration),
+  [Model Prefetch](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/prefetch/index.md), and [Node Model Store](model-delivery-node-store.md#resource).
 
 ## Progress subresource
 
@@ -122,7 +122,7 @@ column names what is missing and who owns it.
 | `resolved_paths` on the worker | the fixed mount path in the consumer's container; host paths are never exposed | by design |
 | `local_dir` | none: the plugin owns the cache layout | by design |
 | Listing a worker's model files | `NodeModelStore` get, list, watch | none |
-| Download to a worker ahead of use | a [ModelPrefetch](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/prefetch/index.md) naming nodes | none |
+| Download to a worker ahead of use | a [ModelPrefetch](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/prefetch/index.md) naming nodes | none |
 | Delete with `cleanup_on_delete` | delete the prefetch; collection after the last reference and its grace | none |
 | `reset` (retry now) | automatic backoff to *`retryTime`* | not planned |
 | One row per source per worker | one entry per digest per node, shared by artifacts with the same content | none |
@@ -141,8 +141,8 @@ column names what is missing and who owns it.
 
 ---
 
-**See also** — [Model Artifact](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/artifact/index.md) for the artifact itself ·
+**See also** — [Model Artifact](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/artifact/index.md) for the artifact itself ·
 [Node Model Store](model-delivery-node-store.md) for each node's entries and the progress write rule ·
-[Node-to-Node Sync](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/prefetch/index.md#node-to-node-sync) for where a node's bytes come from ·
+[Node-to-Node Sync](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/prefetch/index.md#node-to-node-sync) for where a node's bytes come from ·
 [Model Deployment Metrics](model-deployment-metrics.md) for the other subresource built
 the same way.

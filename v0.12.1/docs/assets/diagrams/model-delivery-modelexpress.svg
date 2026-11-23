@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 800" role="img" aria-labelledby="title desc">
+  <title id="title">ModelExpress Peer And Source Delivery</title>
+  <desc id="desc">A seed replica loads from a ModelPrefetch source via GpustackLoadStrategy when no peer is ready, then publishes tensor descriptors and cache manifests to the metadata server. A scale-out peer replica discovers the seed replica and receives GPU tensors over NIXL D2D and compile cache artifacts over NIXL RDMA. If the metadata server restarts, a new replica falls back to GpustackLoadStrategy from the ModelPrefetch source.</desc>
+  <defs>
+    <style>
+      :root { --bg:#f8fafc; --canvas-stroke:#e2e8f0; --card:#fff; --card-stroke:#cbd5e1; --domain:#f0fdf4; --domain-stroke:#10b981; --ink:#0f172a; --muted:#475569; --emerald:#059669; --teal:#0891b2; --amber:#d97706; --grid:#eef2f7; }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg:#0b1220; --canvas-stroke:#1e293b; --card:#111827; --card-stroke:#334155; --domain:#071f18; --domain-stroke:#34d399; --ink:#f8fafc; --muted:#cbd5e1; --emerald:#34d399; --teal:#22d3ee; --amber:#fbbf24; --grid:#131c2e; }
+      }
+      @media (prefers-reduced-motion: reduce) { .flow, .fallback { animation:none !important; } }
+      text { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif; fill:var(--ink); }
+      .kicker { font-size:11px; font-weight:800; letter-spacing:.14em; fill:var(--emerald); }
+      .title { font-size:26px; font-weight:800; }
+      .sub { font-size:14px; fill:var(--muted); }
+      .heading { font-size:16px; font-weight:700; fill:#fff; }
+      .node { font-size:17px; font-weight:700; }
+      .detail { font-size:13px; fill:var(--muted); }
+      .label { font-size:13px; font-weight:700; fill:var(--ink); }
+      .canvas { fill:var(--bg); stroke:var(--canvas-stroke); stroke-width:1.5; }
+      .domain { fill:var(--domain); stroke:var(--domain-stroke); stroke-width:1.8; }
+      .card { fill:var(--card); stroke:var(--card-stroke); stroke-width:1.5; }
+      .inner { fill:var(--bg); stroke:var(--card-stroke); stroke-width:1.5; }
+      .flow { fill:none; stroke:var(--emerald); stroke-width:3; stroke-dasharray:10 7; animation:dash .8s linear infinite; }
+      .meta { fill:none; stroke:var(--teal); stroke-width:2.5; }
+      .fallback { fill:none; stroke:var(--amber); stroke-width:3; stroke-dasharray:10 7; animation:dash .8s linear infinite; }
+      @keyframes dash { to { stroke-dashoffset:-34; } }
+    </style>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="var(--grid)"/></pattern>
+    <marker id="green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="var(--emerald)"/></marker>
+    <marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="var(--teal)"/></marker>
+    <marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="var(--amber)"/></marker>
+  </defs>
+  <rect class="canvas" x="8" y="8" width="1384" height="784" rx="20"/>
+  <rect x="9" y="9" width="1382" height="782" rx="19" fill="url(#grid)"/>
+  <text class="kicker" x="32" y="42">GPUSTACK OPERATOR / MODEL DELIVERY</text>
+  <text class="title" x="32" y="77">ModelExpress Peer And Source Delivery</text>
+  <text class="sub" x="32" y="102">Seed replica load, NIXL D2D peer scale-out and restart fallback</text>
+
+  <rect class="domain" x="32" y="135" width="250" height="620" rx="16"/>
+  <path d="M48 135H266Q282 135 282 151V174H32V151Q32 135 48 135Z" fill="var(--teal)"/>
+  <text class="heading" x="50" y="161">ModelPrefetch source</text>
+  <rect class="card" x="52" y="415" width="210" height="100" rx="12"/>
+  <rect x="52" y="429" width="4" height="72" rx="2" fill="var(--teal)"/>
+  <text class="node" x="70" y="452">Source host memory</text>
+  <text class="detail" x="70" y="481">Prepared model weights</text>
+
+  <rect class="domain" x="305" y="135" width="1063" height="620" rx="16"/>
+  <path d="M321 135H1352Q1368 135 1368 151V174H305V151Q305 135 321 135Z" fill="var(--emerald)"/>
+  <text class="heading" x="325" y="161">ModelDeployment</text>
+  <rect class="card" x="708" y="202" width="255" height="100" rx="12"/>
+  <rect x="708" y="216" width="4" height="72" rx="2" fill="var(--teal)"/>
+  <text class="node" x="726" y="238">In-memory gRPC</text>
+  <text class="node" x="726" y="262">metadata server</text>
+  <text class="detail" x="726" y="284">&lt;md-name&gt;-modelexpress</text>
+
+  <rect class="card" x="335" y="350" width="290" height="270" rx="12"/>
+  <rect x="335" y="364" width="4" height="242" rx="2" fill="var(--amber)"/>
+  <text class="node" x="355" y="380">Seed replica</text>
+  <text class="detail" x="355" y="401">Replica 0</text>
+  <rect class="inner" x="355" y="420" width="250" height="72" rx="10"/>
+  <text class="node" x="372" y="447">Device DRAM</text>
+  <text class="detail" x="372" y="470">GPU tensors</text>
+  <rect class="inner" x="355" y="520" width="250" height="72" rx="10"/>
+  <text class="node" x="372" y="547">Compile cache</text>
+  <text class="detail" x="372" y="570">torch.compile / Triton</text>
+
+  <rect class="card" x="1048" y="350" width="290" height="270" rx="12"/>
+  <rect x="1048" y="364" width="4" height="242" rx="2" fill="var(--amber)"/>
+  <text class="node" x="1068" y="380">Peer replica</text>
+  <text class="detail" x="1068" y="401">Replica 1</text>
+  <rect class="inner" x="1068" y="420" width="250" height="72" rx="10"/>
+  <text class="node" x="1085" y="447">Device DRAM</text>
+  <text class="detail" x="1085" y="470">GPU tensors</text>
+  <rect class="inner" x="1068" y="520" width="250" height="72" rx="10"/>
+  <text class="node" x="1085" y="547">Compile cache</text>
+  <text class="detail" x="1085" y="570">torch.compile / Triton</text>
+
+  <path class="meta" d="M480 350V252H698" marker-end="url(#blue)"/>
+  <text class="label" x="495" y="223">Tensor descriptors</text>
+  <text class="label" x="495" y="242">and cache manifests</text>
+  <path class="meta" d="M963 252H1193V340" marker-end="url(#blue)"/>
+  <text class="label" x="977" y="223">Peer and cache</text>
+  <text class="label" x="977" y="242">discovery</text>
+  <path class="flow" d="M605 456H1058" marker-end="url(#green)">
+    <animate attributeName="stroke-dashoffset" from="0" to="-34" dur="0.8s" repeatCount="indefinite"/>
+  </path>
+  <text class="label" x="678" y="426">RdmaStrategy: NIXL D2D tensor stream</text>
+  <text class="detail" x="678" y="445">Direct GPU-to-GPU RDMA transfer</text>
+  <path class="flow" d="M605 556H1058" marker-end="url(#green)">
+    <animate attributeName="stroke-dashoffset" from="0" to="-34" dur="0.8s" repeatCount="indefinite"/>
+  </path>
+  <text class="label" x="678" y="526">NIXL compile cache transfer</text>
+  <text class="detail" x="678" y="545">Host-memory RDMA archive stream</text>
+  <path class="fallback" d="M157 515V690H480V628" marker-end="url(#orange)">
+    <animate attributeName="stroke-dashoffset" from="0" to="-34" dur="0.8s" repeatCount="indefinite"/>
+  </path>
+  <path class="fallback" d="M480 690H1193V628" marker-end="url(#orange)">
+    <animate attributeName="stroke-dashoffset" from="0" to="-34" dur="0.8s" repeatCount="indefinite"/>
+  </path>
+  <text class="label" x="470" y="718">Seed or fallback (no ready peer): GpustackLoadStrategy (NIXL H2H + H2D)</text>
+</svg>

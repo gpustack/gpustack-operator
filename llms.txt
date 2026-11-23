@@ -2,131 +2,131 @@
 
 > GPUStack Operator discovers accelerators, organizes capacity into pools, and schedules Kubernetes workloads for interactive use and model serving.
 
-Documentation version: v0.12.0. Source revision: 8e2e3bb4bbc13e30f5876c97f4ecaceddb2c2e9e.
+Documentation version: v0.12.1. Source revision: 016fe1d2b2b20bbdaeeec4c4f15d18c349393b24.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
 ## Getting Started
 
-- [Architecture](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/getting-started/architecture/index.md): Scheduling chain, workload flow, and core vocabulary
-- [Vendor Prerequisites](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/getting-started/vendor-prerequisites/index.md): Third-party dependencies and per-vendor driver preparation
+- [Architecture](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/getting-started/architecture/index.md): Scheduling chain, workload flow, and core vocabulary
+- [Vendor Prerequisites](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/getting-started/vendor-prerequisites/index.md): Third-party dependencies and per-vendor driver preparation
 
 ## Walkthroughs
 
-- [Walkthroughs](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/index.md): Select a complete cross-module example
-- [Heterogeneous Devices Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/devices/scheduling/index.md): Follow a recorded accelerator scheduling run
-- [RDMA Networking Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/rdma/network-endpoints/index.md): Request and verify RDMA endpoints and NUMA alignment
-- [Hierarchical Placement Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/topology/hierarchical-placement/index.md): Place serving replicas across zones and racks
-- [Shared Cache Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/kv-cache/shared-cache/index.md): Stand up a shared KV cache from backend to workload
-- [Model Prefetch Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/model-delivery/prefetch/index.md): Cache model weights and verify captured CR status
-- [Model Deployment Walkthroughs](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/index.md): Select a serving topology, hardware, and `AcceleratorType` example
-- [Prefill and Decode Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/prefill-decode/index.md): Deploy H100 prefill and decode roles with tested TCP transfer
-- [Encode, Prefill and Decode Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md): Deploy encode, prefill, and decode roles for multimodal serving
-- [Elastic EP Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/elastic-ep/index.md): Expand an H100 collective from four to eight GPUs in place
-- [External DP Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/external-dp/index.md): Deploy four fixed H100 ranks and verify Router coverage
-- [Model Deployment Scaling Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/scaling/index.md): Configure Shadow and Active scaling, algorithms, and retirement
-- [Online Runtime Control Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/runtime-control/index.md): Tune vLLM and SGLang live, pause roles, and resize Elastic EP
-- [Multi-Host Serving Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/multi-host/index.md): Scale serving models across multiple GPU nodes
+- [Walkthroughs](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/index.md): Select a complete cross-module example
+- [Heterogeneous Devices Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/devices/scheduling/index.md): Follow a recorded accelerator scheduling run
+- [RDMA Networking Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/rdma/network-endpoints/index.md): Request and verify RDMA endpoints and NUMA alignment
+- [Hierarchical Placement Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/topology/hierarchical-placement/index.md): Place serving replicas across zones and racks
+- [Shared Cache Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/kv-cache/shared-cache/index.md): Stand up a shared KV cache from backend to workload
+- [Model Prefetch Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/model-delivery/prefetch/index.md): Cache model weights and verify captured CR status
+- [Model Deployment Walkthroughs](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/index.md): Select a serving topology, hardware, and `AcceleratorType` example
+- [Prefill and Decode Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/prefill-decode/index.md): Deploy H100 prefill and decode roles with tested TCP transfer
+- [Encode, Prefill and Decode Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md): Deploy encode, prefill, and decode roles for multimodal serving
+- [Elastic EP Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/elastic-ep/index.md): Expand an H100 collective from four to eight GPUs in place
+- [External DP Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/external-dp/index.md): Deploy four fixed H100 ranks and verify Router coverage
+- [Model Deployment Scaling Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/scaling/index.md): Configure Shadow and Active scaling, algorithms, and retirement
+- [Online Runtime Control Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/runtime-control/index.md): Tune vLLM and SGLang live, pause roles, and resize Elastic EP
+- [Multi-Host Serving Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/multi-host/index.md): Scale serving models across multiple GPU nodes
 
 ## Heterogeneous Devices
 
-- [Heterogeneous Devices](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/devices/index.md): Choose an accelerator request mode
-- [Preflight Checks](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/devices/preflight/index.md): Validate node health before installation
-- [Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/devices/requests/index.md): Look up resource keys and request rules
-- [NVIDIA MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/devices/nvidia-mig/index.md): Enable and recover NVIDIA MIG partitions
-- [Hygon MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/devices/hygon-mig/index.md): Enable and recover Hygon partitions
-- [T-Head MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/devices/thead-mig/index.md): Enable and recover T-Head partitions
+- [Heterogeneous Devices](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/index.md): Choose an accelerator request mode
+- [Preflight Checks](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/preflight/index.md): Validate node health before installation
+- [Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/requests/index.md): Look up resource keys and request rules
+- [NVIDIA MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/nvidia-mig/index.md): Enable and recover NVIDIA MIG partitions
+- [Hygon MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/hygon-mig/index.md): Enable and recover Hygon partitions
+- [T-Head MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/thead-mig/index.md): Enable and recover T-Head partitions
 
 ## RDMA Networking
 
-- [RDMA Networking](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/rdma/index.md): Configure RDMA-backed workloads
-- [RDMA Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/rdma/operations/index.md): Request and verify RDMA endpoints and TopologyManager
+- [RDMA Networking](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/rdma/index.md): Configure RDMA-backed workloads
+- [RDMA Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/rdma/operations/index.md): Request and verify RDMA endpoints and TopologyManager
 
 ## Topology
 
-- [Topology](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/topology/index.md): Constrain workload placement by topology domain
-- [Topology-Aware Scheduling Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/topology/operations/index.md): Enable Topograph and diagnose pending placement
+- [Topology](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/topology/index.md): Constrain workload placement by topology domain
+- [Topology-Aware Scheduling Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/topology/operations/index.md): Enable Topograph and diagnose pending placement
 
 ## KV Cache
 
-- [KV Cache](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/kv-cache/index.md): Deploy shared inference prefix caches
-- [KV Cache Backend](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/kv-cache/backend/index.md): Configure Mooncake cache backends and capacity
-- [KV Cache Pools and Bindings](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/kv-cache/pool/index.md): Grant cache reuse domains and enforce pool quotas
-- [KV Cache Election and Failover](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/kv-cache/leader/index.md): Operate leader election, probes, and failover
-- [KV Cache Local Disk Tier](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/kv-cache/local-disk-tier/index.md): Configure local disk cache buckets, eviction, and disk-heavy nodes
+- [KV Cache](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/index.md): Deploy shared inference prefix caches
+- [KV Cache Backend](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/backend/index.md): Configure Mooncake cache backends and capacity
+- [KV Cache Pools and Bindings](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/pool/index.md): Grant cache reuse domains and enforce pool quotas
+- [KV Cache Election and Failover](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/leader/index.md): Operate leader election, probes, and failover
+- [KV Cache Local Disk Tier](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/local-disk-tier/index.md): Configure local disk cache buckets, eviction, and disk-heavy nodes
 
 ## Model Delivery
 
-- [Model Delivery](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/index.md): Select how model weights reach workloads
-- [Model Artifact](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/artifact/index.md): Resolve, verify, and mount weights from Hub, PVC, or OCI images
-- [Model Prefetch](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/prefetch/index.md): Warm weights ahead of launch and sync cached trees between nodes
-- [Remote Weight Delivery](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/remote/index.md): Load weights over the network from prepared sources
-- [Model Store Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-delivery/operations/index.md): Operate node cache watermarks, placement, and cleanup
+- [Model Delivery](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/index.md): Select how model weights reach workloads
+- [Model Artifact](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/artifact/index.md): Resolve, verify, and mount weights from Hub, PVC, or OCI images
+- [Model Prefetch](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/prefetch/index.md): Warm weights ahead of launch and sync cached trees between nodes
+- [Remote Weight Delivery](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/remote/index.md): Load weights over the network from prepared sources
+- [Model Store Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/operations/index.md): Operate node cache watermarks, placement, and cleanup
 
 ## Model Deployment
 
-- [Model Deployment](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/index.md): Deploy managed model serving workloads
-- [Configuration](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/configuration/index.md): Configure roles, resources, overrides, and placement
-- [Engine Compatibility](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/engine-versions/index.md): Check engine releases, store versions, and transports
-- [Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/prefill-decode/index.md): Pair disaggregated prefill and decode roles
-- [Prefill and Decode Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/prefill-decode-benchmark/index.md): Compare equal-GPU H100 aggregated and disaggregated serving
-- [Encode, Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/encode-prefill-decode/index.md): Disaggregate encode, prefill, and decode roles
-- [Encode, Prefill and Decode Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md): Compare EPD, prefill/decode, and aggregated throughput
-- [Elastic EP](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/elastic-ep/index.md): Resize an expert-parallel collective in place
-- [Elastic EP Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/elastic-ep-benchmark/index.md): Measure four- to eight-GPU H100 live expansion
-- [External DP](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/external-dp/index.md): Serve a fixed data-parallel group behind a managed router
-- [External DP Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/external-dp-benchmark/index.md): Compare External DP ranks against wide tensor parallelism
-- [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling/index.md): Plan replica counts from serving signals and capacity priors
-- [Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling-benchmark/index.md): Measure H100 and H200 scaling latency and limits
-- [Online Runtime Control](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/runtime-control/index.md): Tune serving parameters, pause roles, and isolate managed routers live
-- [Model Deployment Routing](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/routing/index.md): Configure routing policies and verify router serving
+- [Model Deployment](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/index.md): Deploy managed model serving workloads
+- [Configuration](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/index.md): Configure roles, resources, overrides, and placement
+- [Engine Compatibility](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/engine-versions/index.md): Check engine releases, store versions, and transports
+- [Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/prefill-decode/index.md): Pair disaggregated prefill and decode roles
+- [Prefill and Decode Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/prefill-decode-benchmark/index.md): Compare equal-GPU H100 aggregated and disaggregated serving
+- [Encode, Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/encode-prefill-decode/index.md): Disaggregate encode, prefill, and decode roles
+- [Encode, Prefill and Decode Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md): Compare EPD, prefill/decode, and aggregated throughput
+- [Elastic EP](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep/index.md): Resize an expert-parallel collective in place
+- [Elastic EP Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep-benchmark/index.md): Measure four- to eight-GPU H100 live expansion
+- [External DP](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/external-dp/index.md): Serve a fixed data-parallel group behind a managed router
+- [External DP Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/external-dp-benchmark/index.md): Compare External DP ranks against wide tensor parallelism
+- [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/index.md): Plan replica counts from serving signals and capacity priors
+- [Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling-benchmark/index.md): Measure H100 and H200 scaling latency and limits
+- [Online Runtime Control](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/runtime-control/index.md): Tune serving parameters, pause roles, and isolate managed routers live
+- [Model Deployment Routing](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/routing/index.md): Configure routing policies and verify router serving
 
 ## GPU Instances
 
-- [GPU Instances](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/instances/index.md): Launch accelerator-backed container workspaces and size unit resources
-- [GPU Instance Configuration](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/instances/configuration/index.md): Configure SSH access, volumes, node pinning, and custom instance types
-- [GPU Instance Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/instances/operations/index.md): Operate stop/start lifecycles, network isolation, metrics, and logs
+- [GPU Instances](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/instances/index.md): Launch accelerator-backed container workspaces and size unit resources
+- [GPU Instance Configuration](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/instances/configuration/index.md): Configure SSH access, volumes, node pinning, and custom instance types
+- [GPU Instance Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/instances/operations/index.md): Operate stop/start lifecycles, network isolation, metrics, and logs
 
 ## Operations
 
-- [Installation Modes](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/operate/installation-modes/index.md): Choose Helm chart mode or image mode
-- [High Availability Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/operate/high-availability/index.md): Configure control-plane replicas and failover
-- [Migrating from v0.5.x](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/operate/migration/from-v0.5/index.md): Upgrade across the queue refactor
-- [Migrating to Bundled Subcharts](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/operate/migration/bundled-subcharts/index.md): Transfer ownership to bundled subcharts
-- [Upgrading to an Enforced Binding Dtype](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/operate/migration/enforced-binding-dtype/index.md): Verify binding dtypes before upgrading
-- [Migration Troubleshooting](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/operate/migration/troubleshooting/index.md): Recover stuck upgrades and namespace deletions
+- [Installation Modes](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/operate/installation-modes/index.md): Choose Helm chart mode or image mode
+- [High Availability Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/operate/high-availability/index.md): Configure control-plane replicas and failover
+- [Migrating from v0.5.x](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/operate/migration/from-v0.5/index.md): Upgrade across the queue refactor
+- [Migrating to Bundled Subcharts](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/operate/migration/bundled-subcharts/index.md): Transfer ownership to bundled subcharts
+- [Upgrading to an Enforced Binding Dtype](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/operate/migration/enforced-binding-dtype/index.md): Verify binding dtypes before upgrading
+- [Migration Troubleshooting](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/operate/migration/troubleshooting/index.md): Recover stuck upgrades and namespace deletions
 
 ## Reference
 
-- [LLM Reference](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/README.md): Navigate flat reference contracts, exact aliases, and evidence labels
-- [Command Reference](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/commands.md): Look up `gpustack-operator` subcommands, flags, and exit codes
-- [Settings & Environment Variables](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/settings.md): Look up `Setting` resources and `GPUSTACK_*` variables
-- [Instance Type Unit Resources Reference](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/instance-type-unit-resources.md): Look up CPU and memory unit presets
-- [Ascend A5 Matrix](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/ascend-a5-matrix.md): Look up Ascend A5 UB, Host RoCE and mount matrices
-- [Device Discovery](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/devices-discovery.md): Trace hardware detection, slicing, and allocation
-- [Scheduling Chain](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/devices-scheduling.md): Map node capacity labels to Kueue queues
-- [Admission](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/devices-admission.md): Review webhook checks and admission gates
-- [NVIDIA MIG Transcripts](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/devices-mig-transcripts.md): Review recorded three-configuration H100 MIG transcripts
-- [Devices Scheduling Capture](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/devices-scheduling-capture.md): Review captured multi-object scheduling YAML dumps
-- [Network Topology](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/rdma-network-topology.md): Inspect NIC discovery, PCI roots, and link states
-- [Topology-Aware Scheduling](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/topology-scheduling.md): Map topology snapshots into Kueue TAS placement
-- [KV Cache Backend Internals](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/kv-cache-backend-internals.md): Inspect Mooncake rendering, condition algebra and teardown
-- [KV Cache Injection Reference](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/kv-cache-injection.md): Attach a Pod to a KV cache pool
-- [Model Artifact API](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/model-delivery-artifact-api.md): Query public artifact and node cache APIs
-- [Node Model Store](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/model-delivery-node-store.md): Inspect node cache state, CSI mounts, and collection
-- [Remote Weight Delivery Internals](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/model-delivery-remote-internals.md): Inspect source arithmetic, reader protocol and ModelExpress env
-- [Model Deployment Internals](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/model-deployment-internals.md): Inspect owned keys, render versions and refusal catalog
-- [Parameters](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/model-deployment-parameters.md): Inspect synthesized engine, router, and transfer flags
-- [Model Deployment Metrics](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/model-deployment-metrics.md): Inspect serving, role, and router Prometheus series
-- [Model Deployment Status](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/model-deployment-status.md): Diagnose conditions, retirements, and scaler annotations
-- [Model Deployment Shutdown](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/model-deployment-shutdown.md): Follow replica retirement, drain, and unadmitted removal
-- [Scaling Internals](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/model-deployment-scaling-internals.md): Inspect prior qualification, normalization and status schemas
-- [Model Deployment Scaling Simulation](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/model-deployment-scaling-simulation.md): Compare scaler algorithms on identical synthetic traffic
-- [Instance Metrics Reference](https://docs.gpustack.ai/gpustack-operator/v0.12.0/reference/instances-metrics.md): Inspect per-instance accelerator utilization metrics
+- [LLM Reference](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/README.md): Navigate flat reference contracts, exact aliases, and evidence labels
+- [Command Reference](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/commands.md): Look up `gpustack-operator` subcommands, flags, and exit codes
+- [Settings & Environment Variables](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/settings.md): Look up `Setting` resources and `GPUSTACK_*` variables
+- [Instance Type Unit Resources Reference](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/instance-type-unit-resources.md): Look up CPU and memory unit presets
+- [Ascend A5 Matrix](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/ascend-a5-matrix.md): Look up Ascend A5 UB, Host RoCE and mount matrices
+- [Device Discovery](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/devices-discovery.md): Trace hardware detection, slicing, and allocation
+- [Scheduling Chain](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/devices-scheduling.md): Map node capacity labels to Kueue queues
+- [Admission](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/devices-admission.md): Review webhook checks and admission gates
+- [NVIDIA MIG Transcripts](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/devices-mig-transcripts.md): Review recorded three-configuration H100 MIG transcripts
+- [Devices Scheduling Capture](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/devices-scheduling-capture.md): Review captured multi-object scheduling YAML dumps
+- [Network Topology](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/rdma-network-topology.md): Inspect NIC discovery, PCI roots, and link states
+- [Topology-Aware Scheduling](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/topology-scheduling.md): Map topology snapshots into Kueue TAS placement
+- [KV Cache Backend Internals](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/kv-cache-backend-internals.md): Inspect Mooncake rendering, condition algebra and teardown
+- [KV Cache Injection Reference](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/kv-cache-injection.md): Attach a Pod to a KV cache pool
+- [Model Artifact API](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/model-delivery-artifact-api.md): Query public artifact and node cache APIs
+- [Node Model Store](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/model-delivery-node-store.md): Inspect node cache state, CSI mounts, and collection
+- [Remote Weight Delivery Internals](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/model-delivery-remote-internals.md): Inspect source arithmetic, reader protocol and ModelExpress env
+- [Model Deployment Internals](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/model-deployment-internals.md): Inspect owned keys, render versions and refusal catalog
+- [Parameters](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/model-deployment-parameters.md): Inspect synthesized engine, router, and transfer flags
+- [Model Deployment Metrics](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/model-deployment-metrics.md): Inspect serving, role, and router Prometheus series
+- [Model Deployment Status](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/model-deployment-status.md): Diagnose conditions, retirements, and scaler annotations
+- [Model Deployment Shutdown](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/model-deployment-shutdown.md): Follow replica retirement, drain, and unadmitted removal
+- [Scaling Internals](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/model-deployment-scaling-internals.md): Inspect prior qualification, normalization and status schemas
+- [Model Deployment Scaling Simulation](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/model-deployment-scaling-simulation.md): Compare scaler algorithms on identical synthetic traffic
+- [Instance Metrics Reference](https://docs.gpustack.ai/gpustack-operator/v0.12.1/reference/instances-metrics.md): Inspect per-instance accelerator utilization metrics
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/8e2e3bb4bbc13e30f5876c97f4ecaceddb2c2e9e/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
-- [Development](https://github.com/gpustack/gpustack-operator/blob/8e2e3bb4bbc13e30f5876c97f4ecaceddb2c2e9e/docs/contribute/development.md): Build, generate, test, and lint the repository
-- [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/8e2e3bb4bbc13e30f5876c97f4ecaceddb2c2e9e/docs/contribute/local-cluster-setup.md): Provision a local kind cluster for tests
-- [Internals](https://github.com/gpustack/gpustack-operator/blob/8e2e3bb4bbc13e30f5876c97f4ecaceddb2c2e9e/docs/contribute/internals.md): Review startup order, bindings, and naming limits
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/016fe1d2b2b20bbdaeeec4c4f15d18c349393b24/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Development](https://github.com/gpustack/gpustack-operator/blob/016fe1d2b2b20bbdaeeec4c4f15d18c349393b24/docs/contribute/development.md): Build, generate, test, and lint the repository
+- [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/016fe1d2b2b20bbdaeeec4c4f15d18c349393b24/docs/contribute/local-cluster-setup.md): Provision a local kind cluster for tests
+- [Internals](https://github.com/gpustack/gpustack-operator/blob/016fe1d2b2b20bbdaeeec4c4f15d18c349393b24/docs/contribute/internals.md): Review startup order, bindings, and naming limits

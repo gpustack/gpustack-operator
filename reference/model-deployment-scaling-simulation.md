@@ -7,8 +7,8 @@ latency (ITL)*. These results are not hardware measurements or tuning recommenda
 
 The measured hardware comparison — including a four-node H200 sensitivity wave scored against the
 same true-SLO and goodput metrics — lives in
-[Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling-benchmark/index.md#algorithm-sensitivity); the scaler
-contract lives in [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling/index.md).
+[Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling-benchmark/index.md#algorithm-sensitivity); the scaler
+contract lives in [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/index.md).
 
 ## Contents
 
@@ -186,7 +186,7 @@ quota raise, so recovery from an enlarged quota is not exercised and remains unv
 
 ---
 
-**See also** — [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling/index.md) (the scaler contract, algorithms and guards) ·
-[Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/modules/model-deployment/scaling-benchmark/index.md) (the measured hardware comparison) ·
-[Model Deployment Scaling Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.0/docs/walkthroughs/model-deployment/scaling/index.md) (configure
+**See also** — [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/index.md) (the scaler contract, algorithms and guards) ·
+[Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling-benchmark/index.md) (the measured hardware comparison) ·
+[Model Deployment Scaling Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/scaling/index.md) (configure
 and observe the scaler on a cluster).

@@ -1,0 +1,1644 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.12.1/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  
+  <title>Elastic EP Walkthrough · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/elastic-ep/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.12.1/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.1/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.1/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.12.1/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.12.1/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.12.1"
+    data-home="/gpustack-operator/v0.12.1/" data-page="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/elastic-ep/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.12.1</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.12.1</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.12.1/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <a class="nav-home" href="/gpustack-operator/v0.12.1/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/v0.12.1/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/v0.12.1/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/v0.12.1/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/elastic-ep/" aria-current="page">Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/v0.12.1/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/v0.12.1/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/v0.12.1/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.12.1/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/v0.12.1/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/v0.12.1/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/v0.12.1/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/v0.12.1/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/v0.12.1/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.12.1/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/leader/" >Leader Election</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/remote/" >Remote Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Configuration" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/v0.12.1/docs/modules/instances/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="GPU Instance Configuration" href="/gpustack-operator/v0.12.1/docs/modules/instances/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="GPU Instance Operations" href="/gpustack-operator/v0.12.1/docs/modules/instances/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/v0.12.1/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/v0.12.1/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.12.1/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.12.1/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.12.1/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/v0.12.1/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.12.1/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/">Model Deployment Walkthroughs</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Elastic EP Walkthrough</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="elastic-ep-walkthrough">Elastic EP Walkthrough</h1>
+<p>Start a four-GPU vLLM Ray <em>expert parallelism (EP)</em> collective on an eight-GPU H100 SXM5 node, expand
+it live to eight GPUs without replacing surviving <code>Pod</code>s, and verify uninterrupted client streaming.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#summary">Summary</a>
+</li>
+<li><a href="#step-1-start-the-elastic-deployment">Step 1: Start the elastic deployment</a>
+</li>
+<li><a href="#step-2-verify-baseline-inference">Step 2: Verify baseline inference</a>
+</li>
+<li><a href="#step-3-expand-and-verify-inference">Step 3: Expand and verify inference</a>
+</li>
+<li><a href="#cleanup">Cleanup</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+<li><a href="#troubleshooting">Troubleshooting</a>
+</li>
+</ul>
+<h2 id="summary">Summary</h2>
+<p><em>Elastic EP</em> resizes a running <em>mixture of experts (MoE)</em> collective in place using Ray and <em>internal
+load balancing (Internal LB)</em>. Only the master (<code>pod-ordinal=0</code>) serves HTTP requests, while a
+CPU-only Ray head coordinates membership without claiming GPUs.</p>
+<p>Keep <em><code>replicas: 1</code></em>, <em><code>size: 1</code></em>, and <code>accelerator: &quot;2&quot;</code> (<em>TP</em> = 2), and scale <em>data parallelism (DP)</em>
+width <code>2 → 4</code> (<em>EP</em> world size <code>4 → 8</code>) via <code>runtimeControl.parameters[&quot;elastic.dataParallelWidth&quot;]</code>:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Object</th>
+          <th>Scope</th>
+          <th>Creator</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ModelArtifact</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>Resolves <code>deepseek-v2-lite-chat</code> weights via node model delivery</td>
+      </tr>
+      <tr>
+          <td><code>AcceleratorType</code></td>
+          <td>cluster</td>
+          <td>operator</td>
+          <td>Whole-GPU H100 pool requested by each two-GPU Ray member</td>
+      </tr>
+      <tr>
+          <td><code>ModelDeployment</code></td>
+          <td>namespace</td>
+          <td>user</td>
+          <td>Elastic vLLM collective resized live through <code>elastic.dataParallelWidth</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>During the live <em>DP</em> width 2 → 4 expansion, <strong>439/439 client requests completed with zero errors</strong>. In
+the steady-state benchmark at concurrency 64, width 4 cut <em>time to first token (TTFT)</em> p50 by
+<strong>2.50×</strong> (<code>2,598.867 ms</code> vs <code>6,509.231 ms</code>) while using twice the GPUs, lowering total output
+throughput at every concurrency, and raising concurrency-1 <em>inter-token latency (ITL)</em> p50 from
+<code>8.566 ms</code> to <code>15.675 ms</code>; see <a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep-benchmark/">Elastic EP Benchmark</a>
+.</p>
+<h3 id="environment">Environment</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Item</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Cluster</td>
+          <td>Kubernetes v1.35.7; 1 CPU node and 1 GPU node (<code>gpu-node-0</code>)</td>
+      </tr>
+      <tr>
+          <td>Hardware</td>
+          <td>8 × NVIDIA H100 80 GB HBM3 SXM5 (900 GB/s physical NVLink)</td>
+      </tr>
+      <tr>
+          <td>Operator and runner</td>
+          <td>GPUStack Operator v0.9.1; <code>gpustack/runner:cuda13.0-vllm0.30.0</code></td>
+      </tr>
+      <tr>
+          <td>Model</td>
+          <td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code> (<code>ModelArtifact</code> <code>deepseek-v2-lite-chat</code>)</td>
+      </tr>
+      <tr>
+          <td>Pool</td>
+          <td>Captured on custom <code>InstanceType</code> <code>bench-gpu</code>; reusable manifest uses <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
+      </tr>
+      <tr>
+          <td>Allocation</td>
+          <td>Initial: 2 GPU members × 2 GPUs (4 GPUs) + 1 CPU Ray head; expanded: 4 GPU members × 2 GPUs (8 GPUs)</td>
+      </tr>
+  </tbody>
+</table>
+<p>Each GPU <code>Pod</code> ran with private IPC, private <code>/dev/shm</code>, <em><code>hostIPC</code></em> disabled, and no <em>remote direct
+memory access (RDMA)</em> interface. Intra-<code>Pod</code> <em>TP</em> = 2 used NVLink, while <strong>cross-<code>Pod</code> <em>EP</em>
+collectives ran over TCP sockets on <code>eth0</code></strong>.</p>
+<p>Before starting, enable <a href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/operations/">node model delivery</a>
+ and warm
+<code>deepseek-v2-lite-chat</code> in namespace <code>gpustack-bench</code> via
+<a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-delivery/prefetch/">Model Prefetch</a>
+. Keep all eight H100 GPUs free so Step 3 can admit two
+additional two-GPU members.</p>
+<h2 id="step-1-start-the-elastic-deployment">Step 1: Start the elastic deployment</h2>
+<p>Save <code>elastic-ep.yaml</code> (keep <code>--elastic-ep-max-dp-size 4</code> so vLLM reserves capacity up to width 4):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">b2-elastic-ep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">IfNotPresent</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">runtimeControl</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">parameters</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">elastic.dataParallelWidth</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">tensor-parallel-size</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">max-model-len</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;8192&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">max-num-seqs</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;16&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">gpu-memory-utilization</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;0.90&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">elastic-ep-max-dp-size</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;4&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">all2all-backend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">allgather_reducescatter</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">api-server-count</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">VLLM_USE_RAY_V2_EXECUTOR_BACKEND</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">OTEL_METRICS_EXPORTER</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">none</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">OTEL_TRACES_EXPORTER</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">none</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">RAY_LOGGER_LEVEL</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">info</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">RAY_BACKEND_LOG_LEVEL</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">info</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">RAY_DEDUP_LOGS</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span></span></span></code></pre></div>
+</div>
+<p>Apply <code>elastic-ep.yaml</code> and wait for the Ray head and two initial GPU members to run:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f elastic-ep.yaml
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment b2-elastic-ep
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods -l app.kubernetes.io/instance<span class="o">=</span>b2-elastic-ep -o wide</span></span></code></pre></div>
+</div>
+<p><code>Service/b2-elastic-ep</code> selects only the serving master (<code>pod-ordinal=0</code>), and <em><code>status.roles[0]</code></em>
+reports <code>desired: 1, ready: 1</code> for the single elastic collective.</p>
+<h2 id="step-2-verify-baseline-inference">Step 2: Verify baseline inference</h2>
+<p>Snapshot baseline deployment and <code>Pod</code> state before resizing:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment b2-elastic-ep -o json &gt; baseline-cr.json
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods -l app.kubernetes.io/instance<span class="o">=</span>b2-elastic-ep -o json &gt; baseline-pods.json
+</span></span><span class="line"><span class="cl">jq <span class="s1">&#39;{name: .metadata.name, width: .spec.roles[0].runtimeControl.parameters[&#34;elastic.dataParallelWidth&#34;],
+</span></span></span><span class="line"><span class="cl"><span class="s1">     phase: .status.phase, desired: .status.roles[0].desired,
+</span></span></span><span class="line"><span class="cl"><span class="s1">     ready: .status.roles[0].ready}&#39;</span> baseline-cr.json</span></span></code></pre></div>
+</div>
+<p>Captured output:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>json</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;name&#34;</span><span class="p">:</span> <span class="s2">&#34;b2-elastic-ep&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;width&#34;</span><span class="p">:</span> <span class="s2">&#34;2&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;phase&#34;</span><span class="p">:</span> <span class="s2">&#34;Ready&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;desired&#34;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;ready&#34;</span><span class="p">:</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></div>
+</div>
+<p><code>ReplicasUpToDate</code> can remain <code>Unknown/RolloutNotObserved</code> while <code>phase</code> reads <code>Ready</code>, so verify
+actual token generation in addition to <code>phase</code>. Forward <code>Service/b2-elastic-ep</code> in a second terminal
+and run a streaming completion check:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench port-forward service/b2-elastic-ep 8000:8000</span></span></code></pre></div>
+</div>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">curl --fail-with-body --no-buffer --max-time <span class="m">60</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  http://127.0.0.1:8000/v1/chat/completions <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;messages&#34;:[{&#34;role&#34;:&#34;user&#34;,&#34;content&#34;:&#34;Explain GPU scheduling briefly.&#34;}],&#34;max_tokens&#34;:64,&#34;temperature&#34;:0,&#34;stream&#34;:true,&#34;stream_options&#34;:{&#34;include_usage&#34;:true}}&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o baseline-stream.txt
+</span></span><span class="line"><span class="cl">grep -q <span class="s1">&#39;data: \[DONE\]&#39;</span> baseline-stream.txt <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">&#34;baseline stream OK&#34;</span></span></span></code></pre></div>
+</div>
+<p>Confirm non-empty completion tokens and <code>data: [DONE]</code> before expanding.</p>
+<h2 id="step-3-expand-and-verify-inference">Step 3: Expand and verify inference</h2>
+<p>Patch <code>elastic.dataParallelWidth</code> from <code>&quot;2&quot;</code> to <code>&quot;4&quot;</code> with a JSON <code>test</code> guard:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench patch modeldeployment b2-elastic-ep --type<span class="o">=</span>json <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;test&#34;,&#34;path&#34;:&#34;/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth&#34;,&#34;value&#34;:&#34;2&#34;},{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth&#34;,&#34;value&#34;:&#34;4&#34;}]&#39;</span></span></span></code></pre></div>
+</div>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeployment
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: b2-elastic-ep
+</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   roles:
+</span></span><span class="line"><span class="cl">     - name: server
+</span></span><span class="line"><span class="cl">       runtimeControl:
+</span></span><span class="line"><span class="cl">         parameters:
+</span></span><span class="line"><span class="cl"><span class="gd">-          elastic.dataParallelWidth: &#34;2&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+          elastic.dataParallelWidth: &#34;4&#34;
+</span></span></span></code></pre></div>
+</div>
+<p>Confirm native runtime width <code>4</code> for the current deployment <code>uid</code> and <code>generation</code> (four running <code>Pod</code>s
+alone do not prove collective re-rendezvous):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment b2-elastic-ep -o json &gt; current-cr.json
+</span></span><span class="line"><span class="cl"><span class="nv">MD_UID</span><span class="o">=</span><span class="k">$(</span>jq -r <span class="s1">&#39;.metadata.uid&#39;</span> current-cr.json<span class="k">)</span>
+</span></span><span class="line"><span class="cl"><span class="nv">MD_GENERATION</span><span class="o">=</span><span class="k">$(</span>jq -r <span class="s1">&#39;.metadata.generation&#39;</span> current-cr.json<span class="k">)</span>
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get configmaps -o json <span class="p">|</span>
+</span></span><span class="line"><span class="cl">  jq --arg uid <span class="s2">&#34;</span><span class="nv">$MD_UID</span><span class="s2">&#34;</span> <span class="s1">&#39;[.items[] |
+</span></span></span><span class="line"><span class="cl"><span class="s1">      select(any(.metadata.ownerReferences[]?; .uid == $uid)) |
+</span></span></span><span class="line"><span class="cl"><span class="s1">      select(.data[&#34;observation.json&#34;] != null) |
+</span></span></span><span class="line"><span class="cl"><span class="s1">      .data[&#34;observation.json&#34;] | fromjson] |
+</span></span></span><span class="line"><span class="cl"><span class="s1">      if length == 1 then .[0] else error(&#34;expected one observation&#34;) end&#39;</span> &gt; observation.json
+</span></span><span class="line"><span class="cl">jq -e --argjson generation <span class="s2">&#34;</span><span class="nv">$MD_GENERATION</span><span class="s2">&#34;</span> <span class="s1">&#39;
+</span></span></span><span class="line"><span class="cl"><span class="s1">  .observedGeneration == $generation and
+</span></span></span><span class="line"><span class="cl"><span class="s1">  ([.desired, .admitted, .allocated, .ray, .effective] |
+</span></span></span><span class="line"><span class="cl"><span class="s1">   all(.Known == true and .Value == 4))&#39;</span> observation.json</span></span></code></pre></div>
+</div>
+<p><code>observation.json</code> (diagnostic state rather than a public CR schema) reports <code>observedGeneration: 2</code>,
+all five width stages at <code>4</code>, and reason <code>native ranks and forwards agree</code>. If this check fails,
+inspect <code>ElasticResize</code> on <code>ModelDeployment</code> in <a href="#troubleshooting">Troubleshooting</a>
+ before issuing
+another width edit.</p>
+<p>Snapshot the expanded deployment and verify that the Ray head and both baseline GPU <code>Pod</code>s kept their
+original <code>Pod</code> UIDs with zero container restarts:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment b2-elastic-ep -o json &gt; scaled-cr.json
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods -l app.kubernetes.io/instance<span class="o">=</span>b2-elastic-ep -o json &gt; scaled-pods.json
+</span></span><span class="line"><span class="cl">jq -n --slurpfile base baseline-pods.json --slurpfile scaled scaled-pods.json <span class="s1">&#39;
+</span></span></span><span class="line"><span class="cl"><span class="s1">  ($base[0].items | map({key: .metadata.name, value: .metadata.uid}) | from_entries) as $b |
+</span></span></span><span class="line"><span class="cl"><span class="s1">  [$scaled[0].items[] | select($b[.metadata.name] != null) | {
+</span></span></span><span class="line"><span class="cl"><span class="s1">    name: .metadata.name,
+</span></span></span><span class="line"><span class="cl"><span class="s1">    sameUID: (.metadata.uid == $b[.metadata.name]),
+</span></span></span><span class="line"><span class="cl"><span class="s1">    restarts: ([.status.containerStatuses[].restartCount] | add)
+</span></span></span><span class="line"><span class="cl"><span class="s1">  }]&#39;</span></span></span></code></pre></div>
+</div>
+<p>Captured output (<code>scaled-cr.json</code> projection):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>json</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;name&#34;</span><span class="p">:</span> <span class="s2">&#34;b2-elastic-ep&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;width&#34;</span><span class="p">:</span> <span class="s2">&#34;4&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;phase&#34;</span><span class="p">:</span> <span class="s2">&#34;Ready&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;desired&#34;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;ready&#34;</span><span class="p">:</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></div>
+</div>
+<table>
+  <thead>
+      <tr>
+          <th>Captured <code>Pod</code></th>
+          <th>Role</th>
+          <th>Ready</th>
+          <th>UID across resize</th>
+          <th style="text-align: right">Restarts</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>b2-elastic-ep-b2-elastic-ep-elastic-head-95n5k</code></td>
+          <td>CPU Ray head</td>
+          <td>1/1</td>
+          <td>Retained</td>
+          <td style="text-align: right">0</td>
+      </tr>
+      <tr>
+          <td><code>b2-elastic-ep-server-tsc8r</code></td>
+          <td>Serving master (<code>pod-ordinal=0</code>)</td>
+          <td>1/1</td>
+          <td>Retained</td>
+          <td style="text-align: right">0</td>
+      </tr>
+      <tr>
+          <td><code>b2-elastic-ep-server-vzdtc</code></td>
+          <td>Baseline GPU member</td>
+          <td>1/1</td>
+          <td>Retained</td>
+          <td style="text-align: right">0</td>
+      </tr>
+      <tr>
+          <td><code>b2-elastic-ep-server-6nvwx</code></td>
+          <td>Added GPU member</td>
+          <td>1/1</td>
+          <td>New</td>
+          <td style="text-align: right">0</td>
+      </tr>
+      <tr>
+          <td><code>b2-elastic-ep-server-z22ml</code></td>
+          <td>Added GPU member</td>
+          <td>1/1</td>
+          <td>New</td>
+          <td style="text-align: right">0</td>
+      </tr>
+  </tbody>
+</table>
+<p>Traffic and probe behavior during expansion:</p>
+<ul>
+<li>Continuous concurrency-8 load (<code>1024</code> input / <code>256</code> output tokens) completed <strong>439/439 client
+requests in 264.23 s with zero errors</strong> and zero client-facing HTTP <code>503</code> responses (1,320 total
+completion lines in master logs including warm-up and calibration).</li>
+<li>Patch submission at <code>08:16:11Z</code> converged <code>RoleKindsReady=True</code> and <code>EndpointEligibility=True</code> at
+<code>08:19:20Z</code> (<strong>~189 s</strong> for member startup and Ray collective join).</li>
+<li>During collective re-rendezvous, the master returned <strong>10 <code>/health</code> HTTP <code>503</code> probes</strong>, and a
+16–21 s watch log briefly observed <code>Starting 0S</code> at <code>08:19:09Z</code> between <code>Ready 1S</code> samples at
+<code>08:18:50Z</code> and <code>08:19:30Z</code>. Re-run the Step 2 <code>curl</code> stream after <code>observation.json</code> confirms
+effective width <code>4</code>.</li>
+</ul>
+<h2 id="cleanup">Cleanup</h2>
+<p>Stop <code>port-forward</code>, delete <code>b2-elastic-ep</code>, and confirm all eight H100 GPUs return to
+<code>remaining: 1600000</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench delete modeldeployment b2-elastic-ep --wait<span class="o">=</span><span class="nb">true</span>
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods,services,deployments,workloads -l app.kubernetes.io/instance<span class="o">=</span>b2-elastic-ep
+</span></span><span class="line"><span class="cl">kubectl get devices -o json <span class="p">|</span> jq <span class="s1">&#39;[.items[].status.groups[].accelerators[].remaining]&#39;</span></span></span></code></pre></div>
+</div>
+<p>Deleting <code>ModelDeployment</code> preserves prefetched weights in <code>NodeModelStore</code>
+(<a href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/prefetch/">Model Prefetch</a>
+).</p>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li>Measurements cover single-node cross-<code>Pod</code> TCP (<em>DP</em> width 2 → 4, <em>TP</em> = 2); cross-node resizing,
+<em>RDMA</em> <em>EP</em> collectives, and other models or widths were not tested.</li>
+<li>Only the master serves HTTP (<code>Internal LB</code>), and width shrink (<code>4 → 2</code>) is refused in this release.</li>
+<li>See <a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep-benchmark/">Elastic EP Benchmark</a>
+ for steady-state
+latency and throughput trade-offs.</li>
+</ul>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Symptom</th>
+          <th>Signal</th>
+          <th>Resolution</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Added GPU members stay <code>Pending</code></td>
+          <td>Member <code>Pod</code> phase <code>Pending</code></td>
+          <td>Inspect <code>kubectl -n gpustack-bench get workloads,events</code> and <code>Devices</code> capacity; width <code>4</code> at <em>TP</em> = 2 requires 8 free GPUs.</td>
+      </tr>
+      <tr>
+          <td>Four GPU members run, <code>effective</code> width still <code>&lt; 4</code></td>
+          <td><code>observation.json</code> shows <code>effective.Known=false</code> or <code>Value=2</code></td>
+          <td>Wait for Ray initialization (~3 min on H100) and inspect master container logs (<code>kubectl -n gpustack-bench logs &lt;master-pod&gt; -c main --tail=200</code>).</td>
+      </tr>
+      <tr>
+          <td><code>ElasticResize=False/ScaleRefused</code></td>
+          <td>Engine rejected resize request</td>
+          <td>Read the condition message on <code>ModelDeployment</code> and check <a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep/#resize-hold-conditions">Resize hold conditions</a>
+.</td>
+      </tr>
+      <tr>
+          <td><code>ElasticResize=Unknown/WorldUnprovable</code></td>
+          <td>In-flight resize awaiting engine proof</td>
+          <td>Keep observing without patching <code>elastic.dataParallelWidth</code> again; never resend an unanswered resize manually.</td>
+      </tr>
+      <tr>
+          <td>Streaming requests stall</td>
+          <td>No tokens returned on <code>:8000</code></td>
+          <td>Check master and Ray worker logs, GPU visibility, <code>/dev/shm</code> usage, and host RAM; capture logs before deleting the deployment.</td>
+      </tr>
+  </tbody>
+</table>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep/">Elastic EP</a>
+ (profile contract and resize
+holds)</li><li><a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep-benchmark/">Elastic EP Benchmark</a>
+ (H100 width
+2 vs 4 measurements)</li><li><a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
+ (fixed four-rank <em>External LB</em>
+collective)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
+ — deploy four fixed data-parallel ranks behind a router.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#summary">Summary</a>
+      <ul>
+        <li><a href="#environment">Environment</a></li>
+      </ul>
+    </li>
+    <li><a href="#step-1-start-the-elastic-deployment">Step 1: Start the elastic deployment</a></li>
+    <li><a href="#step-2-verify-baseline-inference">Step 2: Verify baseline inference</a></li>
+    <li><a href="#step-3-expand-and-verify-inference">Step 3: Expand and verify inference</a></li>
+    <li><a href="#cleanup">Cleanup</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.12.1/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
+</body>
+</html>

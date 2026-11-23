@@ -1,0 +1,1581 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.12.1/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  
+  <title>Online Runtime Control Walkthrough · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/runtime-control/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.12.1/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.1/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.1/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.12.1/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.12.1/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.12.1"
+    data-home="/gpustack-operator/v0.12.1/" data-page="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/runtime-control/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.12.1</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.12.1</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.12.1/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <a class="nav-home" href="/gpustack-operator/v0.12.1/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/v0.12.1/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/v0.12.1/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/v0.12.1/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/runtime-control/" aria-current="page">Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/v0.12.1/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/v0.12.1/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/v0.12.1/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.12.1/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/v0.12.1/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/v0.12.1/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/v0.12.1/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/v0.12.1/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/v0.12.1/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.12.1/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/leader/" >Leader Election</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.12.1/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/remote/" >Remote Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Configuration" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/v0.12.1/docs/modules/instances/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="GPU Instance Configuration" href="/gpustack-operator/v0.12.1/docs/modules/instances/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="GPU Instance Operations" href="/gpustack-operator/v0.12.1/docs/modules/instances/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/v0.12.1/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/v0.12.1/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.12.1/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.12.1/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.12.1/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/v0.12.1/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.12.1/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/">Model Deployment Walkthroughs</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Online Runtime Control Walkthrough</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="online-runtime-control-walkthrough">Online Runtime Control Walkthrough</h1>
+<p>Tune live vLLM and SGLang serving parameters, pause and resume roles safely beside an active scaler,
+and verify restart replay and Elastic EP expansion without restarting worker <code>Pod</code>s.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#summary">Summary</a>
+</li>
+<li><a href="#vllm-runtime-changes">vLLM runtime changes</a>
+</li>
+<li><a href="#sglang-runtime-changes">SGLang runtime changes</a>
+</li>
+<li><a href="#verification">Verification</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+<li><a href="#troubleshooting">Troubleshooting</a>
+</li>
+</ul>
+<h2 id="summary">Summary</h2>
+<p><code>ModelDeployment</code> mounts <code>gpustack-engine-sentinel</code> read-only via <code>PYTHONPATH</code> on managed accelerated
+non-<em>Encode</em> roles without API-key <code>Secret</code>s. Managed routers enforce an Envoy inference allowlist on
+port <code>8000</code> and serve <code>/observer/endpoints</code> on pod-internal port <code>9091</code>:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Capability</th>
+          <th>Engine and router</th>
+          <th>Verified behavior</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Envoy allowlist and router hash decoupling</td>
+          <td><code>vLLM 0.32.0</code> + <code>vllm-router</code>, <code>SGLang 0.5.22</code> + <code>sglang-gateway</code></td>
+          <td><code>200</code> on <code>/v1/chat/completions</code>, <code>403</code> on control routes; editing <em><code>requestTimeoutSeconds</code></em> rolls only the router</td>
+      </tr>
+      <tr>
+          <td>Live parameter tuning and auto-reset</td>
+          <td><code>vLLM 0.32.0</code>, <code>SGLang 0.5.22</code> (including NGRAM speculative)</td>
+          <td>Applies live via <code>/gpustack/v1/runtime_config</code>; removing keys restores <code>boot_defaults</code> with zero <code>Pod</code> restarts</td>
+      </tr>
+      <tr>
+          <td>Version-gated unsupported parameters</td>
+          <td><code>vLLM 0.32.0</code>, <code>SGLang 0.5.22</code></td>
+          <td>Reports <code>UnsupportedEngineVersion</code> (<code>unsupportedFields</code>); removing keys recovers <code>Synced</code></td>
+      </tr>
+      <tr>
+          <td>Role pause and scaler guard</td>
+          <td><code>vLLM 0.32.0</code> + <code>Active</code> scaler, <code>SGLang 0.5.22</code>, <code>1P+1D</code> <code>llm-d-router</code></td>
+          <td><code>/live=200</code>, <code>/ready=503</code>, direct inference <code>503</code>, scaler <code>Blocked=True (RolePaused)</code>; resume restores <code>200</code></td>
+      </tr>
+      <tr>
+          <td>Same-UID restart latch and Elastic EP resize</td>
+          <td><code>vLLM 0.32.0</code> (<code>Qwen3-8B</code>, <code>DeepSeek-V2-Lite-Chat</code>)</td>
+          <td>Container restart rotates <code>boot_id</code> and replays parameters before readiness; Elastic EP grows <code>2 → 3</code> keeping master <code>Pod</code> UID</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="environment">Environment</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Item</th>
+          <th>Value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Cluster</td>
+          <td>Kubernetes <code>v1.35.7</code>; 1 CPU node (<code>cpu-d3</code>) and 3 GPU nodes (<code>gpu-h200-sxm</code>, 1 GPU per node)</td>
+      </tr>
+      <tr>
+          <td>Hardware</td>
+          <td>3 × NVIDIA H200 SXM 141 GB (<code>gpustack--nvidia-h200-linux-amd64</code>)</td>
+      </tr>
+      <tr>
+          <td>Runners</td>
+          <td><code>gpustack/runner:cuda13.0-vllm0.32.0</code>, <code>gpustack/runner:cuda13.0-sglang0.5.22</code></td>
+      </tr>
+      <tr>
+          <td>Models</td>
+          <td><code>Qwen/Qwen3-8B</code> (<code>ModelArtifact</code> <code>qwen3-8b</code>), <code>deepseek-ai/DeepSeek-V2-Lite-Chat</code> (<code>deepseek-v2-lite-chat</code>)</td>
+      </tr>
+      <tr>
+          <td>Routers</td>
+          <td><code>vllm-router</code>, <code>sglang-gateway</code>, <code>llm-d-router</code> (<code>gpustack/llm-router:v0.5.0</code>)</td>
+      </tr>
+  </tbody>
+</table>
+<p>Enable <a href="/gpustack-operator/v0.12.1/docs/modules/model-delivery/operations/">node model delivery</a>
+ and complete
+<a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-delivery/prefetch/">Model Prefetch</a>
+ for <code>qwen3-8b</code> and <code>deepseek-v2-lite-chat</code>, then check
+cluster capacity:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get nodes
+</span></span><span class="line"><span class="cl">kubectl get acceleratortypes
+</span></span><span class="line"><span class="cl">kubectl get nodemodelstores</span></span></code></pre></div>
+</div>
+<p>Captured output:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NAME                                 STATUS   ROLES    AGE    VERSION
+</span></span><span class="line"><span class="cl">computeinstance-e01ah0pbdcbn4pngh5   Ready    &lt;none&gt;   143m   v1.35.7
+</span></span><span class="line"><span class="cl">computeinstance-e01dcjfh8cjnywrtf2   Ready    &lt;none&gt;   143m   v1.35.7
+</span></span><span class="line"><span class="cl">computeinstance-e01j5ns0wkmc376ygw   Ready    &lt;none&gt;   144m   v1.35.7
+</span></span><span class="line"><span class="cl">computeinstance-e01nd7j1ezqp5jhwh3   Ready    &lt;none&gt;   143m   v1.35.7
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">NAME                                ENTRANCE                          ACCELERATOR(EX/SH/SL/PT)   PHASE
+</span></span><span class="line"><span class="cl">gpustack--nvidia-h200-linux-amd64   gpustack-fnv64-1bdcbb48b860c5ed   1/3 1/30 100/300 0/0       Active</span></span></code></pre></div>
+</div>
+<h2 id="vllm-runtime-changes">vLLM runtime changes</h2>
+<h3 id="step-1-deploy-routed-vllm">Step 1: Deploy routed vLLM</h3>
+<p>Save <code>vllm-runtime-control.yaml</code> and wait for <code>qwen-vllm-rc</code> to reach <code>Ready</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-vllm-rc</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-8B</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-8b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.32.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vllm-router</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">requestTimeoutSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">60</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h200-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">max-model-len=4096</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">max-num-seqs=64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">max-num-batched-tokens=8192</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">gpu-memory-utilization=0.80</span></span></span></code></pre></div>
+</div>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f vllm-runtime-control.yaml
+</span></span><span class="line"><span class="cl">kubectl -n default <span class="nb">wait</span> --for<span class="o">=</span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.phase}&#39;</span><span class="o">=</span>Ready modeldeployment/qwen-vllm-rc --timeout<span class="o">=</span>600s</span></span></code></pre></div>
+</div>
+<p>Record the initial worker <code>Pod</code> UID, patch <em><code>spec.router.requestTimeoutSeconds</code></em> to <code>90</code>, and verify
+router hash decoupling:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">BEFORE_UID</span><span class="o">=</span><span class="k">$(</span>kubectl -n default get pod -l app.kubernetes.io/instance<span class="o">=</span>qwen-vllm-rc,app.kubernetes.io/component<span class="o">=</span>server <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].metadata.uid}&#39;</span><span class="k">)</span>
+</span></span><span class="line"><span class="cl">kubectl -n default patch modeldeployment qwen-vllm-rc --type<span class="o">=</span>merge <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;router&#34;:{&#34;requestTimeoutSeconds&#34;:90}}}&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="nv">AFTER_UID</span><span class="o">=</span><span class="k">$(</span>kubectl -n default get pod -l app.kubernetes.io/instance<span class="o">=</span>qwen-vllm-rc,app.kubernetes.io/component<span class="o">=</span>server <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].metadata.uid}&#39;</span><span class="k">)</span>
+</span></span><span class="line"><span class="cl"><span class="nb">test</span> <span class="s2">&#34;</span><span class="nv">$BEFORE_UID</span><span class="s2">&#34;</span> <span class="o">=</span> <span class="s2">&#34;</span><span class="nv">$AFTER_UID</span><span class="s2">&#34;</span> <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">&#34;worker UID unchanged&#34;</span></span></span></code></pre></div>
+</div>
+<p>Expected behavior:</p>
+<ul>
+<li>Zero runtime-control <code>Secret</code>s are created in <code>default</code>.</li>
+<li>Router port <code>:8000</code> returns <code>200</code> on <code>POST /v1/chat/completions</code> and <code>403</code> on <code>/gpustack/v1/ready</code>,
+<code>/gpustack/v1/runtime_config</code>, <code>/gpustack/v1/pause</code>, <code>/scale_elastic_ep</code>, and <code>/observer/endpoints</code>,
+while pod-internal <code>:9091/observer/endpoints</code> returns <code>200</code>.</li>
+<li>Updating <em><code>requestTimeoutSeconds</code></em> from <code>60</code> to <code>90</code> rolls only the router <code>Deployment</code>, keeping
+the worker <code>Pod</code> UID identical with <code>restartCount: 0</code>.</li>
+</ul>
+<h3 id="step-2-tune-and-reset-vllm">Step 2: Tune and reset vLLM</h3>
+<p>Patch <em><code>spec.roles[0].runtimeControl.parameters</code></em> live and inspect <code>RuntimeControlSynced</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n default patch modeldeployment qwen-vllm-rc --type<span class="o">=</span>json -p <span class="s1">&#39;[
+</span></span></span><span class="line"><span class="cl"><span class="s1">  {&#34;op&#34;:&#34;add&#34;,&#34;path&#34;:&#34;/spec/roles/0/runtimeControl&#34;,&#34;value&#34;:{&#34;parameters&#34;:{
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;scheduling.maxActiveRequests&#34;:&#34;24&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;scheduling.maxBatchedTokens&#34;:&#34;4096&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;scheduling.longPrefillTokenThreshold&#34;:&#34;1024&#34;
+</span></span></span><span class="line"><span class="cl"><span class="s1">  }}}
+</span></span></span><span class="line"><span class="cl"><span class="s1">]&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl -n default get modeldeployment qwen-vllm-rc <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.conditions[?(@.type==&#34;RuntimeControlSynced&#34;)]}{&#34;\n&#34;}{.status.roles[0].runtimeControl}{&#34;\n&#34;}&#39;</span></span></span></code></pre></div>
+</div>
+<p>Expected convergence, parameter reset, and version-gating behavior:</p>
+<ul>
+<li><code>RuntimeControlSynced</code> converges to <code>True</code> (<code>Reason: Synced</code>) with a non-empty <em><code>appliedConfigDigest</code></em>
+and zero worker restarts.</li>
+<li>Removing <code>scheduling.longPrefillTokenThreshold</code> resets only that parameter to its <code>boot_defaults</code>
+value while keeping <code>maxActiveRequests=24</code> and <code>maxBatchedTokens=4096</code> active under a new config
+digest.</li>
+<li>Setting version-gated keys absent from <code>vllm0.32.0</code> (<code>scheduling.cacheAwareWindow</code> and
+<code>scheduling.cacheAwareThreshold</code>, or <code>scheduling.maxInflightKVLoads</code> and
+<code>scheduling.maxAsyncKVLoadsPerStep</code> on a <code>1P+1D</code> <code>decode</code> role) reports
+<code>RuntimeControlSynced=False</code> (<code>Reason: UnsupportedEngineVersion</code>) with <em><code>unsupportedFields</code></em>
+populated and zero <code>Pod</code> restarts. Removing the unsupported keys restores <code>Synced</code> on the same
+worker <code>Pod</code> UID.</li>
+</ul>
+<h3 id="step-3-pause-scaled-role">Step 3: Pause scaled role</h3>
+<p>With an <code>Active</code> <code>ModelDeploymentScaler</code> bound to <code>qwen-vllm-rc</code>, pause the <code>server</code> role:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n default patch modeldeployment qwen-vllm-rc --type<span class="o">=</span>json <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;add&#34;,&#34;path&#34;:&#34;/spec/roles/0/pause&#34;,&#34;value&#34;:true}]&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl -n default get modeldeploymentscaler <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.metadata.name}{&#34;\t&#34;}{.status.conditions[?(@.type==&#34;Blocked&#34;)]}{&#34;\n&#34;}{end}&#39;</span></span></span></code></pre></div>
+</div>
+<p>Expected pause, resume, and drain behavior:</p>
+<ul>
+<li>The operator removes <code>modeldeployment.gpustack.ai/endpoint-eligible</code>, drains active requests, and
+sets sentinel <code>paused: true</code> (<code>Reason: Synced</code>).</li>
+<li>Worker <code>/gpustack/v1/live</code> returns <code>200</code>, while <code>/gpustack/v1/ready</code> and direct
+<code>POST /v1/chat/completions</code> return <code>503</code>.</li>
+<li>The bound <code>Active</code> <code>ModelDeploymentScaler</code> sets <code>Blocked=True</code> (<code>Reason: RolePaused</code>) and suspends
+replica writes.</li>
+<li>On a <code>1P+1D</code> deployment behind <code>llm-d-router</code>, pausing <code>decode</code> turns only <code>decode</code> <code>/ready</code> to
+<code>503</code> (<code>prefill</code> stays <code>200</code>) and evicts only <code>decode</code> from <code>/observer/endpoints</code>
+(<code>registry_revision</code> <code>3 → 6</code>).</li>
+<li>Setting <code>pause: false</code> and removing <em><code>runtimeControl</code></em> restores <code>boot_defaults</code>, removes the role
+ledger <code>ConfigMap</code>, sets <code>RuntimeControlSynced=True</code> (<code>Reason: NotConfigured</code>), and restores router
+<code>200</code> responses.</li>
+<li>Deleting the worker <code>Pod</code> executes <code>python3 -m gpustack_engine_sentinel.drain</code> with zero
+<code>FailedPreStopHook</code> events.</li>
+</ul>
+<h2 id="sglang-runtime-changes">SGLang runtime changes</h2>
+<p>SGLang parameter tuning uses a separate <code>SGLang 0.5.22</code> deployment (<code>qwen-sglang-rc</code> behind
+<code>sglang-gateway</code>), distinct from <code>qwen-vllm-rc</code> in Steps 1–3. Start from a <code>Ready</code> <code>ModelDeployment</code>
+configured with <code>spec.engine.name: SGLang</code> and a compatible <code>spec.engine.image</code> (substituting your
+deployment name if different), then patch all five scheduling parameters live:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n default patch modeldeployment qwen-sglang-rc --type<span class="o">=</span>json -p <span class="s1">&#39;[
+</span></span></span><span class="line"><span class="cl"><span class="s1">  {&#34;op&#34;:&#34;add&#34;,&#34;path&#34;:&#34;/spec/roles/0/runtimeControl&#34;,&#34;value&#34;:{&#34;parameters&#34;:{
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;scheduling.maxActiveRequests&#34;:&#34;24&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;scheduling.maxBatchedTokens&#34;:&#34;2048&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;scheduling.prefillMaxRequests&#34;:&#34;12&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;scheduling.scheduleConservativeness&#34;:&#34;1.2&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;scheduling.prefillDecodeInterval&#34;:&#34;2&#34;
+</span></span></span><span class="line"><span class="cl"><span class="s1">  }}}
+</span></span></span><span class="line"><span class="cl"><span class="s1">]&#39;</span></span></span></code></pre></div>
+</div>
+<p>Captured output (<code>/gpustack/v1/runtime_config</code> readback from <code>wt-sglang-server-7wwdr</code>):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>json</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;engine&#34;</span><span class="p">:</span> <span class="s2">&#34;sglang&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;boot_id&#34;</span><span class="p">:</span> <span class="s2">&#34;ccf7515e-d667-49c5-ae79-ff88367160b3&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;observed_generation&#34;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;applied_config_digest&#34;</span><span class="p">:</span> <span class="s2">&#34;sha256:2cb017f63c6377dc1c09d7bc8a9634b170067cde11fae3898a281e9dda41b25c&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;ready&#34;</span><span class="p">:</span> <span class="kc">true</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;paused&#34;</span><span class="p">:</span> <span class="kc">false</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;boot_defaults&#34;</span><span class="p">:</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;scheduling.maxActiveRequests&#34;</span><span class="p">:</span> <span class="mi">64</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;scheduling.maxBatchedTokens&#34;</span><span class="p">:</span> <span class="mi">4096</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;scheduling.prefillMaxRequests&#34;</span><span class="p">:</span> <span class="kc">null</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;scheduling.scheduleConservativeness&#34;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;scheduling.prefillDecodeInterval&#34;</span><span class="p">:</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">  <span class="p">},</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;values&#34;</span><span class="p">:</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;scheduling.maxActiveRequests&#34;</span><span class="p">:</span> <span class="mi">24</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;scheduling.maxBatchedTokens&#34;</span><span class="p">:</span> <span class="mi">2048</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;scheduling.prefillMaxRequests&#34;</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;scheduling.scheduleConservativeness&#34;</span><span class="p">:</span> <span class="mf">1.2</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="nt">&#34;scheduling.prefillDecodeInterval&#34;</span><span class="p">:</span> <span class="mi">2</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></div>
+</div>
+<p>On a separate <code>SGLang 0.5.22</code> deployment launched with <code>--speculative-algorithm=NGRAM</code>,
+<code>speculative.acceptThresholdSingle: &quot;0.85&quot;</code> and <code>speculative.acceptThresholdAcc: &quot;0.75&quot;</code> applied live
+with zero restarts, whereas <code>speculative.draftBudgetFraction</code> (DFlash/DSpark only) reported
+<code>UnsupportedEngineVersion</code> and recovered cleanly when removed.</p>
+<h2 id="verification">Verification</h2>
+<p>Verify <code>ModelDeployment</code> sentinel replay across container restarts and Elastic EP width changes:</p>
+<ul>
+<li><strong>Same-UID container restart latch replay</strong>: killing vLLM&rsquo;s <code>EngineCore</code> process triggered an
+in-place container restart (<code>restartCount: 0 → 1</code>) on the same <code>Pod</code> UID. The restarted sentinel
+generated a fresh <code>boot_id</code>, held <code>/gpustack/v1/ready</code> fail-closed until the controller replayed
+<code>maxActiveRequests=24</code> and <code>maxBatchedTokens=4096</code> and sent <code>/gpustack/v1/ack</code>, and only then
+returned <code>200</code> on <code>/gpustack/v1/ready</code>.</li>
+<li><strong>Folded Elastic EP expansion (<code>DeepSeek-V2-Lite-Chat</code>)</strong>: widening
+<code>runtimeControl.parameters[&quot;elastic.dataParallelWidth&quot;]</code> from <code>&quot;2&quot;</code> to <code>&quot;3&quot;</code> preserved the master
+<code>Pod</code> UID, converged <code>ElasticResize=True</code> (<code>Reason: NoRefusal</code>), advanced <code>/gpustack/v1/runtime_config</code>
+to <code>ranks=3</code> and <code>membership_epoch=2</code>, and replayed <code>scheduling.maxActiveRequests=16</code> across all
+three ranks.</li>
+</ul>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li><code>scheduling.ppMaxMicroBatchSize</code> requires <code>--pp-size &gt; 1</code> with <code>resources.accelerator &gt;= 2</code> per
+member and was admission-tested only on this 1-GPU-per-node H200 cluster.</li>
+<li>Parameters absent from <code>vllm0.32.0</code> (<code>cacheAware*</code>, <code>maxInflightKVLoads</code>, <code>maxAsyncKVLoadsPerStep</code>)
+and <code>sglang0.5.22</code> NGRAM (<code>draftBudgetFraction</code>) were verified through the <code>UnsupportedEngineVersion</code>
+rejection and recovery path.</li>
+<li>Behavior on other engines or hardware follows
+<a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/runtime-control/">Online Runtime Control</a>
+.</li>
+</ul>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Symptom</th>
+          <th>Signal</th>
+          <th>Resolution</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>RuntimeControlSynced=False</code></td>
+          <td><code>Reason: UnsupportedEngineVersion</code></td>
+          <td>Inspect <em><code>status.roles[].runtimeControl.unsupportedFields</code></em> on <code>ModelDeployment</code>, then remove those keys or upgrade the runner image.</td>
+      </tr>
+      <tr>
+          <td>Control routes return <code>403</code> on router <code>:8000</code></td>
+          <td>Envoy inference allowlist active</td>
+          <td>Expected security boundary; query <code>/observer/endpoints</code> on the router pod&rsquo;s internal port (<code>:9091</code> or <code>:9090</code>) rather than <code>:8000</code>.</td>
+      </tr>
+      <tr>
+          <td><code>ModelDeploymentScaler</code> stops scaling</td>
+          <td><code>Blocked=True</code> (<code>Reason: RolePaused</code>)</td>
+          <td>Expected while any target role sets <code>pause: true</code>; set <code>pause: false</code> on <code>ModelDeployment</code> to resume autoscaling.</td>
+      </tr>
+      <tr>
+          <td>Restarted container stays unready briefly</td>
+          <td><code>/gpustack/v1/ready</code> returns <code>503</code> after container restart</td>
+          <td>Sentinel holds readiness fail-closed on a new <code>boot_id</code> until the worker replays <em><code>runtimeControl.parameters</code></em> and <code>/gpustack/v1/ack</code>; check worker connectivity if it does not clear.</td>
+      </tr>
+      <tr>
+          <td>Router fails to render</td>
+          <td><code>RouterReady=False/RenderFailed</code></td>
+          <td>No Router <code>Pod</code> exists when rendering fails; inspect <code>RouterReady</code> on <code>ModelDeployment</code> and fix <em><code>spec.router</code></em>.</td>
+      </tr>
+  </tbody>
+</table>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.12.1/docs/modules/model-deployment/runtime-control/">Online Runtime Control</a>
+ (parameter
+catalog and status reasons)</li><li><a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/elastic-ep/">Elastic EP Walkthrough</a>
+ (eight-GPU H100 collective
+expansion)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.12.1/docs/walkthroughs/model-deployment/multi-host/">Multi-Host Serving Walkthrough</a>
+ — span a serving group across multiple GPU hosts.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#summary">Summary</a>
+      <ul>
+        <li><a href="#environment">Environment</a></li>
+      </ul>
+    </li>
+    <li><a href="#vllm-runtime-changes">vLLM runtime changes</a>
+      <ul>
+        <li><a href="#step-1-deploy-routed-vllm">Step 1: Deploy routed vLLM</a></li>
+        <li><a href="#step-2-tune-and-reset-vllm">Step 2: Tune and reset vLLM</a></li>
+        <li><a href="#step-3-pause-scaled-role">Step 3: Pause scaled role</a></li>
+      </ul>
+    </li>
+    <li><a href="#sglang-runtime-changes">SGLang runtime changes</a></li>
+    <li><a href="#verification">Verification</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.12.1/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
+</body>
+</html>
