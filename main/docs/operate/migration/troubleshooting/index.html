@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Migration Troubleshooting · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1262,7 +1262,7 @@ namespace:</p>
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl"><span class="c1"># 2. Delete every APIService backed by the terminating namespace:</span>
 </span></span><span class="line"><span class="cl">kubectl get apiservices -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[?(@.spec.service.namespace==&#34;&#39;</span><span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span><span class="s1">&#39;&#34;)].metadata.name}&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> xargs -r kubectl delete apiservice</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> xargs -r kubectl delete apiservice</span></span></code></pre></div>
 </div>
 <p>After the namespace finishes terminating, clean up two cluster-scoped leftovers before reinstalling:</p>
 <ul>
@@ -1273,9 +1273,9 @@ Filter by backing <code>Service</code> namespace so external Kueue installs stay
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get mutatingwebhookconfigurations,validatingwebhookconfigurations -o name <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> grep -Ei <span class="s1">&#39;gpustack|kueue|nfd&#39;</span> <span class="p">|</span> <span class="k">while</span> <span class="nb">read</span> -r wc<span class="p">;</span> <span class="k">do</span>
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> grep -Ei <span class="s1">&#39;gpustack|kueue|nfd&#39;</span> <span class="p">|</span> <span class="k">while</span> <span class="nb">read</span> -r wc<span class="p">;</span> <span class="k">do</span>
 </span></span><span class="line"><span class="cl">      kubectl get <span class="s2">&#34;</span><span class="nv">$wc</span><span class="s2">&#34;</span> -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.webhooks[*].clientConfig.service.namespace}&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>        <span class="p">|</span> grep -qw <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> <span class="o">&amp;&amp;</span> kubectl delete <span class="s2">&#34;</span><span class="nv">$wc</span><span class="s2">&#34;</span>
+</span></span></span><span class="line"><span class="cl">        <span class="p">|</span> grep -qw <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> <span class="o">&amp;&amp;</span> kubectl delete <span class="s2">&#34;</span><span class="nv">$wc</span><span class="s2">&#34;</span>
 </span></span><span class="line"><span class="cl">    <span class="k">done</span></span></span></code></pre></div>
 </div>
 </li>
@@ -1301,7 +1301,7 @@ v0.8.6 or earlier matched only release name <code>gpustack-operator</code> unles
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl"><span class="c1"># 1. Inspect Terminating Kueue CRDs and their owning release annotation:</span>
 </span></span><span class="line"><span class="cl">kubectl get crd -o custom-columns<span class="o">=</span><span class="s1">&#39;NAME:.metadata.name,DELETING:.metadata.deletionTimestamp,RELEASE:.metadata.annotations.meta\.helm\.sh/release-name&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> grep kueue
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> grep kueue
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl"><span class="c1"># 2. Run current cleanup.sh (handles gpustack-operator, gpustack-operator-device-manager, and gpustack-kueue):</span>
 </span></span><span class="line"><span class="cl">bash deploy/gpustack-operator/chart/files/cleanup.sh <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span>
@@ -1325,7 +1325,7 @@ over node labels on reinstall):</p>
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl"><span class="c1"># During full teardown only (never after an in-place subchart upgrade!):</span>
 </span></span><span class="line"><span class="cl">helm -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> list -a <span class="p">|</span> grep gpustack-node-feature-discovery <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> helm -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> uninstall gpustack-node-feature-discovery --no-hooks</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  <span class="o">&amp;&amp;</span> helm -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> uninstall gpustack-node-feature-discovery --no-hooks</span></span></code></pre></div>
 </div>
 <h2 id="full-reset-order">Full-reset order</h2>
 <p>To wipe an existing worker installation cleanly (for example, before registering the cluster to a

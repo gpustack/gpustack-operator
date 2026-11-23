@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>NVIDIA MIG Operations · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1258,13 +1258,13 @@ derived automatically by the webhook):</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia-partition</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;local-queue&gt;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
@@ -1281,11 +1281,11 @@ exclusive with slice percentages; host CPU/RAM scale by the profile&rsquo;s VRAM
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Instance</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mig-instance</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w">
@@ -1364,34 +1364,34 @@ legacy <code>10</code>-share display; current builds display card count <code>8/
 ). An 8-GPU <code>H100-80GB</code> <code>Node</code>
 reports these capacity views across three layouts:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Configuration</th>
-          <th>Partitioned GPUs</th>
-          <th><code>EX/SH/SL/PT</code></th>
-          <th>Advertised node keys</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>All-logical</td>
-          <td><code>0</code> of <code>8</code></td>
-          <td><code>8/8 80/80 100/800 0/0</code></td>
-          <td>Whole/shared + <code>.sliced.*</code> (<code>1024</code> slices, <code>12800k</code> units); <code>.partitioned: 0</code></td>
-      </tr>
-      <tr>
-          <td>All-physical</td>
-          <td><code>8</code> of <code>8</code></td>
-          <td><code>0/0 0/0 0/0 1/56</code></td>
-          <td><code>.partitioned: 56</code> + <code>.partitioned.mig-*</code> (<code>12800k</code> units); logical keys <code>0</code></td>
-      </tr>
-      <tr>
-          <td>Mixed</td>
-          <td><code>3</code> of <code>8</code></td>
-          <td><code>5/5 50/50 100/500 1/21</code></td>
-          <td><code>5</code> GPUs under logical/whole (<code>640</code> slices); <code>3</code> GPUs under <code>.partitioned.*</code> (<code>21</code>)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Configuration</th>
+					<th>Partitioned GPUs</th>
+					<th><code>EX/SH/SL/PT</code></th>
+					<th>Advertised node keys</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>All-logical</td>
+					<td><code>0</code> of <code>8</code></td>
+					<td><code>8/8 80/80 100/800 0/0</code></td>
+					<td>Whole/shared + <code>.sliced.*</code> (<code>1024</code> slices, <code>12800k</code> units); <code>.partitioned: 0</code></td>
+			</tr>
+			<tr>
+					<td>All-physical</td>
+					<td><code>8</code> of <code>8</code></td>
+					<td><code>0/0 0/0 0/0 1/56</code></td>
+					<td><code>.partitioned: 56</code> + <code>.partitioned.mig-*</code> (<code>12800k</code> units); logical keys <code>0</code></td>
+			</tr>
+			<tr>
+					<td>Mixed</td>
+					<td><code>3</code> of <code>8</code></td>
+					<td><code>5/5 50/50 100/500 1/21</code></td>
+					<td><code>5</code> GPUs under logical/whole (<code>640</code> slices); <code>3</code> GPUs under <code>.partitioned.*</code> (<code>21</code>)</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="verification">Verification</h3>
 <p>Wait for <code>gpustack-operator-device-manager-nvidia</code> to be <code>Ready</code> and <code>.partitioned</code> keys to register
@@ -1413,86 +1413,86 @@ on the <code>Node</code> before submitting <code>Pod</code>s, then verify carved
 <p>When one live <code>3g.40gb</code> occupies slices <code>0–3</code> on an 8-slice H100 (<code>4–7</code> free), free start slots per
 profile on that GPU are:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Profile</th>
-          <th>Slice width</th>
-          <th>Legal starts</th>
-          <th>Free starts</th>
-          <th>Node key contribution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>1g.10gb</code></td>
-          <td><code>1</code></td>
-          <td><code>0 1 2 3 4 5 6</code></td>
-          <td><code>4, 5, 6</code></td>
-          <td><code>3</code></td>
-      </tr>
-      <tr>
-          <td><code>1g.20gb</code></td>
-          <td><code>2</code></td>
-          <td><code>0 2 4 6</code></td>
-          <td><code>4, 6</code></td>
-          <td><code>2</code></td>
-      </tr>
-      <tr>
-          <td><code>2g.20gb</code></td>
-          <td><code>2</code></td>
-          <td><code>0 2 4</code></td>
-          <td><code>4</code></td>
-          <td><code>1</code></td>
-      </tr>
-      <tr>
-          <td><code>3g.40gb</code></td>
-          <td><code>4</code></td>
-          <td><code>0 4</code></td>
-          <td><code>4</code></td>
-          <td><code>1</code> allocated + <code>1</code> free</td>
-      </tr>
-      <tr>
-          <td><code>4g.40gb</code></td>
-          <td><code>4</code></td>
-          <td><code>0</code></td>
-          <td>—</td>
-          <td><code>0</code></td>
-      </tr>
-      <tr>
-          <td><code>7g.80gb</code></td>
-          <td><code>8</code></td>
-          <td><code>0</code></td>
-          <td>—</td>
-          <td><code>0</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Profile</th>
+					<th>Slice width</th>
+					<th>Legal starts</th>
+					<th>Free starts</th>
+					<th>Node key contribution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>1g.10gb</code></td>
+					<td><code>1</code></td>
+					<td><code>0 1 2 3 4 5 6</code></td>
+					<td><code>4, 5, 6</code></td>
+					<td><code>3</code></td>
+			</tr>
+			<tr>
+					<td><code>1g.20gb</code></td>
+					<td><code>2</code></td>
+					<td><code>0 2 4 6</code></td>
+					<td><code>4, 6</code></td>
+					<td><code>2</code></td>
+			</tr>
+			<tr>
+					<td><code>2g.20gb</code></td>
+					<td><code>2</code></td>
+					<td><code>0 2 4</code></td>
+					<td><code>4</code></td>
+					<td><code>1</code></td>
+			</tr>
+			<tr>
+					<td><code>3g.40gb</code></td>
+					<td><code>4</code></td>
+					<td><code>0 4</code></td>
+					<td><code>4</code></td>
+					<td><code>1</code> allocated + <code>1</code> free</td>
+			</tr>
+			<tr>
+					<td><code>4g.40gb</code></td>
+					<td><code>4</code></td>
+					<td><code>0</code></td>
+					<td>—</td>
+					<td><code>0</code></td>
+			</tr>
+			<tr>
+					<td><code>7g.80gb</code></td>
+					<td><code>8</code></td>
+					<td><code>0</code></td>
+					<td>—</td>
+					<td><code>0</code></td>
+			</tr>
+	</tbody>
 </table>
 <p>Across 7 empty GPUs plus that 1 carved GPU:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Surface</th>
-          <th>Value</th>
-          <th>Formula</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>.partitioned.mig-&lt;profile&gt;</code></td>
-          <td><code>1g.10gb: 52</code>, <code>3g.40gb: 16</code></td>
-          <td>Sum of <code>allocated + remaining</code> (scheduler subtracts live <code>Pod</code>s)</td>
-      </tr>
-      <tr>
-          <td><code>nvidia.com/gpu.partitioned</code></td>
-          <td><code>53</code></td>
-          <td>Sum of <code>allocated + max(free profile count)</code> per GPU</td>
-      </tr>
-      <tr>
-          <td><code>InstanceType</code> <code>PT</code> (<code>onceMaxRequest/remaining</code>)</td>
-          <td><code>1/52</code></td>
-          <td><code>1</code> while any slot is free; sum of <code>max(free profile count)</code> without allocated</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Surface</th>
+					<th>Value</th>
+					<th>Formula</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>.partitioned.mig-&lt;profile&gt;</code></td>
+					<td><code>1g.10gb: 52</code>, <code>3g.40gb: 16</code></td>
+					<td>Sum of <code>allocated + remaining</code> (scheduler subtracts live <code>Pod</code>s)</td>
+			</tr>
+			<tr>
+					<td><code>nvidia.com/gpu.partitioned</code></td>
+					<td><code>53</code></td>
+					<td>Sum of <code>allocated + max(free profile count)</code> per GPU</td>
+			</tr>
+			<tr>
+					<td><code>InstanceType</code> <code>PT</code> (<code>onceMaxRequest/remaining</code>)</td>
+					<td><code>1/52</code></td>
+					<td><code>1</code> while any slot is free; sum of <code>max(free profile count)</code> without allocated</td>
+			</tr>
+	</tbody>
 </table>
 <p><em><code>status.detail.slicedDetail</code></em> reflects static empty-pool capability from <code>Devices.spec</code>; read <code>PT</code>
 and <code>PARTITIONS</code> (<code>-o wide</code>) for live remaining slots.</p>

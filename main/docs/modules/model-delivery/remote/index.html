@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Remote Weight Delivery · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1230,30 +1230,30 @@ across batches so successful remote loads write zero checkpoint shards to target
 <h2 id="configuration">Configuration</h2>
 <p>The <code>model-artifact-remote-delivery-policy</code> <code>Setting</code> controls cluster-wide activation:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Value</th>
-          <th>Behavior</th>
-          <th>Requirements</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><strong><code>Prefer</code></strong> (default)</td>
-          <td>Streams remotely when a prepared source is <code>SourceReady</code>; falls back to local delivery otherwise.</td>
-          <td><code>model.csi.gpustack.ai</code> <code>CSIDriver</code> for metadata mounts.</td>
-      </tr>
-      <tr>
-          <td><code>Require</code></td>
-          <td>Streams remotely and waits within startup limits; never downloads locally.</td>
-          <td><code>model.csi.gpustack.ai</code> <code>CSIDriver</code> and an allowlisted role/backend.</td>
-      </tr>
-      <tr>
-          <td><code>Disabled</code></td>
-          <td>Disables remote delivery, leaving <code>Pod</code> specs and status fields unchanged.</td>
-          <td>None (<code>modelTransfer.enabled: false</code> seeds <code>Disabled</code> on start).</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Value</th>
+					<th>Behavior</th>
+					<th>Requirements</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><strong><code>Prefer</code></strong> (default)</td>
+					<td>Streams remotely when a prepared source is <code>SourceReady</code>; falls back to local delivery otherwise.</td>
+					<td><code>model.csi.gpustack.ai</code> <code>CSIDriver</code> for metadata mounts.</td>
+			</tr>
+			<tr>
+					<td><code>Require</code></td>
+					<td>Streams remotely and waits within startup limits; never downloads locally.</td>
+					<td><code>model.csi.gpustack.ai</code> <code>CSIDriver</code> and an allowlisted role/backend.</td>
+			</tr>
+			<tr>
+					<td><code>Disabled</code></td>
+					<td>Disables remote delivery, leaving <code>Pod</code> specs and status fields unchanged.</td>
+					<td>None (<code>modelTransfer.enabled: false</code> seeds <code>Disabled</code> on start).</td>
+			</tr>
+	</tbody>
 </table>
 <p><code>modelTransfer.images</code> configures per-vendor source <code>DaemonSet</code>s (<code>nvidia</code>, <code>amd</code>, <code>ascend</code>, matched
 by <code>pci-&lt;vendor&gt;.present</code> under <code>OnDelete</code>). Use cert-manager when rendering manifests offline
@@ -1263,31 +1263,31 @@ NVIDIA and <code>hixl</code> on Ascend). Take-over <em><code>roles[].command</co
 local paths. Treat source <code>Pod</code>s and vendor images as trusted cluster infrastructure.</p>
 <h3 id="fallback-policies">Fallback policies</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Policy</th>
-          <th>Allowlisted, source ready</th>
-          <th>Allowlisted, source unavailable</th>
-          <th>Outside allowlist</th>
-          <th>Ineligible role</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>Require</code></td>
-          <td>Loads remote</td>
-          <td>Waits within startup timeout; never downloads</td>
-          <td>Blocked (<code>UnqualifiedTransferBackend</code>)</td>
-          <td>Blocked (<code>RoleIneligibleForModelTransfer</code>)</td>
-      </tr>
-      <tr>
-          <td><code>Prefer</code></td>
-          <td>Loads remote</td>
-          <td>Uses local delivery unless a remote replica is running</td>
-          <td>Falls back unless rolling a loaded replica</td>
-          <td>Falls back to local delivery</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Policy</th>
+					<th>Allowlisted, source ready</th>
+					<th>Allowlisted, source unavailable</th>
+					<th>Outside allowlist</th>
+					<th>Ineligible role</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Require</code></td>
+					<td>Loads remote</td>
+					<td>Waits within startup timeout; never downloads</td>
+					<td>Blocked (<code>UnqualifiedTransferBackend</code>)</td>
+					<td>Blocked (<code>RoleIneligibleForModelTransfer</code>)</td>
+			</tr>
+			<tr>
+					<td><code>Prefer</code></td>
+					<td>Loads remote</td>
+					<td>Uses local delivery unless a remote replica is running</td>
+					<td>Falls back unless rolling a loaded replica</td>
+					<td>Falls back to local delivery</td>
+			</tr>
+	</tbody>
 </table>
 <p>Under <code>Prefer</code>, failed remote loads recreate the replica and increment <em><code>fallbackAttempts</code></em>. After
 three attempts, <em><code>reason</code></em> turns <code>FallbackAttemptsSpent</code> and local <code>Node</code> or <code>Engine</code> delivery runs;
@@ -1324,11 +1324,11 @@ at least <code>1 GiB</code> and the largest safetensors shard (shards are never 
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelStoreBinding</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelStoreBinding</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-source</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-default</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">storeRefs</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">model-source-pool</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">quota</span><span class="p">:</span><span class="w">
@@ -1338,13 +1338,13 @@ at least <code>1 GiB</code> and the largest safetensors shard (shards are never 
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bytes</span><span class="p">:</span><span class="w"> </span><span class="l">64Gi </span><span class="w"> </span><span class="c"># shared across prefetches, nodes, and vendors; monotonic upward</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">registrations</span><span class="p">:</span><span class="w"> </span><span class="m">4096</span><span class="w">  </span><span class="c"># monotonic upward</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sessions</span><span class="p">:</span><span class="w"> </span><span class="m">64</span><span class="w">  </span><span class="c"># editable in both directions</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelPrefetch</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelPrefetch</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-8b-source</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-default</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-8b</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">bindingRef</span><span class="p">:</span><span class="w">
@@ -1358,28 +1358,28 @@ at least <code>1 GiB</code> and the largest safetensors shard (shards are never 
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># registers host-memory source alongside disk cache</span></span></span></code></pre></div>
 </div>
 <table>
-  <thead>
-      <tr>
-          <th>Model</th>
-          <th>Checkpoint</th>
-          <th>16 GiB budget</th>
-          <th>Paging behavior</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>Qwen3-8B</code></td>
-          <td><code>15.27 GiB</code></td>
-          <td>Pages (<code>~14.54 GiB</code> net after <code>10%</code> overhead)</td>
-          <td>Fits whole when broker budget exceeds <code>~17.6 GiB</code>.</td>
-      </tr>
-      <tr>
-          <td><code>Qwen3.6-35B-A3B</code></td>
-          <td><code>66.99 GiB</code></td>
-          <td>Pages resident batches</td>
-          <td>Window must fit largest shard; <code>64 GiB</code> Binding grant cannot widen a <code>16 GiB</code> resident cap.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Model</th>
+					<th>Checkpoint</th>
+					<th>16 GiB budget</th>
+					<th>Paging behavior</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Qwen3-8B</code></td>
+					<td><code>15.27 GiB</code></td>
+					<td>Pages (<code>~14.54 GiB</code> net after <code>10%</code> overhead)</td>
+					<td>Fits whole when broker budget exceeds <code>~17.6 GiB</code>.</td>
+			</tr>
+			<tr>
+					<td><code>Qwen3.6-35B-A3B</code></td>
+					<td><code>66.99 GiB</code></td>
+					<td>Pages resident batches</td>
+					<td>Window must fit largest shard; <code>64 GiB</code> Binding grant cannot widen a <code>16 GiB</code> resident cap.</td>
+			</tr>
+	</tbody>
 </table>
 <p>Keep source disk caches intact for page-in and restore. Drain and delete <code>OnDelete</code> source <code>Pod</code>s
 after chart flag or env changes, and keep operator, source SDK, and engine SDK on contract version <code>2</code>.</p>
@@ -1437,11 +1437,11 @@ asymmetric <em>PD</em> are refused):</li>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-8b-a5-roce</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-default</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-8B</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
@@ -1452,7 +1452,7 @@ asymmetric <em>PD</em> are refused):</li>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType: atlas-950  # status.detail.family</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;950&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">atlas-950 </span><span class="w"> </span><span class="c"># status.detail.family: &#34;950&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">interface</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># grants RDMA, RO /etc/hixlep, and roce:host default</span></span></span></code></pre></div>
@@ -1494,17 +1494,17 @@ flowchart LR
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-8B </span><span class="w"> </span><span class="c"># required</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-weights </span><span class="w"> </span><span class="c"># required Hugging Face ModelArtifact</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name: vLLM  # required; enum</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM, SGLang</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM </span><span class="w"> </span><span class="c"># required; enum: vLLM, SGLang</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">example/engine:tag </span><span class="w"> </span><span class="c"># required</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
@@ -1527,11 +1527,11 @@ Server restarts clear descriptors without interrupting running replicas; the nex
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Setting</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Setting</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">model-deployment-modelexpress-server-image</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-system </span><span class="w"> </span><span class="c"># use the system namespace</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/mirrored-modelexpress-server:v0.8.0 </span><span class="w"> </span><span class="c"># default image</span></span></span></code></pre></div>
 </div>
 <h2 id="results">Results</h2>
@@ -1558,236 +1558,236 @@ runs because ModelExpress runs in graph mode (<code>296.82 s</code> → <code>90
 at <em>TP</em> = 2; <code>35B</code> = <code>Qwen/Qwen3.6-35B-A3B</code> and <code>235B</code> = <code>vllm-ascend/Qwen3-235B-A22B-W8A8</code> at
 <em>TP</em> = 8 plus <em>expert parallelism (EP)</em>; 235B <code>16 GiB</code> and <code>256 GiB</code> rows used different SDK builds):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Model</th>
-          <th>Mode</th>
-          <th>Source RAM</th>
-          <th>Target RAM</th>
-          <th>Target Storage</th>
-          <th>Weight Transfer Time</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>8B (<em>TP</em> = 2)</td>
-          <td>TCP peer sync + local load (sum)</td>
-          <td>0 GiB</td>
-          <td>0 GiB</td>
-          <td>15.27 GiB</td>
-          <td>82.90 s (baseline)</td>
-      </tr>
-      <tr>
-          <td>8B (<em>TP</em> = 2)</td>
-          <td>TP0 + broadcast (16 GiB source, 8 GiB target)</td>
-          <td>15.26 GiB</td>
-          <td>3.72 GiB</td>
-          <td>0 GiB</td>
-          <td>15.31 s (5.41×, −81.5% time)</td>
-      </tr>
-      <tr>
-          <td>8B (<em>TP</em> = 2)</td>
-          <td>TP all (16 GiB source, 8 GiB target)</td>
-          <td>15.26 GiB</td>
-          <td>7.45 GiB</td>
-          <td>0 GiB</td>
-          <td>10.78 s (7.69×, −87.0% time)</td>
-      </tr>
-      <tr>
-          <td>35B (<em>TP</em> = 8 + <em>EP</em>)</td>
-          <td>TCP peer sync + local load (sum)</td>
-          <td>0 GiB</td>
-          <td>0 GiB</td>
-          <td>66.99 GiB</td>
-          <td>282.60 s (baseline)</td>
-      </tr>
-      <tr>
-          <td>35B (<em>TP</em> = 8 + <em>EP</em>)</td>
-          <td>TP0 + broadcast (16 GiB source, 8 GiB target)</td>
-          <td>15.66 GiB</td>
-          <td>3.72 GiB</td>
-          <td>0 GiB</td>
-          <td>66.33 s (4.26×, −76.5% time)</td>
-      </tr>
-      <tr>
-          <td>35B (<em>TP</em> = 8 + <em>EP</em>)</td>
-          <td>TP all (16 GiB source, 8 GiB target)</td>
-          <td>15.66 GiB</td>
-          <td>8.00 GiB</td>
-          <td>0 GiB</td>
-          <td>101.39 s (2.79×, −64.1% time)</td>
-      </tr>
-      <tr>
-          <td>35B (<em>TP</em> = 8 + <em>EP</em>)</td>
-          <td>TP all (80 GiB source, 64 GiB target)</td>
-          <td>67.05 GiB</td>
-          <td>29.81 GiB</td>
-          <td>0 GiB</td>
-          <td>46.39 s (6.09×, −83.6% time)</td>
-      </tr>
-      <tr>
-          <td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
-          <td>TCP peer sync + local load (sum)</td>
-          <td>0 GiB</td>
-          <td>0 GiB</td>
-          <td>220.54 GiB</td>
-          <td>599.05 s (baseline)</td>
-      </tr>
-      <tr>
-          <td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
-          <td>TP0 + broadcast (16 GiB source, 8 GiB target)</td>
-          <td>15.99 GiB</td>
-          <td>4.00 GiB</td>
-          <td>0 GiB</td>
-          <td>452.83 s (1.32×, −24.4% time)</td>
-      </tr>
-      <tr>
-          <td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
-          <td>TP0 + broadcast (256 GiB source, 32 GiB target)</td>
-          <td>220.67 GiB</td>
-          <td>4.00 GiB</td>
-          <td>0 GiB</td>
-          <td>253.58 s (2.36×, −57.7% time)</td>
-      </tr>
-      <tr>
-          <td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
-          <td>TP all (256 GiB source, 32 GiB target)</td>
-          <td>220.67 GiB</td>
-          <td>32.00 GiB</td>
-          <td>0 GiB</td>
-          <td>232.93 s (2.57×, −61.1% time)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Model</th>
+					<th>Mode</th>
+					<th>Source RAM</th>
+					<th>Target RAM</th>
+					<th>Target Storage</th>
+					<th>Weight Transfer Time</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>8B (<em>TP</em> = 2)</td>
+					<td>TCP peer sync + local load (sum)</td>
+					<td>0 GiB</td>
+					<td>0 GiB</td>
+					<td>15.27 GiB</td>
+					<td>82.90 s (baseline)</td>
+			</tr>
+			<tr>
+					<td>8B (<em>TP</em> = 2)</td>
+					<td>TP0 + broadcast (16 GiB source, 8 GiB target)</td>
+					<td>15.26 GiB</td>
+					<td>3.72 GiB</td>
+					<td>0 GiB</td>
+					<td>15.31 s (5.41×, −81.5% time)</td>
+			</tr>
+			<tr>
+					<td>8B (<em>TP</em> = 2)</td>
+					<td>TP all (16 GiB source, 8 GiB target)</td>
+					<td>15.26 GiB</td>
+					<td>7.45 GiB</td>
+					<td>0 GiB</td>
+					<td>10.78 s (7.69×, −87.0% time)</td>
+			</tr>
+			<tr>
+					<td>35B (<em>TP</em> = 8 + <em>EP</em>)</td>
+					<td>TCP peer sync + local load (sum)</td>
+					<td>0 GiB</td>
+					<td>0 GiB</td>
+					<td>66.99 GiB</td>
+					<td>282.60 s (baseline)</td>
+			</tr>
+			<tr>
+					<td>35B (<em>TP</em> = 8 + <em>EP</em>)</td>
+					<td>TP0 + broadcast (16 GiB source, 8 GiB target)</td>
+					<td>15.66 GiB</td>
+					<td>3.72 GiB</td>
+					<td>0 GiB</td>
+					<td>66.33 s (4.26×, −76.5% time)</td>
+			</tr>
+			<tr>
+					<td>35B (<em>TP</em> = 8 + <em>EP</em>)</td>
+					<td>TP all (16 GiB source, 8 GiB target)</td>
+					<td>15.66 GiB</td>
+					<td>8.00 GiB</td>
+					<td>0 GiB</td>
+					<td>101.39 s (2.79×, −64.1% time)</td>
+			</tr>
+			<tr>
+					<td>35B (<em>TP</em> = 8 + <em>EP</em>)</td>
+					<td>TP all (80 GiB source, 64 GiB target)</td>
+					<td>67.05 GiB</td>
+					<td>29.81 GiB</td>
+					<td>0 GiB</td>
+					<td>46.39 s (6.09×, −83.6% time)</td>
+			</tr>
+			<tr>
+					<td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
+					<td>TCP peer sync + local load (sum)</td>
+					<td>0 GiB</td>
+					<td>0 GiB</td>
+					<td>220.54 GiB</td>
+					<td>599.05 s (baseline)</td>
+			</tr>
+			<tr>
+					<td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
+					<td>TP0 + broadcast (16 GiB source, 8 GiB target)</td>
+					<td>15.99 GiB</td>
+					<td>4.00 GiB</td>
+					<td>0 GiB</td>
+					<td>452.83 s (1.32×, −24.4% time)</td>
+			</tr>
+			<tr>
+					<td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
+					<td>TP0 + broadcast (256 GiB source, 32 GiB target)</td>
+					<td>220.67 GiB</td>
+					<td>4.00 GiB</td>
+					<td>0 GiB</td>
+					<td>253.58 s (2.36×, −57.7% time)</td>
+			</tr>
+			<tr>
+					<td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
+					<td>TP all (256 GiB source, 32 GiB target)</td>
+					<td>220.67 GiB</td>
+					<td>32.00 GiB</td>
+					<td>0 GiB</td>
+					<td>232.93 s (2.57×, −61.1% time)</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="nvidia-nixl">NVIDIA (NIXL)</h3>
 <p>Nebius H100 80 GB <code>Node</code>s, vLLM <code>0.30.0</code>, eager mode (<code>80B</code> = <code>Qwen/Qwen3-Next-80B-A3B-Instruct-FP8</code>
 at <em>TP</em> = 4; <code>235B</code> = <code>Qwen/Qwen3-235B-A22B-Instruct-2507-FP8</code> at <em>TP</em> = 8 + <em>EP</em>):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Model</th>
-          <th>Mode</th>
-          <th>Source RAM</th>
-          <th>Target RAM</th>
-          <th>Target Storage</th>
-          <th>Weight Transfer Time</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>80B (<em>TP</em> = 4)</td>
-          <td>TCP peer sync + local load (sum)</td>
-          <td>0 GiB</td>
-          <td>0 GiB</td>
-          <td>76.45 GiB</td>
-          <td>393.14 s (baseline)</td>
-      </tr>
-      <tr>
-          <td>80B (<em>TP</em> = 4)</td>
-          <td>TP0 + broadcast (16 GiB source, 8 GiB target)</td>
-          <td>16.00 GiB</td>
-          <td>8.00 GiB</td>
-          <td>0 GiB</td>
-          <td>160.59 s (2.45×, −59.2% time)</td>
-      </tr>
-      <tr>
-          <td>80B (<em>TP</em> = 4)</td>
-          <td>TP all (16 GiB source, 8 GiB target)</td>
-          <td>16.00 GiB</td>
-          <td>8.00 GiB</td>
-          <td>0 GiB</td>
-          <td>1380.52 s (0.28×, +251.2% time)</td>
-      </tr>
-      <tr>
-          <td>80B (<em>TP</em> = 4)</td>
-          <td>TP all (80 GiB source, 64 GiB target)</td>
-          <td>76.42 GiB</td>
-          <td>40.00 GiB</td>
-          <td>0 GiB</td>
-          <td>81.16 s (4.84×, −79.4% time)</td>
-      </tr>
-      <tr>
-          <td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
-          <td>TCP peer sync + local load (sum)</td>
-          <td>0 GiB</td>
-          <td>0 GiB</td>
-          <td>220.21 GiB</td>
-          <td>1121.30 s (baseline)</td>
-      </tr>
-      <tr>
-          <td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
-          <td>TP0 + broadcast (16 GiB source, 8 GiB target)</td>
-          <td>16.00 GiB</td>
-          <td>8.00 GiB</td>
-          <td>0 GiB</td>
-          <td>287.97 s (3.89×, −74.3% time)</td>
-      </tr>
-      <tr>
-          <td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
-          <td>TP0 + broadcast (256 GiB source, 64 GiB target)</td>
-          <td>220.19 GiB</td>
-          <td>9.31 GiB</td>
-          <td>0 GiB</td>
-          <td>108.89 s (10.30×, −90.3% time)</td>
-      </tr>
-      <tr>
-          <td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
-          <td>TP all (256 GiB source, 32 GiB target)</td>
-          <td>220.19 GiB</td>
-          <td>32.00 GiB</td>
-          <td>0 GiB</td>
-          <td>69.16 s (16.21×, −93.8% time)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Model</th>
+					<th>Mode</th>
+					<th>Source RAM</th>
+					<th>Target RAM</th>
+					<th>Target Storage</th>
+					<th>Weight Transfer Time</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>80B (<em>TP</em> = 4)</td>
+					<td>TCP peer sync + local load (sum)</td>
+					<td>0 GiB</td>
+					<td>0 GiB</td>
+					<td>76.45 GiB</td>
+					<td>393.14 s (baseline)</td>
+			</tr>
+			<tr>
+					<td>80B (<em>TP</em> = 4)</td>
+					<td>TP0 + broadcast (16 GiB source, 8 GiB target)</td>
+					<td>16.00 GiB</td>
+					<td>8.00 GiB</td>
+					<td>0 GiB</td>
+					<td>160.59 s (2.45×, −59.2% time)</td>
+			</tr>
+			<tr>
+					<td>80B (<em>TP</em> = 4)</td>
+					<td>TP all (16 GiB source, 8 GiB target)</td>
+					<td>16.00 GiB</td>
+					<td>8.00 GiB</td>
+					<td>0 GiB</td>
+					<td>1380.52 s (0.28×, +251.2% time)</td>
+			</tr>
+			<tr>
+					<td>80B (<em>TP</em> = 4)</td>
+					<td>TP all (80 GiB source, 64 GiB target)</td>
+					<td>76.42 GiB</td>
+					<td>40.00 GiB</td>
+					<td>0 GiB</td>
+					<td>81.16 s (4.84×, −79.4% time)</td>
+			</tr>
+			<tr>
+					<td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
+					<td>TCP peer sync + local load (sum)</td>
+					<td>0 GiB</td>
+					<td>0 GiB</td>
+					<td>220.21 GiB</td>
+					<td>1121.30 s (baseline)</td>
+			</tr>
+			<tr>
+					<td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
+					<td>TP0 + broadcast (16 GiB source, 8 GiB target)</td>
+					<td>16.00 GiB</td>
+					<td>8.00 GiB</td>
+					<td>0 GiB</td>
+					<td>287.97 s (3.89×, −74.3% time)</td>
+			</tr>
+			<tr>
+					<td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
+					<td>TP0 + broadcast (256 GiB source, 64 GiB target)</td>
+					<td>220.19 GiB</td>
+					<td>9.31 GiB</td>
+					<td>0 GiB</td>
+					<td>108.89 s (10.30×, −90.3% time)</td>
+			</tr>
+			<tr>
+					<td>235B (<em>TP</em> = 8 + <em>EP</em>)</td>
+					<td>TP all (256 GiB source, 32 GiB target)</td>
+					<td>220.19 GiB</td>
+					<td>32.00 GiB</td>
+					<td>0 GiB</td>
+					<td>69.16 s (16.21×, −93.8% time)</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="modelexpress-gpu-transfers">ModelExpress GPU transfers</h3>
 <p>Nebius H100 80 GB <code>Node</code>s, vLLM <code>0.30.0</code>, graph mode on <code>235B (TP8 + EP)</code>
 (<code>Qwen/Qwen3-235B-A22B-Instruct-2507-FP8</code>):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Model</th>
-          <th>Mode</th>
-          <th>Source RAM</th>
-          <th>Target RAM</th>
-          <th>Target Storage</th>
-          <th>Weight Transfer Time</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>235B (TP8 + EP)</td>
-          <td>TCP peer sync + local load (sum)</td>
-          <td>0 GiB</td>
-          <td>0 GiB</td>
-          <td>220.21 GiB</td>
-          <td>1121.30 s (baseline)</td>
-      </tr>
-      <tr>
-          <td>235B (TP8 + EP)</td>
-          <td>Seed replica: <code>GpustackLoadStrategy</code> (256 GiB source, 8 GiB target)</td>
-          <td>220.19 GiB</td>
-          <td>8.00 GiB</td>
-          <td>0 GiB</td>
-          <td>232.10 s (4.83×, −79.3% time)</td>
-      </tr>
-      <tr>
-          <td>235B (TP8 + EP)</td>
-          <td>Peer replica: <code>RdmaStrategy</code> (NIXL D2D + compile cache)</td>
-          <td>0 GiB</td>
-          <td>0 GiB</td>
-          <td>0 GiB</td>
-          <td>16.78 s (66.82×, −98.5% time)</td>
-      </tr>
-      <tr>
-          <td>235B (TP8 + EP)</td>
-          <td>Restart fallback: <code>GpustackLoadStrategy</code> (256 GiB source, 8 GiB target)</td>
-          <td>220.19 GiB</td>
-          <td>8.00 GiB</td>
-          <td>0 GiB</td>
-          <td>109.08 s (10.28×, −90.3% time)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Model</th>
+					<th>Mode</th>
+					<th>Source RAM</th>
+					<th>Target RAM</th>
+					<th>Target Storage</th>
+					<th>Weight Transfer Time</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>235B (TP8 + EP)</td>
+					<td>TCP peer sync + local load (sum)</td>
+					<td>0 GiB</td>
+					<td>0 GiB</td>
+					<td>220.21 GiB</td>
+					<td>1121.30 s (baseline)</td>
+			</tr>
+			<tr>
+					<td>235B (TP8 + EP)</td>
+					<td>Seed replica: <code>GpustackLoadStrategy</code> (256 GiB source, 8 GiB target)</td>
+					<td>220.19 GiB</td>
+					<td>8.00 GiB</td>
+					<td>0 GiB</td>
+					<td>232.10 s (4.83×, −79.3% time)</td>
+			</tr>
+			<tr>
+					<td>235B (TP8 + EP)</td>
+					<td>Peer replica: <code>RdmaStrategy</code> (NIXL D2D + compile cache)</td>
+					<td>0 GiB</td>
+					<td>0 GiB</td>
+					<td>0 GiB</td>
+					<td>16.78 s (66.82×, −98.5% time)</td>
+			</tr>
+			<tr>
+					<td>235B (TP8 + EP)</td>
+					<td>Restart fallback: <code>GpustackLoadStrategy</code> (256 GiB source, 8 GiB target)</td>
+					<td>220.19 GiB</td>
+					<td>8.00 GiB</td>
+					<td>0 GiB</td>
+					<td>109.08 s (10.28×, −90.3% time)</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="verification">Verification</h2>
 <p>Inspect per-role and per-replica remote loading state on <code>ModelDeployment</code>:</p>
@@ -1802,60 +1802,60 @@ at <em>TP</em> = 4; <code>235B</code> = <code>Qwen/Qwen3-235B-A22B-Instruct-2507
 ).</p>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Observation</th>
-          <th>Cause</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>SourceWindowFallback</code> (<code>Progressing=True</code>) on prefetch</td>
-          <td>Source grant below <code>1 GiB</code> floor under <code>Prefer</code></td>
-          <td>Raise <code>ModelStoreBinding</code> <em><code>sourceMemory</code></em> or broker RAM budget.</td>
-      </tr>
-      <tr>
-          <td><code>SourceWindowBelowFloor</code> (<code>Progressing=False</code>) on prefetch</td>
-          <td>Source grant below <code>1 GiB</code> floor under <code>Require</code></td>
-          <td>Raise <code>ModelStoreBinding</code> <em><code>sourceMemory</code></em> or broker <code>maxMemoryBytes</code>.</td>
-      </tr>
-      <tr>
-          <td><code>SourceGrantMissing</code> (<code>Progressing=False</code>) on prefetch</td>
-          <td>Missing <code>ModelStoreBinding</code></td>
-          <td>Create the <code>ModelStoreBinding</code> named in <em><code>spec.bindingRef</code></em>.</td>
-      </tr>
-      <tr>
-          <td><code>load: AwaitingSource</code></td>
-          <td>No <code>SourceReady</code> prefetch serves the digest</td>
-          <td>Inspect <code>ModelPrefetch</code> <em><code>status.transfer</code></em> and source <code>Pod</code> logs.</td>
-      </tr>
-      <tr>
-          <td><code>load: AwaitingMetadata</code></td>
-          <td>Metadata CSI mount pending</td>
-          <td>Inspect <code>Pod</code> <code>FailedMount</code> events and <code>model.csi.gpustack.ai</code>.</td>
-      </tr>
-      <tr>
-          <td><code>RemoteLoadFailed</code> (<code>load: Unknown</code>)</td>
-          <td>Remote load exited; replica recreating</td>
-          <td>Inspect previous container logs and <em><code>fallbackAttempts</code></em>.</td>
-      </tr>
-      <tr>
-          <td><code>FallbackAttemptsSpent</code></td>
-          <td>Remote load failed more than 3 times under <code>Prefer</code></td>
-          <td>Diagnose fallback <code>Node</code> or <code>Engine</code> delivery on the recreated <code>Pod</code>.</td>
-      </tr>
-      <tr>
-          <td><code>RoleIneligibleForModelTransfer</code> or <code>UnqualifiedTransferBackend</code></td>
-          <td>Custom command, unsupported engine, or unallowlisted backend under <code>Require</code></td>
-          <td>Switch to a managed NVIDIA (<code>nixl</code>) or Ascend (<code>hixl</code>) role, or set policy to <code>Prefer</code>.</td>
-      </tr>
-      <tr>
-          <td><code>WeightsReady=False</code> (<code>NodeDeliveryUnavailable</code>)</td>
-          <td><code>Require</code> active without <code>model.csi.gpustack.ai</code></td>
-          <td>Enable <code>modelManager.enabled: true</code> or roll back remote policy.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Observation</th>
+					<th>Cause</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>SourceWindowFallback</code> (<code>Progressing=True</code>) on prefetch</td>
+					<td>Source grant below <code>1 GiB</code> floor under <code>Prefer</code></td>
+					<td>Raise <code>ModelStoreBinding</code> <em><code>sourceMemory</code></em> or broker RAM budget.</td>
+			</tr>
+			<tr>
+					<td><code>SourceWindowBelowFloor</code> (<code>Progressing=False</code>) on prefetch</td>
+					<td>Source grant below <code>1 GiB</code> floor under <code>Require</code></td>
+					<td>Raise <code>ModelStoreBinding</code> <em><code>sourceMemory</code></em> or broker <code>maxMemoryBytes</code>.</td>
+			</tr>
+			<tr>
+					<td><code>SourceGrantMissing</code> (<code>Progressing=False</code>) on prefetch</td>
+					<td>Missing <code>ModelStoreBinding</code></td>
+					<td>Create the <code>ModelStoreBinding</code> named in <em><code>spec.bindingRef</code></em>.</td>
+			</tr>
+			<tr>
+					<td><code>load: AwaitingSource</code></td>
+					<td>No <code>SourceReady</code> prefetch serves the digest</td>
+					<td>Inspect <code>ModelPrefetch</code> <em><code>status.transfer</code></em> and source <code>Pod</code> logs.</td>
+			</tr>
+			<tr>
+					<td><code>load: AwaitingMetadata</code></td>
+					<td>Metadata CSI mount pending</td>
+					<td>Inspect <code>Pod</code> <code>FailedMount</code> events and <code>model.csi.gpustack.ai</code>.</td>
+			</tr>
+			<tr>
+					<td><code>RemoteLoadFailed</code> (<code>load: Unknown</code>)</td>
+					<td>Remote load exited; replica recreating</td>
+					<td>Inspect previous container logs and <em><code>fallbackAttempts</code></em>.</td>
+			</tr>
+			<tr>
+					<td><code>FallbackAttemptsSpent</code></td>
+					<td>Remote load failed more than 3 times under <code>Prefer</code></td>
+					<td>Diagnose fallback <code>Node</code> or <code>Engine</code> delivery on the recreated <code>Pod</code>.</td>
+			</tr>
+			<tr>
+					<td><code>RoleIneligibleForModelTransfer</code> or <code>UnqualifiedTransferBackend</code></td>
+					<td>Custom command, unsupported engine, or unallowlisted backend under <code>Require</code></td>
+					<td>Switch to a managed NVIDIA (<code>nixl</code>) or Ascend (<code>hixl</code>) role, or set policy to <code>Prefer</code>.</td>
+			</tr>
+			<tr>
+					<td><code>WeightsReady=False</code> (<code>NodeDeliveryUnavailable</code>)</td>
+					<td><code>Require</code> active without <code>model.csi.gpustack.ai</code></td>
+					<td>Enable <code>modelManager.enabled: true</code> or roll back remote policy.</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="rollback">Rollback</h3>
 <p>Patch <code>model-artifact-remote-delivery-policy</code> to <code>Disabled</code> (or set <code>modelTransfer.enabled: false</code>
@@ -1869,7 +1869,7 @@ in Helm values):</p>
 </span></span><span class="line"><span class="cl">   namespace: gpustack-system
 </span></span><span class="line"><span class="cl"> spec:
 </span></span><span class="line"><span class="cl"><span class="gd">-  value: Prefer
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: Disabled
+</span></span></span><span class="line"><span class="cl"><span class="gi">+  value: Disabled
 </span></span></span></code></pre></div>
 </div>
 <p>New replicas revert to <code>model-artifact-delivery-mode</code> (<code>Node</code> or <code>Engine</code>) while already-loaded

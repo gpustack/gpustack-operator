@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>KV Cache Election and Failover · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1253,25 +1253,25 @@ and pulled before taking the <code>Lease</code>.</p>
 <h2 id="health-checks">Health checks</h2>
 <p>Readiness and liveness probes target separate endpoints on port <code>9003</code>:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Probe</th>
-          <th>Path</th>
-          <th>Gated</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Readiness</td>
-          <td><code>GET /get_all_segments</code></td>
-          <td>Yes (<code>503</code> until active)</td>
-      </tr>
-      <tr>
-          <td>Liveness</td>
-          <td><code>GET /health</code></td>
-          <td>No (<code>200</code> on standbys and activating leaders)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Probe</th>
+					<th>Path</th>
+					<th>Gated</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Readiness</td>
+					<td><code>GET /get_all_segments</code></td>
+					<td>Yes (<code>503</code> until active)</td>
+			</tr>
+			<tr>
+					<td>Liveness</td>
+					<td><code>GET /health</code></td>
+					<td>No (<code>200</code> on standbys and activating leaders)</td>
+			</tr>
+	</tbody>
 </table>
 <p>In the <code>/health</code> JSON response (<code>{&quot;status&quot;:&quot;ok&quot;,&quot;role&quot;:&quot;leader&quot;,&quot;ha_state&quot;:&quot;serving&quot;,&quot;service_ready&quot;:true}</code>),
 <code>status</code> is always <code>&quot;ok&quot;</code>; inspect <strong><code>service_ready</code></strong> to determine whether the leader is active.</p>
@@ -1289,13 +1289,13 @@ operator namespace. Scale an elected leader with a <code>replicas</code> patch:<
 </span></span><span class="line"><span class="cl">     managed:
 </span></span><span class="line"><span class="cl">       leader:
 </span></span><span class="line"><span class="cl"><span class="gd">-        replicas: 1
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+        replicas: 3
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        replicas: 3
 </span></span></span></code></pre></div>
 </div>
 <p><strong>Image requirement:</strong> Upstream <code>kvcacheai/mooncake</code> images compile leadership backends <strong>off</strong>
 (leaders stay in <code>UNAVAILABLE_IN_CURRENT_MODE</code> and members crash with <code>Invalid HA backend entry</code>).
 Use <code>gpustack/mirrored-mooncake</code> (<code>&gt;= 0.3.12</code>, built from
-<a href="https://github.com/gpustack/gpustack-operator/blob/016fe1d2b2b20bbdaeeec4c4f15d18c349393b24/pack/mirrored-mooncake/Dockerfile"><code>pack/mirrored-mooncake</code></a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/b02ee46681ba0224d2d86142381ffb6164b5c9cd/pack/mirrored-mooncake/Dockerfile"><code>pack/mirrored-mooncake</code></a>
 ) for <em><code>spec.image</code></em> and every
 <em><code>members[].image</code></em> (<code>0.3.11</code> exits on rendered <code>-pod_name</code> and <code>-pod_namespace</code> flags).</p>
 <p>All official <code>mirrored-mooncake</code> variants (<code>-cpu</code>, <code>cuda</code>, <code>cann</code>, <code>rocm</code>, including built-in <code>EFA</code>
@@ -1311,50 +1311,50 @@ during handover). Identify the active leader <code>Pod</code> by its self-applie
 <p><strong>RBAC separation:</strong> The operator provisions separate <code>ServiceAccount</code>s, <code>Role</code>s, and <code>RoleBinding</code>s
 in its namespace so members cannot claim the <code>Lease</code>:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Component</th>
-          <th>Permissions</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Leader</td>
-          <td><code>leases</code> (<code>create</code>, <code>get</code>, <code>update</code>), <code>pods</code> (<code>patch</code>)</td>
-          <td>Acquire the <code>Lease</code> and label the winning <code>Pod</code>.</td>
-      </tr>
-      <tr>
-          <td>Member</td>
-          <td><code>leases</code> (<code>get</code>)</td>
-          <td>Follow the <code>Lease</code> holder when <code>memberAddressing: Lease</code> is set.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Component</th>
+					<th>Permissions</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Leader</td>
+					<td><code>leases</code> (<code>create</code>, <code>get</code>, <code>update</code>), <code>pods</code> (<code>patch</code>)</td>
+					<td>Acquire the <code>Lease</code> and label the winning <code>Pod</code>.</td>
+			</tr>
+			<tr>
+					<td>Member</td>
+					<td><code>leases</code> (<code>get</code>)</td>
+					<td>Follow the <code>Lease</code> holder when <code>memberAddressing: Lease</code> is set.</td>
+			</tr>
+	</tbody>
 </table>
 <p>If RBAC is missing, leaders retry silently at <code>0/N</code> ready (liveness stays <code>200</code>), while members exit
 after 20 retries (<code>CrashLoopBackOff</code>). Verify both <code>ServiceAccount</code>s before debugging the store.</p>
 <p><strong>Member addressing:</strong> <em><code>leader.memberAddressing</code></em> selects how members locate the elected leader
 (changing it while HA is active rolls all member groups):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Value</th>
-          <th>Member <code>MOONCAKE_MASTER</code></th>
-          <th>Trade-off</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>Service</code> (default)</td>
-          <td><code>&lt;backend&gt;-leader.&lt;namespace&gt;.svc:50051</code></td>
-          <td>Waits for Kubernetes <code>Endpoints</code> propagation on failover.</td>
-      </tr>
-      <tr>
-          <td><code>Lease</code></td>
-          <td><code>k8s://&lt;namespace&gt;/&lt;lease&gt;</code></td>
-          <td>Reads the <code>Lease</code> directly; requires member API-server reachability and a <code>Lease</code>-enabled image.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Value</th>
+					<th>Member <code>MOONCAKE_MASTER</code></th>
+					<th>Trade-off</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Service</code> (default)</td>
+					<td><code>&lt;backend&gt;-leader.&lt;namespace&gt;.svc:50051</code></td>
+					<td>Waits for Kubernetes <code>Endpoints</code> propagation on failover.</td>
+			</tr>
+			<tr>
+					<td><code>Lease</code></td>
+					<td><code>k8s://&lt;namespace&gt;/&lt;lease&gt;</code></td>
+					<td>Reads the <code>Lease</code> directly; requires member API-server reachability and a <code>Lease</code>-enabled image.</td>
+			</tr>
+	</tbody>
 </table>
 <p><strong>Failover behavior:</strong> Standbys hold no metadata index. After failover (<code>~16 s</code> on a single-node
 cluster versus <code>~30 s</code> for a single-leader restart), the new leader rebuilds segment mounts from

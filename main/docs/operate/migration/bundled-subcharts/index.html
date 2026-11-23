@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Migrating to Bundled Subcharts · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1199,30 +1199,30 @@
 <p>Through v0.7.x, the Helm chart deployed only the worker and Device Managers while the worker installed
 four separate Helm releases at runtime:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Legacy runtime release</th>
-          <th>Bundled subchart</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>gpustack-kueue</code></td>
-          <td><code>kueue</code></td>
-      </tr>
-      <tr>
-          <td><code>gpustack-node-feature-discovery</code></td>
-          <td><code>node-feature-discovery</code></td>
-      </tr>
-      <tr>
-          <td><code>gpustack-csi-driver-nfs</code></td>
-          <td><code>csi-driver-nfs</code></td>
-      </tr>
-      <tr>
-          <td><code>gpustack-csi-driver-s3</code></td>
-          <td><code>csi-driver-s3</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Legacy runtime release</th>
+					<th>Bundled subchart</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>gpustack-kueue</code></td>
+					<td><code>kueue</code></td>
+			</tr>
+			<tr>
+					<td><code>gpustack-node-feature-discovery</code></td>
+					<td><code>node-feature-discovery</code></td>
+			</tr>
+			<tr>
+					<td><code>gpustack-csi-driver-nfs</code></td>
+					<td><code>csi-driver-nfs</code></td>
+			</tr>
+			<tr>
+					<td><code>gpustack-csi-driver-s3</code></td>
+					<td><code>csi-driver-s3</code></td>
+			</tr>
+	</tbody>
 </table>
 <p>Current releases bundle all four as subcharts under one <code>values.yaml</code> with
 <code>worker.disableApplications: [&quot;*&quot;]</code>. Helm adopts existing resources in place, preserving live
@@ -1253,8 +1253,8 @@ upgrade with <strong>Helm 3.21+</strong> and <code>--take-ownership</code><sup i
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm repo add gpustack https://docs.gpustack.ai/gpustack-operator/charts
 </span></span><span class="line"><span class="cl">helm repo update
 </span></span><span class="line"><span class="cl">helm upgrade gpustack-operator gpustack/gpustack-operator <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --namespace gpustack-system <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --take-ownership</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  --namespace gpustack-system <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --take-ownership</span></span></code></pre></div>
 </div>
 <p>Pass <code>--take-ownership</code> <strong>only once</strong> so Helm can import objects owned by the four legacy releases.
 Omit the flag on subsequent upgrades so Helm does not adopt unrelated hand-created resources.</p>
@@ -1299,8 +1299,8 @@ namespaced objects, so forcing <code>--take-ownership</code> leaves two Kueue co
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm upgrade --install gpustack-operator gpustack/gpustack-operator <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --namespace gpustack-system --create-namespace <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set kueue.enabled<span class="o">=</span><span class="nb">false</span> --set node-feature-discovery.enabled<span class="o">=</span>false</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  --namespace gpustack-system --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set kueue.enabled<span class="o">=</span><span class="nb">false</span> --set node-feature-discovery.enabled<span class="o">=</span>false</span></span></code></pre></div>
 </div>
 <p>The worker still applies <code>gpustack-cpu-info</code> against your existing NFD. Keep both components at
 operator-compatible versions.</p>
@@ -1312,7 +1312,7 @@ ownership on those CRDs before installing:</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="k">for</span> crd in <span class="k">$(</span>kubectl get crd -o name <span class="p">|</span> grep <span class="s1">&#39;kueue\.x-k8s\.io&#39;</span><span class="k">)</span><span class="p">;</span> <span class="k">do</span>
 </span></span><span class="line"><span class="cl">  kubectl label <span class="s2">&#34;</span><span class="nv">$crd</span><span class="s2">&#34;</span> app.kubernetes.io/managed-by<span class="o">=</span>Helm --overwrite
 </span></span><span class="line"><span class="cl">  kubectl annotate <span class="s2">&#34;</span><span class="nv">$crd</span><span class="s2">&#34;</span> meta.helm.sh/release-name<span class="o">=</span>gpustack-operator <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>                          meta.helm.sh/release-namespace<span class="o">=</span>gpustack-system --overwrite
+</span></span></span><span class="line"><span class="cl">                          meta.helm.sh/release-namespace<span class="o">=</span>gpustack-system --overwrite
 </span></span><span class="line"><span class="cl"><span class="k">done</span></span></span></code></pre></div>
 </div>
 <p>Review <a href="#rollback-data-loss">Rollback data loss</a>
@@ -1344,7 +1344,7 @@ worker and bundled Kueue:</p>
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">global</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certmanager</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled: auto  # enum</span><span class="p">:</span><span class="w"> </span><span class="l">auto, true, false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l">auto </span><span class="w"> </span><span class="c"># enum: auto, true, false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">issuer</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">     </span><span class="c"># optional; covers both worker and Kueue without creating self-signed Issuers</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Issuer</span></span></span></code></pre></div>
@@ -1366,7 +1366,7 @@ metadata, and <code>visibility.kueue.x-k8s.io</code> <code>APIService</code>s re
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl"><span class="c1"># 2. Adopt kueue-webhook-server-cert with Helm 3.21+:</span>
 </span></span><span class="line"><span class="cl">helm upgrade gpustack-operator &lt;chart&gt; --namespace gpustack-system --reset-then-reuse-values <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set global.certmanager.enabled<span class="o">=</span><span class="nb">false</span> --take-ownership --wait</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  --set global.certmanager.enabled<span class="o">=</span><span class="nb">false</span> --take-ownership --wait</span></span></code></pre></div>
 </div>
 <p>If cert-manager may be installed or removed independently, pin <code>global.certmanager.enabled</code> to <code>true</code>
 or <code>false</code> rather than <code>auto</code>.</p>
@@ -1391,7 +1391,7 @@ CRDs along with every <code>ClusterQueue</code>, <code>LocalQueue</code>, <code>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get clusterqueues,resourceflavors,admissionchecks,instancetypes,localqueues -A -o yaml <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  &gt; gpustack-chain.yaml</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  &gt; gpustack-chain.yaml</span></span></code></pre></div>
 </div>
 <p>If you must return to a pre-subchart version, uninstall and reinstall cleanly via
 <a href="/gpustack-operator/main/docs/operate/migration/from-v0.5/#path-a-uninstall-and-reinstall">Path A in Migrating from v0.5.x</a>

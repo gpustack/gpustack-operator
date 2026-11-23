@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Model Artifact · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1220,16 +1220,16 @@
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelArtifact </span><span class="w"> </span><span class="c"># namespaced, short name mart</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelArtifact </span><span class="w"> </span><span class="c"># namespaced, short name mart</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">  </span><span class="c"># immutable after creation</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">  </span><span class="c"># immutable after creation</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w">  </span><span class="c"># required; set exactly one source</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">huggingFace</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">repository</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-7B-Instruct </span><span class="w"> </span><span class="c"># required</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">revision: main  # optional, default</span><span class="p">:</span><span class="w"> </span><span class="l">main (branch, tag, or commit)</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">secretRef:  # optional Secret in this namespace; key</span><span class="p">:</span><span class="w"> </span><span class="l">token</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">revision</span><span class="p">:</span><span class="w"> </span><span class="l">main </span><span class="w"> </span><span class="c"># optional, default: main (branch, tag, or commit)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span><span class="w">  </span><span class="c"># optional Secret in this namespace; key: token</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">hf-token</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># modelScope:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   repository: qwen/Qwen2.5-7B-Instruct</span><span class="w">
@@ -1248,7 +1248,7 @@
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ignorePatterns</span><span class="p">:</span><span class="w">  </span><span class="c"># optional; hub sources only, wins over allowPatterns</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;original/&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># expectedDigest: sha256:&lt;64-lowercase-hex-characters&gt;  # optional; hub sources only</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">status</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resolved</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">revision</span><span class="p">:</span><span class="w"> </span><span class="l">7ae557604adf67be50417f59c2c2f167def9a775</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">manifestDigest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448</span><span class="w">
@@ -1328,11 +1328,11 @@ patterns, and <em><code>expectedDigest</code></em> are refused at admission; <em
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelArtifact</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelArtifact</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-image</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reference</span><span class="p">:</span><span class="w"> </span><span class="l">registry.example.com/team/qwen@sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448</span></span></span></code></pre></div>
@@ -1352,8 +1352,8 @@ capture its immutable <code>@sha256:...</code> digest:</p>
 </span></span></span><span class="line"><span class="cl"><span class="s">EOF</span>
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl">docker buildx build --platform linux/amd64 --push <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --iidfile /tmp/model.iid <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -t registry.example.com/team/qwen:v1 .
+</span></span></span><span class="line"><span class="cl">  --iidfile /tmp/model.iid <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -t registry.example.com/team/qwen:v1 .
 </span></span><span class="line"><span class="cl">docker buildx imagetools inspect registry.example.com/team/qwen:v1 --format <span class="s1">&#39;{{.Manifest.Digest}}&#39;</span></span></span></code></pre></div>
 </div>
 <p>The operator does not inspect registry contents; build integrity is owned by the image producer.</p>
@@ -1363,30 +1363,30 @@ events while <code>WeightsReady</code> stays <code>False/WeightsNotMounted</code
 kubelet and containerd floors before creating a <code>Pod</code>.</p>
 <h3 id="image-prerequisites">Image prerequisites</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Component</th>
-          <th>Minimum version</th>
-          <th>Reason</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>kube-apiserver</code></td>
-          <td><code>1.35</code></td>
-          <td><code>ImageVolume</code> is beta on by default in <code>1.35</code> (GA in <code>1.36</code>); artifact creation is refused below <code>1.35</code>.</td>
-      </tr>
-      <tr>
-          <td><code>kubelet</code></td>
-          <td><code>1.35</code></td>
-          <td>Required to mount <code>image</code> volumes on target <code>Node</code>s.</td>
-      </tr>
-      <tr>
-          <td><code>containerd</code></td>
-          <td><code>2.1</code></td>
-          <td>Required runtime for <code>image</code> volumes (<code>subPath</code> would require <code>2.2</code>, so root-only mounts are used).</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Component</th>
+					<th>Minimum version</th>
+					<th>Reason</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>kube-apiserver</code></td>
+					<td><code>1.35</code></td>
+					<td><code>ImageVolume</code> is beta on by default in <code>1.35</code> (GA in <code>1.36</code>); artifact creation is refused below <code>1.35</code>.</td>
+			</tr>
+			<tr>
+					<td><code>kubelet</code></td>
+					<td><code>1.35</code></td>
+					<td>Required to mount <code>image</code> volumes on target <code>Node</code>s.</td>
+			</tr>
+			<tr>
+					<td><code>containerd</code></td>
+					<td><code>2.1</code></td>
+					<td>Required runtime for <code>image</code> volumes (<code>subPath</code> would require <code>2.2</code>, so root-only mounts are used).</td>
+			</tr>
+	</tbody>
 </table>
 <p>Pod Security Admission <code>Restricted</code> permits <code>image</code> volumes on Kubernetes <code>&gt;= 1.33</code>
 (<code>kubernetes#130394</code>). Private registries use the workload&rsquo;s existing <em><code>imagePullSecrets</code></em>, and
@@ -1397,31 +1397,31 @@ digests pulled in <code>112 ms</code> / <code>11.8 MB</code> versus <code>2m10s<
 compressed content blobs and unpacked snapshots (kubelet CRI image size reports only the compressed
 blobs, undercounting a <code>15.24 GB</code> model by <code>~2.26×</code>):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Layer format</th>
-          <th>Content store</th>
-          <th>Snapshots</th>
-          <th>Total disk</th>
-          <th>Ratio to raw</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Gzip-compressed</td>
-          <td><code>12.07 GB</code></td>
-          <td><code>15.24 GB</code></td>
-          <td><code>~27.3 GB</code></td>
-          <td><strong><code>1.79×</code></strong></td>
-      </tr>
-      <tr>
-          <td>Uncompressed</td>
-          <td><code>15.24 GB</code></td>
-          <td><code>15.24 GB</code></td>
-          <td><code>~30.5 GB</code></td>
-          <td><strong><code>2.00×</code></strong></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Layer format</th>
+					<th>Content store</th>
+					<th>Snapshots</th>
+					<th>Total disk</th>
+					<th>Ratio to raw</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Gzip-compressed</td>
+					<td><code>12.07 GB</code></td>
+					<td><code>15.24 GB</code></td>
+					<td><code>~27.3 GB</code></td>
+					<td><strong><code>1.79×</code></strong></td>
+			</tr>
+			<tr>
+					<td>Uncompressed</td>
+					<td><code>15.24 GB</code></td>
+					<td><code>15.24 GB</code></td>
+					<td><code>~30.5 GB</code></td>
+					<td><strong><code>2.00×</code></strong></td>
+			</tr>
+	</tbody>
 </table>
 <p>Kubelet image GC behavior:</p>
 <ul>
@@ -1452,38 +1452,38 @@ default) triggers GC across all unused images on the <code>Node</code>.</li>
 chart enables <code>modelManager</code>, rolling hub deployments once on switch). PVC and OCI image sources
 always mount directly:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Aspect</th>
-          <th>PVC (<code>Pvc</code>)</th>
-          <th>Hub (<code>Engine</code>)</th>
-          <th>Hub (<code>Node</code>)</th>
-          <th>OCI image (<code>Image</code>)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Mount / cache</td>
-          <td>Read-only PVC at <code>/var/lib/gpustack/model</code> (<em><code>subPath</code></em> = <em><code>path</code></em>)</td>
-          <td>Engine downloads into <code>/var/lib/gpustack/model-cache</code></td>
-          <td>Read-only CSI <code>model.csi.gpustack.ai</code> at <code>/var/lib/gpustack/model</code></td>
-          <td>Read-only image volume at <code>/var/lib/gpustack/model</code></td>
-      </tr>
-      <tr>
-          <td>Engine argv</td>
-          <td><code>/var/lib/gpustack/model</code></td>
-          <td><code>&lt;repository&gt; --revision &lt;commit&gt;</code></td>
-          <td><code>/var/lib/gpustack/model</code></td>
-          <td><code>/var/lib/gpustack/model</code></td>
-      </tr>
-      <tr>
-          <td>Served name</td>
-          <td><code>--served-model-name &lt;spec.model.name&gt;</code></td>
-          <td>Same</td>
-          <td>Same</td>
-          <td>Same</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Aspect</th>
+					<th>PVC (<code>Pvc</code>)</th>
+					<th>Hub (<code>Engine</code>)</th>
+					<th>Hub (<code>Node</code>)</th>
+					<th>OCI image (<code>Image</code>)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Mount / cache</td>
+					<td>Read-only PVC at <code>/var/lib/gpustack/model</code> (<em><code>subPath</code></em> = <em><code>path</code></em>)</td>
+					<td>Engine downloads into <code>/var/lib/gpustack/model-cache</code></td>
+					<td>Read-only CSI <code>model.csi.gpustack.ai</code> at <code>/var/lib/gpustack/model</code></td>
+					<td>Read-only image volume at <code>/var/lib/gpustack/model</code></td>
+			</tr>
+			<tr>
+					<td>Engine argv</td>
+					<td><code>/var/lib/gpustack/model</code></td>
+					<td><code>&lt;repository&gt; --revision &lt;commit&gt;</code></td>
+					<td><code>/var/lib/gpustack/model</code></td>
+					<td><code>/var/lib/gpustack/model</code></td>
+			</tr>
+			<tr>
+					<td>Served name</td>
+					<td><code>--served-model-name &lt;spec.model.name&gt;</code></td>
+					<td>Same</td>
+					<td>Same</td>
+					<td>Same</td>
+			</tr>
+	</tbody>
 </table>
 <p>Take-over roles (<em><code>roles[].command</code></em> set) receive PVC, <code>Node</code>, or <code>Image</code> volume mounts without argv
 changes, and receive nothing under <code>Engine</code>. While <em><code>artifactRef</code></em> is set, admission refuses manual
@@ -1541,30 +1541,30 @@ raised <code>ephemeral-storage</code> limit.</li>
 <p>Because Kueue <em>topology-aware scheduling (TAS)</em> ignores <code>Pod</code> volumes, the operator aligns <code>Pod</code>
 creation with PVC binding and node affinity:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Claim state</th>
-          <th>Operator behavior</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>Bound</code></td>
-          <td>Injects the PV&rsquo;s required node affinity into every <code>Pod</code> at creation.</td>
-      </tr>
-      <tr>
-          <td><code>Pending</code> (<code>WaitForFirstConsumer</code> with provisioner)</td>
-          <td>Creates <code>Pod</code>s so the first scheduled <code>Pod</code> binds the volume.</td>
-      </tr>
-      <tr>
-          <td><code>Pending</code> (<code>no-provisioner</code> or <code>Immediate</code>)</td>
-          <td>Holds <code>Pod</code> creation with <code>ClaimNotBound</code> (pre-bind static local PVs via <em><code>spec.volumeName</code></em>).</td>
-      </tr>
-      <tr>
-          <td>Multi-<code>Pod</code> mount without <code>ROX</code> or <code>RWX</code></td>
-          <td>Holds <code>Pod</code> creation with <code>AccessModeConflict</code>.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Claim state</th>
+					<th>Operator behavior</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Bound</code></td>
+					<td>Injects the PV&rsquo;s required node affinity into every <code>Pod</code> at creation.</td>
+			</tr>
+			<tr>
+					<td><code>Pending</code> (<code>WaitForFirstConsumer</code> with provisioner)</td>
+					<td>Creates <code>Pod</code>s so the first scheduled <code>Pod</code> binds the volume.</td>
+			</tr>
+			<tr>
+					<td><code>Pending</code> (<code>no-provisioner</code> or <code>Immediate</code>)</td>
+					<td>Holds <code>Pod</code> creation with <code>ClaimNotBound</code> (pre-bind static local PVs via <em><code>spec.volumeName</code></em>).</td>
+			</tr>
+			<tr>
+					<td>Multi-<code>Pod</code> mount without <code>ROX</code> or <code>RWX</code></td>
+					<td>Holds <code>Pod</code> creation with <code>AccessModeConflict</code>.</td>
+			</tr>
+	</tbody>
 </table>
 <p>On a single-accelerator node with cold page caches (<code>1000 GiB</code> boot SSD; <code>2 TiB</code> network disks), a
 7B model loaded in <code>32.6 s</code> over S3 CSI (<code>geesefs</code>, <code>467 MB/s</code> cold, <code>~455 MB/s</code> warm without page
@@ -1577,51 +1577,51 @@ mounts resolve names through the host DNS resolver rather than cluster DNS.</p>
 or <code>Image</code>) and <code>WeightsReady</code> summarizes weight availability (holding rollouts with
 <code>ReplicasUpToDate=False/RolloutHeldByWeights</code> when new <code>Pod</code>s are blocked):</p>
 <table>
-  <thead>
-      <tr>
-          <th><code>WeightsReady</code></th>
-          <th>Reason</th>
-          <th>Action</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>True</code></td>
-          <td><code>NotApplicable</code>, <code>Mounted</code>, <code>Downloaded</code></td>
-          <td>Healthy: no artifact configured, or all <code>Pod</code>s have weights.</td>
-      </tr>
-      <tr>
-          <td><code>False</code></td>
-          <td><code>ArtifactNotFound</code>, <code>ArtifactNotResolved</code></td>
-          <td>Create the <code>ModelArtifact</code> or resolve its hub/secret/claim error.</td>
-      </tr>
-      <tr>
-          <td><code>False</code></td>
-          <td><code>ClaimNotBound</code>, <code>AccessModeConflict</code></td>
-          <td>Bind the PVC or use <code>ReadOnlyMany</code> / <code>ReadWriteMany</code> for multi-<code>Pod</code> mounts.</td>
-      </tr>
-      <tr>
-          <td><code>False</code></td>
-          <td><code>NodeDeliveryUnavailable</code></td>
-          <td>Enable <code>modelManager</code> (<code>model.csi.gpustack.ai</code> <code>CSIDriver</code>) or switch delivery mode.</td>
-      </tr>
-      <tr>
-          <td><code>False</code></td>
-          <td><code>FilterNeedsNodeDelivery</code>, <code>AnchorNeedsNodeDelivery</code></td>
-          <td>Switch <code>model-artifact-delivery-mode</code> to <code>Node</code> for patterned or <code>expectedDigest</code> artifacts.</td>
-      </tr>
-      <tr>
-          <td><code>False</code></td>
-          <td><code>Materializing</code>, <code>Downloading</code>, <code>WeightsNotMounted</code></td>
-          <td>Wait for node cache download, engine download, or image pull; inspect <code>Pod</code> events if stalled.</td>
-      </tr>
-      <tr>
-          <td><code>False</code></td>
-          <td><code>MaterializationFailed</code></td>
-          <td>Read the <code>NodeModelStore</code> failure reason and <em><code>retryTime</code></em> (<a href="/gpustack-operator/main/docs/modules/model-delivery/operations/#troubleshooting">Model Store Operations</a>
+	<thead>
+			<tr>
+					<th><code>WeightsReady</code></th>
+					<th>Reason</th>
+					<th>Action</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>True</code></td>
+					<td><code>NotApplicable</code>, <code>Mounted</code>, <code>Downloaded</code></td>
+					<td>Healthy: no artifact configured, or all <code>Pod</code>s have weights.</td>
+			</tr>
+			<tr>
+					<td><code>False</code></td>
+					<td><code>ArtifactNotFound</code>, <code>ArtifactNotResolved</code></td>
+					<td>Create the <code>ModelArtifact</code> or resolve its hub/secret/claim error.</td>
+			</tr>
+			<tr>
+					<td><code>False</code></td>
+					<td><code>ClaimNotBound</code>, <code>AccessModeConflict</code></td>
+					<td>Bind the PVC or use <code>ReadOnlyMany</code> / <code>ReadWriteMany</code> for multi-<code>Pod</code> mounts.</td>
+			</tr>
+			<tr>
+					<td><code>False</code></td>
+					<td><code>NodeDeliveryUnavailable</code></td>
+					<td>Enable <code>modelManager</code> (<code>model.csi.gpustack.ai</code> <code>CSIDriver</code>) or switch delivery mode.</td>
+			</tr>
+			<tr>
+					<td><code>False</code></td>
+					<td><code>FilterNeedsNodeDelivery</code>, <code>AnchorNeedsNodeDelivery</code></td>
+					<td>Switch <code>model-artifact-delivery-mode</code> to <code>Node</code> for patterned or <code>expectedDigest</code> artifacts.</td>
+			</tr>
+			<tr>
+					<td><code>False</code></td>
+					<td><code>Materializing</code>, <code>Downloading</code>, <code>WeightsNotMounted</code></td>
+					<td>Wait for node cache download, engine download, or image pull; inspect <code>Pod</code> events if stalled.</td>
+			</tr>
+			<tr>
+					<td><code>False</code></td>
+					<td><code>MaterializationFailed</code></td>
+					<td>Read the <code>NodeModelStore</code> failure reason and <em><code>retryTime</code></em> (<a href="/gpustack-operator/main/docs/modules/model-delivery/operations/#troubleshooting">Model Store Operations</a>
 ).</td>
-      </tr>
-  </tbody>
+			</tr>
+	</tbody>
 </table>
 <h3 id="progress-subresource">Progress subresource</h3>
 <p>Query on-demand download progress across up to 64 downloading <code>Node</code>s (<code>13 s</code> timeout, node names
@@ -1635,11 +1635,11 @@ omitted for tenant safety; administrators inspect <code>kubectl get nms</code> d
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">rbac.authorization.k8s.io/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Role</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Role</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">model-artifact-reader</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">rules</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">rules</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">apiGroups</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">worker.gpustack.ai</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">resources</span><span class="p">:</span><span class="w">

@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>KV Cache Backend · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1223,20 +1223,20 @@ managed backends, <em><code>members[].medium</code></em> selects host memory (<c
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend </span><span class="w"> </span><span class="c"># cluster-scoped, short name kvcb</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend </span><span class="w"> </span><span class="c"># cluster-scoped, short name kvcb</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mooncake-dram</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type: Mooncake  # required; enum</span><span class="p">:</span><span class="w"> </span><span class="l">Mooncake</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Mooncake </span><span class="w"> </span><span class="c"># required; enum: Mooncake</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">docker.io/kvcacheai/mooncake:0.3.13 </span><span class="w"> </span><span class="c"># optional; defaults from kv-cache-backend-image Setting</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed:  # required</span><span class="p">:</span><span class="w"> </span><span class="l">set exactly one of managed or external</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">  </span><span class="c"># required: set exactly one of managed or external</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">leader</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">electionBackend</span><span class="p">:</span><span class="w"> </span><span class="l">None </span><span class="w"> </span><span class="c"># upstream image lacks Kubernetes Lease support</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium: DRAM  # required, immutable; enum</span><span class="p">:</span><span class="w"> </span><span class="l">DRAM, VRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">DRAM </span><span class="w"> </span><span class="c"># required, immutable; enum: DRAM, VRAM</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">4Gi </span><span class="w"> </span><span class="c"># required per-node segment size</span></span></span></code></pre></div>
 </div>
 <ul>
@@ -1250,25 +1250,25 @@ and fabric devices. Multiple <code>KVCachePool</code>s can share one backend (<a
 host and device memory.</li>
 </ul>
 <table>
-  <thead>
-      <tr>
-          <th>Value</th>
-          <th>Meaning</th>
-          <th>Constraints</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>DRAM</code></td>
-          <td>Host RAM segment</td>
-          <td>Adds <code>capacityPerMember + localBufferSize</code> to <code>Pod</code> <code>requests.memory</code> and sets <code>void</code> device visibility.</td>
-      </tr>
-      <tr>
-          <td><code>VRAM</code></td>
-          <td>Device memory segment</td>
-          <td>Accounting-only for custom <code>USE_VRAM_SEGMENT=ON</code> images; charges only <em><code>localBufferSize</code></em> and omits <code>void</code> hiding.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Value</th>
+					<th>Meaning</th>
+					<th>Constraints</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>DRAM</code></td>
+					<td>Host RAM segment</td>
+					<td>Adds <code>capacityPerMember + localBufferSize</code> to <code>Pod</code> <code>requests.memory</code> and sets <code>void</code> device visibility.</td>
+			</tr>
+			<tr>
+					<td><code>VRAM</code></td>
+					<td>Device memory segment</td>
+					<td>Accounting-only for custom <code>USE_VRAM_SEGMENT=ON</code> images; charges only <em><code>localBufferSize</code></em> and omits <code>void</code> hiding.</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="metadata-discovery">Metadata discovery</h3>
 <p>The metadata plane always uses peer-to-peer handshakes (<code>P2PHANDSHAKE</code>) and needs no external etcd
@@ -1303,10 +1303,10 @@ both <code>Client</code> and <code>Admin</code> endpoints as <code>host:port</co
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">external-mooncake</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">external</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">endpoints</span><span class="p">:</span><span class="w">
@@ -1371,10 +1371,10 @@ grants <code>hostNetwork</code>, <code>IPC_LOCK</code>, <code>SYS_RESOURCE</code
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">ascend-shared-cache</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">transport</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">CANN</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
@@ -1414,10 +1414,10 @@ driver access via <em><code>runtimeClassName</code></em>, <em><code>extraEnv</co
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-cache</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">leader</span><span class="p">:</span><span class="w"> </span>{}<span class="w">
@@ -1429,7 +1429,7 @@ driver access via <em><code>runtimeClassName</code></em>, <em><code>extraEnv</co
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">8Gi</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">extraEnv</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">NVIDIA_VISIBLE_DEVICES</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">value: all  # requires accept-nvidia-visible-devices-envvar-when-unprivileged or runtimeClassName</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">all </span><span class="w"> </span><span class="c"># requires accept-nvidia-visible-devices-envvar-when-unprivileged or runtimeClassName: nvidia</span></span></span></code></pre></div>
 </div>
 <p>Pairing a custom <code>VRAM</code> group with a <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
  is verified on NVIDIA
@@ -1451,55 +1451,55 @@ and unmeasured on Ascend and AMD.</p>
 every <code>15 s</code>; <em><code>status.capacity</code></em> comes from live leader metrics once <code>service_ready</code> is <code>true</code>,
 never from multiplying <em><code>capacityPerMember</code></em>.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Condition</th>
-          <th>Moves phase</th>
-          <th>Meaning and action</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>LeaderAvailable</code></td>
-          <td>Yes</td>
-          <td>Leader health check passed. If <code>False</code>, inspect leader <code>Deployment</code> <code>Pod</code>s or external <code>Admin</code> reachability.</td>
-      </tr>
-      <tr>
-          <td><code>MembersMounted</code></td>
-          <td>Yes</td>
-          <td>Ready member <code>Pod</code>s match listed segments. On <code>AmbiguousMemberIdentity</code>, move host-network groups onto disjoint <code>Node</code>s; pre-<code>0.3.12</code> masters report <code>Unknown/SegmentListingNotServed</code>.</td>
-      </tr>
-      <tr>
-          <td><code>CapacityObserved</code></td>
-          <td>Yes</td>
-          <td>Leader <code>:9003/metrics</code> scraped while ready. If <code>False</code>, check leader admin port reachability.</td>
-      </tr>
-      <tr>
-          <td><code>PoolWrites</code></td>
-          <td>Yes</td>
-          <td><code>True</code> after a put completes or <code>allocator_used_bytes &gt; 0</code>; <code>False</code> if puts revoke with zero allocated bytes (retry initial writes after tenant ledger propagation).</td>
-      </tr>
-      <tr>
-          <td><code>Deletable</code></td>
-          <td>Yes</td>
-          <td><code>False</code> while <em><code>status.usedBy</code></em> names live <code>KVCachePool</code> or <code>KVCachePoolBinding</code> objects; delete those consumers first.</td>
-      </tr>
-      <tr>
-          <td><code>RolloutComplete</code></td>
-          <td>No</td>
-          <td>Informational: <code>False</code> while an <code>OnDelete</code> member <code>DaemonSet</code> rollout is incomplete.</td>
-      </tr>
-      <tr>
-          <td><code>ElectionObserved</code></td>
-          <td>No</td>
-          <td>Informational (under <code>electionBackend: Kubernetes</code>): confirms <code>Lease</code> holder observation.</td>
-      </tr>
-      <tr>
-          <td><code>TierWasEmpty</code></td>
-          <td>No</td>
-          <td>Informational (when <em><code>localDisks</code></em> is set): records whether the disk directory started empty.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Condition</th>
+					<th>Moves phase</th>
+					<th>Meaning and action</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>LeaderAvailable</code></td>
+					<td>Yes</td>
+					<td>Leader health check passed. If <code>False</code>, inspect leader <code>Deployment</code> <code>Pod</code>s or external <code>Admin</code> reachability.</td>
+			</tr>
+			<tr>
+					<td><code>MembersMounted</code></td>
+					<td>Yes</td>
+					<td>Ready member <code>Pod</code>s match listed segments. On <code>AmbiguousMemberIdentity</code>, move host-network groups onto disjoint <code>Node</code>s; pre-<code>0.3.12</code> masters report <code>Unknown/SegmentListingNotServed</code>.</td>
+			</tr>
+			<tr>
+					<td><code>CapacityObserved</code></td>
+					<td>Yes</td>
+					<td>Leader <code>:9003/metrics</code> scraped while ready. If <code>False</code>, check leader admin port reachability.</td>
+			</tr>
+			<tr>
+					<td><code>PoolWrites</code></td>
+					<td>Yes</td>
+					<td><code>True</code> after a put completes or <code>allocator_used_bytes &gt; 0</code>; <code>False</code> if puts revoke with zero allocated bytes (retry initial writes after tenant ledger propagation).</td>
+			</tr>
+			<tr>
+					<td><code>Deletable</code></td>
+					<td>Yes</td>
+					<td><code>False</code> while <em><code>status.usedBy</code></em> names live <code>KVCachePool</code> or <code>KVCachePoolBinding</code> objects; delete those consumers first.</td>
+			</tr>
+			<tr>
+					<td><code>RolloutComplete</code></td>
+					<td>No</td>
+					<td>Informational: <code>False</code> while an <code>OnDelete</code> member <code>DaemonSet</code> rollout is incomplete.</td>
+			</tr>
+			<tr>
+					<td><code>ElectionObserved</code></td>
+					<td>No</td>
+					<td>Informational (under <code>electionBackend: Kubernetes</code>): confirms <code>Lease</code> holder observation.</td>
+			</tr>
+			<tr>
+					<td><code>TierWasEmpty</code></td>
+					<td>No</td>
+					<td>Informational (when <em><code>localDisks</code></em> is set): records whether the disk directory started empty.</td>
+			</tr>
+	</tbody>
 </table>
 <p>Pool and binding usage fields lag leader <code>:9003/metrics</code> and <code>/api/v1/tenant_quotas</code> by one
 reconcile pass. For disk-tier write checks, see <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/#bucket-writes">Bucket writes</a>
@@ -1512,26 +1512,26 @@ requiring manual <code>Pod</code> deletion to roll each <code>Node</code>.</p>
 <p>Shrinking a group or narrowing <em><code>nodeSelector</code></em> <strong>discards</strong> cached keys on removed <code>Node</code>s. Member
 groups are indexed by list position:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Edit</th>
-          <th>Outcome</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Reordering entries or deleting an entry before the tail</td>
-          <td>Refused at admission</td>
-      </tr>
-      <tr>
-          <td>Appending or removing at the end of <em><code>members</code></em></td>
-          <td>Allowed</td>
-      </tr>
-      <tr>
-          <td>Editing in place (including narrowing <em><code>nodeSelector</code></em> to zero <code>Node</code>s)</td>
-          <td>Allowed</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Edit</th>
+					<th>Outcome</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Reordering entries or deleting an entry before the tail</td>
+					<td>Refused at admission</td>
+			</tr>
+			<tr>
+					<td>Appending or removing at the end of <em><code>members</code></em></td>
+					<td>Allowed</td>
+			</tr>
+			<tr>
+					<td>Editing in place (including narrowing <em><code>nodeSelector</code></em> to zero <code>Node</code>s)</td>
+					<td>Allowed</td>
+			</tr>
+	</tbody>
 </table>
 <p>To retire a middle group without shifting later indices, narrow its <em><code>nodeSelector</code></em> to match zero
 <code>Node</code>s. Before shrinking a group with <em><code>localDisks</code></em>, set <em><code>scaleIn.gracePeriodSeconds</code></em> (<code>0</code> to

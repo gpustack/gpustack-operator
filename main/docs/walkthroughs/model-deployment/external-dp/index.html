@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>External DP Walkthrough · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1223,34 +1223,34 @@ one fixed <em>expert parallelism (EP)</em> collective (<code>replicas: 1</code>,
 , the collective size is
 fixed at startup:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Object</th>
-          <th>Scope</th>
-          <th>Creator</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ModelArtifact</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Resolves <code>deepseek-v2-lite-chat</code> weights via node model delivery</td>
-      </tr>
-      <tr>
-          <td><code>AcceleratorType</code></td>
-          <td>cluster</td>
-          <td>operator</td>
-          <td>Whole-GPU H100 pool requested by all four members</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Four-member <em>External LB</em> collective fronted by <code>vllm-router</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Object</th>
+					<th>Scope</th>
+					<th>Creator</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ModelArtifact</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Resolves <code>deepseek-v2-lite-chat</code> weights via node model delivery</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td>cluster</td>
+					<td>operator</td>
+					<td>Whole-GPU H100 pool requested by all four members</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Four-member <em>External LB</em> collective fronted by <code>vllm-router</code></td>
+			</tr>
+	</tbody>
 </table>
 <p>At concurrency 64 on H100 SXM5, four-rank <em>External DP</em> cut <em>time to first token (TTFT)</em> p50 by
 <strong>2.58×</strong> on <code>1024/256</code> (<code>1,863.100 ms</code> vs <code>4,798.411 ms</code>) and <strong>1.23×</strong> on <code>4096/128</code> (<code>3,094.017 ms</code>
@@ -1259,38 +1259,38 @@ vs <code>3,814.139 ms</code>), while wide <em>TP</em> = 8 retained <strong>2.27�
 .</p>
 <h3 id="environment">Environment</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Item</th>
-          <th>Value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Cluster</td>
-          <td>Kubernetes v1.35.7; 1 CPU node and 1 GPU node (<code>gpu-node-0</code>) with 8 free H100 80 GB HBM3 SXM5 GPUs</td>
-      </tr>
-      <tr>
-          <td>Operator</td>
-          <td>GPUStack Operator v0.9.1</td>
-      </tr>
-      <tr>
-          <td>Runner and router</td>
-          <td><code>gpustack/runner:cuda13.0-vllm0.30.0</code>; <code>vllm-router</code> (<code>gpustack/llm-router:v0.3.1</code>, <code>--policy round_robin</code>)</td>
-      </tr>
-      <tr>
-          <td>Model</td>
-          <td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code> (<code>ModelArtifact</code> <code>deepseek-v2-lite-chat</code>)</td>
-      </tr>
-      <tr>
-          <td>Pool</td>
-          <td>Captured on custom <code>InstanceType</code> <code>bench-gpu</code>; reusable manifest uses <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
-      </tr>
-      <tr>
-          <td>GPU budget</td>
-          <td>4 members × 2 GPUs = 8 GPUs</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Cluster</td>
+					<td>Kubernetes v1.35.7; 1 CPU node and 1 GPU node (<code>gpu-node-0</code>) with 8 free H100 80 GB HBM3 SXM5 GPUs</td>
+			</tr>
+			<tr>
+					<td>Operator</td>
+					<td>GPUStack Operator v0.9.1</td>
+			</tr>
+			<tr>
+					<td>Runner and router</td>
+					<td><code>gpustack/runner:cuda13.0-vllm0.30.0</code>; <code>vllm-router</code> (<code>gpustack/llm-router:v0.3.1</code>, <code>--policy round_robin</code>)</td>
+			</tr>
+			<tr>
+					<td>Model</td>
+					<td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code> (<code>ModelArtifact</code> <code>deepseek-v2-lite-chat</code>)</td>
+			</tr>
+			<tr>
+					<td>Pool</td>
+					<td>Captured on custom <code>InstanceType</code> <code>bench-gpu</code>; reusable manifest uses <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
+			</tr>
+			<tr>
+					<td>GPU budget</td>
+					<td>4 members × 2 GPUs = 8 GPUs</td>
+			</tr>
+	</tbody>
 </table>
 <p>Each member <code>Pod</code> exposed two GPUs with private IPC, private <code>/dev/shm</code>, and no <em>remote direct memory
 access (RDMA)</em> interface. Intra-<code>Pod</code> <em>TP</em> = 2 used NVLink, while <strong>cross-<code>Pod</code> <em>EP</em> communication
@@ -1305,11 +1305,11 @@ access (RDMA)</em> interface. Intra-<code>Pod</code> <em>TP</em> = 2 used NVLink
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">external-dp-arm2-external-dp</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
@@ -1421,8 +1421,8 @@ separate terminals:</p>
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">RANK</span><span class="o">=</span><span class="m">0</span>
 </span></span><span class="line"><span class="cl"><span class="nv">RANK_POD</span><span class="o">=</span><span class="k">$(</span>kubectl -n gpustack-bench get pods <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l <span class="s2">&#34;app.kubernetes.io/instance=external-dp-arm2-external-dp,app.kubernetes.io/component=server,modeldeployment.gpustack.ai/member-index=</span><span class="nv">$RANK</span><span class="s2">&#34;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].metadata.name}&#39;</span><span class="k">)</span>
+</span></span></span><span class="line"><span class="cl">  -l <span class="s2">&#34;app.kubernetes.io/instance=external-dp-arm2-external-dp,app.kubernetes.io/component=server,modeldeployment.gpustack.ai/member-index=</span><span class="nv">$RANK</span><span class="s2">&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].metadata.name}&#39;</span><span class="k">)</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench port-forward <span class="s2">&#34;pod/</span><span class="nv">$RANK_POD</span><span class="s2">&#34;</span> <span class="s2">&#34;</span><span class="k">$((</span><span class="m">18000</span> <span class="o">+</span> RANK<span class="k">))</span><span class="s2">:8000&#34;</span></span></span></code></pre></div>
 </div>
 <p>Send non-streaming and streaming completions to every forwarded rank:</p>
@@ -1430,15 +1430,15 @@ separate terminals:</p>
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="k">for</span> port in <span class="m">18000</span> <span class="m">18001</span> <span class="m">18002</span> 18003<span class="p">;</span> <span class="k">do</span>
 </span></span><span class="line"><span class="cl">  curl --fail-with-body --max-time <span class="m">60</span> <span class="s2">&#34;http://127.0.0.1:</span><span class="nv">$port</span><span class="s2">/v1/completions&#34;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;prompt&#34;:&#34;The sky is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0}&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -o <span class="s2">&#34;rank-</span><span class="nv">$port</span><span class="s2">.json&#34;</span>
+</span></span></span><span class="line"><span class="cl">    -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">    -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;prompt&#34;:&#34;The sky is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0}&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">    -o <span class="s2">&#34;rank-</span><span class="nv">$port</span><span class="s2">.json&#34;</span>
 </span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;{text: .choices[0].text, finish_reason: .choices[0].finish_reason,
 </span></span></span><span class="line"><span class="cl"><span class="s1">       completion_tokens: .usage.completion_tokens}&#39;</span> <span class="s2">&#34;rank-</span><span class="nv">$port</span><span class="s2">.json&#34;</span>
 </span></span><span class="line"><span class="cl">  curl --fail-with-body --no-buffer --max-time <span class="m">60</span> <span class="s2">&#34;http://127.0.0.1:</span><span class="nv">$port</span><span class="s2">/v1/completions&#34;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;prompt&#34;:&#34;A GPU is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0,&#34;stream&#34;:true,&#34;stream_options&#34;:{&#34;include_usage&#34;:true}}&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -o <span class="s2">&#34;rank-</span><span class="nv">$port</span><span class="s2">-stream.txt&#34;</span>
+</span></span></span><span class="line"><span class="cl">    -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">    -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;prompt&#34;:&#34;A GPU is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0,&#34;stream&#34;:true,&#34;stream_options&#34;:{&#34;include_usage&#34;:true}}&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">    -o <span class="s2">&#34;rank-</span><span class="nv">$port</span><span class="s2">-stream.txt&#34;</span>
 </span></span><span class="line"><span class="cl"><span class="k">done</span></span></span></code></pre></div>
 </div>
 <p>Confirm positive <code>completion_tokens</code>, non-empty <code>text</code>, and a trailing <code>data: [DONE]</code> on all four
@@ -1448,7 +1448,7 @@ ports.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">ROUTER_POD</span><span class="o">=</span><span class="k">$(</span>kubectl -n gpustack-bench get pods <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l app.kubernetes.io/instance<span class="o">=</span>external-dp-arm2-external-dp -o json <span class="p">|</span>
+</span></span></span><span class="line"><span class="cl">  -l app.kubernetes.io/instance<span class="o">=</span>external-dp-arm2-external-dp -o json <span class="p">|</span>
 </span></span><span class="line"><span class="cl">  jq -r <span class="s1">&#39;.items[] | select(any(.spec.containers[]; .name == &#34;router&#34;)) | .metadata.name&#39;</span><span class="k">)</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench port-forward <span class="s2">&#34;pod/</span><span class="nv">$ROUTER_POD</span><span class="s2">&#34;</span> 18080:8000 19090:9090</span></span></code></pre></div>
 </div>
@@ -1460,9 +1460,9 @@ eight requests and compare per-worker counters:</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">curl --fail-with-body http://127.0.0.1:19090/metrics &gt; router-before.prom
 </span></span><span class="line"><span class="cl"><span class="k">for</span> request in <span class="m">1</span> <span class="m">2</span> <span class="m">3</span> <span class="m">4</span> <span class="m">5</span> <span class="m">6</span> <span class="m">7</span> 8<span class="p">;</span> <span class="k">do</span>
 </span></span><span class="line"><span class="cl">  curl --fail-with-body --max-time <span class="m">60</span> http://127.0.0.1:18080/v1/completions <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;prompt&#34;:&#34;The sky is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0}&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -o <span class="s2">&#34;router-</span><span class="nv">$request</span><span class="s2">.json&#34;</span>
+</span></span></span><span class="line"><span class="cl">    -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">    -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;prompt&#34;:&#34;The sky is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0}&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">    -o <span class="s2">&#34;router-</span><span class="nv">$request</span><span class="s2">.json&#34;</span>
 </span></span><span class="line"><span class="cl"><span class="k">done</span>
 </span></span><span class="line"><span class="cl">curl --fail-with-body http://127.0.0.1:19090/metrics &gt; router-after.prom
 </span></span><span class="line"><span class="cl">grep -H <span class="s1">&#39;^vllm_router_processed_requests_total&#39;</span> router-before.prom router-after.prom</span></span></code></pre></div>
@@ -1478,15 +1478,15 @@ request = 1,137 total), router counters matched engine access logs on every rank
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench logs <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l app.kubernetes.io/instance<span class="o">=</span>external-dp-arm2-external-dp,app.kubernetes.io/component<span class="o">=</span>server <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -c main --prefix --tail<span class="o">=</span><span class="m">200</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -l app.kubernetes.io/instance<span class="o">=</span>external-dp-arm2-external-dp,app.kubernetes.io/component<span class="o">=</span>server <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -c main --prefix --tail<span class="o">=</span><span class="m">200</span></span></span></code></pre></div>
 </div>
 <p>Stop all <code>port-forward</code> processes, delete the deployment, and confirm all eight GPUs release:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench delete modeldeployment external-dp-arm2-external-dp --wait<span class="o">=</span><span class="nb">true</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods,services,deployments,workloads <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l app.kubernetes.io/instance<span class="o">=</span>external-dp-arm2-external-dp
+</span></span></span><span class="line"><span class="cl">  -l app.kubernetes.io/instance<span class="o">=</span>external-dp-arm2-external-dp
 </span></span><span class="line"><span class="cl">kubectl get devices -o json</span></span></code></pre></div>
 </div>
 <h2 id="limitations">Limitations</h2>
@@ -1499,40 +1499,40 @@ replica (<a href="/gpustack-operator/main/docs/modules/model-deployment/external
 </ul>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Member <code>Pod</code>s stay <code>Pending</code></td>
-          <td>Kueue <code>Workload</code> unreserved</td>
-          <td>Check <code>kubectl -n gpustack-bench get workloads,events</code> and <code>AcceleratorType</code> capacity; <code>size: 4</code> × <code>2</code> GPUs requires 8 free GPUs.</td>
-      </tr>
-      <tr>
-          <td>Ranks fail collective startup or hit <code>EADDRINUSE</code></td>
-          <td>Engine startup log error on <code>m0</code>..<code>m3</code></td>
-          <td>Pin <code>1024 &lt;= VLLM_PORT &lt; 32768</code> (such as <code>19500</code>) on all members and confirm <code>--data-parallel-size 4</code>, <code>--data-parallel-rank $(GPUSTACK_MEMBER_INDEX)</code>, and <code>--data-parallel-address $(GPUSTACK_REPLICA_LEADER_ADDRESS)</code>.</td>
-      </tr>
-      <tr>
-          <td>Direct rank requests succeed, router returns <code>503</code></td>
-          <td><em><code>status.roles[].endpoints</code></em> unconfirmed</td>
-          <td>Inspect <code>EndpointEligibility</code> on <code>ModelDeployment</code> and router logs for endpoint qualification failures.</td>
-      </tr>
-      <tr>
-          <td>Router sends traffic only to <code>m0</code></td>
-          <td>Metrics increment on one worker only</td>
-          <td>Confirm <em><code>status.roles[0].parallelism.loadBalance</code></em> reads <code>External</code> (<code>--data-parallel-rank</code> must be present in <em><code>extraArgs</code></em>).</td>
-      </tr>
-      <tr>
-          <td>Leftover resources remain after delete</td>
-          <td><code>Pod</code>s or <code>Service</code>s still listed</td>
-          <td>Inspect <em><code>metadata.ownerReferences</code></em> before deleting any residual objects manually.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Member <code>Pod</code>s stay <code>Pending</code></td>
+					<td>Kueue <code>Workload</code> unreserved</td>
+					<td>Check <code>kubectl -n gpustack-bench get workloads,events</code> and <code>AcceleratorType</code> capacity; <code>size: 4</code> × <code>2</code> GPUs requires 8 free GPUs.</td>
+			</tr>
+			<tr>
+					<td>Ranks fail collective startup or hit <code>EADDRINUSE</code></td>
+					<td>Engine startup log error on <code>m0</code>..<code>m3</code></td>
+					<td>Pin <code>1024 &lt;= VLLM_PORT &lt; 32768</code> (such as <code>19500</code>) on all members and confirm <code>--data-parallel-size 4</code>, <code>--data-parallel-rank $(GPUSTACK_MEMBER_INDEX)</code>, and <code>--data-parallel-address $(GPUSTACK_REPLICA_LEADER_ADDRESS)</code>.</td>
+			</tr>
+			<tr>
+					<td>Direct rank requests succeed, router returns <code>503</code></td>
+					<td><em><code>status.roles[].endpoints</code></em> unconfirmed</td>
+					<td>Inspect <code>EndpointEligibility</code> on <code>ModelDeployment</code> and router logs for endpoint qualification failures.</td>
+			</tr>
+			<tr>
+					<td>Router sends traffic only to <code>m0</code></td>
+					<td>Metrics increment on one worker only</td>
+					<td>Confirm <em><code>status.roles[0].parallelism.loadBalance</code></em> reads <code>External</code> (<code>--data-parallel-rank</code> must be present in <em><code>extraArgs</code></em>).</td>
+			</tr>
+			<tr>
+					<td>Leftover resources remain after delete</td>
+					<td><code>Pod</code>s or <code>Service</code>s still listed</td>
+					<td>Inspect <em><code>metadata.ownerReferences</code></em> before deleting any residual objects manually.</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

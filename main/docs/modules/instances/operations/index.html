@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>GPU Instance Operations · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1266,7 +1266,7 @@ admission):</p>
 </span></span><span class="line"><span class="cl">   namespace: team-a
 </span></span><span class="line"><span class="cl"> spec:
 </span></span><span class="line"><span class="cl"><span class="gd">-  stop: true
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  stop: false
+</span></span></span><span class="line"><span class="cl"><span class="gi">+  stop: false
 </span></span></span></code></pre></div>
 </div>
 <div class="code-block">
@@ -1291,7 +1291,7 @@ the <code>Setting</code>:</p>
 </span></span><span class="line"><span class="cl">   namespace: gpustack-system
 </span></span><span class="line"><span class="cl"> spec:
 </span></span><span class="line"><span class="cl"><span class="gd">-  value: &#34;&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: 10.244.0.0/16
+</span></span></span><span class="line"><span class="cl"><span class="gi">+  value: 10.244.0.0/16
 </span></span></span></code></pre></div>
 </div>
 <p>The worker immediately reconciles a <code>NetworkPolicy</code> named <code>gpustack-instance-isolation</code> in every
@@ -1316,12 +1316,12 @@ worker&rsquo;s read-only <code>metrics</code> subresource:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">InstanceMetrics</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">InstanceMetrics</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">workspace-demo</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">uid</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;instance-uid&gt;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">sample</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">sample</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2026-08-13T12:00:00Z&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">cpuTotalMilliCores</span><span class="p">:</span><span class="w"> </span><span class="m">8000</span><span class="w">  </span><span class="c"># declared container limits (init containers excluded)</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">cpuUsedMilliCores</span><span class="p">:</span><span class="w"> </span><span class="m">500</span><span class="w">
@@ -1331,7 +1331,7 @@ worker&rsquo;s read-only <code>metrics</code> subresource:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">storageUsedMiB</span><span class="p">:</span><span class="w"> </span><span class="m">256</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">accelerators</span><span class="p">:</span><span class="w">  </span><span class="c"># one entry per grant (device, logical slice, or partition)</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;device-or-mig-uuid&gt;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">mode: Exclusive  # enum</span><span class="p">:</span><span class="w"> </span><span class="l">Exclusive, Shared, Sliced, Partitioned, Visibility</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Exclusive </span><span class="w"> </span><span class="c"># enum: Exclusive, Shared, Sliced, Partitioned, Visibility</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">memoryTotalMiB</span><span class="p">:</span><span class="w"> </span><span class="m">24576</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">memoryUsedMiB</span><span class="p">:</span><span class="w"> </span><span class="m">4096</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">memoryUtilizationPercent</span><span class="p">:</span><span class="w"> </span><span class="m">17</span><span class="w">
@@ -1377,46 +1377,46 @@ with <code>deviceManager.networkPolicy.enabled: true</code> and <code>deviceMana
 </span></span><span class="line"><span class="cl">kubectl get --raw <span class="s2">&#34;/apis/worker.gpustack.ai/v1/namespaces/&lt;ns&gt;/instances/&lt;name&gt;/events&#34;</span></span></span></code></pre></div>
 </div>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Reason</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Refused on create (<code>reserved namespace</code> or <code>inactive</code>)</td>
-          <td>System namespace or held <code>InstanceType</code></td>
-          <td>Create in a workload namespace and select an <code>Active</code> <code>InstanceType</code>.</td>
-      </tr>
-      <tr>
-          <td>Retryable error (<code>not ready yet; retry</code>)</td>
-          <td>Slice or partition requested before <code>InstanceType</code> <code>status.detail</code> synced</td>
-          <td>Wait a few seconds for <code>InstanceType</code> reconciliation and re-apply.</td>
-      </tr>
-      <tr>
-          <td>Refused on update (<code>is immutable</code>)</td>
-          <td>Edited template, ports, node pin, or volumes while running</td>
-          <td>Set <code>spec.stop: true</code>, wait for <code>Stopped</code>, apply the edit, then set <code>spec.stop: false</code> (recreate to change <em><code>spec.volume</code></em>).</td>
-      </tr>
-      <tr>
-          <td>Refused on <code>privileged</code> or <code>hostPath</code></td>
-          <td>Cluster host-access gate is <code>false</code></td>
-          <td>Ask an administrator to enable <code>instance-privileged-allowed</code> or <code>instance-host-path-volume-allowed</code>, or remove the field.</td>
-      </tr>
-      <tr>
-          <td>Stuck in <code>Starting</code> naming a volume or runtime floor</td>
-          <td>Unresolved <code>ModelArtifact</code>, missing <code>CSIDriver</code>, unbound claim, or pinned node below kubelet <code>1.35</code> / containerd <code>2.1</code></td>
-          <td>Check <code>ModelArtifact</code> <code>Resolved=True</code>, <code>model.csi.gpustack.ai</code>, <code>InstancePersistentVolume</code> binding, or pin a compatible node.</td>
-      </tr>
-      <tr>
-          <td>Stuck in <code>Starting</code> or <code>Pod</code> <code>Failed</code> (<code>UnexpectedAdmissionError</code>)</td>
-          <td>Queued behind capacity, incompatible <code>spec.nodeName</code>, or persistent device-plugin rejection past the 5-minute retry window</td>
-          <td>Inspect the Kueue <code>Workload</code>, verify <code>spec.nodeName</code> labels, and follow <a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/#troubleshooting">scheduling troubleshooting</a>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Reason</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Refused on create (<code>reserved namespace</code> or <code>inactive</code>)</td>
+					<td>System namespace or held <code>InstanceType</code></td>
+					<td>Create in a workload namespace and select an <code>Active</code> <code>InstanceType</code>.</td>
+			</tr>
+			<tr>
+					<td>Retryable error (<code>not ready yet; retry</code>)</td>
+					<td>Slice or partition requested before <code>InstanceType</code> <code>status.detail</code> synced</td>
+					<td>Wait a few seconds for <code>InstanceType</code> reconciliation and re-apply.</td>
+			</tr>
+			<tr>
+					<td>Refused on update (<code>is immutable</code>)</td>
+					<td>Edited template, ports, node pin, or volumes while running</td>
+					<td>Set <code>spec.stop: true</code>, wait for <code>Stopped</code>, apply the edit, then set <code>spec.stop: false</code> (recreate to change <em><code>spec.volume</code></em>).</td>
+			</tr>
+			<tr>
+					<td>Refused on <code>privileged</code> or <code>hostPath</code></td>
+					<td>Cluster host-access gate is <code>false</code></td>
+					<td>Ask an administrator to enable <code>instance-privileged-allowed</code> or <code>instance-host-path-volume-allowed</code>, or remove the field.</td>
+			</tr>
+			<tr>
+					<td>Stuck in <code>Starting</code> naming a volume or runtime floor</td>
+					<td>Unresolved <code>ModelArtifact</code>, missing <code>CSIDriver</code>, unbound claim, or pinned node below kubelet <code>1.35</code> / containerd <code>2.1</code></td>
+					<td>Check <code>ModelArtifact</code> <code>Resolved=True</code>, <code>model.csi.gpustack.ai</code>, <code>InstancePersistentVolume</code> binding, or pin a compatible node.</td>
+			</tr>
+			<tr>
+					<td>Stuck in <code>Starting</code> or <code>Pod</code> <code>Failed</code> (<code>UnexpectedAdmissionError</code>)</td>
+					<td>Queued behind capacity, incompatible <code>spec.nodeName</code>, or persistent device-plugin rejection past the 5-minute retry window</td>
+					<td>Inspect the Kueue <code>Workload</code>, verify <code>spec.nodeName</code> labels, and follow <a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/#troubleshooting">scheduling troubleshooting</a>
 .</td>
-      </tr>
-  </tbody>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

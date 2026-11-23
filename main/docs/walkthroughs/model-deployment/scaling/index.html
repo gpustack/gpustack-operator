@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Model Deployment Scaling Walkthrough · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1223,40 +1223,40 @@
 scaling algorithm (including InferenceX catalog priors or <em>encode/prefill/decode (EPD)</em> role ratios),
 and switch to <code>Active</code> mode:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Object</th>
-          <th>Scope</th>
-          <th>Creator</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ModelArtifact</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Resolves <code>Qwen/Qwen3-8B</code> weights (<code>qwen3-8b</code>)</td>
-      </tr>
-      <tr>
-          <td><code>AcceleratorType</code></td>
-          <td>cluster</td>
-          <td>operator</td>
-          <td>Whole-GPU pool requested by each role replica</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Disaggregated <em>PD</em> target whose <em><code>replicas</code></em> the scaler controls</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeploymentScaler</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Autoscaling policy evaluated in <code>Shadow</code> and enforced in <code>Active</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Object</th>
+					<th>Scope</th>
+					<th>Creator</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ModelArtifact</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Resolves <code>Qwen/Qwen3-8B</code> weights (<code>qwen3-8b</code>)</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td>cluster</td>
+					<td>operator</td>
+					<td>Whole-GPU pool requested by each role replica</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Disaggregated <em>PD</em> target whose <em><code>replicas</code></em> the scaler controls</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeploymentScaler</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Autoscaling policy evaluated in <code>Shadow</code> and enforced in <code>Active</code></td>
+			</tr>
+	</tbody>
 </table>
 <p>Manifests below are reusable configuration examples; captured lifecycle results from the standalone
 H100 and H200 runs are labeled explicitly in <a href="#verification">Verification</a>
@@ -1265,34 +1265,34 @@ H100 and H200 runs are labeled explicitly in <a href="#verification">Verificatio
 .</p>
 <h2 id="environment">Environment</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Item</th>
-          <th>Value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>GPUs</td>
-          <td>2 free GPUs initially, up to 4 GPUs at max scale (1 GPU per replica)</td>
-      </tr>
-      <tr>
-          <td><code>AcceleratorType</code></td>
-          <td>Reusable example uses <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code> (substitute an <code>Active</code> pool from <code>kubectl get acctype</code>)</td>
-      </tr>
-      <tr>
-          <td>Namespace</td>
-          <td><code>gpustack-bench</code></td>
-      </tr>
-      <tr>
-          <td>Model</td>
-          <td><code>Qwen/Qwen3-8B</code> via <code>ModelArtifact</code> <code>qwen3-8b</code> at revision <code>b968826d9c46dd6066d109eabc6255188de91218</code></td>
-      </tr>
-      <tr>
-          <td>Tools</td>
-          <td><code>kubectl</code>, <code>jq</code>, and Python 3 with <code>aiohttp</code> (plus a repo checkout for <code>bench_client.py</code>)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>GPUs</td>
+					<td>2 free GPUs initially, up to 4 GPUs at max scale (1 GPU per replica)</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td>Reusable example uses <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code> (substitute an <code>Active</code> pool from <code>kubectl get acctype</code>)</td>
+			</tr>
+			<tr>
+					<td>Namespace</td>
+					<td><code>gpustack-bench</code></td>
+			</tr>
+			<tr>
+					<td>Model</td>
+					<td><code>Qwen/Qwen3-8B</code> via <code>ModelArtifact</code> <code>qwen3-8b</code> at revision <code>b968826d9c46dd6066d109eabc6255188de91218</code></td>
+			</tr>
+			<tr>
+					<td>Tools</td>
+					<td><code>kubectl</code>, <code>jq</code>, and Python 3 with <code>aiohttp</code> (plus a repo checkout for <code>bench_client.py</code>)</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="prerequisites">Prerequisites</h3>
 <p>Complete <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#cluster-preparation">Cluster preparation</a>
@@ -1310,11 +1310,11 @@ other <code>ModelDeploymentScaler</code> already binds the target deployment; se
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling-vllm-pd</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-8B</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
@@ -1383,11 +1383,11 @@ target <em><code>replicas</code></em>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscale-vllm-pd</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling-vllm-pd</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Shadow</span><span class="w">
@@ -1419,7 +1419,7 @@ target <em><code>replicas</code></em>:</p>
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f scaling-policy.yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-vllm-pd <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}{&#34;\n&#34;}{end}&#39;</span>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}{&#34;\n&#34;}{end}&#39;</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment autoscaling-vllm-pd -o json <span class="p">|</span>
 </span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;{replicas: [.spec.roles[] | {name, replicas}],
 </span></span></span><span class="line"><span class="cl"><span class="s1">       binding: .metadata.annotations[&#34;modeldeployment.gpustack.ai/scaler-binding&#34;]}&#39;</span></span></span></code></pre></div>
@@ -1438,10 +1438,10 @@ load against the router <code>Service</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">BENCH_INCLUSTER</span><span class="o">=</span><span class="m">1</span> python3 .agents/skills/gpustack-operator-benchmark/scripts/bench_client.py load <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --endpoint http://autoscaling-vllm-pd-router.gpustack-bench.svc:8000 <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --model Qwen/Qwen3-8B --arm shadow --suite autoscaling --label baseline <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --input-tokens <span class="m">1024</span> --output-tokens <span class="m">256</span> --concurrency <span class="m">2</span> --duration <span class="m">45</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --out /tmp/scaler-shadow.json --requests-out /tmp/scaler-shadow-requests.jsonl</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  --endpoint http://autoscaling-vllm-pd-router.gpustack-bench.svc:8000 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --model Qwen/Qwen3-8B --arm shadow --suite autoscaling --label baseline <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --input-tokens <span class="m">1024</span> --output-tokens <span class="m">256</span> --concurrency <span class="m">2</span> --duration <span class="m">45</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --out /tmp/scaler-shadow.json --requests-out /tmp/scaler-shadow-requests.jsonl</span></span></code></pre></div>
 </div>
 <p>If <code>bench_client.py</code> reports local fallback, stop and fix <code>default/bench-driver</code> access because
 cluster-internal DNS will not resolve locally.</p>
@@ -1449,30 +1449,30 @@ cluster-internal DNS will not resolve locally.</p>
 <p>When switching algorithms in <code>scaling-policy.yaml</code>, replace the entire <em><code>spec.algorithm</code></em> block
 (admission rejects sub-blocks that do not match <em><code>algorithm.type</code></em>):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Choice</th>
-          <th>Target scenario</th>
-          <th>Configuration guidance</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>Predictive</code> + <em><code>capacityPrior</code></em></td>
-          <td>Latency-sensitive serving and traffic ramps where replica startup (~76 s on H200) must start ahead of peak load</td>
-          <td>Set <em><code>horizonSeconds</code></em> above startup time (<code>180–300</code> s), keep <em><code>headroom: &quot;0.75&quot;</code></em>, and cap step bursts via <em><code>behavior.scaleUp.maxStepReplicas</code></em>.</td>
-      </tr>
-      <tr>
-          <td><code>TokenThroughput</code> + <em><code>capacityPrior</code></em></td>
-          <td>Variable prompt lengths and prefix caching where GPU replica-seconds should track sustained token demand</td>
-          <td>Use <em><code>capacityPrior</code></em> (<code>headroom: &quot;0.75&quot;</code>) or set manual targets at 70–75% of single-replica saturation.</td>
-      </tr>
-      <tr>
-          <td><code>Proportional</code></td>
-          <td>Uniform request shapes using <code>RunningRequests</code> or <code>QueueDepth</code> without offline token sweeps</td>
-          <td>Set <em><code>roleTargets[].target</code></em> to per-replica concurrency within <em>TTFT</em> targets (<code>Proportional</code> rejects <em><code>capacityPrior</code></em>).</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Choice</th>
+					<th>Target scenario</th>
+					<th>Configuration guidance</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Predictive</code> + <em><code>capacityPrior</code></em></td>
+					<td>Latency-sensitive serving and traffic ramps where replica startup (~76 s on H200) must start ahead of peak load</td>
+					<td>Set <em><code>horizonSeconds</code></em> above startup time (<code>180–300</code> s), keep <em><code>headroom: &quot;0.75&quot;</code></em>, and cap step bursts via <em><code>behavior.scaleUp.maxStepReplicas</code></em>.</td>
+			</tr>
+			<tr>
+					<td><code>TokenThroughput</code> + <em><code>capacityPrior</code></em></td>
+					<td>Variable prompt lengths and prefix caching where GPU replica-seconds should track sustained token demand</td>
+					<td>Use <em><code>capacityPrior</code></em> (<code>headroom: &quot;0.75&quot;</code>) or set manual targets at 70–75% of single-replica saturation.</td>
+			</tr>
+			<tr>
+					<td><code>Proportional</code></td>
+					<td>Uniform request shapes using <code>RunningRequests</code> or <code>QueueDepth</code> without offline token sweeps</td>
+					<td>Set <em><code>roleTargets[].target</code></em> to per-replica concurrency within <em>TTFT</em> targets (<code>Proportional</code> rejects <em><code>capacityPrior</code></em>).</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="token-throughput">Token throughput</h3>
 <div class="code-block">
@@ -1493,7 +1493,7 @@ cluster-internal DNS will not resolve locally.</p>
 </span></span></span><span class="line"><span class="cl"><span class="gd">-          target: &#34;3&#34;
 </span></span></span><span class="line"><span class="cl"><span class="gd">-        - name: decode
 </span></span></span><span class="line"><span class="cl"><span class="gd">-          target: &#34;3&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    type: TokenThroughput
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    type: TokenThroughput
 </span></span></span><span class="line"><span class="cl"><span class="gi">+    tokenThroughput:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+      prefillTargetTokensPerSecond: &#34;1200&#34;
 </span></span></span><span class="line"><span class="cl"><span class="gi">+      decodeTargetTokensPerSecond: &#34;300&#34;
@@ -1522,7 +1522,7 @@ SGLang <em>PD</em> traffic over TCP, review the
 </span></span></span><span class="line"><span class="cl"><span class="gd">-          target: &#34;3&#34;
 </span></span></span><span class="line"><span class="cl"><span class="gd">-        - name: decode
 </span></span></span><span class="line"><span class="cl"><span class="gd">-          target: &#34;3&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    type: Predictive
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    type: Predictive
 </span></span></span><span class="line"><span class="cl"><span class="gi">+    predictive:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+      horizonSeconds: 30
 </span></span></span><span class="line"><span class="cl"><span class="gi">+      minPoints: 2
@@ -1553,11 +1553,11 @@ the deployment with <code>worker.gpustack.ai/precision</code>):</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscale-vllm-pd-prior</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling-vllm-pd</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Shadow</span><span class="w">
@@ -1588,11 +1588,11 @@ override with catalog-resolved forecast capacity:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">catalog-server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-8B</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
@@ -1608,13 +1608,13 @@ override with catalog-resolved forecast capacity:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscale-server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">catalog-server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
@@ -1658,13 +1658,13 @@ override with catalog-resolved forecast capacity:</p>
 </span></span><span class="line"><span class="cl">     predictive:
 </span></span><span class="line"><span class="cl">       tokenThroughput:
 </span></span><span class="line"><span class="cl"><span class="gd">-        serverTargetTokensPerSecond: &#34;1200&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span>         ttftTargetMilliseconds: &#34;500&#34;
+</span></span></span><span class="line"><span class="cl">         ttftTargetMilliseconds: &#34;500&#34;
 </span></span><span class="line"><span class="cl">         itlTargetMilliseconds: &#34;50&#34;
 </span></span><span class="line"><span class="cl">     capacityPrior:
 </span></span><span class="line"><span class="cl"><span class="gd">-      catalogRef:
 </span></span></span><span class="line"><span class="cl"><span class="gd">-        name: autoscaling-priors
 </span></span></span><span class="line"><span class="cl"><span class="gd">-        key: priors.yaml
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span>       headroom: &#34;0.75&#34;
+</span></span></span><span class="line"><span class="cl">       headroom: &#34;0.75&#34;
 </span></span></code></pre></div>
 </div>
 <p>To switch back to manual capacities, remove <em><code>capacityPrior</code></em> and supply explicit capacity fields:</p>
@@ -1680,9 +1680,9 @@ override with catalog-resolved forecast capacity:</p>
 </span></span><span class="line"><span class="cl">     type: Predictive
 </span></span><span class="line"><span class="cl">     predictive:
 </span></span><span class="line"><span class="cl"><span class="gi">+      serverTokenCapacityPerReplica: &#34;2000&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>       tokenThroughput:
+</span></span></span><span class="line"><span class="cl">       tokenThroughput:
 </span></span><span class="line"><span class="cl"><span class="gi">+        serverTargetTokensPerSecond: &#34;1200&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span><span class="gd">-    capacityPrior:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-    capacityPrior:
 </span></span></span><span class="line"><span class="cl"><span class="gd">-      headroom: &#34;0.75&#34;
 </span></span></span></code></pre></div>
 </div>
@@ -1696,11 +1696,11 @@ couple <em>encode</em> replica counts via <em><code>ratios</code></em> rather th
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-scaler</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">epd-arm3-epd</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
@@ -1742,10 +1742,10 @@ watch scale-out in another:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">BENCH_INCLUSTER</span><span class="o">=</span><span class="m">1</span> python3 .agents/skills/gpustack-operator-benchmark/scripts/bench_client.py load <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --endpoint http://autoscaling-vllm-pd-router.gpustack-bench.svc:8000 <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --model Qwen/Qwen3-8B --arm active --suite autoscaling --label ramp <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --input-tokens <span class="m">1024</span> --output-tokens <span class="m">256</span> --concurrency <span class="m">24</span> --duration <span class="m">75</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --out /tmp/scaler-ramp.json --requests-out /tmp/scaler-ramp-requests.jsonl</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  --endpoint http://autoscaling-vllm-pd-router.gpustack-bench.svc:8000 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --model Qwen/Qwen3-8B --arm active --suite autoscaling --label ramp <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --input-tokens <span class="m">1024</span> --output-tokens <span class="m">256</span> --concurrency <span class="m">24</span> --duration <span class="m">75</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --out /tmp/scaler-ramp.json --requests-out /tmp/scaler-ramp-requests.jsonl</span></span></code></pre></div>
 </div>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1764,10 +1764,10 @@ router withdrawal and drain budgets; setting <code>0</code> stores the 300 s def
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">BENCH_INCLUSTER</span><span class="o">=</span><span class="m">1</span> python3 .agents/skills/gpustack-operator-benchmark/scripts/bench_client.py load <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --endpoint http://autoscaling-vllm-pd-router.gpustack-bench.svc:8000 <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --model Qwen/Qwen3-8B --arm active --suite autoscaling --label cooldown <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --input-tokens <span class="m">1024</span> --output-tokens <span class="m">256</span> --concurrency <span class="m">2</span> --duration <span class="m">600</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --out /tmp/scaler-cooldown.json --requests-out /tmp/scaler-cooldown-requests.jsonl</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  --endpoint http://autoscaling-vllm-pd-router.gpustack-bench.svc:8000 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --model Qwen/Qwen3-8B --arm active --suite autoscaling --label cooldown <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --input-tokens <span class="m">1024</span> --output-tokens <span class="m">256</span> --concurrency <span class="m">2</span> --duration <span class="m">600</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --out /tmp/scaler-cooldown.json --requests-out /tmp/scaler-cooldown-requests.jsonl</span></span></code></pre></div>
 </div>
 <p>Poll retirement and scale-down status during cooldown:</p>
 <div class="code-block">
@@ -1799,68 +1799,68 @@ during scale-out (<a href="/gpustack-operator/main/docs/modules/model-deployment
 the shipped profile <code>(Server, deepseek-ai/DeepSeek-R1-0528, fp8, sglang, amd-mi325x, gpusPerReplica: 8, tensorParallel: 8)</code> from <code>pkg/worker/scaling/priors/priors.yaml</code> (illustrative <code>tokens/s/MW</code> assumes a
 ~0.0115 MW 8-GPU node; interactivity is <code>1000 / ITL P90</code>):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Concurrency</th>
-          <th style="text-align: right">Per-replica <code>tokens/s</code></th>
-          <th style="text-align: right"><code>tokens/s/MW</code></th>
-          <th style="text-align: right"><em>TTFT</em> P90 (ms)</th>
-          <th style="text-align: right"><em>ITL</em> P90 (ms)</th>
-          <th style="text-align: right"><code>tokens/s/user</code></th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>4</td>
-          <td style="text-align: right">1875.02</td>
-          <td style="text-align: right">~163k</td>
-          <td style="text-align: right">665.4</td>
-          <td style="text-align: right">16.95</td>
-          <td style="text-align: right">59.0</td>
-      </tr>
-      <tr>
-          <td>8</td>
-          <td style="text-align: right">3167.82</td>
-          <td style="text-align: right">~275k</td>
-          <td style="text-align: right">1001.7</td>
-          <td style="text-align: right">18.47</td>
-          <td style="text-align: right">54.1</td>
-      </tr>
-      <tr>
-          <td>16</td>
-          <td style="text-align: right">4988.96</td>
-          <td style="text-align: right">~434k</td>
-          <td style="text-align: right">1119.7</td>
-          <td style="text-align: right">20.82</td>
-          <td style="text-align: right">48.0</td>
-      </tr>
-      <tr>
-          <td>32</td>
-          <td style="text-align: right">6496.65</td>
-          <td style="text-align: right">~565k</td>
-          <td style="text-align: right">1516.6</td>
-          <td style="text-align: right">28.32</td>
-          <td style="text-align: right">35.3</td>
-      </tr>
-      <tr>
-          <td>64</td>
-          <td style="text-align: right">7630.2</td>
-          <td style="text-align: right">~663k</td>
-          <td style="text-align: right">2636.2</td>
-          <td style="text-align: right">44.44</td>
-          <td style="text-align: right">22.5</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Concurrency</th>
+					<th style="text-align: right">Per-replica <code>tokens/s</code></th>
+					<th style="text-align: right"><code>tokens/s/MW</code></th>
+					<th style="text-align: right"><em>TTFT</em> P90 (ms)</th>
+					<th style="text-align: right"><em>ITL</em> P90 (ms)</th>
+					<th style="text-align: right"><code>tokens/s/user</code></th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>4</td>
+					<td style="text-align: right">1875.02</td>
+					<td style="text-align: right">~163k</td>
+					<td style="text-align: right">665.4</td>
+					<td style="text-align: right">16.95</td>
+					<td style="text-align: right">59.0</td>
+			</tr>
+			<tr>
+					<td>8</td>
+					<td style="text-align: right">3167.82</td>
+					<td style="text-align: right">~275k</td>
+					<td style="text-align: right">1001.7</td>
+					<td style="text-align: right">18.47</td>
+					<td style="text-align: right">54.1</td>
+			</tr>
+			<tr>
+					<td>16</td>
+					<td style="text-align: right">4988.96</td>
+					<td style="text-align: right">~434k</td>
+					<td style="text-align: right">1119.7</td>
+					<td style="text-align: right">20.82</td>
+					<td style="text-align: right">48.0</td>
+			</tr>
+			<tr>
+					<td>32</td>
+					<td style="text-align: right">6496.65</td>
+					<td style="text-align: right">~565k</td>
+					<td style="text-align: right">1516.6</td>
+					<td style="text-align: right">28.32</td>
+					<td style="text-align: right">35.3</td>
+			</tr>
+			<tr>
+					<td>64</td>
+					<td style="text-align: right">7630.2</td>
+					<td style="text-align: right">~663k</td>
+					<td style="text-align: right">2636.2</td>
+					<td style="text-align: right">44.44</td>
+					<td style="text-align: right">22.5</td>
+			</tr>
+	</tbody>
 </table>
 <p>Configure a scaler holding P90 <em>TTFT</em> <code>&lt;= 2000 ms</code> and P90 <em>ITL</em> <code>&lt;= 33 ms</code> (~30.3 <code>tokens/s/user</code>):</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-scaler</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
@@ -1895,9 +1895,9 @@ disjoint from <code>fitRunIDs</code>), copy
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">bash .agents/skills/gpustack-operator-benchmark/cases/case-5-autoscaling.sh <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --capacity-comparison --config FILE --out DIR --validate-only
+</span></span></span><span class="line"><span class="cl">  --capacity-comparison --config FILE --out DIR --validate-only
 </span></span><span class="line"><span class="cl">python3 .agents/skills/gpustack-operator-benchmark/scripts/autoscaling_report.py <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  ARM_DIR --out REPORT_JSON</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  ARM_DIR --out REPORT_JSON</span></span></code></pre></div>
 </div>
 <p><code>--validate-only</code> makes zero cluster calls and exits <code>0</code> (valid) or <code>2</code> (input error); <code>--execute</code>
 runs at least three repeats per configuration and writes <code>comparison.json</code> (<code>0</code> success, <code>1</code>
@@ -1917,71 +1917,71 @@ delete the target <code>ModelDeployment</code>:</p>
 </div>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Target <em><code>replicas</code></em> stay at <code>1</code></td>
-          <td><code>Active=False</code> (<code>Reason: ShadowMode</code>)</td>
-          <td>Expected in <code>Shadow</code> mode; set <code>spec.mode: Active</code> on <code>ModelDeploymentScaler</code> when ready.</td>
-      </tr>
-      <tr>
-          <td>Apply rejected with <code>AlreadyBound</code></td>
-          <td>Another scaler owns <code>scaler-binding</code></td>
-          <td>Edit the existing <code>ModelDeploymentScaler</code>, or delete it and wait for binding release first.</td>
-      </tr>
-      <tr>
-          <td><code>Reason: InvalidBinding</code></td>
-          <td>Corrupted <code>scaler-binding</code> annotation on target</td>
-          <td>Remove or repair <code>modeldeployment.gpustack.ai/scaler-binding</code> on the target <code>ModelDeployment</code>.</td>
-      </tr>
-      <tr>
-          <td><code>Reason: BoundsConflict</code> or <code>RatioConflict</code></td>
-          <td>Live replica counts fall outside policy bands</td>
-          <td>Widen <em><code>minReplicas</code></em>/<em><code>maxReplicas</code></em> or <em><code>ratios</code></em> on <code>ModelDeploymentScaler</code> to include current counts.</td>
-      </tr>
-      <tr>
-          <td><code>MetricsReady=False/WaitingForMetrics</code></td>
-          <td>Missing successive metric samples</td>
-          <td>Wait at least two sampling intervals and verify Ready role <code>Pod</code>s expose engine metrics.</td>
-      </tr>
-      <tr>
-          <td><code>CapacityPriorsReady=False</code></td>
-          <td><code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, or <code>IncompatibleMetric</code></td>
-          <td>Check <code>catalogRef</code>, precision annotation/<code>--quantization</code>, single-<code>Pod</code> role eligibility, and latency targets, or switch to explicit manual capacities.</td>
-      </tr>
-      <tr>
-          <td><code>Reason: ResourceExhausted</code></td>
-          <td>Scale-out blocked by Kueue quota</td>
-          <td>Inspect <em><code>status.pendingCohort</code></em>, <code>Workload</code>s, and <code>ClusterQueue</code> capacity.</td>
-      </tr>
-      <tr>
-          <td><code>Reason: ScaleDownAborted</code></td>
-          <td>Replica drain aborted</td>
-          <td>Inspect <em><code>status.lastScaleDown</code></em> and target <em><code>status.retirement</code></em>; wait out the abort cooldown after fixing drain blockers.</td>
-      </tr>
-      <tr>
-          <td><code>Reason: PacingBounded</code></td>
-          <td>Cooldown or step cap still active</td>
-          <td>Wait for <em><code>stabilizationWindowSeconds</code></em> and retirement grace timers to elapse.</td>
-      </tr>
-      <tr>
-          <td>Router errors during scale-out</td>
-          <td>Client 5xx or connection resets</td>
-          <td>Capture router and engine logs; <code>VLLM_HTTP_TIMEOUT_KEEP_ALIVE</code> reduces but does not eliminate all scale-out resets.</td>
-      </tr>
-      <tr>
-          <td>SGLang TCP KV transfer errors</td>
-          <td>Engine port-exhaustion logs</td>
-          <td>Enable <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/#limitations"><code>model-deployment-tcp-tw-reuse</code></a>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Target <em><code>replicas</code></em> stay at <code>1</code></td>
+					<td><code>Active=False</code> (<code>Reason: ShadowMode</code>)</td>
+					<td>Expected in <code>Shadow</code> mode; set <code>spec.mode: Active</code> on <code>ModelDeploymentScaler</code> when ready.</td>
+			</tr>
+			<tr>
+					<td>Apply rejected with <code>AlreadyBound</code></td>
+					<td>Another scaler owns <code>scaler-binding</code></td>
+					<td>Edit the existing <code>ModelDeploymentScaler</code>, or delete it and wait for binding release first.</td>
+			</tr>
+			<tr>
+					<td><code>Reason: InvalidBinding</code></td>
+					<td>Corrupted <code>scaler-binding</code> annotation on target</td>
+					<td>Remove or repair <code>modeldeployment.gpustack.ai/scaler-binding</code> on the target <code>ModelDeployment</code>.</td>
+			</tr>
+			<tr>
+					<td><code>Reason: BoundsConflict</code> or <code>RatioConflict</code></td>
+					<td>Live replica counts fall outside policy bands</td>
+					<td>Widen <em><code>minReplicas</code></em>/<em><code>maxReplicas</code></em> or <em><code>ratios</code></em> on <code>ModelDeploymentScaler</code> to include current counts.</td>
+			</tr>
+			<tr>
+					<td><code>MetricsReady=False/WaitingForMetrics</code></td>
+					<td>Missing successive metric samples</td>
+					<td>Wait at least two sampling intervals and verify Ready role <code>Pod</code>s expose engine metrics.</td>
+			</tr>
+			<tr>
+					<td><code>CapacityPriorsReady=False</code></td>
+					<td><code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, or <code>IncompatibleMetric</code></td>
+					<td>Check <code>catalogRef</code>, precision annotation/<code>--quantization</code>, single-<code>Pod</code> role eligibility, and latency targets, or switch to explicit manual capacities.</td>
+			</tr>
+			<tr>
+					<td><code>Reason: ResourceExhausted</code></td>
+					<td>Scale-out blocked by Kueue quota</td>
+					<td>Inspect <em><code>status.pendingCohort</code></em>, <code>Workload</code>s, and <code>ClusterQueue</code> capacity.</td>
+			</tr>
+			<tr>
+					<td><code>Reason: ScaleDownAborted</code></td>
+					<td>Replica drain aborted</td>
+					<td>Inspect <em><code>status.lastScaleDown</code></em> and target <em><code>status.retirement</code></em>; wait out the abort cooldown after fixing drain blockers.</td>
+			</tr>
+			<tr>
+					<td><code>Reason: PacingBounded</code></td>
+					<td>Cooldown or step cap still active</td>
+					<td>Wait for <em><code>stabilizationWindowSeconds</code></em> and retirement grace timers to elapse.</td>
+			</tr>
+			<tr>
+					<td>Router errors during scale-out</td>
+					<td>Client 5xx or connection resets</td>
+					<td>Capture router and engine logs; <code>VLLM_HTTP_TIMEOUT_KEEP_ALIVE</code> reduces but does not eliminate all scale-out resets.</td>
+			</tr>
+			<tr>
+					<td>SGLang TCP KV transfer errors</td>
+					<td>Engine port-exhaustion logs</td>
+					<td>Enable <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/#limitations"><code>model-deployment-tcp-tw-reuse</code></a>
  after permitting <code>net.ipv4.tcp_tw_reuse</code> on kubelets.</td>
-      </tr>
-  </tbody>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

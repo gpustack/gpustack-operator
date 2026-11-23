@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Model Deployment Routing · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1216,77 +1216,77 @@ which replicas receive traffic.</p>
 <p>The serving mode decides which <code>Pod</code>s are HTTP candidates; the router policy chooses only among
 those candidates.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Serving mode</th>
-          <th>HTTP candidates</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Internal <em>Server</em> group</td>
-          <td>Member 0 of each replica</td>
-      </tr>
-      <tr>
-          <td>Qualified External <em>Server</em> group</td>
-          <td>Every qualified member (one <em>data parallelism (DP)</em> rank per member)</td>
-      </tr>
-      <tr>
-          <td><em>Prefill</em> or <em>Decode</em> group</td>
-          <td>Member 0 of each replica, even when <code>size &gt; 1</code></td>
-      </tr>
-      <tr>
-          <td><em>Elastic EP</em> collective</td>
-          <td>Master endpoint only</td>
-      </tr>
-      <tr>
-          <td><em>Encode</em> group</td>
-          <td>Excluded from answering candidates and deployment <code>Service</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Serving mode</th>
+					<th>HTTP candidates</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Internal <em>Server</em> group</td>
+					<td>Member 0 of each replica</td>
+			</tr>
+			<tr>
+					<td>Qualified External <em>Server</em> group</td>
+					<td>Every qualified member (one <em>data parallelism (DP)</em> rank per member)</td>
+			</tr>
+			<tr>
+					<td><em>Prefill</em> or <em>Decode</em> group</td>
+					<td>Member 0 of each replica, even when <code>size &gt; 1</code></td>
+			</tr>
+			<tr>
+					<td><em>Elastic EP</em> collective</td>
+					<td>Master endpoint only</td>
+			</tr>
+			<tr>
+					<td><em>Encode</em> group</td>
+					<td>Excluded from answering candidates and deployment <code>Service</code></td>
+			</tr>
+	</tbody>
 </table>
 <p><code>vllm-router</code> pairs only with vLLM and <code>sglang-gateway</code> only with SGLang:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Mode</th>
-          <th><code>llm-d-router</code></th>
-          <th><code>vllm-router</code></th>
-          <th><code>sglang-gateway</code></th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Multi-replica <em>Server</em></td>
-          <td>Fixed scoring profile (prefix, queue, KV); measured 187/170 on vLLM and 375/0 on SGLang</td>
-          <td><code>cache_aware</code> default; <code>--policy round_robin</code> measured 60/60</td>
-          <td>Same policies; <code>round_robin</code> measured 60/60</td>
-      </tr>
-      <tr>
-          <td><em>PD</em> pair</td>
-          <td>Token-counted <em>PD</em> split, connector docs and decode sidecar</td>
-          <td>Native <em>PD</em> mode</td>
-          <td>Native <code>--pd-disaggregation</code> (never combined with <code>--dp-aware</code>)</td>
-      </tr>
-      <tr>
-          <td><em>EPD</em></td>
-          <td><code>encode</code> profile + decode sidecar transfer</td>
-          <td>Operator-owned <code>--epd-config</code>, no sidecar</td>
-          <td>Native pair; <em>Prefill</em> dials <code>--encoder-urls</code></td>
-      </tr>
-      <tr>
-          <td><em>Elastic EP</em></td>
-          <td>Engine internal load balancing; single endpoint</td>
-          <td>Same</td>
-          <td>Same</td>
-      </tr>
-      <tr>
-          <td><em>External DP</em></td>
-          <td>Admitted, but no <code>--policy</code> flag; prefer engine router</td>
-          <td>Per-rank endpoints with <code>--policy round_robin</code></td>
-          <td>Per-member endpoints (<code>--dp-aware</code> fan-out below)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Mode</th>
+					<th><code>llm-d-router</code></th>
+					<th><code>vllm-router</code></th>
+					<th><code>sglang-gateway</code></th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Multi-replica <em>Server</em></td>
+					<td>Fixed scoring profile (prefix, queue, KV); measured 187/170 on vLLM and 375/0 on SGLang</td>
+					<td><code>cache_aware</code> default; <code>--policy round_robin</code> measured 60/60</td>
+					<td>Same policies; <code>round_robin</code> measured 60/60</td>
+			</tr>
+			<tr>
+					<td><em>PD</em> pair</td>
+					<td>Token-counted <em>PD</em> split, connector docs and decode sidecar</td>
+					<td>Native <em>PD</em> mode</td>
+					<td>Native <code>--pd-disaggregation</code> (never combined with <code>--dp-aware</code>)</td>
+			</tr>
+			<tr>
+					<td><em>EPD</em></td>
+					<td><code>encode</code> profile + decode sidecar transfer</td>
+					<td>Operator-owned <code>--epd-config</code>, no sidecar</td>
+					<td>Native pair; <em>Prefill</em> dials <code>--encoder-urls</code></td>
+			</tr>
+			<tr>
+					<td><em>Elastic EP</em></td>
+					<td>Engine internal load balancing; single endpoint</td>
+					<td>Same</td>
+					<td>Same</td>
+			</tr>
+			<tr>
+					<td><em>External DP</em></td>
+					<td>Admitted, but no <code>--policy</code> flag; prefer engine router</td>
+					<td>Per-rank endpoints with <code>--policy round_robin</code></td>
+					<td>Per-member endpoints (<code>--dp-aware</code> fan-out below)</td>
+			</tr>
+	</tbody>
 </table>
 <p>Where even spread matters (multi-replica <em>Server</em> or <em>External DP</em>), choose <code>vllm-router</code> for vLLM
 or <code>sglang-gateway</code> for SGLang because <code>llm-d-router</code> has no policy switch
@@ -1311,26 +1311,26 @@ at most one registered worker per group.</li>
 <p>Protected groups are gated by <code>Pod</code> labels, never by dropping selector terms. Both the Router and
 the role <code>Service</code> enforce the same rule:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Group class</th>
-          <th>Selector rule</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Managed protected group (multi-member ordinary, <em>External DP</em>, <em>PD</em>)</td>
-          <td>Requires <code>endpoint-eligible: &quot;true&quot;</code> from first enable; only qualified groups receive the label</td>
-      </tr>
-      <tr>
-          <td>Unsupported custom route or engine outside capability matrix</td>
-          <td>Keeps leader restriction with no qualification claim</td>
-      </tr>
-      <tr>
-          <td>Ordinary single-member <em>Server</em></td>
-          <td>Leader restriction, no eligibility label required</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Group class</th>
+					<th>Selector rule</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Managed protected group (multi-member ordinary, <em>External DP</em>, <em>PD</em>)</td>
+					<td>Requires <code>endpoint-eligible: &quot;true&quot;</code> from first enable; only qualified groups receive the label</td>
+			</tr>
+			<tr>
+					<td>Unsupported custom route or engine outside capability matrix</td>
+					<td>Keeps leader restriction with no qualification claim</td>
+			</tr>
+			<tr>
+					<td>Ordinary single-member <em>Server</em></td>
+					<td>Leader restriction, no eligibility label required</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="managed-and-custom-roles">Managed and custom roles</h3>
 <p>When roles in one deployment carry mixed requirements, the operator labels eligible discovery
@@ -1340,35 +1340,35 @@ label marks membership only; actual routing intersects it with native role and m
 <p>Send all client requests to <em><code>status.endpoint</code></em>. <em>Encode</em> <code>Pod</code>s stay excluded from the deployment
 <code>Service</code> and KV-event discovery:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Router</th>
-          <th>Engine</th>
-          <th>Encoder routing</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>llm-d-router</code></td>
-          <td><code>vLLM</code></td>
-          <td><code>encode</code> profile picks an encoder for media requests; decode sidecar (<code>--ec-connector=ec-nixl</code> or <code>ec-example</code>) coordinates transfer</td>
-      </tr>
-      <tr>
-          <td><code>vllm-router</code></td>
-          <td><code>vLLM</code></td>
-          <td>Operator renders <code>--epd-config</code> (owned, refused in <em><code>extraArgs</code></em>); router drives <em>Encode</em> → <em>Prefill</em> (NIXL) → <em>Decode</em> without a sidecar</td>
-      </tr>
-      <tr>
-          <td><code>llm-d-router</code></td>
-          <td><code>SGLang</code></td>
-          <td>Router splits every request to <em>Prefill</em>/<em>Decode</em> (no <code>--ec-connector</code>); <em>Prefill</em> dials <em>Encode</em> via <code>--encoder-urls</code></td>
-      </tr>
-      <tr>
-          <td><code>sglang-gateway</code></td>
-          <td><code>SGLang</code></td>
-          <td>Gateway routes <em>Prefill</em>/<em>Decode</em> natively; <em>Prefill</em> dials <em>Encode</em> via <code>--encoder-urls</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Router</th>
+					<th>Engine</th>
+					<th>Encoder routing</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>llm-d-router</code></td>
+					<td><code>vLLM</code></td>
+					<td><code>encode</code> profile picks an encoder for media requests; decode sidecar (<code>--ec-connector=ec-nixl</code> or <code>ec-example</code>) coordinates transfer</td>
+			</tr>
+			<tr>
+					<td><code>vllm-router</code></td>
+					<td><code>vLLM</code></td>
+					<td>Operator renders <code>--epd-config</code> (owned, refused in <em><code>extraArgs</code></em>); router drives <em>Encode</em> → <em>Prefill</em> (NIXL) → <em>Decode</em> without a sidecar</td>
+			</tr>
+			<tr>
+					<td><code>llm-d-router</code></td>
+					<td><code>SGLang</code></td>
+					<td>Router splits every request to <em>Prefill</em>/<em>Decode</em> (no <code>--ec-connector</code>); <em>Prefill</em> dials <em>Encode</em> via <code>--encoder-urls</code></td>
+			</tr>
+			<tr>
+					<td><code>sglang-gateway</code></td>
+					<td><code>SGLang</code></td>
+					<td>Gateway routes <em>Prefill</em>/<em>Decode</em> natively; <em>Prefill</em> dials <em>Encode</em> via <code>--encoder-urls</code></td>
+			</tr>
+	</tbody>
 </table>
 <p>Under <code>llm-d-router</code> + vLLM, the <code>encode</code> profile omits queue, KV-cache and prefix scorers, sends
 media requests through <em>Encode</em> first, and routes text-only requests straight to <em>Prefill</em> and
@@ -1378,30 +1378,30 @@ media requests through <em>Encode</em> first, and routes text-only requests stra
 <p><code>vllm-router</code> and <code>sglang-gateway</code> default to <code>cache_aware</code> (logging
 <code>policy: CacheAware { cache_threshold: 0.3, ... }</code>); <code>llm-d-router</code> uses its fixed scoring profile:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Router</th>
-          <th>Default</th>
-          <th>Replica selection</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>vllm-router</code></td>
-          <td><code>cache_aware</code></td>
-          <td>Longest matching prefix above <code>--cache-threshold</code> (<code>0.3</code>), else smallest tree; switches to least-loaded when load gap exceeds <code>--balance-abs-threshold</code> (<code>64</code>) and <code>--balance-rel-threshold</code> (<code>1.5×</code>)</td>
-      </tr>
-      <tr>
-          <td><code>sglang-gateway</code></td>
-          <td><code>cache_aware</code></td>
-          <td>Same algorithm and three defaults</td>
-      </tr>
-      <tr>
-          <td><code>llm-d-router</code></td>
-          <td>Fixed profile</td>
-          <td>Highest sum of prefix match (weight <code>3</code>, omitted on <em>Decode</em>), queue depth (<code>2</code>) and KV utilization (<code>2</code>)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Router</th>
+					<th>Default</th>
+					<th>Replica selection</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>vllm-router</code></td>
+					<td><code>cache_aware</code></td>
+					<td>Longest matching prefix above <code>--cache-threshold</code> (<code>0.3</code>), else smallest tree; switches to least-loaded when load gap exceeds <code>--balance-abs-threshold</code> (<code>64</code>) and <code>--balance-rel-threshold</code> (<code>1.5×</code>)</td>
+			</tr>
+			<tr>
+					<td><code>sglang-gateway</code></td>
+					<td><code>cache_aware</code></td>
+					<td>Same algorithm and three defaults</td>
+			</tr>
+			<tr>
+					<td><code>llm-d-router</code></td>
+					<td>Fixed profile</td>
+					<td>Highest sum of prefix match (weight <code>3</code>, omitted on <em>Decode</em>), queue depth (<code>2</code>) and KV utilization (<code>2</code>)</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="prefix-affinity">Prefix affinity</h3>
 <p><strong>Under <code>cache_aware</code>, serial requests sharing a long prefix land on one replica while peers stay
@@ -1410,35 +1410,35 @@ exceeds the thresholds above.</p>
 <p>Measured on two single-GPU <em>Server</em> replicas with serial 500-character shared-prefix chat requests
 (zero errors; concurrent spread unmeasured):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Router</th>
-          <th>Engine</th>
-          <th>Requests per replica</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>vllm-router</code></td>
-          <td>vLLM</td>
-          <td>354 and 0</td>
-      </tr>
-      <tr>
-          <td><code>sglang-gateway</code></td>
-          <td>SGLang</td>
-          <td>406 and 0</td>
-      </tr>
-      <tr>
-          <td><code>llm-d-router</code></td>
-          <td>vLLM</td>
-          <td>187 and 170</td>
-      </tr>
-      <tr>
-          <td><code>llm-d-router</code></td>
-          <td>SGLang</td>
-          <td>375 and 0</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Router</th>
+					<th>Engine</th>
+					<th>Requests per replica</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>vllm-router</code></td>
+					<td>vLLM</td>
+					<td>354 and 0</td>
+			</tr>
+			<tr>
+					<td><code>sglang-gateway</code></td>
+					<td>SGLang</td>
+					<td>406 and 0</td>
+			</tr>
+			<tr>
+					<td><code>llm-d-router</code></td>
+					<td>vLLM</td>
+					<td>187 and 170</td>
+			</tr>
+			<tr>
+					<td><code>llm-d-router</code></td>
+					<td>SGLang</td>
+					<td>375 and 0</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="policy-overrides">Policy overrides</h2>
 <p>Add <code>--policy round_robin</code> to <em><code>spec.router.extraArgs</code></em> on <code>vllm-router</code> or <code>sglang-gateway</code> to
@@ -1469,22 +1469,22 @@ an empty prefix table. Both routers also run behind the shared Envoy inference a
 with a <code>:9091</code> observer when managed accelerated non-<em>Encode</em> roles exist.</p>
 <p>Admission does not validate <code>--policy</code> values; an unknown value stops the router at startup:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Router</th>
-          <th>Accepted <code>--policy</code> values</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>vllm-router</code></td>
-          <td><code>random</code>, <code>round_robin</code>, <code>cache_aware</code>, <code>power_of_two</code>, <code>consistent_hash</code>, <code>rendezvous_hash</code></td>
-      </tr>
-      <tr>
-          <td><code>sglang-gateway</code></td>
-          <td><code>random</code>, <code>round_robin</code>, <code>cache_aware</code>, <code>power_of_two</code>, <code>prefix_hash</code>, <code>manual</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Router</th>
+					<th>Accepted <code>--policy</code> values</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>vllm-router</code></td>
+					<td><code>random</code>, <code>round_robin</code>, <code>cache_aware</code>, <code>power_of_two</code>, <code>consistent_hash</code>, <code>rendezvous_hash</code></td>
+			</tr>
+			<tr>
+					<td><code>sglang-gateway</code></td>
+					<td><code>random</code>, <code>round_robin</code>, <code>cache_aware</code>, <code>power_of_two</code>, <code>prefix_hash</code>, <code>manual</code></td>
+			</tr>
+	</tbody>
 </table>
 <p>Only <code>round_robin</code> was live-tested; <code>cache_aware</code> thresholds, <code>--prefill-policy</code> and
 <code>--decode-policy</code> pass through <em><code>extraArgs</code></em> untested.</p>
@@ -1497,40 +1497,40 @@ observation, <code>0</code> when empty), while <em><code>status.roles[].endpoint
 per-Router union (<code>Confirmed</code> with <em><code>serving.value</code></em>, <code>NotConverged</code>, <code>Unknown</code> or <code>NotConfigured</code>).</p>
 <p>Protected groups must pass all five criteria to hold <code>modeldeployment.gpustack.ai/endpoint-eligible: &quot;true&quot;</code>:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Criterion</th>
-          <th>Requirement</th>
-          <th>Failure effect</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>MemberSetComplete</code></td>
-          <td>Every declared member <code>Pod</code> exists</td>
-          <td>Revokes <code>endpoint-eligible</code>; <code>Unknown</code> keeps prior state</td>
-      </tr>
-      <tr>
-          <td><code>MembersReady</code></td>
-          <td>Every member passes readiness (<code>/health</code> or <code>/gpustack/v1/ready</code>)</td>
-          <td>Revokes <code>endpoint-eligible</code> immediately</td>
-      </tr>
-      <tr>
-          <td><code>GroupForward</code></td>
-          <td>Collective forward generation probe succeeds</td>
-          <td>Revokes <code>endpoint-eligible</code>; <code>Unknown</code> keeps prior state</td>
-      </tr>
-      <tr>
-          <td><code>NoPlannedRetirement</code></td>
-          <td>No active retirement holds the ordinal</td>
-          <td>Revokes <code>endpoint-eligible</code> during withdrawal and drain</td>
-      </tr>
-      <tr>
-          <td><code>NoPendingReplacement</code></td>
-          <td>No replacement is queued for the ordinal</td>
-          <td>Revokes <code>endpoint-eligible</code> immediately</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Criterion</th>
+					<th>Requirement</th>
+					<th>Failure effect</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>MemberSetComplete</code></td>
+					<td>Every declared member <code>Pod</code> exists</td>
+					<td>Revokes <code>endpoint-eligible</code>; <code>Unknown</code> keeps prior state</td>
+			</tr>
+			<tr>
+					<td><code>MembersReady</code></td>
+					<td>Every member passes readiness (<code>/health</code> or <code>/gpustack/v1/ready</code>)</td>
+					<td>Revokes <code>endpoint-eligible</code> immediately</td>
+			</tr>
+			<tr>
+					<td><code>GroupForward</code></td>
+					<td>Collective forward generation probe succeeds</td>
+					<td>Revokes <code>endpoint-eligible</code>; <code>Unknown</code> keeps prior state</td>
+			</tr>
+			<tr>
+					<td><code>NoPlannedRetirement</code></td>
+					<td>No active retirement holds the ordinal</td>
+					<td>Revokes <code>endpoint-eligible</code> during withdrawal and drain</td>
+			</tr>
+			<tr>
+					<td><code>NoPendingReplacement</code></td>
+					<td>No replacement is queued for the ordinal</td>
+					<td>Revokes <code>endpoint-eligible</code> immediately</td>
+			</tr>
+	</tbody>
 </table>
 <p><em><code>status.roles[].groups[]</code></em> publishes member UID <code>generation</code>, <code>state</code> (<code>Eligible</code>, <code>Withdrawn</code>,
 <code>AwaitingMembers</code>, <code>AwaitingReady</code>, <code>AwaitingProbe</code>, <code>AwaitingObservation</code>, <code>Unsupported</code>,
@@ -1539,80 +1539,80 @@ stays <code>Eligible</code> during a transient Router scrape loss while <em><cod
 <p>The operator queries every Router <code>Pod</code> directly under three timeouts (all Router replicas must
 agree for <code>Confirmed</code>):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Bound</th>
-          <th>Value</th>
-          <th>Scope</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Fetch deadline</td>
-          <td><code>2 s</code></td>
-          <td>Single Router <code>Pod</code> read</td>
-      </tr>
-      <tr>
-          <td>Collection budget</td>
-          <td><code>14 s</code></td>
-          <td>One collection across all Router <code>Pod</code>s</td>
-      </tr>
-      <tr>
-          <td>Freshness policy</td>
-          <td><code>15 s</code></td>
-          <td>Validity of a collected view before falling back to <code>Unknown</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Bound</th>
+					<th>Value</th>
+					<th>Scope</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Fetch deadline</td>
+					<td><code>2 s</code></td>
+					<td>Single Router <code>Pod</code> read</td>
+			</tr>
+			<tr>
+					<td>Collection budget</td>
+					<td><code>14 s</code></td>
+					<td>One collection across all Router <code>Pod</code>s</td>
+			</tr>
+			<tr>
+					<td>Freshness policy</td>
+					<td><code>15 s</code></td>
+					<td>Validity of a collected view before falling back to <code>Unknown</code></td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="per-worker-routing-metrics">Per-worker routing metrics</h3>
 <p>The <code>ModelDeployment</code> <code>/metrics</code> subresource aggregates role and router counters without per-replica
 labels. Scrape each router&rsquo;s own <code>/metrics</code> for per-worker attribution (<code>worker</code> carries the worker
 URL/<code>Pod</code> address):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Router</th>
-          <th>Series</th>
-          <th>Meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>vllm-router</code></td>
-          <td><code>vllm_router_processed_requests_total{worker}</code></td>
-          <td>Requests sent to each worker</td>
-      </tr>
-      <tr>
-          <td><code>vllm-router</code></td>
-          <td><code>vllm_router_policy_decisions_total{policy,worker}</code></td>
-          <td>Policy picks per worker</td>
-      </tr>
-      <tr>
-          <td><code>vllm-router</code></td>
-          <td><code>vllm_router_pd_prefill_requests_total{worker}</code>, <code>vllm_router_pd_decode_requests_total{worker}</code></td>
-          <td><em>PD</em> requests per <em>Prefill</em> and <em>Decode</em> worker</td>
-      </tr>
-      <tr>
-          <td><code>sglang-gateway</code></td>
-          <td><code>smg_worker_requests_active{worker}</code></td>
-          <td>Active in-flight requests per worker</td>
-      </tr>
-      <tr>
-          <td><code>sglang-gateway</code></td>
-          <td><code>smg_worker_selection_total{worker_type,policy}</code></td>
-          <td>Picks by policy and <code>regular</code>/<code>prefill</code>/<code>decode</code> type</td>
-      </tr>
-      <tr>
-          <td><code>llm-d-router</code></td>
-          <td><code>llm_d_epp_per_endpoint_queue_size{model_server_endpoint}</code></td>
-          <td>Queued requests per endpoint</td>
-      </tr>
-      <tr>
-          <td><code>llm-d-router</code></td>
-          <td><code>llm_d_epp_disagg_decision_total{decision_type}</code></td>
-          <td><code>prefill-decode</code> versus <code>decode-only</code> split counts</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Router</th>
+					<th>Series</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>vllm-router</code></td>
+					<td><code>vllm_router_processed_requests_total{worker}</code></td>
+					<td>Requests sent to each worker</td>
+			</tr>
+			<tr>
+					<td><code>vllm-router</code></td>
+					<td><code>vllm_router_policy_decisions_total{policy,worker}</code></td>
+					<td>Policy picks per worker</td>
+			</tr>
+			<tr>
+					<td><code>vllm-router</code></td>
+					<td><code>vllm_router_pd_prefill_requests_total{worker}</code>, <code>vllm_router_pd_decode_requests_total{worker}</code></td>
+					<td><em>PD</em> requests per <em>Prefill</em> and <em>Decode</em> worker</td>
+			</tr>
+			<tr>
+					<td><code>sglang-gateway</code></td>
+					<td><code>smg_worker_requests_active{worker}</code></td>
+					<td>Active in-flight requests per worker</td>
+			</tr>
+			<tr>
+					<td><code>sglang-gateway</code></td>
+					<td><code>smg_worker_selection_total{worker_type,policy}</code></td>
+					<td>Picks by policy and <code>regular</code>/<code>prefill</code>/<code>decode</code> type</td>
+			</tr>
+			<tr>
+					<td><code>llm-d-router</code></td>
+					<td><code>llm_d_epp_per_endpoint_queue_size{model_server_endpoint}</code></td>
+					<td>Queued requests per endpoint</td>
+			</tr>
+			<tr>
+					<td><code>llm-d-router</code></td>
+					<td><code>llm_d_epp_disagg_decision_total{decision_type}</code></td>
+					<td><code>prefill-decode</code> versus <code>decode-only</code> split counts</td>
+			</tr>
+	</tbody>
 </table>
 <p>Neither <code>sglang-gateway</code> nor <code>llm-d-router</code> exposes cumulative per-worker request totals; compare
 each engine <code>Pod</code>&rsquo;s <em>time to first token (TTFT)</em> histogram <code>_count</code> instead. On <code>sglang-gateway</code>
@@ -1623,45 +1623,45 @@ after scale-down, retired workers remain in <code>smg_worker_health</code> with 
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n &lt;namespace&gt; get modeldeployment &lt;name&gt; -o json <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;{phase: .status.phase, endpoint: .status.endpoint,
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq <span class="s1">&#39;{phase: .status.phase, endpoint: .status.endpoint,
 </span></span></span><span class="line"><span class="cl"><span class="s1">         conditions: [.status.conditions[] | select(.type | IN(&#34;RouterReady&#34;,&#34;RoleKindsReady&#34;,&#34;EndpointEligibility&#34;))],
 </span></span></span><span class="line"><span class="cl"><span class="s1">         roles: [.status.roles[] | {name, ready, desired, endpoints, groups}]}&#39;</span></span></span></code></pre></div>
 </div>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Owner &amp; action</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><em><code>status.endpoint</code></em> is empty</td>
-          <td><code>RouterReady=False</code> (<code>RenderFailed</code>, <code>NoReadyReplicas</code>) or <code>Unknown</code> (<code>NotDeployed</code>)</td>
-          <td>Fix refused <em><code>spec.router</code></em> flags on the <code>ModelDeployment</code> or inspect <code>&lt;deployment&gt;-router</code> <code>Pod</code> logs and events.</td>
-      </tr>
-      <tr>
-          <td><code>Pod</code> <code>Running</code> (<code>0/1</code> <code>Ready</code>)</td>
-          <td><code>groups[].state: AwaitingReady</code> or <code>RoleKindsReady=False</code></td>
-          <td>Wait for weight load (<code>startupTimeoutSeconds</code>, default <code>1800 s</code>), or check worker <code>Pod</code> logs, <code>/gpustack/v1/ready</code> and <em><code>roles[].pause</code></em>.</td>
-      </tr>
-      <tr>
-          <td><code>Pod</code> <code>1/1</code> <code>Ready</code> without <code>endpoint-eligible</code></td>
-          <td><code>groups[].state: AwaitingMembers</code>, <code>AwaitingProbe</code> or <code>Withdrawn</code></td>
-          <td>Read <code>groups[].reason</code> on the <code>ModelDeployment</code> for missing peer <code>Pod</code>s, failed forward probe, <em><code>status.retirement</code></em> or <em><code>roles[].pause: true</code></em>.</td>
-      </tr>
-      <tr>
-          <td><em><code>endpoints.eligible</code></em> is <code>null</code></td>
-          <td><code>EndpointEligibility=Unknown</code> (<code>NotObserved</code>)</td>
-          <td>Wait for qualification pass or inspect operator worker logs if status stalls.</td>
-      </tr>
-      <tr>
-          <td>Qualified group gets no traffic</td>
-          <td><code>AwaitingObservation</code> or <code>serving.state: Unknown</code> / <code>NotConverged</code></td>
-          <td>Inspect <code>&lt;deployment&gt;-router</code> <code>Pod</code>s and <code>:9091/observer/endpoints</code> (<code>:9090</code> on <code>llm-d-router</code>) so all Router replicas report fresh views within <code>15 s</code>.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Owner &amp; action</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><em><code>status.endpoint</code></em> is empty</td>
+					<td><code>RouterReady=False</code> (<code>RenderFailed</code>, <code>NoReadyReplicas</code>) or <code>Unknown</code> (<code>NotDeployed</code>)</td>
+					<td>Fix refused <em><code>spec.router</code></em> flags on the <code>ModelDeployment</code> or inspect <code>&lt;deployment&gt;-router</code> <code>Pod</code> logs and events.</td>
+			</tr>
+			<tr>
+					<td><code>Pod</code> <code>Running</code> (<code>0/1</code> <code>Ready</code>)</td>
+					<td><code>groups[].state: AwaitingReady</code> or <code>RoleKindsReady=False</code></td>
+					<td>Wait for weight load (<code>startupTimeoutSeconds</code>, default <code>1800 s</code>), or check worker <code>Pod</code> logs, <code>/gpustack/v1/ready</code> and <em><code>roles[].pause</code></em>.</td>
+			</tr>
+			<tr>
+					<td><code>Pod</code> <code>1/1</code> <code>Ready</code> without <code>endpoint-eligible</code></td>
+					<td><code>groups[].state: AwaitingMembers</code>, <code>AwaitingProbe</code> or <code>Withdrawn</code></td>
+					<td>Read <code>groups[].reason</code> on the <code>ModelDeployment</code> for missing peer <code>Pod</code>s, failed forward probe, <em><code>status.retirement</code></em> or <em><code>roles[].pause: true</code></em>.</td>
+			</tr>
+			<tr>
+					<td><em><code>endpoints.eligible</code></em> is <code>null</code></td>
+					<td><code>EndpointEligibility=Unknown</code> (<code>NotObserved</code>)</td>
+					<td>Wait for qualification pass or inspect operator worker logs if status stalls.</td>
+			</tr>
+			<tr>
+					<td>Qualified group gets no traffic</td>
+					<td><code>AwaitingObservation</code> or <code>serving.state: Unknown</code> / <code>NotConverged</code></td>
+					<td>Inspect <code>&lt;deployment&gt;-router</code> <code>Pod</code>s and <code>:9091/observer/endpoints</code> (<code>:9090</code> on <code>llm-d-router</code>) so all Router replicas report fresh views within <code>15 s</code>.</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

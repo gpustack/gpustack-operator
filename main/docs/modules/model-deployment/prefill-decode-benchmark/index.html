@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Prefill and Decode Benchmark · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1257,58 +1257,58 @@ concurrency 16, it reached 322.852 tok/s against 98.154 tok/s for <em>PD</em>. I
 serving also had lower <em>TTFT</em> and higher throughput on both streams.</p>
 <h2 id="environment">Environment</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Item</th>
-          <th>Captured value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Cluster</td>
-          <td>Kubernetes v1.35.7; one CPU node and one GPU node</td>
-      </tr>
-      <tr>
-          <td>Hardware</td>
-          <td>8 × NVIDIA H100 80 GB HBM3 SXM5 on one node; physical NVLink bandwidth 900 GB/s</td>
-      </tr>
-      <tr>
-          <td>GPUStack Operator</td>
-          <td>v0.9.1</td>
-      </tr>
-      <tr>
-          <td>Runner</td>
-          <td><code>gpustack/runner:cuda13.0-vllm0.30.0</code><sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup></td>
-      </tr>
-      <tr>
-          <td>Model</td>
-          <td>Qwen/Qwen3-32B, BF16 (16-bit brain floating-point) weights</td>
-      </tr>
-      <tr>
-          <td>Model delivery</td>
-          <td><code>ModelArtifact</code> <code>qwen3-32b</code>, mounted at <code>/models</code> through node delivery</td>
-      </tr>
-      <tr>
-          <td>Captured <code>InstanceType</code></td>
-          <td><code>bench-gpu</code>, selecting the H100 accelerator group</td>
-      </tr>
-      <tr>
-          <td>Aggregated</td>
-          <td>3 <em>Server</em> replicas × 2 GPUs, <em>TP</em> = 2 per replica</td>
-      </tr>
-      <tr>
-          <td><em>PD</em></td>
-          <td>1 <em>Prefill</em> replica + 2 <em>Decode</em> replicas, 2 GPUs and <em>TP</em> = 2 per replica</td>
-      </tr>
-      <tr>
-          <td>KV transport</td>
-          <td><code>MooncakeConnector</code> over TCP; no <em>RDMA</em> resources allocated</td>
-      </tr>
-      <tr>
-          <td>Engine limits</td>
-          <td><code>--max-model-len 16384</code>, <code>--max-num-seqs 64</code>, <code>--gpu-memory-utilization 0.90</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Captured value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Cluster</td>
+					<td>Kubernetes v1.35.7; one CPU node and one GPU node</td>
+			</tr>
+			<tr>
+					<td>Hardware</td>
+					<td>8 × NVIDIA H100 80 GB HBM3 SXM5 on one node; physical NVLink bandwidth 900 GB/s</td>
+			</tr>
+			<tr>
+					<td>GPUStack Operator</td>
+					<td>v0.9.1</td>
+			</tr>
+			<tr>
+					<td>Runner</td>
+					<td><code>gpustack/runner:cuda13.0-vllm0.30.0</code><sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup></td>
+			</tr>
+			<tr>
+					<td>Model</td>
+					<td>Qwen/Qwen3-32B, BF16 (16-bit brain floating-point) weights</td>
+			</tr>
+			<tr>
+					<td>Model delivery</td>
+					<td><code>ModelArtifact</code> <code>qwen3-32b</code>, mounted at <code>/models</code> through node delivery</td>
+			</tr>
+			<tr>
+					<td>Captured <code>InstanceType</code></td>
+					<td><code>bench-gpu</code>, selecting the H100 accelerator group</td>
+			</tr>
+			<tr>
+					<td>Aggregated</td>
+					<td>3 <em>Server</em> replicas × 2 GPUs, <em>TP</em> = 2 per replica</td>
+			</tr>
+			<tr>
+					<td><em>PD</em></td>
+					<td>1 <em>Prefill</em> replica + 2 <em>Decode</em> replicas, 2 GPUs and <em>TP</em> = 2 per replica</td>
+			</tr>
+			<tr>
+					<td>KV transport</td>
+					<td><code>MooncakeConnector</code> over TCP; no <em>RDMA</em> resources allocated</td>
+			</tr>
+			<tr>
+					<td>Engine limits</td>
+					<td><code>--max-model-len 16384</code>, <code>--max-num-seqs 64</code>, <code>--gpu-memory-utilization 0.90</code></td>
+			</tr>
+	</tbody>
 </table>
 <p>The configurations ran one after the other on the same node. Two GPUs were outside each serving
 allocation.</p>
@@ -1335,391 +1335,391 @@ per-request generation time per token. <em>ITL</em> measures gaps between stream
 the lower latency or higher throughput within each matched pair.</p>
 <h3 id="512-input-256-output">512 input, 256 output</h3>
 <table>
-  <thead>
-      <tr>
-          <th style="text-align: right">Concurrency</th>
-          <th>Configuration</th>
-          <th style="text-align: right">Requests</th>
-          <th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
-          <th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">Output (tok/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td style="text-align: right">1</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right"><strong>49.030</strong></td>
-          <td style="text-align: right"><strong>53.318</strong></td>
-          <td style="text-align: right"><strong>13.532</strong></td>
-          <td style="text-align: right"><strong>16.886</strong></td>
-          <td style="text-align: right"><strong>72.937</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">1</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right">129.316</td>
-          <td style="text-align: right">138.124</td>
-          <td style="text-align: right">13.556</td>
-          <td style="text-align: right">17.068</td>
-          <td style="text-align: right">70.990</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">4</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right"><strong>55.821</strong></td>
-          <td style="text-align: right"><strong>143.648</strong></td>
-          <td style="text-align: right">13.598</td>
-          <td style="text-align: right">17.309</td>
-          <td style="text-align: right"><strong>289.869</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">4</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right">163.561</td>
-          <td style="text-align: right">343.092</td>
-          <td style="text-align: right"><strong>13.548</strong></td>
-          <td style="text-align: right"><strong>17.052</strong></td>
-          <td style="text-align: right">279.466</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">8</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right">210.641</td>
-          <td style="text-align: right"><strong>229.082</strong></td>
-          <td style="text-align: right">13.895</td>
-          <td style="text-align: right"><strong>17.439</strong></td>
-          <td style="text-align: right"><strong>545.187</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">8</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right"><strong>192.224</strong></td>
-          <td style="text-align: right">598.643</td>
-          <td style="text-align: right"><strong>13.629</strong></td>
-          <td style="text-align: right">17.444</td>
-          <td style="text-align: right">535.895</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">16</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">64/64</td>
-          <td style="text-align: right"><strong>213.619</strong></td>
-          <td style="text-align: right"><strong>315.869</strong></td>
-          <td style="text-align: right">14.182</td>
-          <td style="text-align: right"><strong>17.318</strong></td>
-          <td style="text-align: right"><strong>1,040.697</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">16</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">64/64</td>
-          <td style="text-align: right">261.322</td>
-          <td style="text-align: right">1,602.287</td>
-          <td style="text-align: right"><strong>13.877</strong></td>
-          <td style="text-align: right">17.785</td>
-          <td style="text-align: right">973.298</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th style="text-align: right">Concurrency</th>
+					<th>Configuration</th>
+					<th style="text-align: right">Requests</th>
+					<th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
+					<th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">Output (tok/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td style="text-align: right">1</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right"><strong>49.030</strong></td>
+					<td style="text-align: right"><strong>53.318</strong></td>
+					<td style="text-align: right"><strong>13.532</strong></td>
+					<td style="text-align: right"><strong>16.886</strong></td>
+					<td style="text-align: right"><strong>72.937</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">1</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right">129.316</td>
+					<td style="text-align: right">138.124</td>
+					<td style="text-align: right">13.556</td>
+					<td style="text-align: right">17.068</td>
+					<td style="text-align: right">70.990</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">4</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right"><strong>55.821</strong></td>
+					<td style="text-align: right"><strong>143.648</strong></td>
+					<td style="text-align: right">13.598</td>
+					<td style="text-align: right">17.309</td>
+					<td style="text-align: right"><strong>289.869</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">4</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right">163.561</td>
+					<td style="text-align: right">343.092</td>
+					<td style="text-align: right"><strong>13.548</strong></td>
+					<td style="text-align: right"><strong>17.052</strong></td>
+					<td style="text-align: right">279.466</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">8</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right">210.641</td>
+					<td style="text-align: right"><strong>229.082</strong></td>
+					<td style="text-align: right">13.895</td>
+					<td style="text-align: right"><strong>17.439</strong></td>
+					<td style="text-align: right"><strong>545.187</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">8</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right"><strong>192.224</strong></td>
+					<td style="text-align: right">598.643</td>
+					<td style="text-align: right"><strong>13.629</strong></td>
+					<td style="text-align: right">17.444</td>
+					<td style="text-align: right">535.895</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">16</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">64/64</td>
+					<td style="text-align: right"><strong>213.619</strong></td>
+					<td style="text-align: right"><strong>315.869</strong></td>
+					<td style="text-align: right">14.182</td>
+					<td style="text-align: right"><strong>17.318</strong></td>
+					<td style="text-align: right"><strong>1,040.697</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">16</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">64/64</td>
+					<td style="text-align: right">261.322</td>
+					<td style="text-align: right">1,602.287</td>
+					<td style="text-align: right"><strong>13.877</strong></td>
+					<td style="text-align: right">17.785</td>
+					<td style="text-align: right">973.298</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="4096-input-128-output">4096 input, 128 output</h3>
 <table>
-  <thead>
-      <tr>
-          <th style="text-align: right">Concurrency</th>
-          <th>Configuration</th>
-          <th style="text-align: right">Requests</th>
-          <th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
-          <th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">Output (tok/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td style="text-align: right">1</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right"><strong>264.263</strong></td>
-          <td style="text-align: right"><strong>272.194</strong></td>
-          <td style="text-align: right"><strong>13.748</strong></td>
-          <td style="text-align: right"><strong>16.852</strong></td>
-          <td style="text-align: right"><strong>63.580</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">1</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right">661.241</td>
-          <td style="text-align: right">692.402</td>
-          <td style="text-align: right">13.757</td>
-          <td style="text-align: right">17.225</td>
-          <td style="text-align: right">52.958</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">4</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right"><strong>477.919</strong></td>
-          <td style="text-align: right"><strong>734.463</strong></td>
-          <td style="text-align: right">14.101</td>
-          <td style="text-align: right"><strong>17.299</strong></td>
-          <td style="text-align: right"><strong>207.503</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">4</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right">738.476</td>
-          <td style="text-align: right">1,884.268</td>
-          <td style="text-align: right"><strong>13.835</strong></td>
-          <td style="text-align: right">17.561</td>
-          <td style="text-align: right">187.547</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">8</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right"><strong>717.456</strong></td>
-          <td style="text-align: right"><strong>1,250.297</strong></td>
-          <td style="text-align: right">14.563</td>
-          <td style="text-align: right">19.308</td>
-          <td style="text-align: right"><strong>334.893</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">8</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right">1,356.958</td>
-          <td style="text-align: right">4,459.771</td>
-          <td style="text-align: right"><strong>13.923</strong></td>
-          <td style="text-align: right"><strong>17.977</strong></td>
-          <td style="text-align: right">264.025</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">16</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">64/64</td>
-          <td style="text-align: right"><strong>1,231.691</strong></td>
-          <td style="text-align: right"><strong>2,119.357</strong></td>
-          <td style="text-align: right">19.677</td>
-          <td style="text-align: right">458.058</td>
-          <td style="text-align: right"><strong>490.425</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">16</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">64/64</td>
-          <td style="text-align: right">8,065.377</td>
-          <td style="text-align: right">14,363.057</td>
-          <td style="text-align: right"><strong>13.851</strong></td>
-          <td style="text-align: right"><strong>17.895</strong></td>
-          <td style="text-align: right">194.074</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th style="text-align: right">Concurrency</th>
+					<th>Configuration</th>
+					<th style="text-align: right">Requests</th>
+					<th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
+					<th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">Output (tok/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td style="text-align: right">1</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right"><strong>264.263</strong></td>
+					<td style="text-align: right"><strong>272.194</strong></td>
+					<td style="text-align: right"><strong>13.748</strong></td>
+					<td style="text-align: right"><strong>16.852</strong></td>
+					<td style="text-align: right"><strong>63.580</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">1</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right">661.241</td>
+					<td style="text-align: right">692.402</td>
+					<td style="text-align: right">13.757</td>
+					<td style="text-align: right">17.225</td>
+					<td style="text-align: right">52.958</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">4</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right"><strong>477.919</strong></td>
+					<td style="text-align: right"><strong>734.463</strong></td>
+					<td style="text-align: right">14.101</td>
+					<td style="text-align: right"><strong>17.299</strong></td>
+					<td style="text-align: right"><strong>207.503</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">4</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right">738.476</td>
+					<td style="text-align: right">1,884.268</td>
+					<td style="text-align: right"><strong>13.835</strong></td>
+					<td style="text-align: right">17.561</td>
+					<td style="text-align: right">187.547</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">8</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right"><strong>717.456</strong></td>
+					<td style="text-align: right"><strong>1,250.297</strong></td>
+					<td style="text-align: right">14.563</td>
+					<td style="text-align: right">19.308</td>
+					<td style="text-align: right"><strong>334.893</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">8</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right">1,356.958</td>
+					<td style="text-align: right">4,459.771</td>
+					<td style="text-align: right"><strong>13.923</strong></td>
+					<td style="text-align: right"><strong>17.977</strong></td>
+					<td style="text-align: right">264.025</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">16</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">64/64</td>
+					<td style="text-align: right"><strong>1,231.691</strong></td>
+					<td style="text-align: right"><strong>2,119.357</strong></td>
+					<td style="text-align: right">19.677</td>
+					<td style="text-align: right">458.058</td>
+					<td style="text-align: right"><strong>490.425</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">16</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">64/64</td>
+					<td style="text-align: right">8,065.377</td>
+					<td style="text-align: right">14,363.057</td>
+					<td style="text-align: right"><strong>13.851</strong></td>
+					<td style="text-align: right"><strong>17.895</strong></td>
+					<td style="text-align: right">194.074</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="256-input-1024-output">256 input, 1024 output</h3>
 <table>
-  <thead>
-      <tr>
-          <th style="text-align: right">Concurrency</th>
-          <th>Configuration</th>
-          <th style="text-align: right">Requests</th>
-          <th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
-          <th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">Output (tok/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td style="text-align: right">1</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right"><strong>50.158</strong></td>
-          <td style="text-align: right"><strong>56.069</strong></td>
-          <td style="text-align: right"><strong>13.541</strong></td>
-          <td style="text-align: right"><strong>16.831</strong></td>
-          <td style="text-align: right"><strong>73.546</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">1</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right">109.703</td>
-          <td style="text-align: right">120.828</td>
-          <td style="text-align: right">13.558</td>
-          <td style="text-align: right">17.027</td>
-          <td style="text-align: right">72.810</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">4</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right"><strong>49.191</strong></td>
-          <td style="text-align: right"><strong>77.951</strong></td>
-          <td style="text-align: right"><strong>13.547</strong></td>
-          <td style="text-align: right"><strong>16.751</strong></td>
-          <td style="text-align: right"><strong>293.725</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">4</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right">141.441</td>
-          <td style="text-align: right">232.738</td>
-          <td style="text-align: right">13.591</td>
-          <td style="text-align: right">16.998</td>
-          <td style="text-align: right">291.832</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">8</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right"><strong>61.782</strong></td>
-          <td style="text-align: right"><strong>115.500</strong></td>
-          <td style="text-align: right"><strong>13.669</strong></td>
-          <td style="text-align: right"><strong>16.798</strong></td>
-          <td style="text-align: right"><strong>580.148</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">8</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right">187.257</td>
-          <td style="text-align: right">418.748</td>
-          <td style="text-align: right">13.842</td>
-          <td style="text-align: right">17.265</td>
-          <td style="text-align: right">562.653</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">16</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">64/64</td>
-          <td style="text-align: right"><strong>113.217</strong></td>
-          <td style="text-align: right"><strong>177.494</strong></td>
-          <td style="text-align: right"><strong>14.247</strong></td>
-          <td style="text-align: right"><strong>17.597</strong></td>
-          <td style="text-align: right">753.604</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">16</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">64/64</td>
-          <td style="text-align: right">198.038</td>
-          <td style="text-align: right">853.881</td>
-          <td style="text-align: right">14.406</td>
-          <td style="text-align: right">18.334</td>
-          <td style="text-align: right"><strong>1,078.624</strong></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th style="text-align: right">Concurrency</th>
+					<th>Configuration</th>
+					<th style="text-align: right">Requests</th>
+					<th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
+					<th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">Output (tok/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td style="text-align: right">1</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right"><strong>50.158</strong></td>
+					<td style="text-align: right"><strong>56.069</strong></td>
+					<td style="text-align: right"><strong>13.541</strong></td>
+					<td style="text-align: right"><strong>16.831</strong></td>
+					<td style="text-align: right"><strong>73.546</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">1</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right">109.703</td>
+					<td style="text-align: right">120.828</td>
+					<td style="text-align: right">13.558</td>
+					<td style="text-align: right">17.027</td>
+					<td style="text-align: right">72.810</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">4</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right"><strong>49.191</strong></td>
+					<td style="text-align: right"><strong>77.951</strong></td>
+					<td style="text-align: right"><strong>13.547</strong></td>
+					<td style="text-align: right"><strong>16.751</strong></td>
+					<td style="text-align: right"><strong>293.725</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">4</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right">141.441</td>
+					<td style="text-align: right">232.738</td>
+					<td style="text-align: right">13.591</td>
+					<td style="text-align: right">16.998</td>
+					<td style="text-align: right">291.832</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">8</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right"><strong>61.782</strong></td>
+					<td style="text-align: right"><strong>115.500</strong></td>
+					<td style="text-align: right"><strong>13.669</strong></td>
+					<td style="text-align: right"><strong>16.798</strong></td>
+					<td style="text-align: right"><strong>580.148</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">8</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right">187.257</td>
+					<td style="text-align: right">418.748</td>
+					<td style="text-align: right">13.842</td>
+					<td style="text-align: right">17.265</td>
+					<td style="text-align: right">562.653</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">16</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">64/64</td>
+					<td style="text-align: right"><strong>113.217</strong></td>
+					<td style="text-align: right"><strong>177.494</strong></td>
+					<td style="text-align: right"><strong>14.247</strong></td>
+					<td style="text-align: right"><strong>17.597</strong></td>
+					<td style="text-align: right">753.604</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">16</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">64/64</td>
+					<td style="text-align: right">198.038</td>
+					<td style="text-align: right">853.881</td>
+					<td style="text-align: right">14.406</td>
+					<td style="text-align: right">18.334</td>
+					<td style="text-align: right"><strong>1,078.624</strong></td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="8192-input-128-output">8192 input, 128 output</h3>
 <table>
-  <thead>
-      <tr>
-          <th style="text-align: right">Concurrency</th>
-          <th>Configuration</th>
-          <th style="text-align: right">Requests</th>
-          <th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
-          <th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">Output (tok/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td style="text-align: right">1</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right"><strong>536.405</strong></td>
-          <td style="text-align: right"><strong>554.418</strong></td>
-          <td style="text-align: right"><strong>13.926</strong></td>
-          <td style="text-align: right"><strong>17.280</strong></td>
-          <td style="text-align: right"><strong>55.397</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">1</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right">1,314.379</td>
-          <td style="text-align: right">1,349.357</td>
-          <td style="text-align: right">13.938</td>
-          <td style="text-align: right">17.640</td>
-          <td style="text-align: right">41.425</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">4</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right"><strong>1,043.456</strong></td>
-          <td style="text-align: right"><strong>2,042.767</strong></td>
-          <td style="text-align: right">14.957</td>
-          <td style="text-align: right">18.591</td>
-          <td style="text-align: right"><strong>148.309</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">4</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right">1,584.477</td>
-          <td style="text-align: right">3,800.788</td>
-          <td style="text-align: right"><strong>14.084</strong></td>
-          <td style="text-align: right"><strong>17.849</strong></td>
-          <td style="text-align: right">137.823</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">8</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right"><strong>1,578.925</strong></td>
-          <td style="text-align: right"><strong>3,543.434</strong></td>
-          <td style="text-align: right">18.152</td>
-          <td style="text-align: right">502.555</td>
-          <td style="text-align: right"><strong>214.569</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">8</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">32/32</td>
-          <td style="text-align: right">4,288.098</td>
-          <td style="text-align: right">11,417.297</td>
-          <td style="text-align: right"><strong>14.098</strong></td>
-          <td style="text-align: right"><strong>18.766</strong></td>
-          <td style="text-align: right">137.024</td>
-      </tr>
-      <tr>
-          <td style="text-align: right">16</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">64/64</td>
-          <td style="text-align: right"><strong>2,072.452</strong></td>
-          <td style="text-align: right"><strong>4,966.323</strong></td>
-          <td style="text-align: right">24.241</td>
-          <td style="text-align: right">509.188</td>
-          <td style="text-align: right"><strong>322.852</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">16</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">64/64</td>
-          <td style="text-align: right">17,514.203</td>
-          <td style="text-align: right">26,391.897</td>
-          <td style="text-align: right"><strong>13.966</strong></td>
-          <td style="text-align: right"><strong>18.315</strong></td>
-          <td style="text-align: right">98.154</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th style="text-align: right">Concurrency</th>
+					<th>Configuration</th>
+					<th style="text-align: right">Requests</th>
+					<th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
+					<th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">Output (tok/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td style="text-align: right">1</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right"><strong>536.405</strong></td>
+					<td style="text-align: right"><strong>554.418</strong></td>
+					<td style="text-align: right"><strong>13.926</strong></td>
+					<td style="text-align: right"><strong>17.280</strong></td>
+					<td style="text-align: right"><strong>55.397</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">1</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right">1,314.379</td>
+					<td style="text-align: right">1,349.357</td>
+					<td style="text-align: right">13.938</td>
+					<td style="text-align: right">17.640</td>
+					<td style="text-align: right">41.425</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">4</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right"><strong>1,043.456</strong></td>
+					<td style="text-align: right"><strong>2,042.767</strong></td>
+					<td style="text-align: right">14.957</td>
+					<td style="text-align: right">18.591</td>
+					<td style="text-align: right"><strong>148.309</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">4</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right">1,584.477</td>
+					<td style="text-align: right">3,800.788</td>
+					<td style="text-align: right"><strong>14.084</strong></td>
+					<td style="text-align: right"><strong>17.849</strong></td>
+					<td style="text-align: right">137.823</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">8</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right"><strong>1,578.925</strong></td>
+					<td style="text-align: right"><strong>3,543.434</strong></td>
+					<td style="text-align: right">18.152</td>
+					<td style="text-align: right">502.555</td>
+					<td style="text-align: right"><strong>214.569</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">8</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">32/32</td>
+					<td style="text-align: right">4,288.098</td>
+					<td style="text-align: right">11,417.297</td>
+					<td style="text-align: right"><strong>14.098</strong></td>
+					<td style="text-align: right"><strong>18.766</strong></td>
+					<td style="text-align: right">137.024</td>
+			</tr>
+			<tr>
+					<td style="text-align: right">16</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">64/64</td>
+					<td style="text-align: right"><strong>2,072.452</strong></td>
+					<td style="text-align: right"><strong>4,966.323</strong></td>
+					<td style="text-align: right">24.241</td>
+					<td style="text-align: right">509.188</td>
+					<td style="text-align: right"><strong>322.852</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">16</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">64/64</td>
+					<td style="text-align: right">17,514.203</td>
+					<td style="text-align: right">26,391.897</td>
+					<td style="text-align: right"><strong>13.966</strong></td>
+					<td style="text-align: right"><strong>18.315</strong></td>
+					<td style="text-align: right">98.154</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="suite-2-mixed-load">Suite 2: Mixed load</h2>
 <p>The steady stream sent 64 requests at concurrency 4, each with 512 input and 256 output tokens.
@@ -1732,60 +1732,60 @@ interval. It is not that stream&rsquo;s saturated throughput.</p>
 5,792.275 tokens for aggregated serving and 5,893.1 for <em>PD</em>, so the two runs used different prompt
 sets.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Stream</th>
-          <th>Configuration</th>
-          <th style="text-align: right">Requests</th>
-          <th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
-          <th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">Output (tok/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Steady</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">64/64</td>
-          <td style="text-align: right"><strong>65.755</strong></td>
-          <td style="text-align: right"><strong>357.217</strong></td>
-          <td style="text-align: right">13.638</td>
-          <td style="text-align: right"><strong>16.925</strong></td>
-          <td style="text-align: right"><strong>271.112</strong></td>
-      </tr>
-      <tr>
-          <td>Steady</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">64/64</td>
-          <td style="text-align: right">217.862</td>
-          <td style="text-align: right">1,542.731</td>
-          <td style="text-align: right"><strong>13.635</strong></td>
-          <td style="text-align: right">17.518</td>
-          <td style="text-align: right">246.150</td>
-      </tr>
-      <tr>
-          <td>Burst</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">40/40</td>
-          <td style="text-align: right"><strong>507.856</strong></td>
-          <td style="text-align: right"><strong>860.598</strong></td>
-          <td style="text-align: right">14.208</td>
-          <td style="text-align: right">18.078</td>
-          <td style="text-align: right"><strong>42.361</strong></td>
-      </tr>
-      <tr>
-          <td>Burst</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">40/40</td>
-          <td style="text-align: right">1,264.500</td>
-          <td style="text-align: right">2,555.799</td>
-          <td style="text-align: right"><strong>13.834</strong></td>
-          <td style="text-align: right"><strong>17.826</strong></td>
-          <td style="text-align: right">38.461</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Stream</th>
+					<th>Configuration</th>
+					<th style="text-align: right">Requests</th>
+					<th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
+					<th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">Output (tok/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Steady</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">64/64</td>
+					<td style="text-align: right"><strong>65.755</strong></td>
+					<td style="text-align: right"><strong>357.217</strong></td>
+					<td style="text-align: right">13.638</td>
+					<td style="text-align: right"><strong>16.925</strong></td>
+					<td style="text-align: right"><strong>271.112</strong></td>
+			</tr>
+			<tr>
+					<td>Steady</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">64/64</td>
+					<td style="text-align: right">217.862</td>
+					<td style="text-align: right">1,542.731</td>
+					<td style="text-align: right"><strong>13.635</strong></td>
+					<td style="text-align: right">17.518</td>
+					<td style="text-align: right">246.150</td>
+			</tr>
+			<tr>
+					<td>Burst</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">40/40</td>
+					<td style="text-align: right"><strong>507.856</strong></td>
+					<td style="text-align: right"><strong>860.598</strong></td>
+					<td style="text-align: right">14.208</td>
+					<td style="text-align: right">18.078</td>
+					<td style="text-align: right"><strong>42.361</strong></td>
+			</tr>
+			<tr>
+					<td>Burst</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">40/40</td>
+					<td style="text-align: right">1,264.500</td>
+					<td style="text-align: right">2,555.799</td>
+					<td style="text-align: right"><strong>13.834</strong></td>
+					<td style="text-align: right"><strong>17.826</strong></td>
+					<td style="text-align: right">38.461</td>
+			</tr>
+	</tbody>
 </table>
 <p>The steady stream&rsquo;s <em>ITL</em> p99 was <strong>16.925 ms</strong> for aggregated serving and 17.518 ms for <em>PD</em>, so
 this recording shows <strong>no steady-stream p99 reduction</strong>. The maximum steady-stream token gap still
@@ -1802,45 +1802,45 @@ token gaps.</p>
 captures agree. The counts include warm-up, calibration and auxiliary requests, so they are not
 measured-suite totals or a one-to-one request trace.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Configuration</th>
-          <th>Role and captured suffix</th>
-          <th style="text-align: right">Completion requests</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Aggregated</td>
-          <td><em>Server</em> <code>8kjjc</code></td>
-          <td style="text-align: right">405</td>
-      </tr>
-      <tr>
-          <td>Aggregated</td>
-          <td><em>Server</em> <code>qrh6w</code></td>
-          <td style="text-align: right">387</td>
-      </tr>
-      <tr>
-          <td>Aggregated</td>
-          <td><em>Server</em> <code>vq2vc</code></td>
-          <td style="text-align: right">428</td>
-      </tr>
-      <tr>
-          <td><em>PD</em></td>
-          <td><em>Prefill</em> <code>xmjvs</code></td>
-          <td style="text-align: right">1,173</td>
-      </tr>
-      <tr>
-          <td><em>PD</em></td>
-          <td><em>Decode</em> <code>2xglg</code></td>
-          <td style="text-align: right">380</td>
-      </tr>
-      <tr>
-          <td><em>PD</em></td>
-          <td><em>Decode</em> <code>r2zt4</code></td>
-          <td style="text-align: right">445</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Configuration</th>
+					<th>Role and captured suffix</th>
+					<th style="text-align: right">Completion requests</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Aggregated</td>
+					<td><em>Server</em> <code>8kjjc</code></td>
+					<td style="text-align: right">405</td>
+			</tr>
+			<tr>
+					<td>Aggregated</td>
+					<td><em>Server</em> <code>qrh6w</code></td>
+					<td style="text-align: right">387</td>
+			</tr>
+			<tr>
+					<td>Aggregated</td>
+					<td><em>Server</em> <code>vq2vc</code></td>
+					<td style="text-align: right">428</td>
+			</tr>
+			<tr>
+					<td><em>PD</em></td>
+					<td><em>Prefill</em> <code>xmjvs</code></td>
+					<td style="text-align: right">1,173</td>
+			</tr>
+			<tr>
+					<td><em>PD</em></td>
+					<td><em>Decode</em> <code>2xglg</code></td>
+					<td style="text-align: right">380</td>
+			</tr>
+			<tr>
+					<td><em>PD</em></td>
+					<td><em>Decode</em> <code>r2zt4</code></td>
+					<td style="text-align: right">445</td>
+			</tr>
+	</tbody>
 </table>
 <p>The <em>PD</em> Router capture contains 844 access lines. The aggregated count capture also contains a
 collection-script diagnostic and supplies no reliable Router count. Engine counts establish role
@@ -1876,7 +1876,7 @@ fixed-shape cells completed <strong>640/640 requests with zero errors</strong>.<
 </span></span><span class="line"><span class="cl">       resources:
 </span></span><span class="line"><span class="cl">         accelerator: &#34;2&#34;
 </span></span><span class="line"><span class="cl"><span class="gi">+        interface: &#34;2&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>     - name: decode
+</span></span></span><span class="line"><span class="cl">     - name: decode
 </span></span><span class="line"><span class="cl">       kind: Decode
 </span></span><span class="line"><span class="cl">       resources:
 </span></span><span class="line"><span class="cl">         accelerator: &#34;2&#34;
@@ -1901,180 +1901,180 @@ over TCP <em>PD</em> for long-prompt isolation, though aggregated serving still 
 <em>Prefill</em> replica and separate runs with larger KV blocks do not isolate transport alone.</p>
 <p>Bold values mark the lower latency or higher throughput within each matched TCP/RDMA pair.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Shape</th>
-          <th style="text-align: right">Concurrency</th>
-          <th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right">TCP <em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">RDMA <em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">TCP output (tok/s)</th>
-          <th style="text-align: right">RDMA output (tok/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>512/256</code></td>
-          <td style="text-align: right">1</td>
-          <td style="text-align: right">129.316</td>
-          <td style="text-align: right"><strong>80.237</strong></td>
-          <td style="text-align: right">17.068</td>
-          <td style="text-align: right"><strong>16.819</strong></td>
-          <td style="text-align: right">70.990</td>
-          <td style="text-align: right"><strong>72.934</strong></td>
-      </tr>
-      <tr>
-          <td><code>512/256</code></td>
-          <td style="text-align: right">4</td>
-          <td style="text-align: right">163.561</td>
-          <td style="text-align: right"><strong>123.806</strong></td>
-          <td style="text-align: right"><strong>17.052</strong></td>
-          <td style="text-align: right">18.038</td>
-          <td style="text-align: right">279.466</td>
-          <td style="text-align: right"><strong>284.946</strong></td>
-      </tr>
-      <tr>
-          <td><code>512/256</code></td>
-          <td style="text-align: right">8</td>
-          <td style="text-align: right"><strong>192.224</strong></td>
-          <td style="text-align: right">215.574</td>
-          <td style="text-align: right">17.444</td>
-          <td style="text-align: right"><strong>17.392</strong></td>
-          <td style="text-align: right">535.895</td>
-          <td style="text-align: right"><strong>538.096</strong></td>
-      </tr>
-      <tr>
-          <td><code>512/256</code></td>
-          <td style="text-align: right">16</td>
-          <td style="text-align: right"><strong>261.322</strong></td>
-          <td style="text-align: right">372.135</td>
-          <td style="text-align: right">17.785</td>
-          <td style="text-align: right"><strong>17.363</strong></td>
-          <td style="text-align: right">973.298</td>
-          <td style="text-align: right"><strong>995.358</strong></td>
-      </tr>
-      <tr>
-          <td><code>4096/128</code></td>
-          <td style="text-align: right">1</td>
-          <td style="text-align: right">661.241</td>
-          <td style="text-align: right"><strong>326.837</strong></td>
-          <td style="text-align: right">17.225</td>
-          <td style="text-align: right"><strong>16.961</strong></td>
-          <td style="text-align: right">52.958</td>
-          <td style="text-align: right"><strong>62.165</strong></td>
-      </tr>
-      <tr>
-          <td><code>4096/128</code></td>
-          <td style="text-align: right">4</td>
-          <td style="text-align: right">738.476</td>
-          <td style="text-align: right"><strong>374.910</strong></td>
-          <td style="text-align: right">17.561</td>
-          <td style="text-align: right"><strong>17.525</strong></td>
-          <td style="text-align: right">187.547</td>
-          <td style="text-align: right"><strong>223.823</strong></td>
-      </tr>
-      <tr>
-          <td><code>4096/128</code></td>
-          <td style="text-align: right">8</td>
-          <td style="text-align: right">1,356.958</td>
-          <td style="text-align: right"><strong>626.566</strong></td>
-          <td style="text-align: right">17.977</td>
-          <td style="text-align: right"><strong>17.780</strong></td>
-          <td style="text-align: right">264.025</td>
-          <td style="text-align: right"><strong>343.344</strong></td>
-      </tr>
-      <tr>
-          <td><code>4096/128</code></td>
-          <td style="text-align: right">16</td>
-          <td style="text-align: right">8,065.377</td>
-          <td style="text-align: right"><strong>1,966.856</strong></td>
-          <td style="text-align: right"><strong>17.895</strong></td>
-          <td style="text-align: right">19.221</td>
-          <td style="text-align: right">194.074</td>
-          <td style="text-align: right"><strong>475.153</strong></td>
-      </tr>
-      <tr>
-          <td><code>256/1024</code></td>
-          <td style="text-align: right">1</td>
-          <td style="text-align: right">109.703</td>
-          <td style="text-align: right"><strong>82.139</strong></td>
-          <td style="text-align: right">17.027</td>
-          <td style="text-align: right"><strong>16.740</strong></td>
-          <td style="text-align: right">72.810</td>
-          <td style="text-align: right"><strong>73.976</strong></td>
-      </tr>
-      <tr>
-          <td><code>256/1024</code></td>
-          <td style="text-align: right">4</td>
-          <td style="text-align: right">141.441</td>
-          <td style="text-align: right"><strong>135.288</strong></td>
-          <td style="text-align: right"><strong>16.998</strong></td>
-          <td style="text-align: right">17.220</td>
-          <td style="text-align: right"><strong>291.832</strong></td>
-          <td style="text-align: right">290.996</td>
-      </tr>
-      <tr>
-          <td><code>256/1024</code></td>
-          <td style="text-align: right">8</td>
-          <td style="text-align: right">187.257</td>
-          <td style="text-align: right"><strong>165.782</strong></td>
-          <td style="text-align: right"><strong>17.265</strong></td>
-          <td style="text-align: right">17.474</td>
-          <td style="text-align: right">562.653</td>
-          <td style="text-align: right"><strong>568.279</strong></td>
-      </tr>
-      <tr>
-          <td><code>256/1024</code></td>
-          <td style="text-align: right">16</td>
-          <td style="text-align: right"><strong>198.038</strong></td>
-          <td style="text-align: right">302.155</td>
-          <td style="text-align: right"><strong>18.334</strong></td>
-          <td style="text-align: right">18.487</td>
-          <td style="text-align: right">1,078.624</td>
-          <td style="text-align: right"><strong>1,086.885</strong></td>
-      </tr>
-      <tr>
-          <td><code>8192/128</code></td>
-          <td style="text-align: right">1</td>
-          <td style="text-align: right">1,314.379</td>
-          <td style="text-align: right"><strong>651.440</strong></td>
-          <td style="text-align: right">17.640</td>
-          <td style="text-align: right"><strong>17.383</strong></td>
-          <td style="text-align: right">41.425</td>
-          <td style="text-align: right"><strong>53.200</strong></td>
-      </tr>
-      <tr>
-          <td><code>8192/128</code></td>
-          <td style="text-align: right">4</td>
-          <td style="text-align: right">1,584.477</td>
-          <td style="text-align: right"><strong>721.694</strong></td>
-          <td style="text-align: right"><strong>17.849</strong></td>
-          <td style="text-align: right">18.107</td>
-          <td style="text-align: right">137.823</td>
-          <td style="text-align: right"><strong>184.952</strong></td>
-      </tr>
-      <tr>
-          <td><code>8192/128</code></td>
-          <td style="text-align: right">8</td>
-          <td style="text-align: right">4,288.098</td>
-          <td style="text-align: right"><strong>2,209.757</strong></td>
-          <td style="text-align: right"><strong>18.766</strong></td>
-          <td style="text-align: right">19.149</td>
-          <td style="text-align: right">137.024</td>
-          <td style="text-align: right"><strong>223.497</strong></td>
-      </tr>
-      <tr>
-          <td><code>8192/128</code></td>
-          <td style="text-align: right">16</td>
-          <td style="text-align: right">17,514.203</td>
-          <td style="text-align: right"><strong>6,256.258</strong></td>
-          <td style="text-align: right"><strong>18.315</strong></td>
-          <td style="text-align: right">18.674</td>
-          <td style="text-align: right">98.154</td>
-          <td style="text-align: right"><strong>237.019</strong></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Shape</th>
+					<th style="text-align: right">Concurrency</th>
+					<th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right">TCP <em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">RDMA <em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">TCP output (tok/s)</th>
+					<th style="text-align: right">RDMA output (tok/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>512/256</code></td>
+					<td style="text-align: right">1</td>
+					<td style="text-align: right">129.316</td>
+					<td style="text-align: right"><strong>80.237</strong></td>
+					<td style="text-align: right">17.068</td>
+					<td style="text-align: right"><strong>16.819</strong></td>
+					<td style="text-align: right">70.990</td>
+					<td style="text-align: right"><strong>72.934</strong></td>
+			</tr>
+			<tr>
+					<td><code>512/256</code></td>
+					<td style="text-align: right">4</td>
+					<td style="text-align: right">163.561</td>
+					<td style="text-align: right"><strong>123.806</strong></td>
+					<td style="text-align: right"><strong>17.052</strong></td>
+					<td style="text-align: right">18.038</td>
+					<td style="text-align: right">279.466</td>
+					<td style="text-align: right"><strong>284.946</strong></td>
+			</tr>
+			<tr>
+					<td><code>512/256</code></td>
+					<td style="text-align: right">8</td>
+					<td style="text-align: right"><strong>192.224</strong></td>
+					<td style="text-align: right">215.574</td>
+					<td style="text-align: right">17.444</td>
+					<td style="text-align: right"><strong>17.392</strong></td>
+					<td style="text-align: right">535.895</td>
+					<td style="text-align: right"><strong>538.096</strong></td>
+			</tr>
+			<tr>
+					<td><code>512/256</code></td>
+					<td style="text-align: right">16</td>
+					<td style="text-align: right"><strong>261.322</strong></td>
+					<td style="text-align: right">372.135</td>
+					<td style="text-align: right">17.785</td>
+					<td style="text-align: right"><strong>17.363</strong></td>
+					<td style="text-align: right">973.298</td>
+					<td style="text-align: right"><strong>995.358</strong></td>
+			</tr>
+			<tr>
+					<td><code>4096/128</code></td>
+					<td style="text-align: right">1</td>
+					<td style="text-align: right">661.241</td>
+					<td style="text-align: right"><strong>326.837</strong></td>
+					<td style="text-align: right">17.225</td>
+					<td style="text-align: right"><strong>16.961</strong></td>
+					<td style="text-align: right">52.958</td>
+					<td style="text-align: right"><strong>62.165</strong></td>
+			</tr>
+			<tr>
+					<td><code>4096/128</code></td>
+					<td style="text-align: right">4</td>
+					<td style="text-align: right">738.476</td>
+					<td style="text-align: right"><strong>374.910</strong></td>
+					<td style="text-align: right">17.561</td>
+					<td style="text-align: right"><strong>17.525</strong></td>
+					<td style="text-align: right">187.547</td>
+					<td style="text-align: right"><strong>223.823</strong></td>
+			</tr>
+			<tr>
+					<td><code>4096/128</code></td>
+					<td style="text-align: right">8</td>
+					<td style="text-align: right">1,356.958</td>
+					<td style="text-align: right"><strong>626.566</strong></td>
+					<td style="text-align: right">17.977</td>
+					<td style="text-align: right"><strong>17.780</strong></td>
+					<td style="text-align: right">264.025</td>
+					<td style="text-align: right"><strong>343.344</strong></td>
+			</tr>
+			<tr>
+					<td><code>4096/128</code></td>
+					<td style="text-align: right">16</td>
+					<td style="text-align: right">8,065.377</td>
+					<td style="text-align: right"><strong>1,966.856</strong></td>
+					<td style="text-align: right"><strong>17.895</strong></td>
+					<td style="text-align: right">19.221</td>
+					<td style="text-align: right">194.074</td>
+					<td style="text-align: right"><strong>475.153</strong></td>
+			</tr>
+			<tr>
+					<td><code>256/1024</code></td>
+					<td style="text-align: right">1</td>
+					<td style="text-align: right">109.703</td>
+					<td style="text-align: right"><strong>82.139</strong></td>
+					<td style="text-align: right">17.027</td>
+					<td style="text-align: right"><strong>16.740</strong></td>
+					<td style="text-align: right">72.810</td>
+					<td style="text-align: right"><strong>73.976</strong></td>
+			</tr>
+			<tr>
+					<td><code>256/1024</code></td>
+					<td style="text-align: right">4</td>
+					<td style="text-align: right">141.441</td>
+					<td style="text-align: right"><strong>135.288</strong></td>
+					<td style="text-align: right"><strong>16.998</strong></td>
+					<td style="text-align: right">17.220</td>
+					<td style="text-align: right"><strong>291.832</strong></td>
+					<td style="text-align: right">290.996</td>
+			</tr>
+			<tr>
+					<td><code>256/1024</code></td>
+					<td style="text-align: right">8</td>
+					<td style="text-align: right">187.257</td>
+					<td style="text-align: right"><strong>165.782</strong></td>
+					<td style="text-align: right"><strong>17.265</strong></td>
+					<td style="text-align: right">17.474</td>
+					<td style="text-align: right">562.653</td>
+					<td style="text-align: right"><strong>568.279</strong></td>
+			</tr>
+			<tr>
+					<td><code>256/1024</code></td>
+					<td style="text-align: right">16</td>
+					<td style="text-align: right"><strong>198.038</strong></td>
+					<td style="text-align: right">302.155</td>
+					<td style="text-align: right"><strong>18.334</strong></td>
+					<td style="text-align: right">18.487</td>
+					<td style="text-align: right">1,078.624</td>
+					<td style="text-align: right"><strong>1,086.885</strong></td>
+			</tr>
+			<tr>
+					<td><code>8192/128</code></td>
+					<td style="text-align: right">1</td>
+					<td style="text-align: right">1,314.379</td>
+					<td style="text-align: right"><strong>651.440</strong></td>
+					<td style="text-align: right">17.640</td>
+					<td style="text-align: right"><strong>17.383</strong></td>
+					<td style="text-align: right">41.425</td>
+					<td style="text-align: right"><strong>53.200</strong></td>
+			</tr>
+			<tr>
+					<td><code>8192/128</code></td>
+					<td style="text-align: right">4</td>
+					<td style="text-align: right">1,584.477</td>
+					<td style="text-align: right"><strong>721.694</strong></td>
+					<td style="text-align: right"><strong>17.849</strong></td>
+					<td style="text-align: right">18.107</td>
+					<td style="text-align: right">137.823</td>
+					<td style="text-align: right"><strong>184.952</strong></td>
+			</tr>
+			<tr>
+					<td><code>8192/128</code></td>
+					<td style="text-align: right">8</td>
+					<td style="text-align: right">4,288.098</td>
+					<td style="text-align: right"><strong>2,209.757</strong></td>
+					<td style="text-align: right"><strong>18.766</strong></td>
+					<td style="text-align: right">19.149</td>
+					<td style="text-align: right">137.024</td>
+					<td style="text-align: right"><strong>223.497</strong></td>
+			</tr>
+			<tr>
+					<td><code>8192/128</code></td>
+					<td style="text-align: right">16</td>
+					<td style="text-align: right">17,514.203</td>
+					<td style="text-align: right"><strong>6,256.258</strong></td>
+					<td style="text-align: right"><strong>18.315</strong></td>
+					<td style="text-align: right">18.674</td>
+					<td style="text-align: right">98.154</td>
+					<td style="text-align: right"><strong>237.019</strong></td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="mixed-load-comparison">Mixed-load comparison</h3>
 <p>The follow-up completed <strong>64 steady and 40 burst requests with zero errors</strong>, for <strong>744/744 measured
@@ -2082,37 +2082,37 @@ requests</strong> across both suites. Per-stream throughput uses the full mixed 
 sleep intervals: 60.260 s for RDMA versus 66.561 s for TCP. Burst prompts were unseeded samples from
 the same target range, not a matched-prompt replay.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Stream</th>
-          <th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right">TCP <em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">RDMA <em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">TCP output (tok/s)</th>
-          <th style="text-align: right">RDMA output (tok/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Steady</td>
-          <td style="text-align: right">217.862</td>
-          <td style="text-align: right"><strong>140.293</strong></td>
-          <td style="text-align: right">17.518</td>
-          <td style="text-align: right"><strong>17.234</strong></td>
-          <td style="text-align: right">246.150</td>
-          <td style="text-align: right"><strong>271.887</strong></td>
-      </tr>
-      <tr>
-          <td>Burst</td>
-          <td style="text-align: right">1,264.500</td>
-          <td style="text-align: right"><strong>619.482</strong></td>
-          <td style="text-align: right"><strong>17.826</strong></td>
-          <td style="text-align: right">17.987</td>
-          <td style="text-align: right">38.461</td>
-          <td style="text-align: right"><strong>42.482</strong></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Stream</th>
+					<th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right">TCP <em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">RDMA <em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">TCP output (tok/s)</th>
+					<th style="text-align: right">RDMA output (tok/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Steady</td>
+					<td style="text-align: right">217.862</td>
+					<td style="text-align: right"><strong>140.293</strong></td>
+					<td style="text-align: right">17.518</td>
+					<td style="text-align: right"><strong>17.234</strong></td>
+					<td style="text-align: right">246.150</td>
+					<td style="text-align: right"><strong>271.887</strong></td>
+			</tr>
+			<tr>
+					<td>Burst</td>
+					<td style="text-align: right">1,264.500</td>
+					<td style="text-align: right"><strong>619.482</strong></td>
+					<td style="text-align: right"><strong>17.826</strong></td>
+					<td style="text-align: right">17.987</td>
+					<td style="text-align: right">38.461</td>
+					<td style="text-align: right"><strong>42.482</strong></td>
+			</tr>
+	</tbody>
 </table>
 <p>RDMA lowered median <em>TTFT</em> <strong>1.55×</strong> on the steady stream and <strong>2.04×</strong> on the burst stream.
 Maximum <em>ITL</em> stayed close to TCP: 20.895 versus 20.850 ms for steady traffic, and 21.036 versus

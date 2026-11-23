@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>KV Cache Pools and Bindings · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1224,27 +1224,27 @@ owns backend capacity, and the namespaced object grants quota and RBAC scope to 
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePool </span><span class="w"> </span><span class="c"># cluster-scoped, short name kvcp</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePool </span><span class="w"> </span><span class="c"># cluster-scoped, short name kvcp</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-dram</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">backends</span><span class="p">:</span><span class="w">  </span><span class="c"># required; single-item list naming one KVCacheBackend</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mooncake-dram</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">quota</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">total</span><span class="p">:</span><span class="w"> </span><span class="l">900Gi </span><span class="w"> </span><span class="c"># optional pool quota target</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePoolBinding </span><span class="w"> </span><span class="c"># namespaced, short name kvcpb</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePoolBinding </span><span class="w"> </span><span class="c"># namespaced, short name kvcpb</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">poolRef</span><span class="p">:</span><span class="w">  </span><span class="c"># required; immutable</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-dram</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">quota</span><span class="p">:</span><span class="w">  </span><span class="c"># required</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ceiling</span><span class="p">:</span><span class="w"> </span><span class="l">600Gi </span><span class="w"> </span><span class="c"># requested ceiling; effective grant scales proportionally on oversubscription</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">domain</span><span class="p">:</span><span class="w">  </span><span class="c"># required; all fields are immutable</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name: qwen-72b-v2  # optional, default</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;default&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-72b-v2 </span><span class="w"> </span><span class="c"># optional, default: &#34;default&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">blockSize</span><span class="p">:</span><span class="w"> </span><span class="m">64</span><span class="w">  </span><span class="c"># required</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">dtype</span><span class="p">:</span><span class="w"> </span><span class="l">fp8_e4m3 </span><span class="w"> </span><span class="c"># required; &#34;auto&#34; refused on new Bindings</span></span></span></code></pre></div>
 </div>
@@ -1290,25 +1290,25 @@ resolve <code>auto</code> to different types. Legacy <code>auto</code> Bindings 
 (<code>bfloat16</code>, <code>fp8_e4m3</code>, <code>fp8_e5m2</code>, or <code>nvfp4</code>).</li>
 </ul>
 <table>
-  <thead>
-      <tr>
-          <th>Engine</th>
-          <th>Accepted <code>dtype</code> values</th>
-          <th>Rejected aliases</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>vLLM</code> (including Ascend)</td>
-          <td><code>bfloat16</code>, <code>float16</code>, <code>fp8</code>, <code>fp8_e4m3</code>, <code>fp8_e5m2</code>, <code>fp8_inc</code>, <code>fp8_ds_mla</code>, <code>nvfp4</code></td>
-          <td><code>bf16</code></td>
-      </tr>
-      <tr>
-          <td><code>SGLang</code></td>
-          <td><code>bfloat16</code>, <code>bf16</code>, <code>fp8_e4m3</code>, <code>fp8_e5m2</code>, <code>mxfp8</code>, <code>nvfp4</code>, <code>fp4_mx_block16</code></td>
-          <td><code>fp8</code>, <code>float16</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Engine</th>
+					<th>Accepted <code>dtype</code> values</th>
+					<th>Rejected aliases</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>vLLM</code> (including Ascend)</td>
+					<td><code>bfloat16</code>, <code>float16</code>, <code>fp8</code>, <code>fp8_e4m3</code>, <code>fp8_e5m2</code>, <code>fp8_inc</code>, <code>fp8_ds_mla</code>, <code>nvfp4</code></td>
+					<td><code>bf16</code></td>
+			</tr>
+			<tr>
+					<td><code>SGLang</code></td>
+					<td><code>bfloat16</code>, <code>bf16</code>, <code>fp8_e4m3</code>, <code>fp8_e5m2</code>, <code>mxfp8</code>, <code>nvfp4</code>, <code>fp4_mx_block16</code></td>
+					<td><code>fp8</code>, <code>float16</code></td>
+			</tr>
+	</tbody>
 </table>
 <p>Values above reflect vLLM <code>v0.29.0</code> and SGLang <code>v0.5.18</code>; the running engine image is authoritative.</p>
 <h2 id="capacity-grants">Capacity grants</h2>
@@ -1368,19 +1368,19 @@ without <code>kvcache.gpustack.ai/inject: &quot;true&quot;</code> are ignored.</
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">chat-0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/inject</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">  </span><span class="c"># required opt-in label; immutable</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">annotations</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/binding</span><span class="p">:</span><span class="w"> </span><span class="l">team-a </span><span class="w"> </span><span class="c"># required KVCachePoolBinding in this namespace</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/engine: vLLM  # required; enum</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM, SGLang</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/engine</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM </span><span class="w"> </span><span class="c"># required; enum: vLLM, SGLang</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l">ascend </span><span class="w"> </span><span class="c"># optional; vLLM only (selects vLLM-Ascend)</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/role</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill </span><span class="w"> </span><span class="c"># optional; vLLM only (Prefill or Decode; omit for plain server)</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/container</span><span class="p">:</span><span class="w"> </span><span class="l">server </span><span class="w"> </span><span class="c"># required when Pod has multiple containers</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">vllm/vllm-openai:v0.29.0</span><span class="w">
@@ -1414,50 +1414,50 @@ the owning controller (<code>Deployment</code> or <code>ReplicaSet</code>) and c
 </span></span><span class="line"><span class="cl">kubectl -n &lt;namespace&gt; logs &lt;pod-name&gt; -c &lt;container-name&gt;</span></span></code></pre></div>
 </div>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Expected signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Missing required annotation</td>
-          <td>Refusal naming <code>binding</code> or <code>engine</code></td>
-          <td>Set <code>kvcache.gpustack.ai/binding</code> (same namespace) and <code>kvcache.gpustack.ai/engine</code> (<code>vLLM</code> or <code>SGLang</code>).</td>
-      </tr>
-      <tr>
-          <td>Invalid role or target container</td>
-          <td>Refusal naming <code>Server</code>, missing <code>container</code>, or init container</td>
-          <td>Omit <code>role</code> on standard servers (<code>Server</code> is refused); name an app container in <code>kvcache.gpustack.ai/container</code>.</td>
-      </tr>
-      <tr>
-          <td>Pool or ledger not ready</td>
-          <td>Refusal naming <code>QuotaLedgerAvailable</code> or <code>status.clientEndpoint</code></td>
-          <td>Restore the <code>KVCacheBackend</code> leader and wait for <code>KVCachePool</code> <em><code>status.clientEndpoint</code></em>.</td>
-      </tr>
-      <tr>
-          <td>Conflicting flag, env, or mount</td>
-          <td>Refusal naming <code>--kv-transfer-config</code>, <code>MOONCAKE_CONFIG_PATH</code>, <code>--hicache-storage-backend</code>, <code>--kv-cache-dtype</code>, or <code>/etc/gpustack/kvcache</code></td>
-          <td>Remove the duplicate flag, env var, or mount from the <code>Pod</code> spec so it matches <em><code>spec.domain.dtype</code></em>.</td>
-      </tr>
-      <tr>
-          <td>Shell <code>-c</code> or <code>env -S</code> launch</td>
-          <td>Refusal rejecting <code>sh -c</code>, <code>bash -c</code>, or <code>env -S</code></td>
-          <td>Put the engine binary in <em><code>command</code></em> and its flags in <em><code>args</code></em>; the forwarding annotation does not override shell <code>-c</code> refusals.</td>
-      </tr>
-      <tr>
-          <td>Wrapper script or bare <code>args</code></td>
-          <td>Refusal rejecting bare <code>args</code> or a <code>.sh</code> wrapper</td>
-          <td>Launch the engine binary directly, or set <code>kvcache.gpustack.ai/launch-args-forwarded: &quot;true&quot;</code> only when the wrapper forwards appended arguments (<code>&quot;$@&quot;</code>).</td>
-      </tr>
-      <tr>
-          <td>Transport mismatch</td>
-          <td>Admission <code>NotSupportedTransport</code> or vLLM-Ascend <code>NotImplementedError</code> for <code>tcp</code></td>
-          <td>Set <code>spec.transport.protocol: CANN</code> on Ascend backends or align member group protocols.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Expected signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Missing required annotation</td>
+					<td>Refusal naming <code>binding</code> or <code>engine</code></td>
+					<td>Set <code>kvcache.gpustack.ai/binding</code> (same namespace) and <code>kvcache.gpustack.ai/engine</code> (<code>vLLM</code> or <code>SGLang</code>).</td>
+			</tr>
+			<tr>
+					<td>Invalid role or target container</td>
+					<td>Refusal naming <code>Server</code>, missing <code>container</code>, or init container</td>
+					<td>Omit <code>role</code> on standard servers (<code>Server</code> is refused); name an app container in <code>kvcache.gpustack.ai/container</code>.</td>
+			</tr>
+			<tr>
+					<td>Pool or ledger not ready</td>
+					<td>Refusal naming <code>QuotaLedgerAvailable</code> or <code>status.clientEndpoint</code></td>
+					<td>Restore the <code>KVCacheBackend</code> leader and wait for <code>KVCachePool</code> <em><code>status.clientEndpoint</code></em>.</td>
+			</tr>
+			<tr>
+					<td>Conflicting flag, env, or mount</td>
+					<td>Refusal naming <code>--kv-transfer-config</code>, <code>MOONCAKE_CONFIG_PATH</code>, <code>--hicache-storage-backend</code>, <code>--kv-cache-dtype</code>, or <code>/etc/gpustack/kvcache</code></td>
+					<td>Remove the duplicate flag, env var, or mount from the <code>Pod</code> spec so it matches <em><code>spec.domain.dtype</code></em>.</td>
+			</tr>
+			<tr>
+					<td>Shell <code>-c</code> or <code>env -S</code> launch</td>
+					<td>Refusal rejecting <code>sh -c</code>, <code>bash -c</code>, or <code>env -S</code></td>
+					<td>Put the engine binary in <em><code>command</code></em> and its flags in <em><code>args</code></em>; the forwarding annotation does not override shell <code>-c</code> refusals.</td>
+			</tr>
+			<tr>
+					<td>Wrapper script or bare <code>args</code></td>
+					<td>Refusal rejecting bare <code>args</code> or a <code>.sh</code> wrapper</td>
+					<td>Launch the engine binary directly, or set <code>kvcache.gpustack.ai/launch-args-forwarded: &quot;true&quot;</code> only when the wrapper forwards appended arguments (<code>&quot;$@&quot;</code>).</td>
+			</tr>
+			<tr>
+					<td>Transport mismatch</td>
+					<td>Admission <code>NotSupportedTransport</code> or vLLM-Ascend <code>NotImplementedError</code> for <code>tcp</code></td>
+					<td>Set <code>spec.transport.protocol: CANN</code> on Ascend backends or align member group protocols.</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="pod-binding-verification">Pod binding verification</h3>
 <p>Verify injection on an admitted <code>Pod</code> by reading <code>kvcache.gpustack.ai/injected</code>:</p>
@@ -1477,7 +1477,7 @@ confirm the image carries the Mooncake store connector:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n &lt;namespace&gt; <span class="nb">exec</span> &lt;pod-name&gt; -- python3 -c <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="s2">&#34;import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print(&#39;reader present&#39;)&#34;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  <span class="s2">&#34;import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print(&#39;reader present&#39;)&#34;</span></span></span></code></pre></div>
 </div>
 <h3 id="tenant-compatibility">Tenant compatibility</h3>
 <p><code>tenantInjected: true</code> confirms only that the webhook wrote <code>tenant_id</code> (vLLM) or
@@ -1503,30 +1503,30 @@ blank when <code>multiTenancy</code> is <code>false</code>):</p>
 <p>When deleting a <code>KVCachePoolBinding</code> or <code>KVCachePool</code> stays in <code>Deleting</code>, inspect <code>Releasable=False</code>
 and act on the owner named by its reason:</p>
 <table>
-  <thead>
-      <tr>
-          <th><code>Releasable</code> reason</th>
-          <th>Cause</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>HeldByWorkloads</code></td>
-          <td>Workloads in <em><code>status.usedBy</code></em> still reference the Binding</td>
-          <td>Delete or detach the named workloads in the namespace.</td>
-      </tr>
-      <tr>
-          <td><code>LedgerNotReleased</code></td>
-          <td>Domain still holds bytes on the leader, or leader is unreachable during pool teardown</td>
-          <td>Drain the domain or restore leader <code>:9003</code> reachability (retries every <code>30 s</code>).</td>
-      </tr>
-      <tr>
-          <td><code>LedgerRequestFailed</code></td>
-          <td>Admin API call failed, leaving ledger state unknown</td>
-          <td>Inspect <code>KVCachePool</code> and <code>KVCacheBackend</code> conditions and restore the leader.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th><code>Releasable</code> reason</th>
+					<th>Cause</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>HeldByWorkloads</code></td>
+					<td>Workloads in <em><code>status.usedBy</code></em> still reference the Binding</td>
+					<td>Delete or detach the named workloads in the namespace.</td>
+			</tr>
+			<tr>
+					<td><code>LedgerNotReleased</code></td>
+					<td>Domain still holds bytes on the leader, or leader is unreachable during pool teardown</td>
+					<td>Drain the domain or restore leader <code>:9003</code> reachability (retries every <code>30 s</code>).</td>
+			</tr>
+			<tr>
+					<td><code>LedgerRequestFailed</code></td>
+					<td>Admin API call failed, leaving ledger state unknown</td>
+					<td>Inspect <code>KVCachePool</code> and <code>KVCacheBackend</code> conditions and restore the leader.</td>
+			</tr>
+	</tbody>
 </table>
 <p>If an external or permanently destroyed leader will never return, clear the pool finalizer manually
 (this orphans quota entries if the leader is still live):</p>

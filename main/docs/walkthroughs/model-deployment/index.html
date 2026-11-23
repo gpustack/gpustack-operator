@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Model Deployment Walkthroughs · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1213,62 +1213,62 @@ parallelism (EP)</em>. <em>DP</em> width counts data-parallel ranks, <em>EP</em>
 expert collective, and <em>internal load balancing (Internal LB)</em> vs <em>external load balancing (External LB)</em>
 decides whether only the master or every <em>DP</em> rank serves HTTP requests.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Walkthrough</th>
-          <th>Serving configuration</th>
-          <th>Scope</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/">Prefill and Decode</a>
+	<thead>
+			<tr>
+					<th>Walkthrough</th>
+					<th>Serving configuration</th>
+					<th>Scope</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/">Prefill and Decode</a>
 </td>
-          <td>Disaggregated <em>Prefill</em> and <em>Decode</em> roles behind <code>llm-d-router</code></td>
-          <td>1 <em>Prefill</em> + 2 <em>Decode</em> replicas, <em>TP</em> = 2, TCP Mooncake transfer (<a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/">Prefill and Decode Benchmark</a>
+					<td>Disaggregated <em>Prefill</em> and <em>Decode</em> roles behind <code>llm-d-router</code></td>
+					<td>1 <em>Prefill</em> + 2 <em>Decode</em> replicas, <em>TP</em> = 2, TCP Mooncake transfer (<a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/">Prefill and Decode Benchmark</a>
 ).</td>
-      </tr>
-      <tr>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/">Encode, Prefill and Decode</a>
+			</tr>
+			<tr>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/">Encode, Prefill and Decode</a>
 </td>
-          <td>Disaggregated multimodal <em>Encode</em>, <em>Prefill</em>, and <em>Decode</em> roles</td>
-          <td>1 <em>Encode</em> + 1 <em>Prefill</em> + 1 <em>Decode</em> replica, NIXL encoder-cache transfer (<a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/">Encode, Prefill and Decode Benchmark</a>
+					<td>Disaggregated multimodal <em>Encode</em>, <em>Prefill</em>, and <em>Decode</em> roles</td>
+					<td>1 <em>Encode</em> + 1 <em>Prefill</em> + 1 <em>Decode</em> replica, NIXL encoder-cache transfer (<a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/">Encode, Prefill and Decode Benchmark</a>
 ).</td>
-      </tr>
-      <tr>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/">Elastic EP</a>
+			</tr>
+			<tr>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/">Elastic EP</a>
 </td>
-          <td>Single <em>Internal LB</em> Ray collective resized in place</td>
-          <td><em>TP</em> = 2, <em>DP</em> width 2 → 4, <em>EP</em> world size 4 → 8; 439/439 requests succeeded (<a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/">Elastic EP Benchmark</a>
+					<td>Single <em>Internal LB</em> Ray collective resized in place</td>
+					<td><em>TP</em> = 2, <em>DP</em> width 2 → 4, <em>EP</em> world size 4 → 8; 439/439 requests succeeded (<a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/">Elastic EP Benchmark</a>
 ).</td>
-      </tr>
-      <tr>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP</a>
+			</tr>
+			<tr>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP</a>
 </td>
-          <td>Four fixed <em>External LB</em> <em>DP</em> ranks behind <code>vllm-router</code></td>
-          <td><em>TP</em> = 2, <em>DP</em> = 4, <em>EP</em> world size 8; per-rank endpoints and router distribution (<a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/">External DP Benchmark</a>
+					<td>Four fixed <em>External LB</em> <em>DP</em> ranks behind <code>vllm-router</code></td>
+					<td><em>TP</em> = 2, <em>DP</em> = 4, <em>EP</em> world size 8; per-rank endpoints and router distribution (<a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/">External DP Benchmark</a>
 ).</td>
-      </tr>
-      <tr>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/">Scaling</a>
+			</tr>
+			<tr>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/">Scaling</a>
 </td>
-          <td>Replica autoscaling via <code>ModelDeploymentScaler</code></td>
-          <td><code>Shadow</code> and <code>Active</code> modes, <code>Proportional</code> / <code>TokenThroughput</code> / <code>Predictive</code> algorithms, catalog priors, <em>EPD</em> ratios, and retirement (<a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/">Model Deployment Scaling Benchmark</a>
+					<td>Replica autoscaling via <code>ModelDeploymentScaler</code></td>
+					<td><code>Shadow</code> and <code>Active</code> modes, <code>Proportional</code> / <code>TokenThroughput</code> / <code>Predictive</code> algorithms, catalog priors, <em>EPD</em> ratios, and retirement (<a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/">Model Deployment Scaling Benchmark</a>
 ).</td>
-      </tr>
-      <tr>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/">Online Runtime Control</a>
+			</tr>
+			<tr>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/">Online Runtime Control</a>
 </td>
-          <td>Live parameter tuning, role pause, and restart replay</td>
-          <td>vLLM and SGLang live mutations, Envoy allowlist, <code>RolePaused</code> scaler guard, same-UID restart latch, and Elastic EP resize.</td>
-      </tr>
-      <tr>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/">Multi-Host</a>
+					<td>Live parameter tuning, role pause, and restart replay</td>
+					<td>vLLM and SGLang live mutations, Envoy allowlist, <code>RolePaused</code> scaler guard, same-UID restart latch, and Elastic EP resize.</td>
+			</tr>
+			<tr>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/">Multi-Host</a>
 </td>
-          <td>Single collective instance spanning two GPU hosts</td>
-          <td>Configuration example: <code>size: 2</code> (16 GPUs across two nodes), leader <code>m0</code> ingress, and gang admission.</td>
-      </tr>
-  </tbody>
+					<td>Single collective instance spanning two GPU hosts</td>
+					<td>Configuration example: <code>size: 2</code> (16 GPUs across two nodes), leader <code>m0</code> ingress, and gang admission.</td>
+			</tr>
+	</tbody>
 </table>
 <p>Increasing <em><code>roles[].replicas</code></em> adds independent replica groups rather than widening one collective;
 see <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#rollout-behavior">Rollout behavior</a>

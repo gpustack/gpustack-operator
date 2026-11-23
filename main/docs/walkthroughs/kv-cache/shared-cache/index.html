@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Shared Cache Walkthrough · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1217,69 +1217,69 @@ Create the four objects in order because each resource references the one above 
 (<a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#pools-and-bindings">Pools and bindings</a>
 ):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Object</th>
-          <th>Scope</th>
-          <th>Creator</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>KVCacheBackend</code></td>
-          <td>cluster</td>
-          <td>administrator</td>
-          <td>Deploys Mooncake leader and per-node memory/disk members</td>
-      </tr>
-      <tr>
-          <td><code>KVCachePool</code></td>
-          <td>cluster</td>
-          <td>administrator</td>
-          <td>Caps total cache capacity exposed from one backend</td>
-      </tr>
-      <tr>
-          <td><code>KVCachePoolBinding</code></td>
-          <td>namespace</td>
-          <td>administrator</td>
-          <td>Grants one namespace a reuse domain and quota ceiling</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Attaches serving roles to the namespace <code>KVCachePoolBinding</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Object</th>
+					<th>Scope</th>
+					<th>Creator</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>KVCacheBackend</code></td>
+					<td>cluster</td>
+					<td>administrator</td>
+					<td>Deploys Mooncake leader and per-node memory/disk members</td>
+			</tr>
+			<tr>
+					<td><code>KVCachePool</code></td>
+					<td>cluster</td>
+					<td>administrator</td>
+					<td>Caps total cache capacity exposed from one backend</td>
+			</tr>
+			<tr>
+					<td><code>KVCachePoolBinding</code></td>
+					<td>namespace</td>
+					<td>administrator</td>
+					<td>Grants one namespace a reuse domain and quota ceiling</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Attaches serving roles to the namespace <code>KVCachePoolBinding</code></td>
+			</tr>
+	</tbody>
 </table>
 <p>Workloads always set <em><code>kvCache.poolRef.name</code></em> to the namespace <code>KVCachePoolBinding</code>, never the
 cluster-scoped <code>KVCachePool</code>.</p>
 <h3 id="environment">Environment</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Item</th>
-          <th>Value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Cluster</td>
-          <td>Kubernetes with GPUStack installed</td>
-      </tr>
-      <tr>
-          <td>Contributing nodes</td>
-          <td>Matched by <em><code>members[].nodeSelector</code></em> (<code>kubernetes.io/os: linux</code> in Step 1; <code>kvcache: &quot;true&quot;</code> in Step 5)</td>
-      </tr>
-      <tr>
-          <td><code>AcceleratorType</code></td>
-          <td>An <code>Active</code> pool from <code>kubectl get acctype</code></td>
-      </tr>
-      <tr>
-          <td>Model and engine</td>
-          <td><code>Qwen/Qwen2.5-7B-Instruct</code> on vLLM <code>gpustack/runner:cuda13.0-vllm0.29.0</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Cluster</td>
+					<td>Kubernetes with GPUStack installed</td>
+			</tr>
+			<tr>
+					<td>Contributing nodes</td>
+					<td>Matched by <em><code>members[].nodeSelector</code></em> (<code>kubernetes.io/os: linux</code> in Step 1; <code>kvcache: &quot;true&quot;</code> in Step 5)</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td>An <code>Active</code> pool from <code>kubectl get acctype</code></td>
+			</tr>
+			<tr>
+					<td>Model and engine</td>
+					<td><code>Qwen/Qwen2.5-7B-Instruct</code> on vLLM <code>gpustack/runner:cuda13.0-vllm0.29.0</code></td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="cache-deployment">Cache deployment</h2>
 <h3 id="step-1-create-cache-backend">Step 1: Create cache backend</h3>
@@ -1288,10 +1288,10 @@ should contribute DRAM:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mooncake-dram</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Mooncake</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">
@@ -1329,21 +1329,21 @@ and inspect <code>MembersMounted</code> in <a href="#troubleshooting">Troublesho
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePool</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePool</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-dram</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">backends</span><span class="p">:</span><span class="w">  </span><span class="c"># exactly one backend; immutable</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mooncake-dram</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">quota</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">total</span><span class="p">:</span><span class="w"> </span><span class="l">16Gi</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePoolBinding</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePoolBinding</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">poolRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-dram</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">quota</span><span class="p">:</span><span class="w">
@@ -1356,7 +1356,7 @@ and inspect <code>MembersMounted</code> in <a href="#troubleshooting">Troublesho
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f pool-and-binding.yaml
 </span></span><span class="line"><span class="cl">kubectl -n team-a get kvcachepoolbinding team-a <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.effectiveQuota}{&#34;\t&#34;}{.status.conditions[?(@.type==&#34;QuotaGranted&#34;)].status}{&#34;\n&#34;}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.effectiveQuota}{&#34;\t&#34;}{.status.conditions[?(@.type==&#34;QuotaGranted&#34;)].status}{&#34;\n&#34;}&#39;</span></span></span></code></pre></div>
 </div>
 <p>Example output (illustrative):</p>
 <div class="code-block">
@@ -1381,11 +1381,11 @@ honor injected tenant settings (for non-<code>default</code> domains, <code>moon
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-7B-Instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
@@ -1433,7 +1433,7 @@ on the admitted <code>Pod</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n team-a <span class="nb">exec</span> &lt;pod-name&gt; -- python3 -c <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="s2">&#34;import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print(&#39;reader present&#39;)&#34;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  <span class="s2">&#34;import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print(&#39;reader present&#39;)&#34;</span></span></span></code></pre></div>
 </div>
 <p>If creation fails with <code>FailedCreate</code> or <code>TypeError</code> at startup, match the symptom in
 <a href="#troubleshooting">Troubleshooting</a>
@@ -1453,9 +1453,9 @@ on the admitted <code>Pod</code>:</p>
 </span></span><span class="line"><span class="cl">   connection:
 </span></span><span class="line"><span class="cl">     managed:
 </span></span><span class="line"><span class="cl"><span class="gd">-      leader: {}
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+      leader:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      leader:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+        replicas: 3
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>       members:
+</span></span></span><span class="line"><span class="cl">       members:
 </span></span><span class="line"><span class="cl">         - nodeSelector:
 </span></span><span class="line"><span class="cl">             kubernetes.io/os: linux
 </span></span><span class="line"><span class="cl">           medium: DRAM
@@ -1466,32 +1466,32 @@ on the admitted <code>Pod</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get kvcb mooncake-dram <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}{&#34;\n&#34;}{end}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}{&#34;\n&#34;}{end}&#39;</span></span></span></code></pre></div>
 </div>
 <p>In steady state, <code>Deployment/mooncake-dram-leader</code> shows <strong><code>1/3</code> Ready</strong> intentionally: only the
 active <code>Lease</code> holder reports Ready so the leader <code>Service</code> never routes traffic to standbys. Watch
 two conditions (<a href="/gpustack-operator/main/docs/modules/kv-cache/leader/#health-checks">Health checks</a>
 ):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Condition</th>
-          <th><code>True</code> meaning</th>
-          <th><code>False</code> meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ElectionObserved</code></td>
-          <td>Active <code>Lease</code> names a holder</td>
-          <td>Ready leader with empty <code>Lease</code> (wrong image, missing RBAC, or initial election in flight)</td>
-      </tr>
-      <tr>
-          <td><code>RolloutComplete</code></td>
-          <td>All replicas run the current template</td>
-          <td>Rollout in progress or stalled</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Condition</th>
+					<th><code>True</code> meaning</th>
+					<th><code>False</code> meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ElectionObserved</code></td>
+					<td>Active <code>Lease</code> names a holder</td>
+					<td>Ready leader with empty <code>Lease</code> (wrong image, missing RBAC, or initial election in flight)</td>
+			</tr>
+			<tr>
+					<td><code>RolloutComplete</code></td>
+					<td>All replicas run the current template</td>
+					<td>Rollout in progress or stalled</td>
+			</tr>
+	</tbody>
 </table>
 <p>Standby leaders hold no in-memory index. After a leader restart or failover, members remount their
 segments automatically (~30 s), and cached blocks start cold (<a href="/gpustack-operator/main/docs/modules/kv-cache/leader/#high-availability">High availability</a>
@@ -1514,8 +1514,8 @@ directory on every <code>kvcache: &quot;true&quot;</code> node first (owned by U
 </span></span><span class="line"><span class="cl"> kind: KVCacheBackend
 </span></span><span class="line"><span class="cl"> metadata:
 </span></span><span class="line"><span class="cl"><span class="gd">-  name: mooncake-dram
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  name: mooncake-disk
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span> spec:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+  name: mooncake-disk
+</span></span></span><span class="line"><span class="cl"> spec:
 </span></span><span class="line"><span class="cl">   type: Mooncake
 </span></span><span class="line"><span class="cl">   connection:
 </span></span><span class="line"><span class="cl">     managed:
@@ -1523,8 +1523,8 @@ directory on every <code>kvcache: &quot;true&quot;</code> node first (owned by U
 </span></span><span class="line"><span class="cl">       members:
 </span></span><span class="line"><span class="cl">         - nodeSelector:
 </span></span><span class="line"><span class="cl"><span class="gd">-            kubernetes.io/os: linux
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+            kvcache: &#34;true&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>           medium: DRAM
+</span></span></span><span class="line"><span class="cl"><span class="gi">+            kvcache: &#34;true&#34;
+</span></span></span><span class="line"><span class="cl">           medium: DRAM
 </span></span><span class="line"><span class="cl">           capacityPerMember: 8Gi
 </span></span><span class="line"><span class="cl"><span class="gi">+          localDisks:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+            - path: /var/lib/kvcache
@@ -1540,11 +1540,11 @@ the disk tier flushes in buckets, small workloads may keep disk usage at zero in
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePoolBinding</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePoolBinding</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">team-b</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-b</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">poolRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-dram</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">quota</span><span class="p">:</span><span class="w">
@@ -1559,11 +1559,11 @@ the disk tier flushes in buckets, small workloads may keep disk usage at zero in
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePoolBinding</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePoolBinding</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-fp8</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">poolRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-dram</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">quota</span><span class="p">:</span><span class="w">
@@ -1572,13 +1572,13 @@ the disk tier flushes in buckets, small workloads may keep disk usage at zero in
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-fp8-v1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">blockSize</span><span class="p">:</span><span class="w"> </span><span class="m">16</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">dtype</span><span class="p">:</span><span class="w"> </span><span class="l">fp8_e4m3</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-chat-fp8</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-7B-Instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
@@ -1614,102 +1614,102 @@ until deleted (<a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#quot
 </ul>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>Pod</code> or <code>ReplicaSet</code> injection refused</td>
-          <td>Event <code>FailedCreate</code> naming <code>binding</code>, <code>engine</code>, flag collision, or <code>QuotaLedgerAvailable</code></td>
-          <td>Update the owning <code>Deployment</code> or <code>Pod</code> spec: fix the <code>kvcache.gpustack.ai/binding</code> annotation, remove owned <code>--kv-transfer-config</code> / <code>--kv-cache-dtype</code> flags, or wait for pool readiness (<a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#refused-engine-launch">Refused engine launch</a>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Pod</code> or <code>ReplicaSet</code> injection refused</td>
+					<td>Event <code>FailedCreate</code> naming <code>binding</code>, <code>engine</code>, flag collision, or <code>QuotaLedgerAvailable</code></td>
+					<td>Update the owning <code>Deployment</code> or <code>Pod</code> spec: fix the <code>kvcache.gpustack.ai/binding</code> annotation, remove owned <code>--kv-transfer-config</code> / <code>--kv-cache-dtype</code> flags, or wait for pool readiness (<a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#refused-engine-launch">Refused engine launch</a>
 ).</td>
-      </tr>
-      <tr>
-          <td><code>vllm-ascend</code> fails on startup</td>
-          <td><code>NotImplementedError: MooncakeBackend does not support protocol 'tcp'</code></td>
-          <td>Patch <code>KVCacheBackend</code> <em><code>spec.transport.protocol</code></em> to <code>CANN</code>.</td>
-      </tr>
-      <tr>
-          <td>Engine fails on <code>setup()</code></td>
-          <td><code>TypeError: setup(): incompatible function arguments</code></td>
-          <td>Runner image has <code>mooncake-transfer-engine &lt; 0.3.13</code>; upgrade the runner image or use a Binding with <code>domain.name: default</code>.</td>
-      </tr>
-      <tr>
-          <td>Cache writes fail with <code>TENANT_NOT_REGISTERED</code></td>
-          <td>Engine log error or missing connector <code>ImportError</code></td>
-          <td>Confirm the <code>KVCachePoolBinding</code> is <code>QuotaGranted=True</code> in the workload&rsquo;s namespace and the runner carries <code>MooncakeStoreConnector</code>.</td>
-      </tr>
-      <tr>
-          <td><code>KVCacheBackend</code> stuck in <code>Provisioning</code> or <code>Error</code></td>
-          <td><code>LeaderAvailable=False</code></td>
-          <td>Inspect <code>Deployment/&lt;name&gt;-leader</code> logs and image, or verify external endpoint reachability.</td>
-      </tr>
-      <tr>
-          <td><code>KVCacheBackend</code> stays <code>Degraded</code></td>
-          <td><code>MembersMounted=False</code> (<code>SegmentsShort</code> or <code>NoSegments</code>)</td>
-          <td>Check node memory capacity and member <code>DaemonSet</code> logs on matched nodes.</td>
-      </tr>
-      <tr>
-          <td><code>KVCachePool</code> reports <code>Error</code></td>
-          <td><code>BackendResolved=False</code> or <code>CapacityAllocatable=False</code></td>
-          <td>Create or repair the referenced <code>KVCacheBackend</code> so its <code>CAPACITY</code> is non-zero.</td>
-      </tr>
-      <tr>
-          <td><code>KVCachePool</code> <code>QuotaLedgerAvailable=False</code></td>
-          <td><code>Reason: MultiTenancyDisabled</code></td>
-          <td>Expected when <code>KVCacheBackend</code> sets <code>leader.multiTenancy: false</code>; enable <code>multiTenancy</code> to enforce ceilings.</td>
-      </tr>
-      <tr>
-          <td><code>KVCachePoolBinding</code> shows <code>effectiveQuota: 0</code></td>
-          <td><code>QuotaGranted=False/ZeroGranted</code></td>
-          <td>Wait ~30 s if the leader just restarted (<code>NothingToAllocate</code>), or raise pool <em><code>quota.total</code></em> / lower sibling ceilings.</td>
-      </tr>
-      <tr>
-          <td>Pool reports <code>Oversubscribed</code></td>
-          <td><code>QuotaWithinTotal=False/Oversubscribed</code></td>
-          <td>Expected proportional recut when ceilings exceed <em><code>quota.total</code></em>; inspect <em><code>status.effectiveQuota</code></em> on each Binding.</td>
-      </tr>
-      <tr>
-          <td>Binding apply rejected on <code>domain.name</code></td>
-          <td><code>Duplicate</code> on <em><code>spec.domain.name</code></em></td>
-          <td>Another Binding on the same backend already claims that domain (<code>default</code> when omitted); set a unique <em><code>domain.name</code></em>.</td>
-      </tr>
-      <tr>
-          <td>Two Bindings claim one domain</td>
-          <td><code>DomainExclusive=False/DomainClaimedByMultipleBindings</code></td>
-          <td>Delete one of the racing <code>KVCachePoolBinding</code> objects.</td>
-      </tr>
-      <tr>
-          <td>Disk-tier member stuck or unready</td>
-          <td><code>FailedMount</code> or <code>no write permission on directory</code></td>
-          <td>Create the host directory on every matched node with <code>install -d -o 65532 -g 0 -m 0750 &lt;path&gt;</code> (<a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/#host-directory-requirements">Host directory requirements</a>
+			</tr>
+			<tr>
+					<td><code>vllm-ascend</code> fails on startup</td>
+					<td><code>NotImplementedError: MooncakeBackend does not support protocol 'tcp'</code></td>
+					<td>Patch <code>KVCacheBackend</code> <em><code>spec.transport.protocol</code></em> to <code>CANN</code>.</td>
+			</tr>
+			<tr>
+					<td>Engine fails on <code>setup()</code></td>
+					<td><code>TypeError: setup(): incompatible function arguments</code></td>
+					<td>Runner image has <code>mooncake-transfer-engine &lt; 0.3.13</code>; upgrade the runner image or use a Binding with <code>domain.name: default</code>.</td>
+			</tr>
+			<tr>
+					<td>Cache writes fail with <code>TENANT_NOT_REGISTERED</code></td>
+					<td>Engine log error or missing connector <code>ImportError</code></td>
+					<td>Confirm the <code>KVCachePoolBinding</code> is <code>QuotaGranted=True</code> in the workload&rsquo;s namespace and the runner carries <code>MooncakeStoreConnector</code>.</td>
+			</tr>
+			<tr>
+					<td><code>KVCacheBackend</code> stuck in <code>Provisioning</code> or <code>Error</code></td>
+					<td><code>LeaderAvailable=False</code></td>
+					<td>Inspect <code>Deployment/&lt;name&gt;-leader</code> logs and image, or verify external endpoint reachability.</td>
+			</tr>
+			<tr>
+					<td><code>KVCacheBackend</code> stays <code>Degraded</code></td>
+					<td><code>MembersMounted=False</code> (<code>SegmentsShort</code> or <code>NoSegments</code>)</td>
+					<td>Check node memory capacity and member <code>DaemonSet</code> logs on matched nodes.</td>
+			</tr>
+			<tr>
+					<td><code>KVCachePool</code> reports <code>Error</code></td>
+					<td><code>BackendResolved=False</code> or <code>CapacityAllocatable=False</code></td>
+					<td>Create or repair the referenced <code>KVCacheBackend</code> so its <code>CAPACITY</code> is non-zero.</td>
+			</tr>
+			<tr>
+					<td><code>KVCachePool</code> <code>QuotaLedgerAvailable=False</code></td>
+					<td><code>Reason: MultiTenancyDisabled</code></td>
+					<td>Expected when <code>KVCacheBackend</code> sets <code>leader.multiTenancy: false</code>; enable <code>multiTenancy</code> to enforce ceilings.</td>
+			</tr>
+			<tr>
+					<td><code>KVCachePoolBinding</code> shows <code>effectiveQuota: 0</code></td>
+					<td><code>QuotaGranted=False/ZeroGranted</code></td>
+					<td>Wait ~30 s if the leader just restarted (<code>NothingToAllocate</code>), or raise pool <em><code>quota.total</code></em> / lower sibling ceilings.</td>
+			</tr>
+			<tr>
+					<td>Pool reports <code>Oversubscribed</code></td>
+					<td><code>QuotaWithinTotal=False/Oversubscribed</code></td>
+					<td>Expected proportional recut when ceilings exceed <em><code>quota.total</code></em>; inspect <em><code>status.effectiveQuota</code></em> on each Binding.</td>
+			</tr>
+			<tr>
+					<td>Binding apply rejected on <code>domain.name</code></td>
+					<td><code>Duplicate</code> on <em><code>spec.domain.name</code></em></td>
+					<td>Another Binding on the same backend already claims that domain (<code>default</code> when omitted); set a unique <em><code>domain.name</code></em>.</td>
+			</tr>
+			<tr>
+					<td>Two Bindings claim one domain</td>
+					<td><code>DomainExclusive=False/DomainClaimedByMultipleBindings</code></td>
+					<td>Delete one of the racing <code>KVCachePoolBinding</code> objects.</td>
+			</tr>
+			<tr>
+					<td>Disk-tier member stuck or unready</td>
+					<td><code>FailedMount</code> or <code>no write permission on directory</code></td>
+					<td>Create the host directory on every matched node with <code>install -d -o 65532 -g 0 -m 0750 &lt;path&gt;</code> (<a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/#host-directory-requirements">Host directory requirements</a>
 ).</td>
-      </tr>
-      <tr>
-          <td>Disk-tier init container crash-loops</td>
-          <td><code>MembersMounted=False/MemberInitCrashLooping</code></td>
-          <td>Use a member image that includes <code>sh</code> for the directory survey init container.</td>
-      </tr>
-      <tr>
-          <td>Disk tier warns of preexisting files</td>
-          <td><code>TierWasEmpty=False/PreexistingContent</code></td>
-          <td>Empty stale files from the host path manually (<code>cleanAfterDelete: true</code> cleans only on backend deletion).</td>
-      </tr>
-      <tr>
-          <td>HA leader <code>Deployment</code> shows <code>1/3</code> Ready</td>
-          <td>Expected leader-election steady state</td>
-          <td>No action needed; two standbys remain intentionally unready until failover.</td>
-      </tr>
-      <tr>
-          <td><code>KVCachePoolBinding</code> deletion hangs</td>
-          <td><code>Releasable=False/HeldByWorkloads</code></td>
-          <td>Delete attached <code>ModelDeployment</code>s and injected <code>Pod</code>s before deleting the Binding.</td>
-      </tr>
-  </tbody>
+			</tr>
+			<tr>
+					<td>Disk-tier init container crash-loops</td>
+					<td><code>MembersMounted=False/MemberInitCrashLooping</code></td>
+					<td>Use a member image that includes <code>sh</code> for the directory survey init container.</td>
+			</tr>
+			<tr>
+					<td>Disk tier warns of preexisting files</td>
+					<td><code>TierWasEmpty=False/PreexistingContent</code></td>
+					<td>Empty stale files from the host path manually (<code>cleanAfterDelete: true</code> cleans only on backend deletion).</td>
+			</tr>
+			<tr>
+					<td>HA leader <code>Deployment</code> shows <code>1/3</code> Ready</td>
+					<td>Expected leader-election steady state</td>
+					<td>No action needed; two standbys remain intentionally unready until failover.</td>
+			</tr>
+			<tr>
+					<td><code>KVCachePoolBinding</code> deletion hangs</td>
+					<td><code>Releasable=False/HeldByWorkloads</code></td>
+					<td>Delete attached <code>ModelDeployment</code>s and injected <code>Pod</code>s before deleting the Binding.</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

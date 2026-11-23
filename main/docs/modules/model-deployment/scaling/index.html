@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Model Deployment Scaling · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1229,21 +1229,21 @@ flowchart LR
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler </span><span class="w"> </span><span class="c"># namespaced, short name mds</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler </span><span class="w"> </span><span class="c"># namespaced, short name mds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving </span><span class="w"> </span><span class="c"># required, immutable; ModelDeployment in this namespace</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode: Shadow  # default; enum</span><span class="p">:</span><span class="w"> </span><span class="l">Shadow, Active</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Shadow </span><span class="w"> </span><span class="c"># default; enum: Shadow, Active</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">suspend</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># default; true stops planning and releases binding</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sampling</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">intervalSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">15</span><span class="w">  </span><span class="c"># default; range 5..300</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">pendingTimeoutSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">300</span><span class="w">  </span><span class="c"># default; range 60..1200</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">  </span><span class="c"># required; include every target role</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas: 2  # optional, default</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="l">; range 1..1024 (no scale-to-zero)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">  </span><span class="c"># optional, default: 1; range 1..1024 (no scale-to-zero)</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">16</span><span class="w">  </span><span class="c"># required; range 1..1024, &gt;= minReplicas</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">  </span><span class="c"># one type and its matching parameter block only</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Proportional</span><span class="w">
@@ -1271,7 +1271,7 @@ flowchart LR
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c">#   type: Percent  # enum: Pods, Percent</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c">#   value: 10      # required, nonnegative</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">rebalance</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">policy: Opposing  # default; enum</span><span class="p">:</span><span class="w"> </span><span class="l">Opposing, Priority, Disabled</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">Opposing </span><span class="w"> </span><span class="c"># default; enum: Opposing, Priority, Disabled</span></span></span></code></pre></div>
 </div>
 <ul>
 <li><strong>Target ordering</strong>: A scaler may be created before its target; it reports <code>TargetNotFound</code> until
@@ -1295,34 +1295,34 @@ H100 and H200 measurements and
 <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/#step-3-choose-an-algorithm">Step 3: Choose an algorithm</a>
 .</p>
 <table>
-  <thead>
-      <tr>
-          <th>Algorithm</th>
-          <th>Mechanism</th>
-          <th>Best fit</th>
-          <th>Main constraint</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>Proportional</code></td>
-          <td>Instantaneous metric over fixed per-replica target with <em><code>tolerance</code></em> deadband</td>
-          <td>Uniform-length requests</td>
-          <td>Bursts and shifting lengths skew fixed targets</td>
-      </tr>
-      <tr>
-          <td><strong><code>TokenThroughput</code></strong></td>
-          <td><strong>Default</strong>. Stable and panic sliding windows over cache-adjusted token rates plus p95 <em>TTFT</em>/<em>ITL</em> guards</td>
-          <td>General LLM and <em>PD</em> workloads with prefix caching</td>
-          <td>Reacts after demand changes</td>
-      </tr>
-      <tr>
-          <td><code>Predictive</code></td>
-          <td>Causal Kalman filter forecasting <em><code>horizonSeconds</code></em> ahead, floored by <code>TokenThroughput</code></td>
-          <td>Sustained ramps where pre-warming offsets startup latency</td>
-          <td>Falls back to <code>TokenThroughput</code> until <em><code>minPoints</code></em> arrive</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Algorithm</th>
+					<th>Mechanism</th>
+					<th>Best fit</th>
+					<th>Main constraint</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Proportional</code></td>
+					<td>Instantaneous metric over fixed per-replica target with <em><code>tolerance</code></em> deadband</td>
+					<td>Uniform-length requests</td>
+					<td>Bursts and shifting lengths skew fixed targets</td>
+			</tr>
+			<tr>
+					<td><strong><code>TokenThroughput</code></strong></td>
+					<td><strong>Default</strong>. Stable and panic sliding windows over cache-adjusted token rates plus p95 <em>TTFT</em>/<em>ITL</em> guards</td>
+					<td>General LLM and <em>PD</em> workloads with prefix caching</td>
+					<td>Reacts after demand changes</td>
+			</tr>
+			<tr>
+					<td><code>Predictive</code></td>
+					<td>Causal Kalman filter forecasting <em><code>horizonSeconds</code></em> ahead, floored by <code>TokenThroughput</code></td>
+					<td>Sustained ramps where pre-warming offsets startup latency</td>
+					<td>Falls back to <code>TokenThroughput</code> until <em><code>minPoints</code></em> arrive</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="proportional">Proportional</h3>
 <p>Recommends <code>ceil(total / target)</code> (minimum <code>1</code>) when observed load per ready replica leaves the
@@ -1333,11 +1333,11 @@ needs a target or a direct ratio to a targeted role.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Active</span><span class="w">
@@ -1386,11 +1386,11 @@ scale-down; above <code>1.2×</code> target triggers growth.</li>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Active</span><span class="w">
@@ -1429,7 +1429,7 @@ subresource (requires RBAC <code>get</code> on <code>modeldeployments/metrics</c
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get --raw <span class="s2">&#34;/apis/worker.gpustack.ai/v1/namespaces/&lt;namespace&gt;/modeldeployments/&lt;name&gt;/metrics&#34;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;{partial, missing, processing, queueing, latency}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq <span class="s1">&#39;{partial, missing, processing, queueing, latency}&#39;</span></span></span></code></pre></div>
 </div>
 <p>The subresource scrapes up to <code>64</code> owned <code>Pod</code>s (<code>prometheus.io/scrape: &quot;true&quot;</code>,
 <code>prometheus.io/port</code>, <code>prometheus.io/scheme</code>; take-over <em><code>roles[].command</code></em> roles omit scrape
@@ -1448,11 +1448,11 @@ same-namespace <code>ConfigMap</code>). Missing or incompatible profiles fail cl
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-scaler</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
@@ -1489,34 +1489,34 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-bench
 <code>AcceleratorType</code> and <code>--quantization</code>. Pin or cross-check identities with optional
 <code>ModelDeployment</code> annotations:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Annotation</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>worker.gpustack.ai/model-id</code></td>
-          <td>Model identity guard (natural name or normalized alias)</td>
-      </tr>
-      <tr>
-          <td><code>worker.gpustack.ai/hardware-id</code></td>
-          <td>Hardware identity guard (accelerator name or slug)</td>
-      </tr>
-      <tr>
-          <td><code>worker.gpustack.ai/prefill-hardware-id</code></td>
-          <td><em>Prefill</em> hardware guard for heterogeneous targets</td>
-      </tr>
-      <tr>
-          <td><code>worker.gpustack.ai/decode-hardware-id</code></td>
-          <td><em>Decode</em> hardware guard for heterogeneous targets</td>
-      </tr>
-      <tr>
-          <td><code>worker.gpustack.ai/precision</code></td>
-          <td>Precision selector (<code>fp8</code>, <code>bf16</code>, <code>fp4</code>, etc.)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Annotation</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>worker.gpustack.ai/model-id</code></td>
+					<td>Model identity guard (natural name or normalized alias)</td>
+			</tr>
+			<tr>
+					<td><code>worker.gpustack.ai/hardware-id</code></td>
+					<td>Hardware identity guard (accelerator name or slug)</td>
+			</tr>
+			<tr>
+					<td><code>worker.gpustack.ai/prefill-hardware-id</code></td>
+					<td><em>Prefill</em> hardware guard for heterogeneous targets</td>
+			</tr>
+			<tr>
+					<td><code>worker.gpustack.ai/decode-hardware-id</code></td>
+					<td><em>Decode</em> hardware guard for heterogeneous targets</td>
+			</tr>
+			<tr>
+					<td><code>worker.gpustack.ai/precision</code></td>
+					<td>Precision selector (<code>fp8</code>, <code>bf16</code>, <code>fp4</code>, etc.)</td>
+			</tr>
+	</tbody>
 </table>
 <p>Catalog resolution supports single-<code>Pod</code> managed <em>Server</em>, <em>PD</em> and <em>EPD</em> roles with whole-card
 resources (no slicing, <em>Elastic EP</em>, <em>External DP</em>, <em><code>spec.kvCache</code></em> or <em><code>roles[].command</code></em>).</p>
@@ -1549,35 +1549,35 @@ Re-declaring the ordinal before <code>Deleting</code> cancels retirement (<code>
 <p>When a scale-up times out and reverts while the receiver still needs capacity, <em><code>rebalance.policy</code></em>
 decides whether a donor on the same nonempty <em><code>acceleratorType</code></em> retires one replica first:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Policy</th>
-          <th>Donor rule</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>Opposing</code></td>
-          <td>Default. Donor&rsquo;s own recommendation must be to shrink.</td>
-      </tr>
-      <tr>
-          <td><code>Priority</code></td>
-          <td>Lower-priority role in <em><code>rebalance.priority[]</code></em> may donate while holding.</td>
-      </tr>
-      <tr>
-          <td><code>Disabled</code></td>
-          <td>No donation attempted.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Policy</th>
+					<th>Donor rule</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Opposing</code></td>
+					<td>Default. Donor&rsquo;s own recommendation must be to shrink.</td>
+			</tr>
+			<tr>
+					<td><code>Priority</code></td>
+					<td>Lower-priority role in <em><code>rebalance.priority[]</code></em> may donate while holding.</td>
+			</tr>
+			<tr>
+					<td><code>Disabled</code></td>
+					<td>No donation attempted.</td>
+			</tr>
+	</tbody>
 </table>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-scaler</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
@@ -1611,22 +1611,22 @@ vector violates policy or a <code>Priority</code> donation already ran in this e
 <h3 id="scaler-ownership-rules">Scaler ownership rules</h3>
 <p>An <code>Active</code> scaler claims target replicas with two annotations on the <code>ModelDeployment</code>:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Annotation</th>
-          <th>Payload</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>modeldeployment.gpustack.ai/scaler-binding</code></td>
-          <td><em><code>scalerName</code></em>, <em><code>scalerUID</code></em> and monotonic <em><code>term</code></em></td>
-      </tr>
-      <tr>
-          <td><code>modeldeployment.gpustack.ai/scaler-decision</code></td>
-          <td><em><code>decisionID</code></em>, <em><code>term</code></em> and committed <em><code>vector</code></em></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Annotation</th>
+					<th>Payload</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>modeldeployment.gpustack.ai/scaler-binding</code></td>
+					<td><em><code>scalerName</code></em>, <em><code>scalerUID</code></em> and monotonic <em><code>term</code></em></td>
+			</tr>
+			<tr>
+					<td><code>modeldeployment.gpustack.ai/scaler-decision</code></td>
+					<td><em><code>decisionID</code></em>, <em><code>term</code></em> and committed <em><code>vector</code></em></td>
+			</tr>
+	</tbody>
 </table>
 <p>Admission rejects user edits to replica counts or either annotation on a bound target while allowing
 other edits. A competing scaler reports <code>AlreadyBound</code>; target recreation reports <code>TargetReplaced</code>
@@ -1637,11 +1637,11 @@ orphaned binding after scaler deletion, remove the annotation without editing re
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">argoproj.io/v1alpha1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Application</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Application</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">argocd</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ignoreDifferences</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">group</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
@@ -1659,11 +1659,11 @@ orphaned binding after scaler deletion, remove the annotation without editing re
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">kustomize.toolkit.fluxcd.io/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Kustomization</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Kustomization</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-operator</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">flux-system</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ignore</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">target</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">group</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai</span><span class="w">
@@ -1681,40 +1681,40 @@ orphaned binding after scaler deletion, remove the annotation without editing re
 <code>PredictorWarmingUp</code>, <code>PredictiveConsolidationHold</code>, <code>RatioCoupled</code>). <em><code>signalState</code></em> reports
 <code>Fresh</code>, <code>Idle</code>, <code>Missing</code> or <code>Stale</code>.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Condition</th>
-          <th>Success reason</th>
-          <th>Other reasons</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>Bound</code></td>
-          <td><code>Bound</code></td>
-          <td><code>TargetNotFound</code>, <code>AlreadyBound</code>, <code>TargetReplaced</code>, <code>InvalidBinding</code>, <code>Suspended</code></td>
-      </tr>
-      <tr>
-          <td><code>Active</code></td>
-          <td><code>Active</code></td>
-          <td><code>TargetNotFound</code>, <code>AlreadyBound</code>, <code>TargetReplaced</code>, <code>InvalidBinding</code>, <code>Suspended</code>, <code>ShadowMode</code>, <code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, <code>IncompatibleMetric</code></td>
-      </tr>
-      <tr>
-          <td><code>MetricsReady</code></td>
-          <td><code>Observed</code></td>
-          <td><code>WaitingForMetrics</code>, <code>ResourceExhausted</code>, <code>BoundsConflict</code>, <code>RatioConflict</code></td>
-      </tr>
-      <tr>
-          <td><code>CapacityPriorsReady</code></td>
-          <td><code>Resolved</code>, <code>Disabled</code></td>
-          <td><code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, <code>IncompatibleMetric</code>, <code>TargetNotFound</code>, <code>TargetReplaced</code>, <code>InvalidBinding</code>, <code>Suspended</code></td>
-      </tr>
-      <tr>
-          <td><code>Blocked</code></td>
-          <td><code>Ready</code> (<code>False</code>)</td>
-          <td><code>BoundsConflict</code>, <code>RatioConflict</code>, <code>PacingBounded</code>, <code>ResourceExhausted</code>, <code>ScaleDownAborted</code>, <code>RebalanceNotApplicable</code>, <code>RebalanceBlocked</code>, <code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, <code>IncompatibleMetric</code>, <code>RolePaused</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Condition</th>
+					<th>Success reason</th>
+					<th>Other reasons</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Bound</code></td>
+					<td><code>Bound</code></td>
+					<td><code>TargetNotFound</code>, <code>AlreadyBound</code>, <code>TargetReplaced</code>, <code>InvalidBinding</code>, <code>Suspended</code></td>
+			</tr>
+			<tr>
+					<td><code>Active</code></td>
+					<td><code>Active</code></td>
+					<td><code>TargetNotFound</code>, <code>AlreadyBound</code>, <code>TargetReplaced</code>, <code>InvalidBinding</code>, <code>Suspended</code>, <code>ShadowMode</code>, <code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, <code>IncompatibleMetric</code></td>
+			</tr>
+			<tr>
+					<td><code>MetricsReady</code></td>
+					<td><code>Observed</code></td>
+					<td><code>WaitingForMetrics</code>, <code>ResourceExhausted</code>, <code>BoundsConflict</code>, <code>RatioConflict</code></td>
+			</tr>
+			<tr>
+					<td><code>CapacityPriorsReady</code></td>
+					<td><code>Resolved</code>, <code>Disabled</code></td>
+					<td><code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, <code>IncompatibleMetric</code>, <code>TargetNotFound</code>, <code>TargetReplaced</code>, <code>InvalidBinding</code>, <code>Suspended</code></td>
+			</tr>
+			<tr>
+					<td><code>Blocked</code></td>
+					<td><code>Ready</code> (<code>False</code>)</td>
+					<td><code>BoundsConflict</code>, <code>RatioConflict</code>, <code>PacingBounded</code>, <code>ResourceExhausted</code>, <code>ScaleDownAborted</code>, <code>RebalanceNotApplicable</code>, <code>RebalanceBlocked</code>, <code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, <code>IncompatibleMetric</code>, <code>RolePaused</code></td>
+			</tr>
+	</tbody>
 </table>
 <p><code>RolePaused</code> holds replica writes while a target role is paused
 (<a href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/#scaling-during-pause">Scaling during pause</a>
@@ -1733,51 +1733,51 @@ replicas keep serving.</li>
 </ul>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Owner &amp; action</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Counts never change</td>
-          <td><code>Active=False</code> (<code>ShadowMode</code>, <code>Suspended</code>, <code>TargetNotFound</code>, <code>AlreadyBound</code>, <code>TargetReplaced</code>)</td>
-          <td>On the <code>ModelDeploymentScaler</code>, set <code>mode: Active</code>, clear <code>suspend</code>, or resolve the duplicate/replaced target binding.</td>
-      </tr>
-      <tr>
-          <td>Counts never change</td>
-          <td><code>MetricsReady=False</code> (<code>WaitingForMetrics</code>), <code>signalState: Missing</code>/<code>Stale</code></td>
-          <td>Query the <code>ModelDeployment</code> <code>/metrics</code> subresource (<code>jq '{partial,missing}'</code>), repair unreadable <code>Pod</code>s and wait two intervals.</td>
-      </tr>
-      <tr>
-          <td>Counts never change</td>
-          <td><code>CapacityPriorsReady=False</code></td>
-          <td>Fix <code>catalogRef</code> <code>ConfigMap</code>, target identity annotations, single-<code>Pod</code> topology and explicit latency targets, or supply explicit capacities on the scaler.</td>
-      </tr>
-      <tr>
-          <td>Counts never change</td>
-          <td><code>Blocked=True</code> (<code>BoundsConflict</code>, <code>RatioConflict</code>, <code>RolePaused</code>, <code>PacingBounded</code>)</td>
-          <td>Adjust scaler bounds/ratios, clear <em><code>roles[].pause</code></em> on the <code>ModelDeployment</code>, or wait for pacing/retirement windows.</td>
-      </tr>
-      <tr>
-          <td>Counts revert after growth</td>
-          <td><em><code>pendingCohort</code></em>, <code>ResourceExhausted</code></td>
-          <td>Inspect Kueue <code>ClusterQueue</code> quota and <code>Workload</code> status on the target&rsquo;s pool before retrying growth.</td>
-      </tr>
-      <tr>
-          <td>Counts revert after shrinking</td>
-          <td><em><code>lastScaleDown</code></em> (<code>Aborted</code>), target <em><code>status.retirement</code></em></td>
-          <td>Inspect <code>kubectl -n &lt;ns&gt; get md &lt;name&gt; -o json | jq '.status.retirement'</code>: add <em><code>spec.router</code></em> if aborted at <code>30 s</code>, or fix stuck/busy <code>Pod</code>s before cooldown ends.</td>
-      </tr>
-      <tr>
-          <td>Write refused by webhook</td>
-          <td>Admission error on <code>ModelDeployment</code></td>
-          <td>Configure <a href="#gitops-sync">GitOps sync</a>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Owner &amp; action</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Counts never change</td>
+					<td><code>Active=False</code> (<code>ShadowMode</code>, <code>Suspended</code>, <code>TargetNotFound</code>, <code>AlreadyBound</code>, <code>TargetReplaced</code>)</td>
+					<td>On the <code>ModelDeploymentScaler</code>, set <code>mode: Active</code>, clear <code>suspend</code>, or resolve the duplicate/replaced target binding.</td>
+			</tr>
+			<tr>
+					<td>Counts never change</td>
+					<td><code>MetricsReady=False</code> (<code>WaitingForMetrics</code>), <code>signalState: Missing</code>/<code>Stale</code></td>
+					<td>Query the <code>ModelDeployment</code> <code>/metrics</code> subresource (<code>jq '{partial,missing}'</code>), repair unreadable <code>Pod</code>s and wait two intervals.</td>
+			</tr>
+			<tr>
+					<td>Counts never change</td>
+					<td><code>CapacityPriorsReady=False</code></td>
+					<td>Fix <code>catalogRef</code> <code>ConfigMap</code>, target identity annotations, single-<code>Pod</code> topology and explicit latency targets, or supply explicit capacities on the scaler.</td>
+			</tr>
+			<tr>
+					<td>Counts never change</td>
+					<td><code>Blocked=True</code> (<code>BoundsConflict</code>, <code>RatioConflict</code>, <code>RolePaused</code>, <code>PacingBounded</code>)</td>
+					<td>Adjust scaler bounds/ratios, clear <em><code>roles[].pause</code></em> on the <code>ModelDeployment</code>, or wait for pacing/retirement windows.</td>
+			</tr>
+			<tr>
+					<td>Counts revert after growth</td>
+					<td><em><code>pendingCohort</code></em>, <code>ResourceExhausted</code></td>
+					<td>Inspect Kueue <code>ClusterQueue</code> quota and <code>Workload</code> status on the target&rsquo;s pool before retrying growth.</td>
+			</tr>
+			<tr>
+					<td>Counts revert after shrinking</td>
+					<td><em><code>lastScaleDown</code></em> (<code>Aborted</code>), target <em><code>status.retirement</code></em></td>
+					<td>Inspect <code>kubectl -n &lt;ns&gt; get md &lt;name&gt; -o json | jq '.status.retirement'</code>: add <em><code>spec.router</code></em> if aborted at <code>30 s</code>, or fix stuck/busy <code>Pod</code>s before cooldown ends.</td>
+			</tr>
+			<tr>
+					<td>Write refused by webhook</td>
+					<td>Admission error on <code>ModelDeployment</code></td>
+					<td>Configure <a href="#gitops-sync">GitOps sync</a>
  ignore paths or clear an orphaned binding annotation after deleting the scaler.</td>
-      </tr>
-  </tbody>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

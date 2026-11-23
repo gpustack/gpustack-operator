@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>RDMA Networking Walkthrough · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1221,57 +1221,57 @@ and <em>single-root I/O virtualization (SR-IOV)</em> resource keys. Nodes with a
 carry <code>feature.gpustack.ai/rdma.capable=true</code> (<a href="/gpustack-operator/main/docs/modules/rdma/operations/#rdma-resource-requests">RDMA Operations</a>
 ).</p>
 <table>
-  <thead>
-      <tr>
-          <th>Object</th>
-          <th>Scope</th>
-          <th>Creator</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>Pod</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Standalone workload requesting <em>RDMA</em> endpoints alongside GPUs</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Managed serving roles requesting fabric counts via <em><code>roles[].resources.interface</code></em></td>
-      </tr>
-      <tr>
-          <td><code>KVCacheBackend</code></td>
-          <td>cluster</td>
-          <td>administrator</td>
-          <td>Shared Mooncake cache configured for <code>RDMA</code> or <code>EFA</code> transport</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Object</th>
+					<th>Scope</th>
+					<th>Creator</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Pod</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Standalone workload requesting <em>RDMA</em> endpoints alongside GPUs</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Managed serving roles requesting fabric counts via <em><code>roles[].resources.interface</code></em></td>
+			</tr>
+			<tr>
+					<td><code>KVCacheBackend</code></td>
+					<td>cluster</td>
+					<td>administrator</td>
+					<td>Shared Mooncake cache configured for <code>RDMA</code> or <code>EFA</code> transport</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="environment">Environment</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Item</th>
-          <th>Value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Cluster</td>
-          <td>Kubernetes with GPUStack installed (illustrative configuration examples)</td>
-      </tr>
-      <tr>
-          <td>Hardware</td>
-          <td>Workload <code>Node</code>s equipped with active <em>RDMA</em>-capable NICs (or AWS EFA adapters)</td>
-      </tr>
-      <tr>
-          <td>Tools</td>
-          <td><code>kubectl</code>, <code>jq</code>, and node SSH access for Step 2 kubelet configuration</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Cluster</td>
+					<td>Kubernetes with GPUStack installed (illustrative configuration examples)</td>
+			</tr>
+			<tr>
+					<td>Hardware</td>
+					<td>Workload <code>Node</code>s equipped with active <em>RDMA</em>-capable NICs (or AWS EFA adapters)</td>
+			</tr>
+			<tr>
+					<td>Tools</td>
+					<td><code>kubectl</code>, <code>jq</code>, and node SSH access for Step 2 kubelet configuration</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="node-configuration">Node configuration</h2>
 <h3 id="step-1-request-rdma-endpoints">Step 1: Request RDMA endpoints</h3>
@@ -1302,13 +1302,13 @@ its <code>gpustack-fnv64-&lt;hash&gt;</code> name, and apply <code>trainer-0.yam
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">trainer-0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-fnv64-&lt;hash&gt; </span><span class="w"> </span><span class="c"># required for Kueue admission</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">restartPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">Never</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">trainer</span><span class="w">
@@ -1380,11 +1380,11 @@ uses it (such as a managed <em>PD</em> pair or an <em>RDMA</em>/<em>EFA</em> <co
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-pd</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-7B-Instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
@@ -1414,7 +1414,7 @@ uses it (such as a managed <em>PD</em> pair or an <em>RDMA</em>/<em>EFA</em> <co
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f qwen-pd.yaml
 </span></span><span class="line"><span class="cl">kubectl -n team-a get pods -l app.kubernetes.io/instance<span class="o">=</span>qwen-pd,app.kubernetes.io/component<span class="o">=</span>prefill <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o json <span class="p">|</span> jq <span class="s1">&#39;.items[0].spec.containers[0].resources.limits&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -o json <span class="p">|</span> jq <span class="s1">&#39;.items[0].spec.containers[0].resources.limits&#39;</span></span></span></code></pre></div>
 </div>
 <p>Example output (illustrative):</p>
 <div class="code-block">
@@ -1441,7 +1441,7 @@ from TCP to <code>RDMA</code> and allocate two fabric interfaces per member:</p>
 </span></span><span class="line"><span class="cl">   type: Mooncake
 </span></span><span class="line"><span class="cl"><span class="gi">+  transport:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+    protocol: RDMA
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>   connection:
+</span></span></span><span class="line"><span class="cl">   connection:
 </span></span><span class="line"><span class="cl">     managed:
 </span></span><span class="line"><span class="cl">       leader: {}
 </span></span><span class="line"><span class="cl">       members:
@@ -1467,10 +1467,10 @@ on <code>KVCacheBackend</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mooncake-efa</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Mooncake</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">transport</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">EFA</span><span class="w">
@@ -1505,52 +1505,52 @@ so Kueue can admit a <code>Workload</code> that then waits <code>Pending</code> 
 </ul>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>rdma</code> keys report <code>0</code> allocatable</td>
-          <td>Links <code>Failed</code> or filtered out by policy</td>
-          <td>Inspect <code>kubectl get devices &lt;node&gt; -o json</code> and <code>DevicesRDMASelectionPolicy</code> (<a href="/gpustack-operator/main/docs/modules/rdma/operations/#selection-policy">Selection policy</a>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>rdma</code> keys report <code>0</code> allocatable</td>
+					<td>Links <code>Failed</code> or filtered out by policy</td>
+					<td>Inspect <code>kubectl get devices &lt;node&gt; -o json</code> and <code>DevicesRDMASelectionPolicy</code> (<a href="/gpustack-operator/main/docs/modules/rdma/operations/#selection-policy">Selection policy</a>
 ); fix cabling, subnet manager, or policy filters (never hand-edit <code>Devices</code> status).</td>
-      </tr>
-      <tr>
-          <td><code>Workload</code> admitted by Kueue, <code>Pod</code> stays <code>Pending</code></td>
-          <td>Insufficient free node <code>device.gpustack.ai/rdma*</code></td>
-          <td>Kueue does not meter network keys; check <code>Node.status.allocatable</code> and active <code>Pod</code> requests, then free endpoints or lower <em><code>resources.interface</code></em>.</td>
-      </tr>
-      <tr>
-          <td><code>Pod</code> fails placement with <code>TopologyAffinityError</code></td>
-          <td>Free GPUs and NICs sit on different <em>NUMA</em> sockets</td>
-          <td>Confirm <code>topologyManagerPolicy: restricted</code> in <code>/var/lib/kubelet/config.yaml</code> and keep GPU and <em>RDMA</em> requests in the same container.</td>
-      </tr>
-      <tr>
-          <td>Fewer <code>uverbs</code> devices mounted than <code>rdma.shared</code> count</td>
-          <td>Shared units exceed eligible HCA count</td>
-          <td>Expected round-robin behavior; switch to <code>device.gpustack.ai/rdma</code> (<code>interface &gt; 1</code>) when each unit requires its own physical HCA.</td>
-      </tr>
-      <tr>
-          <td><code>Node</code> loses <code>feature.gpustack.ai/rdma.capable</code></td>
-          <td>Every endpoint on the host is <code>Failed</code> or unbound</td>
-          <td>Check host <code>dmesg</code> and NIC carrier state (<a href="/gpustack-operator/main/docs/modules/rdma/operations/#nic-record-inspection">NIC record inspection</a>
+			</tr>
+			<tr>
+					<td><code>Workload</code> admitted by Kueue, <code>Pod</code> stays <code>Pending</code></td>
+					<td>Insufficient free node <code>device.gpustack.ai/rdma*</code></td>
+					<td>Kueue does not meter network keys; check <code>Node.status.allocatable</code> and active <code>Pod</code> requests, then free endpoints or lower <em><code>resources.interface</code></em>.</td>
+			</tr>
+			<tr>
+					<td><code>Pod</code> fails placement with <code>TopologyAffinityError</code></td>
+					<td>Free GPUs and NICs sit on different <em>NUMA</em> sockets</td>
+					<td>Confirm <code>topologyManagerPolicy: restricted</code> in <code>/var/lib/kubelet/config.yaml</code> and keep GPU and <em>RDMA</em> requests in the same container.</td>
+			</tr>
+			<tr>
+					<td>Fewer <code>uverbs</code> devices mounted than <code>rdma.shared</code> count</td>
+					<td>Shared units exceed eligible HCA count</td>
+					<td>Expected round-robin behavior; switch to <code>device.gpustack.ai/rdma</code> (<code>interface &gt; 1</code>) when each unit requires its own physical HCA.</td>
+			</tr>
+			<tr>
+					<td><code>Node</code> loses <code>feature.gpustack.ai/rdma.capable</code></td>
+					<td>Every endpoint on the host is <code>Failed</code> or unbound</td>
+					<td>Check host <code>dmesg</code> and NIC carrier state (<a href="/gpustack-operator/main/docs/modules/rdma/operations/#nic-record-inspection">NIC record inspection</a>
 ); Device Manager restores the label automatically once a link recovers.</td>
-      </tr>
-      <tr>
-          <td>AWS EFA <code>Pod</code> stays <code>Pending</code></td>
-          <td>Requested <code>device.gpustack.ai/rdma*</code> on EFA host</td>
-          <td>Patch <code>Setting/aws-efa-enabled</code> to <code>&quot;true&quot;</code> for <code>ModelDeployment</code>, or set <code>transport.protocol: EFA</code> on <code>KVCacheBackend</code>.</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code> rejected: <code>no effective RDMA or EFA transfer leg uses the requested interfaces</code></td>
-          <td><em><code>resources.interface</code></em> set without an active fabric leg</td>
-          <td>Pair managed <em>Prefill</em> and <em>Decode</em> roles behind a router, attach an <code>RDMA</code>/<code>EFA</code> KV cache pool, or remove <em><code>resources.interface</code></em>.</td>
-      </tr>
-  </tbody>
+			</tr>
+			<tr>
+					<td>AWS EFA <code>Pod</code> stays <code>Pending</code></td>
+					<td>Requested <code>device.gpustack.ai/rdma*</code> on EFA host</td>
+					<td>Patch <code>Setting/aws-efa-enabled</code> to <code>&quot;true&quot;</code> for <code>ModelDeployment</code>, or set <code>transport.protocol: EFA</code> on <code>KVCacheBackend</code>.</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code> rejected: <code>no effective RDMA or EFA transfer leg uses the requested interfaces</code></td>
+					<td><em><code>resources.interface</code></em> set without an active fabric leg</td>
+					<td>Pair managed <em>Prefill</em> and <em>Decode</em> roles behind a router, attach an <code>RDMA</code>/<code>EFA</code> KV cache pool, or remove <em><code>resources.interface</code></em>.</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

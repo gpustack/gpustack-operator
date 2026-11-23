@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Walkthroughs · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1212,138 +1212,138 @@ parallelism (EP)</em>. See <a href="/gpustack-operator/main/docs/modules/model-d
  for serving
 contracts and benchmarks.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Module</th>
-          <th>Walkthrough</th>
-          <th>Task</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Heterogeneous Devices</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/">Heterogeneous Devices</a>
+	<thead>
+			<tr>
+					<th>Module</th>
+					<th>Walkthrough</th>
+					<th>Task</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Heterogeneous Devices</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/">Heterogeneous Devices</a>
 </td>
-          <td>Inspect pool derivation, node opt-out, logical slicing, custom <code>InstanceType</code>s, CPU awareness, and node pinning.</td>
-      </tr>
-      <tr>
-          <td>RDMA Networking</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/">RDMA Networking</a>
+					<td>Inspect pool derivation, node opt-out, logical slicing, custom <code>InstanceType</code>s, CPU awareness, and node pinning.</td>
+			</tr>
+			<tr>
+					<td>RDMA Networking</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/">RDMA Networking</a>
 </td>
-          <td>Request shared and exclusive <em>RDMA</em> endpoints, align <em>NUMA</em> with kubelet, and attach fabric to KV cache or <em>PD</em> roles.</td>
-      </tr>
-      <tr>
-          <td>Topology</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/">Hierarchical Placement</a>
+					<td>Request shared and exclusive <em>RDMA</em> endpoints, align <em>NUMA</em> with kubelet, and attach fabric to KV cache or <em>PD</em> roles.</td>
+			</tr>
+			<tr>
+					<td>Topology</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/">Hierarchical Placement</a>
 </td>
-          <td>Publish zone and rack hierarchies and constrain multi-<code>Pod</code> replicas to one failure domain.</td>
-      </tr>
-      <tr>
-          <td>KV Cache</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/">Shared Cache</a>
+					<td>Publish zone and rack hierarchies and constrain multi-<code>Pod</code> replicas to one failure domain.</td>
+			</tr>
+			<tr>
+					<td>KV Cache</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/">Shared Cache</a>
 </td>
-          <td>Stand up a backend, pool, namespace binding, HA leader, local disk tier, and attached serving workload.</td>
-      </tr>
-      <tr>
-          <td>Model Delivery</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">Model Prefetch</a>
+					<td>Stand up a backend, pool, namespace binding, HA leader, local disk tier, and attached serving workload.</td>
+			</tr>
+			<tr>
+					<td>Model Delivery</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">Model Prefetch</a>
 </td>
-          <td>Prefetch verified Hugging Face weights onto a GPU node and pin them against eviction.</td>
-      </tr>
-      <tr>
-          <td>Model Deployment</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/">Preparation and choices</a>
+					<td>Prefetch verified Hugging Face weights onto a GPU node and pin them against eviction.</td>
+			</tr>
+			<tr>
+					<td>Model Deployment</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/">Preparation and choices</a>
 </td>
-          <td>Compare serving topologies and prepare cluster prerequisites and GPU <code>AcceleratorType</code>s.</td>
-      </tr>
-      <tr>
-          <td>Model Deployment</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/">Prefill and Decode</a>
+					<td>Compare serving topologies and prepare cluster prerequisites and GPU <code>AcceleratorType</code>s.</td>
+			</tr>
+			<tr>
+					<td>Model Deployment</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/">Prefill and Decode</a>
 </td>
-          <td>Deploy disaggregated <em>Prefill</em> and <em>Decode</em> roles behind <code>llm-d-router</code>.</td>
-      </tr>
-      <tr>
-          <td>Model Deployment</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/">Encode, Prefill and Decode</a>
+					<td>Deploy disaggregated <em>Prefill</em> and <em>Decode</em> roles behind <code>llm-d-router</code>.</td>
+			</tr>
+			<tr>
+					<td>Model Deployment</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/">Encode, Prefill and Decode</a>
 </td>
-          <td>Deploy multimodal <em>Encode</em>, <em>Prefill</em>, and <em>Decode</em> roles with NIXL encoder-cache transfer.</td>
-      </tr>
-      <tr>
-          <td>Model Deployment</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/">Elastic EP</a>
+					<td>Deploy multimodal <em>Encode</em>, <em>Prefill</em>, and <em>Decode</em> roles with NIXL encoder-cache transfer.</td>
+			</tr>
+			<tr>
+					<td>Model Deployment</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/">Elastic EP</a>
 </td>
-          <td>Expand a live Ray <em>EP</em> collective from <em>DP</em> width 2 → 4 (<em>EP</em> world size 4 → 8) without replacing surviving <code>Pod</code>s.</td>
-      </tr>
-      <tr>
-          <td>Model Deployment</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP</a>
+					<td>Expand a live Ray <em>EP</em> collective from <em>DP</em> width 2 → 4 (<em>EP</em> world size 4 → 8) without replacing surviving <code>Pod</code>s.</td>
+			</tr>
+			<tr>
+					<td>Model Deployment</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP</a>
 </td>
-          <td>Deploy four fixed <em>DP</em> ranks (<em>TP</em> = 2, <em>EP</em> world size 8) behind <code>vllm-router</code> and verify all-rank coverage.</td>
-      </tr>
-      <tr>
-          <td>Model Deployment</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/">Scaling</a>
+					<td>Deploy four fixed <em>DP</em> ranks (<em>TP</em> = 2, <em>EP</em> world size 8) behind <code>vllm-router</code> and verify all-rank coverage.</td>
+			</tr>
+			<tr>
+					<td>Model Deployment</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/">Scaling</a>
 </td>
-          <td>Observe a <code>ModelDeploymentScaler</code> in <code>Shadow</code> mode, select an algorithm or catalog prior, and activate scaling.</td>
-      </tr>
-      <tr>
-          <td>Model Deployment</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/">Online Runtime Control</a>
+					<td>Observe a <code>ModelDeploymentScaler</code> in <code>Shadow</code> mode, select an algorithm or catalog prior, and activate scaling.</td>
+			</tr>
+			<tr>
+					<td>Model Deployment</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/">Online Runtime Control</a>
 </td>
-          <td>Tune vLLM and SGLang parameters live, pause roles safely with an active scaler, and verify restart replay.</td>
-      </tr>
-      <tr>
-          <td>Model Deployment</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/">Multi-Host</a>
+					<td>Tune vLLM and SGLang parameters live, pause roles safely with an active scaler, and verify restart replay.</td>
+			</tr>
+			<tr>
+					<td>Model Deployment</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/">Multi-Host</a>
 </td>
-          <td>Span one 16-GPU serving instance across two physical GPU hosts with gang admission.</td>
-      </tr>
-  </tbody>
+					<td>Span one 16-GPU serving instance across two physical GPU hosts with gang admission.</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="cross-module-configurations">Cross-module configurations</h2>
 <p>Multi-module sequences converge here so capability guides stay focused on single-module contracts.
 Verify each page&rsquo;s prerequisites and limitations before adapting a manifest to other hardware or
 transports.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Configuration</th>
-          <th>Walkthrough</th>
-          <th>Linkage</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Model delivery and serving</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">Model Prefetch</a>
+	<thead>
+			<tr>
+					<th>Configuration</th>
+					<th>Walkthrough</th>
+					<th>Linkage</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Model delivery and serving</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">Model Prefetch</a>
 </td>
-          <td><code>ModelStoreBinding</code> grants cache quota; <code>ModelDeployment</code> mounts the resolved <code>ModelArtifact</code>.</td>
-      </tr>
-      <tr>
-          <td>Shared cache and serving</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/">Shared Cache</a>
+					<td><code>ModelStoreBinding</code> grants cache quota; <code>ModelDeployment</code> mounts the resolved <code>ModelArtifact</code>.</td>
+			</tr>
+			<tr>
+					<td>Shared cache and serving</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/">Shared Cache</a>
 </td>
-          <td><code>KVCacheBackend</code> backs a <code>KVCachePool</code>; <code>KVCachePoolBinding</code> injects client config into workloads.</td>
-      </tr>
-      <tr>
-          <td>RDMA and shared cache</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/#step-4-configure-rdma-cache">RDMA Networking</a>
+					<td><code>KVCacheBackend</code> backs a <code>KVCachePool</code>; <code>KVCachePoolBinding</code> injects client config into workloads.</td>
+			</tr>
+			<tr>
+					<td>RDMA and shared cache</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/#step-4-configure-rdma-cache">RDMA Networking</a>
 </td>
-          <td><code>KVCacheBackend</code> switches transport to <code>RDMA</code> and claims fabric interfaces per member.</td>
-      </tr>
-      <tr>
-          <td>Delivery, serving, and scaling</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/">Scaling</a>
+					<td><code>KVCacheBackend</code> switches transport to <code>RDMA</code> and claims fabric interfaces per member.</td>
+			</tr>
+			<tr>
+					<td>Delivery, serving, and scaling</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/">Scaling</a>
 </td>
-          <td><code>ModelDeployment</code> serves a prefetched <code>ModelArtifact</code> while <code>ModelDeploymentScaler</code> drives replica counts.</td>
-      </tr>
-      <tr>
-          <td>Topology and serving</td>
-          <td><a href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/">Hierarchical Placement</a>
+					<td><code>ModelDeployment</code> serves a prefetched <code>ModelArtifact</code> while <code>ModelDeploymentScaler</code> drives replica counts.</td>
+			</tr>
+			<tr>
+					<td>Topology and serving</td>
+					<td><a href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/">Hierarchical Placement</a>
 </td>
-          <td><code>TopologySource</code> publishes zone or rack domains enforced by <em><code>roles[].topology.requiredLevel</code></em>.</td>
-      </tr>
-  </tbody>
+					<td><code>TopologySource</code> publishes zone or rack domains enforced by <em><code>roles[].topology.requiredLevel</code></em>.</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="captured-and-illustrative-output">Captured and illustrative output</h2>
 <p>Each step pairs commands with <code>Captured output</code> from a live cluster run or <code>Example output (illustrative)</code> showing the expected signal. A resource reaching <code>Ready</code> does not by itself prove

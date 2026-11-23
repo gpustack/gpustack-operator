@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Prefill and Decode · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1228,15 +1228,15 @@ flowchart LR
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-pd</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-72B-Instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name: vLLM  # enum</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM, SGLang</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM </span><span class="w"> </span><span class="c"># enum: vLLM, SGLang</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;a runner image your cluster can pull&gt; </span><span class="w"> </span><span class="c"># required</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-d-router </span><span class="w"> </span><span class="c"># required to pair Prefill and Decode</span><span class="w">
@@ -1288,37 +1288,37 @@ frozen after creation):</p>
 request splits across roles.</p>
 <p>Admission matches <em><code>spec.router.name</code></em> to <em><code>spec.engine.name</code></em> and rejects cross pairings:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Router</th>
-          <th>Engines</th>
-          <th>Rendered configuration</th>
-          <th>Routing policy</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>llm-d-router</code></td>
-          <td><code>vLLM</code>, <code>SGLang</code></td>
-          <td>Endpoint picker behind a proxy with a mounted config file</td>
-          <td><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#fixed-scoring-profile">Fixed scoring profile</a>
+	<thead>
+			<tr>
+					<th>Router</th>
+					<th>Engines</th>
+					<th>Rendered configuration</th>
+					<th>Routing policy</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>llm-d-router</code></td>
+					<td><code>vLLM</code>, <code>SGLang</code></td>
+					<td>Endpoint picker behind a proxy with a mounted config file</td>
+					<td><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#fixed-scoring-profile">Fixed scoring profile</a>
 </td>
-      </tr>
-      <tr>
-          <td><code>vllm-router</code></td>
-          <td><code>vLLM</code></td>
-          <td>Single process configured by CLI flags</td>
-          <td><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#policy-overrides"><code>cache_aware</code>, or <code>--policy</code></a>
+			</tr>
+			<tr>
+					<td><code>vllm-router</code></td>
+					<td><code>vLLM</code></td>
+					<td>Single process configured by CLI flags</td>
+					<td><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#policy-overrides"><code>cache_aware</code>, or <code>--policy</code></a>
 </td>
-      </tr>
-      <tr>
-          <td><code>sglang-gateway</code></td>
-          <td><code>SGLang</code></td>
-          <td>Single process configured by CLI flags</td>
-          <td><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#policy-overrides"><code>cache_aware</code>, or <code>--policy</code></a>
+			</tr>
+			<tr>
+					<td><code>sglang-gateway</code></td>
+					<td><code>SGLang</code></td>
+					<td>Single process configured by CLI flags</td>
+					<td><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#policy-overrides"><code>cache_aware</code>, or <code>--policy</code></a>
 </td>
-      </tr>
-  </tbody>
+			</tr>
+	</tbody>
 </table>
 <ul>
 <li><strong>Router replicas</strong>: <em><code>spec.router.replicas</code></em> defaults to <code>1</code>. Running <code>&gt; 1</code> trades prefix-cache
@@ -1350,34 +1350,34 @@ The router counts prompt tokens via <code>POST /v1/chat/completions/render</code
 under <code>--enable-scale-out</code> (floor: vLLM <code>0.30.0</code>, vLLM-Ascend <code>0.30.0rc1</code>). Admission does not
 check for the flag, and the operator does not inject it.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Declared roles</th>
-          <th>Token counting</th>
-          <th>Flag needed</th>
-          <th>Rendered flag</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><em>Encode</em>, <em>Prefill</em>, <em>Decode</em></td>
-          <td>Router built-in estimator; no HTTP call</td>
-          <td>No</td>
-          <td>None</td>
-      </tr>
-      <tr>
-          <td><em>Prefill</em>, <em>Decode</em></td>
-          <td>Engine <code>/v1/chat/completions/render</code> call</td>
-          <td>Yes</td>
-          <td>None</td>
-      </tr>
-      <tr>
-          <td>Single <em>Server</em> role</td>
-          <td>Engine <code>/v1/chat/completions/render</code> call</td>
-          <td>Yes</td>
-          <td>None</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Declared roles</th>
+					<th>Token counting</th>
+					<th>Flag needed</th>
+					<th>Rendered flag</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><em>Encode</em>, <em>Prefill</em>, <em>Decode</em></td>
+					<td>Router built-in estimator; no HTTP call</td>
+					<td>No</td>
+					<td>None</td>
+			</tr>
+			<tr>
+					<td><em>Prefill</em>, <em>Decode</em></td>
+					<td>Engine <code>/v1/chat/completions/render</code> call</td>
+					<td>Yes</td>
+					<td>None</td>
+			</tr>
+			<tr>
+					<td>Single <em>Server</em> role</td>
+					<td>Engine <code>/v1/chat/completions/render</code> call</td>
+					<td>Yes</td>
+					<td>None</td>
+			</tr>
+	</tbody>
 </table>
 <p><strong>Without <code>--enable-scale-out</code>, disaggregation fails silently.</strong> Render calls return <code>404</code>, the
 router sends every request to <em>Decode</em> alone, clients receive <code>200</code>, and <em>Prefill</em> receives zero
@@ -1397,7 +1397,7 @@ completions (<a href="/gpustack-operator/main/docs/modules/model-deployment/enco
 </span></span><span class="line"><span class="cl">       kind: Prefill
 </span></span><span class="line"><span class="cl"><span class="gi">+      extraArgs:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+        - --enable-scale-out
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>     - name: decode
+</span></span></span><span class="line"><span class="cl">     - name: decode
 </span></span><span class="line"><span class="cl">       kind: Decode
 </span></span><span class="line"><span class="cl"><span class="gi">+      extraArgs:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+        - --enable-scale-out
@@ -1410,31 +1410,31 @@ unknown flag.</p>
 . Other
 router paths:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Router path</th>
-          <th><code>--enable-scale-out</code> status</th>
-          <th>Configuration path</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>vllm-router</code> + vLLM</td>
-          <td>Not established</td>
-          <td>Uses router <em>PD</em> mode and selectors; <em>encode/prefill/decode (EPD)</em> renders <a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#encode-stage-routing"><code>--epd-config</code></a>
+	<thead>
+			<tr>
+					<th>Router path</th>
+					<th><code>--enable-scale-out</code> status</th>
+					<th>Configuration path</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>vllm-router</code> + vLLM</td>
+					<td>Not established</td>
+					<td>Uses router <em>PD</em> mode and selectors; <em>encode/prefill/decode (EPD)</em> renders <a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#encode-stage-routing"><code>--epd-config</code></a>
 </td>
-      </tr>
-      <tr>
-          <td><code>sglang-gateway</code> + SGLang</td>
-          <td>Not applicable</td>
-          <td>Uses SGLang native disaggregation flags</td>
-      </tr>
-      <tr>
-          <td><code>llm-d-router</code> + SGLang</td>
-          <td>Not applicable; token path unmeasured</td>
-          <td>Uses SGLang native disaggregation flags</td>
-      </tr>
-  </tbody>
+			</tr>
+			<tr>
+					<td><code>sglang-gateway</code> + SGLang</td>
+					<td>Not applicable</td>
+					<td>Uses SGLang native disaggregation flags</td>
+			</tr>
+			<tr>
+					<td><code>llm-d-router</code> + SGLang</td>
+					<td>Not applicable; token path unmeasured</td>
+					<td>Uses SGLang native disaggregation flags</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="direct-kv-transports">Direct KV transports</h2>
 <p><em><code>spec.kvTransfer.backend</code></em> selects <code>Mooncake</code>, <code>NIXL</code> or <code>HIXL</code>. If omitted, it defaults to
@@ -1519,11 +1519,11 @@ uses <code>RDMA</code>). Static-UB take-over via <em><code>roles[].command</code
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-a5-roce</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-72B-Instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
@@ -1540,7 +1540,7 @@ uses <code>RDMA</code>). Static-UB take-over via <em><code>roles[].command</code
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType: atlas-950  # converged status.detail.family</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;950&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">atlas-950 </span><span class="w"> </span><span class="c"># converged status.detail.family: &#34;950&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">interface</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># required on both Prefill and Decode for Host RoCE</span><span class="w">

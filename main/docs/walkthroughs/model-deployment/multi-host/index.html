@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Multi-Host Serving Walkthrough · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1220,34 +1220,34 @@ exceeds one node, using gang admission and operator-injected leader coordinates.
 replica under Kueue gang scheduling. Member <code>m0</code> runs the Ray head and receives all <code>Service</code> HTTP
 traffic, while subordinate members (<code>m1</code>..<code>mN</code>) join <code>m0</code> using injected discovery variables:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Object</th>
-          <th>Scope</th>
-          <th>Creator</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ModelArtifact</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Resolves <code>deepseek-v2-lite-chat</code> weights warmed onto both GPU hosts</td>
-      </tr>
-      <tr>
-          <td><code>AcceleratorType</code></td>
-          <td>cluster</td>
-          <td>operator</td>
-          <td>Discovered whole-GPU H100 pool requested by every member</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Two-node (<code>size: 2</code>, 16-GPU) Ray serving group</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Object</th>
+					<th>Scope</th>
+					<th>Creator</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ModelArtifact</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Resolves <code>deepseek-v2-lite-chat</code> weights warmed onto both GPU hosts</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td>cluster</td>
+					<td>operator</td>
+					<td>Discovered whole-GPU H100 pool requested by every member</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Two-node (<code>size: 2</code>, 16-GPU) Ray serving group</td>
+			</tr>
+	</tbody>
 </table>
 <p>This 16-GPU layout (<em>tensor parallelism (TP)</em> = 8 within each node, <em>pipeline parallelism (PP)</em> = 2 across two nodes) is an illustrative configuration example.
 Complete <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#cluster-preparation">Cluster preparation</a>
@@ -1256,30 +1256,30 @@ Complete <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#cl
  in namespace <code>gpustack-elastic</code> with <code>minReady: 2</code> across both GPU hosts so both <code>m0</code> and <code>m1</code> mount warm local weights.</p>
 <h3 id="environment">Environment</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Item</th>
-          <th>Value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Nodes</td>
-          <td>Two physical GPU hosts (<code>8</code> GPUs each, <code>16</code> GPUs total)</td>
-      </tr>
-      <tr>
-          <td>Fabric</td>
-          <td>High-speed inter-node network (InfiniBand, RoCE, or AWS EFA)</td>
-      </tr>
-      <tr>
-          <td><code>AcceleratorType</code></td>
-          <td><code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
-      </tr>
-      <tr>
-          <td>Namespace and model</td>
-          <td><code>gpustack-elastic</code> with <code>ModelArtifact</code> <code>deepseek-v2-lite-chat</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Nodes</td>
+					<td>Two physical GPU hosts (<code>8</code> GPUs each, <code>16</code> GPUs total)</td>
+			</tr>
+			<tr>
+					<td>Fabric</td>
+					<td>High-speed inter-node network (InfiniBand, RoCE, or AWS EFA)</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td><code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
+			</tr>
+			<tr>
+					<td>Namespace and model</td>
+					<td><code>gpustack-elastic</code> with <code>ModelArtifact</code> <code>deepseek-v2-lite-chat</code></td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="step-1-deploy-distributed-model">Step 1: Deploy distributed model</h2>
 <p>Because the operator does not synthesize multi-node Ray startup commands, multi-host roles use the
@@ -1290,11 +1290,11 @@ take-over tier (<em><code>roles[].command</code></em>, which sets <code>status.r
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-multi-host</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-elastic</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
@@ -1363,10 +1363,10 @@ entrypoint), send a completion request to <code>Service/deepseek-multi-host-serv
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic run test-client --rm -i --restart<span class="o">=</span>Never <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --image<span class="o">=</span>curlimages/curl -- <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  curl -fsS http://deepseek-multi-host-server:8000/v1/chat/completions <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -H <span class="s2">&#34;Content-Type: application/json&#34;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -d <span class="s1">&#39;{
+</span></span></span><span class="line"><span class="cl">  --image<span class="o">=</span>curlimages/curl -- <span class="se">\
+</span></span></span><span class="line"><span class="cl">  curl -fsS http://deepseek-multi-host-server:8000/v1/chat/completions <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -H <span class="s2">&#34;Content-Type: application/json&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -d <span class="s1">&#39;{
 </span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;model&#34;: &#34;deepseek-v2-lite-chat&#34;,
 </span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;messages&#34;: [{&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: &#34;Hello distributed inference!&#34;}],
 </span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;max_tokens&#34;: 16
@@ -1387,8 +1387,8 @@ entrypoint), send a completion request to <code>Service/deepseek-multi-host-serv
 </span></span><span class="line"><span class="cl">   roles:
 </span></span><span class="line"><span class="cl">     - name: server
 </span></span><span class="line"><span class="cl"><span class="gd">-      replicas: 1
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+      replicas: 2
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>       size: 2
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      replicas: 2
+</span></span></span><span class="line"><span class="cl">       size: 2
 </span></span></code></pre></div>
 </div>
 <p>Editing <em><code>size</code></em>, <em><code>resources</code></em>, or <em><code>acceleratorType</code></em> replaces whole replica groups one slot per pass
@@ -1417,40 +1417,40 @@ replica group rather than expanding live.</li>
 </ul>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ModelDeployment</code> stuck in <code>Starting</code>, missing <code>Workload</code></td>
-          <td><code>QuotaReserved=False/PodGroupIncomplete</code></td>
-          <td>Read <code>QuotaReserved</code> on <code>ModelDeployment</code> and inspect missing or rejected member <code>Pod</code>s.</td>
-      </tr>
-      <tr>
-          <td>Entire replica tears down and rebuilds</td>
-          <td><code>ReplicasUpToDate=False/ReplacementInProgress</code></td>
-          <td>One member <code>Pod</code> was evicted, drained, or deleted; because members share fate, the operator rebuilds the whole <code>size</code>-member replica. Check node and Kueue events.</td>
-      </tr>
-      <tr>
-          <td>Replica stays <code>Pending</code> for quota</td>
-          <td><code>QuotaReserved=False/Pending</code></td>
-          <td><code>ClusterQueue</code> lacks <code>size × accelerator</code> free GPUs across distinct hosts; free capacity or reduce <em><code>replicas</code></em> / <em><code>size</code></em>.</td>
-      </tr>
-      <tr>
-          <td><code>m1</code> cannot join <code>m0</code> Ray head</td>
-          <td>Connection errors in <code>m1</code> logs</td>
-          <td>Verify headless <code>Service</code> DNS resolution for <code>GPUSTACK_REPLICA_LEADER_ADDRESS</code> and allow port <code>6379</code> plus Ray/NCCL ephemeral ports in <code>NetworkPolicy</code>.</td>
-      </tr>
-      <tr>
-          <td>vLLM exits on invalid parallel world size</td>
-          <td>Startup error in <code>m0</code> logs</td>
-          <td>Ensure <code>--tensor-parallel-size</code> equals per-member <code>resources.accelerator</code> (<code>8</code>) and <code>--pipeline-parallel-size</code> equals <code>GPUSTACK_REPLICA_SIZE</code> (<code>2</code>).</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ModelDeployment</code> stuck in <code>Starting</code>, missing <code>Workload</code></td>
+					<td><code>QuotaReserved=False/PodGroupIncomplete</code></td>
+					<td>Read <code>QuotaReserved</code> on <code>ModelDeployment</code> and inspect missing or rejected member <code>Pod</code>s.</td>
+			</tr>
+			<tr>
+					<td>Entire replica tears down and rebuilds</td>
+					<td><code>ReplicasUpToDate=False/ReplacementInProgress</code></td>
+					<td>One member <code>Pod</code> was evicted, drained, or deleted; because members share fate, the operator rebuilds the whole <code>size</code>-member replica. Check node and Kueue events.</td>
+			</tr>
+			<tr>
+					<td>Replica stays <code>Pending</code> for quota</td>
+					<td><code>QuotaReserved=False/Pending</code></td>
+					<td><code>ClusterQueue</code> lacks <code>size × accelerator</code> free GPUs across distinct hosts; free capacity or reduce <em><code>replicas</code></em> / <em><code>size</code></em>.</td>
+			</tr>
+			<tr>
+					<td><code>m1</code> cannot join <code>m0</code> Ray head</td>
+					<td>Connection errors in <code>m1</code> logs</td>
+					<td>Verify headless <code>Service</code> DNS resolution for <code>GPUSTACK_REPLICA_LEADER_ADDRESS</code> and allow port <code>6379</code> plus Ray/NCCL ephemeral ports in <code>NetworkPolicy</code>.</td>
+			</tr>
+			<tr>
+					<td>vLLM exits on invalid parallel world size</td>
+					<td>Startup error in <code>m0</code> logs</td>
+					<td>Ensure <code>--tensor-parallel-size</code> equals per-member <code>resources.accelerator</code> (<code>8</code>) and <code>--pipeline-parallel-size</code> equals <code>GPUSTACK_REPLICA_SIZE</code> (<code>2</code>).</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

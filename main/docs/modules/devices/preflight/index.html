@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Preflight Checks · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1241,10 +1241,10 @@ and <code>/dev</code> discovery).</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /opt/rocm:/opt/rocm:ro -v /opt/rocm/lib:/opt/rocm/lib:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>amd</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -v /opt/rocm:/opt/rocm:ro -v /opt/rocm/lib:/opt/rocm/lib:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>amd</span></span></code></pre></div>
 </div>
 <p>Mount both <code>/opt/rocm</code> and <code>/opt/rocm/lib</code> so the host resolves ROCm symlinks on multi-version
 installations (or mount <code>-v /opt/rocm/core-&lt;ver&gt;:/opt/rocm:ro</code> to test one version).</p>
@@ -1252,10 +1252,10 @@ installations (or mount <code>-v /opt/rocm/core-&lt;ver&gt;:/opt/rocm:ro</code> 
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /usr/local/Ascend:/usr/local/Ascend:ro -v /usr/local/dcmi:/usr/local/dcmi:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>ascend</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -v /usr/local/Ascend:/usr/local/Ascend:ro -v /usr/local/dcmi:/usr/local/dcmi:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>ascend</span></span></code></pre></div>
 </div>
 <p>The outer container needs no <code>--runtime ascend</code> because <code>/dev</code> is already mounted; inner Ascend
 probe containers pass <code>--runtime ascend</code> automatically under <code>docker</code> (and emit commands under
@@ -1264,20 +1264,20 @@ probe containers pass <code>--runtime ascend</code> automatically under <code>do
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /usr/local/neuware:/usr/local/neuware:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>cambricon</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -v /usr/local/neuware:/usr/local/neuware:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>cambricon</span></span></code></pre></div>
 </div>
 <h3 id="hygon">Hygon</h3>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /opt/hyhal:/opt/hyhal:ro -v /opt/dtk:/opt/dtk:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /etc/dmi_mig_config:/etc/dmi_mig_config <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>hygon --probe-image<span class="o">=</span>&lt;image&gt;</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -v /opt/hyhal:/opt/hyhal:ro -v /opt/dtk:/opt/dtk:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -v /etc/dmi_mig_config:/etc/dmi_mig_config <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>hygon --probe-image<span class="o">=</span>&lt;image&gt;</span></span></code></pre></div>
 </div>
 <p><code>/etc/dmi_mig_config</code> is mounted writable for MIG registry operations, and <code>--probe-image</code> is
 required to measure slice checks (<a href="#container-probes">Container probes</a>
@@ -1286,27 +1286,27 @@ required to measure slice checks (<a href="#container-probes">Container probes</
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /usr/local/corex:/usr/local/corex:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>iluvatar</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -v /usr/local/corex:/usr/local/corex:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>iluvatar</span></span></code></pre></div>
 </div>
 <h3 id="metax">MetaX</h3>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /opt/mxdriver:/opt/mxdriver:ro -v /opt/maca:/opt/maca:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>metax</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -v /opt/mxdriver:/opt/mxdriver:ro -v /opt/maca:/opt/maca:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>metax</span></span></code></pre></div>
 </div>
 <h3 id="moore-threads">Moore Threads</h3>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host --runtime mthreads <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>mthreads</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>mthreads</span></span></code></pre></div>
 </div>
 <p>The <code>mthreads</code> container runtime injects user-space libraries (<code>nerdctl --runtime</code> expects an OCI
 shim name and cannot invoke <code>mthreads</code> directly).</p>
@@ -1314,9 +1314,9 @@ shim name and cannot invoke <code>mthreads</code> directly).</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host --runtime nvidia <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>nvidia</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>nvidia</span></span></code></pre></div>
 </div>
 <p>Pass <code>--runtime nvidia</code> on <code>docker</code> or <code>--gpus all</code> on <code>nerdctl</code> (running under <code>runc</code> hides NVML
 and reports <code>accelerators: 0</code> with exit code <code>1</code>).</p>
@@ -1324,18 +1324,18 @@ and reports <code>accelerators: 0</code> with exit code <code>1</code>).</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /usr/local/PPU_SDK:/usr/local/PPU_SDK:ro <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>thead --probe-image<span class="o">=</span>&lt;image&gt;</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -v /usr/local/PPU_SDK:/usr/local/PPU_SDK:ro <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>thead --probe-image<span class="o">=</span>&lt;image&gt;</span></span></code></pre></div>
 </div>
 <p>Supply <code>--probe-image</code> carrying the workload PPU SDK to measure slice rows.</p>
 <h3 id="all-manufacturers">All manufacturers</h3>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --network<span class="o">=</span>host -v /:/host <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl">  gpustack-operator device-manager preflight</span></span></code></pre></div>
 </div>
 <p>Without vendor mounts, <code>preflight</code> cross-checks host CLIs on NVIDIA, Ascend, and AMD and prints the
 required vendor mounts for detected hardware.</p>
@@ -1346,7 +1346,7 @@ required vendor mounts for detected hardware.</p>
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl <span class="nb">exec</span> -n gpustack-system &lt;device-manager-pod&gt; -- gpustack-operator device-manager detect
 </span></span><span class="line"><span class="cl">kubectl <span class="nb">exec</span> -n gpustack-system &lt;device-manager-pod&gt; -- <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>&lt;manufacturer&gt;</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>&lt;manufacturer&gt;</span></span></code></pre></div>
 </div>
 <p>The <code>DaemonSet</code> <code>Pod</code> omits <code>/:/host</code>, so <code>preflight</code> enters dry-run mode automatically. It runs
 detection, <code>device-health</code>, and read-only driver checks, emits container commands, and leaves the
@@ -1354,65 +1354,65 @@ node untouched.</p>
 <h2 id="configuration">Configuration</h2>
 <h3 id="host-access">Host access</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Mount</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>-v /:/host</code></td>
-          <td>Enters host root via <code>chroot</code> to run the host container and vendor CLIs and stage preload libraries.</td>
-      </tr>
-      <tr>
-          <td><code>--network=host</code></td>
-          <td>Provides host DNS resolution when pulling probe images inside <code>chroot</code>.</td>
-      </tr>
-      <tr>
-          <td><code>-v /dev:/dev</code>, <code>-v /sys:/sys</code></td>
-          <td>Supplies device nodes and sysfs topology for in-process detection and driver reads.</td>
-      </tr>
-      <tr>
-          <td>Vendor mount or <code>--runtime</code></td>
-          <td>Loads user-space vendor management libraries into the <code>preflight</code> process.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Mount</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>-v /:/host</code></td>
+					<td>Enters host root via <code>chroot</code> to run the host container and vendor CLIs and stage preload libraries.</td>
+			</tr>
+			<tr>
+					<td><code>--network=host</code></td>
+					<td>Provides host DNS resolution when pulling probe images inside <code>chroot</code>.</td>
+			</tr>
+			<tr>
+					<td><code>-v /dev:/dev</code>, <code>-v /sys:/sys</code></td>
+					<td>Supplies device nodes and sysfs topology for in-process detection and driver reads.</td>
+			</tr>
+			<tr>
+					<td>Vendor mount or <code>--runtime</code></td>
+					<td>Loads user-space vendor management libraries into the <code>preflight</code> process.</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="command-flags">Command flags</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Flag</th>
-          <th>Effect</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>--manufacturer</code></td>
-          <td>Comma-separated manufacturers to check (defaults to all).</td>
-      </tr>
-      <tr>
-          <td><code>--no-pci-check</code></td>
-          <td>Skips PCI presence filtering during detection.</td>
-      </tr>
-      <tr>
-          <td><code>--dry-run</code></td>
-          <td>Prints probe steps without writing host files, toggling driver modes, or starting containers.</td>
-      </tr>
-      <tr>
-          <td><code>--probe-image</code></td>
-          <td>Overrides the probe container image (required on Hygon and T-Head, or for air-gapped hosts).</td>
-      </tr>
-      <tr>
-          <td><code>--host-root</code></td>
-          <td>Host root mount path inside the container (default <code>/host</code>).</td>
-      </tr>
-      <tr>
-          <td><code>--runtime</code></td>
-          <td>Overrides CRI auto-detection (<code>docker</code>, <code>nerdctl</code>, or <code>ctr</code>; missing <code>/host/proc</code> requires explicit <code>--runtime</code>).</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Effect</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--manufacturer</code></td>
+					<td>Comma-separated manufacturers to check (defaults to all).</td>
+			</tr>
+			<tr>
+					<td><code>--no-pci-check</code></td>
+					<td>Skips PCI presence filtering during detection.</td>
+			</tr>
+			<tr>
+					<td><code>--dry-run</code></td>
+					<td>Prints probe steps without writing host files, toggling driver modes, or starting containers.</td>
+			</tr>
+			<tr>
+					<td><code>--probe-image</code></td>
+					<td>Overrides the probe container image (required on Hygon and T-Head, or for air-gapped hosts).</td>
+			</tr>
+			<tr>
+					<td><code>--host-root</code></td>
+					<td>Host root mount path inside the container (default <code>/host</code>).</td>
+			</tr>
+			<tr>
+					<td><code>--runtime</code></td>
+					<td>Overrides CRI auto-detection (<code>docker</code>, <code>nerdctl</code>, or <code>ctr</code>; missing <code>/host/proc</code> requires explicit <code>--runtime</code>).</td>
+			</tr>
+	</tbody>
 </table>
 <p>By default, <code>preflight</code> reads the container runtime from kubelet CRI flags or
 <code>/var/lib/kubelet/{kubeadm-flags.env,config.yaml}</code>. Otherwise it falls back to <code>docker</code>, <code>nerdctl</code>,
@@ -1422,35 +1422,35 @@ or <code>ctr</code>.</p>
 verify co-tenancy. Containers carry label <code>gpustack.ai/preflight=true</code> (containerd namespace
 <code>gpustack-preflight</code>) and are swept before and after each run.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Host write</th>
-          <th>Path</th>
-          <th>Lifecycle</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Preload libraries</td>
-          <td><code>/var/lib/gpustack/operator/lib/&lt;manufacturer&gt;</code></td>
-          <td>Kept on disk (matches Device Manager init-container staging).</td>
-      </tr>
-      <tr>
-          <td>Per-probe configs</td>
-          <td><code>/var/lib/gpustack/operator/preflight/</code></td>
-          <td>Removed at pass completion (isolated from live <code>.../operator/pods</code> state).</td>
-      </tr>
-      <tr>
-          <td>Process lock</td>
-          <td><code>/var/lib/gpustack/operator/preflight/lock</code></td>
-          <td>File stays; kernel <code>flock</code> releases automatically on process exit.</td>
-      </tr>
-      <tr>
-          <td>Driver sharing flag</td>
-          <td>Ascend / Cambricon driver state</td>
-          <td>Restored immediately within the same pass.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Host write</th>
+					<th>Path</th>
+					<th>Lifecycle</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Preload libraries</td>
+					<td><code>/var/lib/gpustack/operator/lib/&lt;manufacturer&gt;</code></td>
+					<td>Kept on disk (matches Device Manager init-container staging).</td>
+			</tr>
+			<tr>
+					<td>Per-probe configs</td>
+					<td><code>/var/lib/gpustack/operator/preflight/</code></td>
+					<td>Removed at pass completion (isolated from live <code>.../operator/pods</code> state).</td>
+			</tr>
+			<tr>
+					<td>Process lock</td>
+					<td><code>/var/lib/gpustack/operator/preflight/lock</code></td>
+					<td>File stays; kernel <code>flock</code> releases automatically on process exit.</td>
+			</tr>
+			<tr>
+					<td>Driver sharing flag</td>
+					<td>Ascend / Cambricon driver state</td>
+					<td>Restored immediately within the same pass.</td>
+			</tr>
+	</tbody>
 </table>
 <p><strong>Printed probe commands</strong>: Container probes skip execution under <code>--dry-run</code>, missing <code>/host</code>,
 read-only library paths, missing runtimes, <code>ctr</code>, or <code>nerdctl</code> on Ascend. In those cases,
@@ -1459,45 +1459,45 @@ read-only library paths, missing runtimes, <code>ctr</code>, or <code>nerdctl</c
 <p>Each accelerator reports only the modes it currently offers (for example, a MIG-enabled GPU reports
 partition checks and omits logical-slice rows).</p>
 <table>
-  <thead>
-      <tr>
-          <th>Tier</th>
-          <th>Manufacturers</th>
-          <th>Driver check</th>
-          <th>Capability checks</th>
-          <th>Deepest answer</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><strong>Full</strong></td>
-          <td>NVIDIA, Ascend, AMD, T-Head</td>
-          <td>Yes</td>
-          <td>Real container (<code>sidecar-visibility</code> simulated)</td>
-          <td><code>measured</code></td>
-      </tr>
-      <tr>
-          <td><strong>Container probe</strong></td>
-          <td>Hygon</td>
-          <td>No (<code>note</code> explains why)</td>
-          <td>Real container (<code>sidecar-visibility</code> simulated)</td>
-          <td><code>measured</code></td>
-      </tr>
-      <tr>
-          <td><strong>Driver + injection</strong></td>
-          <td>Cambricon, MetaX</td>
-          <td>Yes</td>
-          <td>Allocator injection only</td>
-          <td><code>simulated</code></td>
-      </tr>
-      <tr>
-          <td><strong>Injection only</strong></td>
-          <td>Iluvatar, MThreads</td>
-          <td>No (<code>note</code> explains why)</td>
-          <td>Allocator injection only</td>
-          <td><code>simulated</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Tier</th>
+					<th>Manufacturers</th>
+					<th>Driver check</th>
+					<th>Capability checks</th>
+					<th>Deepest answer</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><strong>Full</strong></td>
+					<td>NVIDIA, Ascend, AMD, T-Head</td>
+					<td>Yes</td>
+					<td>Real container (<code>sidecar-visibility</code> simulated)</td>
+					<td><code>measured</code></td>
+			</tr>
+			<tr>
+					<td><strong>Container probe</strong></td>
+					<td>Hygon</td>
+					<td>No (<code>note</code> explains why)</td>
+					<td>Real container (<code>sidecar-visibility</code> simulated)</td>
+					<td><code>measured</code></td>
+			</tr>
+			<tr>
+					<td><strong>Driver + injection</strong></td>
+					<td>Cambricon, MetaX</td>
+					<td>Yes</td>
+					<td>Allocator injection only</td>
+					<td><code>simulated</code></td>
+			</tr>
+			<tr>
+					<td><strong>Injection only</strong></td>
+					<td>Iluvatar, MThreads</td>
+					<td>No (<code>note</code> explains why)</td>
+					<td>Allocator injection only</td>
+					<td><code>simulated</code></td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="injection-checks">Injection checks</h3>
 <p>Iluvatar and Moore Threads enforce slicing in the kernel module and container runtime rather than a
@@ -1509,160 +1509,160 @@ user-space flag. <code>preflight</code> verifies allocator injection (<code>simu
 reads <code>kfd</code> vgpu sysfs because <code>hy-smi</code> always prints full physical VRAM.</p>
 <h3 id="supported-vendor-checks">Supported vendor checks</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Manufacturer</th>
-          <th>Detection API</th>
-          <th>Host cross-check</th>
-          <th>Driver check</th>
-          <th>Target mode</th>
-          <th>Container probe</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>NVIDIA</td>
-          <td>NVML</td>
-          <td><code>nvidia-smi -L</code></td>
-          <td><code>mig-partitioning</code></td>
-          <td><code>partitioned</code></td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>Ascend</td>
-          <td>DCMI</td>
-          <td><code>npu-smi info -l</code></td>
-          <td><code>container-share</code></td>
-          <td><code>sliced</code></td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>AMD</td>
-          <td>RSMI, AMDSMI, HSA</td>
-          <td><code>rocm-smi --showuniqueid</code></td>
-          <td><code>cu-mask-topology</code></td>
-          <td><code>sliced</code></td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>T-Head</td>
-          <td>HGML</td>
-          <td>—</td>
-          <td><code>mig-partitioning</code></td>
-          <td><code>partitioned</code></td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>Cambricon</td>
-          <td>CNDev</td>
-          <td>—</td>
-          <td><code>smlu-mode</code></td>
-          <td><code>sliced</code></td>
-          <td>—</td>
-      </tr>
-      <tr>
-          <td>MetaX</td>
-          <td>MXSML, sGPU sysfs</td>
-          <td>—</td>
-          <td><code>sgpu-mode</code></td>
-          <td><code>sliced</code></td>
-          <td>—</td>
-      </tr>
-      <tr>
-          <td>Hygon</td>
-          <td>RSMI, AMDGPU, HSA</td>
-          <td>—</td>
-          <td>—</td>
-          <td><code>sliced</code> / <code>partitioned</code></td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>Iluvatar</td>
-          <td>IXML</td>
-          <td>—</td>
-          <td>—</td>
-          <td><code>sliced</code></td>
-          <td>—</td>
-      </tr>
-      <tr>
-          <td>MThreads</td>
-          <td>MTML</td>
-          <td>—</td>
-          <td>—</td>
-          <td><code>sliced</code></td>
-          <td>—</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Manufacturer</th>
+					<th>Detection API</th>
+					<th>Host cross-check</th>
+					<th>Driver check</th>
+					<th>Target mode</th>
+					<th>Container probe</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>NVIDIA</td>
+					<td>NVML</td>
+					<td><code>nvidia-smi -L</code></td>
+					<td><code>mig-partitioning</code></td>
+					<td><code>partitioned</code></td>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>Ascend</td>
+					<td>DCMI</td>
+					<td><code>npu-smi info -l</code></td>
+					<td><code>container-share</code></td>
+					<td><code>sliced</code></td>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>AMD</td>
+					<td>RSMI, AMDSMI, HSA</td>
+					<td><code>rocm-smi --showuniqueid</code></td>
+					<td><code>cu-mask-topology</code></td>
+					<td><code>sliced</code></td>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>T-Head</td>
+					<td>HGML</td>
+					<td>—</td>
+					<td><code>mig-partitioning</code></td>
+					<td><code>partitioned</code></td>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>Cambricon</td>
+					<td>CNDev</td>
+					<td>—</td>
+					<td><code>smlu-mode</code></td>
+					<td><code>sliced</code></td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>MetaX</td>
+					<td>MXSML, sGPU sysfs</td>
+					<td>—</td>
+					<td><code>sgpu-mode</code></td>
+					<td><code>sliced</code></td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>Hygon</td>
+					<td>RSMI, AMDGPU, HSA</td>
+					<td>—</td>
+					<td>—</td>
+					<td><code>sliced</code> / <code>partitioned</code></td>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>Iluvatar</td>
+					<td>IXML</td>
+					<td>—</td>
+					<td>—</td>
+					<td><code>sliced</code></td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>MThreads</td>
+					<td>MTML</td>
+					<td>—</td>
+					<td>—</td>
+					<td><code>sliced</code></td>
+					<td>—</td>
+			</tr>
+	</tbody>
 </table>
 <p>Compare vendors by the report&rsquo;s <code>mode</code> field rather than vendor-specific capability names.</p>
 <h3 id="driver-checks">Driver checks</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Check</th>
-          <th><code>ok</code> meaning</th>
-          <th><code>not-declared</code> meaning</th>
-          <th><code>unavailable</code> meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>mig-partitioning</code></td>
-          <td>Physical partition profile declared</td>
-          <td>MIG off or unsupported on card</td>
-          <td>Driver query failed</td>
-      </tr>
-      <tr>
-          <td><code>container-share</code></td>
-          <td>Flag on, or toggled on and restored</td>
-          <td>Generation has no flag</td>
-          <td>DCMI missing or refused</td>
-      </tr>
-      <tr>
-          <td><code>cu-mask-topology</code></td>
-          <td>HSA topology and CU atom validated</td>
-          <td>—</td>
-          <td>HSA init failed or card missing</td>
-      </tr>
-      <tr>
-          <td><code>smlu-mode</code></td>
-          <td>Mode on, or toggled on and restored</td>
-          <td>Card advertises no sMLU capacity</td>
-          <td>CNDev missing sMLU API or refused</td>
-      </tr>
-      <tr>
-          <td><code>sgpu-mode</code></td>
-          <td>sGPU sysfs registry readable</td>
-          <td>—</td>
-          <td>Registry unreadable</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Check</th>
+					<th><code>ok</code> meaning</th>
+					<th><code>not-declared</code> meaning</th>
+					<th><code>unavailable</code> meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>mig-partitioning</code></td>
+					<td>Physical partition profile declared</td>
+					<td>MIG off or unsupported on card</td>
+					<td>Driver query failed</td>
+			</tr>
+			<tr>
+					<td><code>container-share</code></td>
+					<td>Flag on, or toggled on and restored</td>
+					<td>Generation has no flag</td>
+					<td>DCMI missing or refused</td>
+			</tr>
+			<tr>
+					<td><code>cu-mask-topology</code></td>
+					<td>HSA topology and CU atom validated</td>
+					<td>—</td>
+					<td>HSA init failed or card missing</td>
+			</tr>
+			<tr>
+					<td><code>smlu-mode</code></td>
+					<td>Mode on, or toggled on and restored</td>
+					<td>Card advertises no sMLU capacity</td>
+					<td>CNDev missing sMLU API or refused</td>
+			</tr>
+			<tr>
+					<td><code>sgpu-mode</code></td>
+					<td>sGPU sysfs registry readable</td>
+					<td>—</td>
+					<td>Registry unreadable</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="ascend-a5-host-checks">Ascend A5 host checks</h3>
 <p>On Atlas A5 (<code>950</code>) NPUs, <code>preflight</code> adds two node-level <code>declared</code> checks on every card:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Check</th>
-          <th>Reads</th>
-          <th><code>ok</code> meaning</th>
-          <th><code>unavailable</code> meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ascend-docker-runtime</code></td>
-          <td><code>/usr/local/Ascend</code> version</td>
-          <td>MindCluster <code>26.0.0+</code></td>
-          <td>Older or unreadable runtime</td>
-      </tr>
-      <tr>
-          <td><code>hccl-ranktable</code></td>
-          <td><code>/host/etc/hccl_rootinfo.json</code></td>
-          <td>Absent or JSON version <code>2.0</code></td>
-          <td>Wrong version, symlink, invalid JSON, or missing <code>/host</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Check</th>
+					<th>Reads</th>
+					<th><code>ok</code> meaning</th>
+					<th><code>unavailable</code> meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ascend-docker-runtime</code></td>
+					<td><code>/usr/local/Ascend</code> version</td>
+					<td>MindCluster <code>26.0.0+</code></td>
+					<td>Older or unreadable runtime</td>
+			</tr>
+			<tr>
+					<td><code>hccl-ranktable</code></td>
+					<td><code>/host/etc/hccl_rootinfo.json</code></td>
+					<td>Absent or JSON version <code>2.0</code></td>
+					<td>Wrong version, symlink, invalid JSON, or missing <code>/host</code></td>
+			</tr>
+	</tbody>
 </table>
 <p>See <a href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/#ascend">Vendor Prerequisites</a>
  for remediation.</p>
@@ -1670,52 +1670,52 @@ reads <code>kfd</code> vgpu sysfs because <code>hy-smi</code> always prints full
 <p>Each slice probe requests <strong>50%</strong> of one card (so a <code>24564 MiB</code> card reports <code>12282 MiB</code> inside the
 probe):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Manufacturer</th>
-          <th>Default probe image</th>
-          <th>Vendor runtime</th>
-          <th>Probe reader</th>
-          <th>Cap source</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>NVIDIA</td>
-          <td><code>nvidia/cuda:&lt;CUDA major&gt;</code></td>
-          <td><code>--runtime nvidia</code> / <code>--gpus all</code></td>
-          <td><code>nvidia-smi --query-gpu=memory.total</code></td>
-          <td><code>CUDA_DEVICE_MEMORY_LIMIT_&lt;i&gt;</code></td>
-      </tr>
-      <tr>
-          <td>Ascend</td>
-          <td><code>quay.io/ascend/cann:&lt;CANN major&gt;-&lt;family&gt;</code></td>
-          <td><code>--runtime ascend</code> (<code>docker</code>)</td>
-          <td><code>enpu-monitor</code></td>
-          <td><code>npu_info.config</code> (<code>memory-quota</code>)</td>
-      </tr>
-      <tr>
-          <td>AMD</td>
-          <td><code>ubuntu:24.04</code></td>
-          <td>None</td>
-          <td><code>rocm-monitor</code></td>
-          <td><code>VROCM_DEVICE_MEMORY_LIMIT_&lt;i&gt;</code></td>
-      </tr>
-      <tr>
-          <td>T-Head</td>
-          <td>Required via <code>--probe-image</code></td>
-          <td>None</td>
-          <td><code>ppu-monitor</code></td>
-          <td><code>HGGC_DEVICE_MEMORY_LIMIT_&lt;i&gt;</code></td>
-      </tr>
-      <tr>
-          <td>Hygon</td>
-          <td>Required via <code>--probe-image</code></td>
-          <td>None</td>
-          <td><code>BandwidthTest</code> + <code>kfd</code> vgpu sysfs</td>
-          <td><code>vdev0.conf</code> (<code>mem</code>)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Manufacturer</th>
+					<th>Default probe image</th>
+					<th>Vendor runtime</th>
+					<th>Probe reader</th>
+					<th>Cap source</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>NVIDIA</td>
+					<td><code>nvidia/cuda:&lt;CUDA major&gt;</code></td>
+					<td><code>--runtime nvidia</code> / <code>--gpus all</code></td>
+					<td><code>nvidia-smi --query-gpu=memory.total</code></td>
+					<td><code>CUDA_DEVICE_MEMORY_LIMIT_&lt;i&gt;</code></td>
+			</tr>
+			<tr>
+					<td>Ascend</td>
+					<td><code>quay.io/ascend/cann:&lt;CANN major&gt;-&lt;family&gt;</code></td>
+					<td><code>--runtime ascend</code> (<code>docker</code>)</td>
+					<td><code>enpu-monitor</code></td>
+					<td><code>npu_info.config</code> (<code>memory-quota</code>)</td>
+			</tr>
+			<tr>
+					<td>AMD</td>
+					<td><code>ubuntu:24.04</code></td>
+					<td>None</td>
+					<td><code>rocm-monitor</code></td>
+					<td><code>VROCM_DEVICE_MEMORY_LIMIT_&lt;i&gt;</code></td>
+			</tr>
+			<tr>
+					<td>T-Head</td>
+					<td>Required via <code>--probe-image</code></td>
+					<td>None</td>
+					<td><code>ppu-monitor</code></td>
+					<td><code>HGGC_DEVICE_MEMORY_LIMIT_&lt;i&gt;</code></td>
+			</tr>
+			<tr>
+					<td>Hygon</td>
+					<td>Required via <code>--probe-image</code></td>
+					<td>None</td>
+					<td><code>BandwidthTest</code> + <code>kfd</code> vgpu sysfs</td>
+					<td><code>vdev0.conf</code> (<code>mem</code>)</td>
+			</tr>
+	</tbody>
 </table>
 <p>Capability rows report <code>sliced-runtime-loaded</code> (shim or vgpu active), <code>sliced-quota-in-force</code> (50%
 VRAM cap), <code>sidecar-visibility</code> (<code>simulated</code> SSH grant), and <code>co-tenancy</code> (two slices on one card).</p>
@@ -1733,40 +1733,40 @@ kubelet <code>topologyManagerPolicy</code>, or <code>unknown</code> when unset):
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">depth</span><span class="p">:</span><span class="w"> </span><span class="l">declared</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"> </span><span class="m">8</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">checks</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">network</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">network</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2026-10-29T00:00:00Z&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">checks</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">topology</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">topology</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2026-10-29T00:00:00Z&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">single-numa-node</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">depth</span><span class="p">:</span><span class="w"> </span><span class="l">declared</span></span></span></code></pre></div>
 </div>
 <h3 id="check-states-and-depth">Check states and depth</h3>
 <table>
-  <thead>
-      <tr>
-          <th>State</th>
-          <th>Meaning</th>
-          <th>Exit code</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ok</code></td>
-          <td>Capability verified at reported depth (<code>declared</code>, <code>simulated</code>, or <code>measured</code>)</td>
-          <td><code>0</code></td>
-      </tr>
-      <tr>
-          <td><code>not-declared</code></td>
-          <td>Hardware does not offer this capability</td>
-          <td><code>0</code></td>
-      </tr>
-      <tr>
-          <td><code>unavailable</code></td>
-          <td>Offered capability, detection, lock, crash guard, or stale sweep failed</td>
-          <td>Non-zero</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>State</th>
+					<th>Meaning</th>
+					<th>Exit code</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ok</code></td>
+					<td>Capability verified at reported depth (<code>declared</code>, <code>simulated</code>, or <code>measured</code>)</td>
+					<td><code>0</code></td>
+			</tr>
+			<tr>
+					<td><code>not-declared</code></td>
+					<td>Hardware does not offer this capability</td>
+					<td><code>0</code></td>
+			</tr>
+			<tr>
+					<td><code>unavailable</code></td>
+					<td>Offered capability, detection, lock, crash guard, or stale sweep failed</td>
+					<td>Non-zero</td>
+			</tr>
+	</tbody>
 </table>
 <p>Broken RDMA links and <code>topology: unknown</code> or <code>none</code> do <strong>not</strong> fail the exit code because accelerator
 allocation still works. Concurrent runs fail closed on <code>/var/lib/gpustack/operator/preflight/lock</code>,

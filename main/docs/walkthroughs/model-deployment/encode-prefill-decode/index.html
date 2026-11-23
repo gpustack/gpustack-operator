@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Encode, Prefill and Decode Walkthrough · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1221,46 +1221,46 @@ while multimodal requests route through <em>Encode</em> → <em>Prefill</em> →
 (<a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/">Encode, Prefill and Decode</a>
 ):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Object</th>
-          <th>Scope</th>
-          <th>Creator</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ModelArtifact</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Resolves <code>Qwen/Qwen2.5-VL-7B-Instruct</code> weights</td>
-      </tr>
-      <tr>
-          <td><code>ModelPrefetch</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Warms <code>qwen2-5-vl-7b-instruct</code> onto the H100 node</td>
-      </tr>
-      <tr>
-          <td><code>AcceleratorType</code></td>
-          <td>cluster</td>
-          <td>operator</td>
-          <td>H100 pool requested by all three roles</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Runs 1 <em>Encode</em>, 1 <em>Prefill</em>, and 1 <em>Decode</em> replica behind <code>llm-d-router</code></td>
-      </tr>
-      <tr>
-          <td>Router <code>Deployment</code> and <code>Service</code></td>
-          <td>namespace</td>
-          <td>operator</td>
-          <td>Single HTTP endpoint routing multimodal and text requests</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Object</th>
+					<th>Scope</th>
+					<th>Creator</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ModelArtifact</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Resolves <code>Qwen/Qwen2.5-VL-7B-Instruct</code> weights</td>
+			</tr>
+			<tr>
+					<td><code>ModelPrefetch</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Warms <code>qwen2-5-vl-7b-instruct</code> onto the H100 node</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td>cluster</td>
+					<td>operator</td>
+					<td>H100 pool requested by all three roles</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Runs 1 <em>Encode</em>, 1 <em>Prefill</em>, and 1 <em>Decode</em> replica behind <code>llm-d-router</code></td>
+			</tr>
+			<tr>
+					<td>Router <code>Deployment</code> and <code>Service</code></td>
+					<td>namespace</td>
+					<td>operator</td>
+					<td>Single HTTP endpoint routing multimodal and text requests</td>
+			</tr>
+	</tbody>
 </table>
 <p>In the H100 benchmark (3 GPUs for <em>EPD</em> vs 2 for <em>PD</em> and 1 for aggregated serving), <em>EPD</em> improved
 concurrency-8 <code>4k</code>/<code>8k</code> <em>inter-token latency (ITL)</em> p99 by <strong>15.1×–21.8×</strong> and repeated-image <em>time
@@ -1269,34 +1269,34 @@ see <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefil
 .</p>
 <h3 id="environment">Environment</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Item</th>
-          <th>Value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Cluster</td>
-          <td>Kubernetes v1.35.7; 1 CPU node and 1 GPU node (<code>gpu-node-0</code>)</td>
-      </tr>
-      <tr>
-          <td>GPUs</td>
-          <td>8 × NVIDIA H100 80 GB HBM3 SXM5 (3 GPUs allocated: 1 per role)</td>
-      </tr>
-      <tr>
-          <td>Pool</td>
-          <td>Captured on custom <code>InstanceType</code> <code>bench-gpu</code>; reusable manifest uses <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
-      </tr>
-      <tr>
-          <td>Model</td>
-          <td><code>Qwen/Qwen2.5-VL-7B-Instruct</code> from <code>ModelArtifact</code> <code>qwen2-5-vl-7b-instruct</code> mounted at <code>/var/lib/gpustack/model</code></td>
-      </tr>
-      <tr>
-          <td>Runtime</td>
-          <td>vLLM <code>gpustack/runner:cuda13.0-vllm0.30.0</code> with <code>llm-d-router</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Cluster</td>
+					<td>Kubernetes v1.35.7; 1 CPU node and 1 GPU node (<code>gpu-node-0</code>)</td>
+			</tr>
+			<tr>
+					<td>GPUs</td>
+					<td>8 × NVIDIA H100 80 GB HBM3 SXM5 (3 GPUs allocated: 1 per role)</td>
+			</tr>
+			<tr>
+					<td>Pool</td>
+					<td>Captured on custom <code>InstanceType</code> <code>bench-gpu</code>; reusable manifest uses <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
+			</tr>
+			<tr>
+					<td>Model</td>
+					<td><code>Qwen/Qwen2.5-VL-7B-Instruct</code> from <code>ModelArtifact</code> <code>qwen2-5-vl-7b-instruct</code> mounted at <code>/var/lib/gpustack/model</code></td>
+			</tr>
+			<tr>
+					<td>Runtime</td>
+					<td>vLLM <code>gpustack/runner:cuda13.0-vllm0.30.0</code> with <code>llm-d-router</code></td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="deployment">Deployment</h2>
 <h3 id="step-1-start-three-role-serving">Step 1: Start three-role serving</h3>
@@ -1307,11 +1307,11 @@ see <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefil
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">epd-arm3-epd</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen2-5-vl-7b-instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
@@ -1374,7 +1374,7 @@ see <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefil
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f epd-deployment.yaml
 </span></span><span class="line"><span class="cl">kubectl get modeldeployment epd-arm3-epd -n gpustack-bench <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o custom-columns<span class="o">=</span>NAME:.metadata.name,ENGINE:.spec.engine.name,ROLES:.status.roleSummary,PHASE:.status.phase
+</span></span></span><span class="line"><span class="cl">  -o custom-columns<span class="o">=</span>NAME:.metadata.name,ENGINE:.spec.engine.name,ROLES:.status.roleSummary,PHASE:.status.phase
 </span></span><span class="line"><span class="cl">kubectl get pods -n gpustack-bench -l app.kubernetes.io/instance<span class="o">=</span>epd-arm3-epd</span></span></code></pre></div>
 </div>
 <p>Captured output:</p>
@@ -1505,42 +1505,42 @@ a text prompt, then send it to the router from inside the cluster:</p>
 </span></span></span><span class="line"><span class="cl"><span class="s">EOF</span>
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl">kubectl run curl-probe -n gpustack-bench --rm -i --restart<span class="o">=</span>Never --image<span class="o">=</span>curlimages/curl -- <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  curl -fsS -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --data-binary @- <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  http://epd-arm3-epd-router.gpustack-bench.svc:8000/v1/chat/completions &lt; request.json</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  curl -fsS -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --data-binary @- <span class="se">\
+</span></span></span><span class="line"><span class="cl">  http://epd-arm3-epd-router.gpustack-bench.svc:8000/v1/chat/completions &lt; request.json</span></span></code></pre></div>
 </div>
 <p>Across <strong>236 measured requests with zero errors</strong> (plus 28 warm-ups; 280 router access-log lines),
 container access logs confirm activity at every stage:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Stage</th>
-          <th>Container</th>
-          <th>Captured log count</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><em>Encode</em></td>
-          <td><code>epd-arm3-epd-encode-9jz5c/main</code></td>
-          <td><code>POST /v1/chat/completions</code> (264 lines)</td>
-      </tr>
-      <tr>
-          <td><em>Prefill</em></td>
-          <td><code>epd-arm3-epd-prefill-26ls5/main</code></td>
-          <td><code>POST /v1/chat/completions</code> (264 lines)</td>
-      </tr>
-      <tr>
-          <td><em>Decode</em></td>
-          <td><code>epd-arm3-epd-decode-h62cw/main</code></td>
-          <td><code>POST /v1/chat/completions</code> (264 lines)</td>
-      </tr>
-      <tr>
-          <td><em>Decode</em> sidecar</td>
-          <td><code>epd-arm3-epd-decode-h62cw/routing-proxy</code></td>
-          <td>Multimodal items received (264 lines)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Stage</th>
+					<th>Container</th>
+					<th>Captured log count</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><em>Encode</em></td>
+					<td><code>epd-arm3-epd-encode-9jz5c/main</code></td>
+					<td><code>POST /v1/chat/completions</code> (264 lines)</td>
+			</tr>
+			<tr>
+					<td><em>Prefill</em></td>
+					<td><code>epd-arm3-epd-prefill-26ls5/main</code></td>
+					<td><code>POST /v1/chat/completions</code> (264 lines)</td>
+			</tr>
+			<tr>
+					<td><em>Decode</em></td>
+					<td><code>epd-arm3-epd-decode-h62cw/main</code></td>
+					<td><code>POST /v1/chat/completions</code> (264 lines)</td>
+			</tr>
+			<tr>
+					<td><em>Decode</em> sidecar</td>
+					<td><code>epd-arm3-epd-decode-h62cw/routing-proxy</code></td>
+					<td>Multimodal items received (264 lines)</td>
+			</tr>
+	</tbody>
 </table>
 <p>If <em>Encode</em> receives requests while <em>Prefill</em> receives zero, check vLLM <em>PD</em> token-counting flags in
 <a href="#troubleshooting">Troubleshooting</a>
@@ -1558,35 +1558,35 @@ exchange the largest payloads without blocking scheduling
 (<a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#role-placement-preferences">Role placement preferences</a>
 ):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Replica</th>
-          <th>Preferred peer</th>
-          <th style="text-align: right">Weight</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><em>Encode</em></td>
-          <td><em>Prefill</em></td>
-          <td style="text-align: right">50</td>
-      </tr>
-      <tr>
-          <td><em>Prefill</em></td>
-          <td><em>Decode</em></td>
-          <td style="text-align: right">100</td>
-      </tr>
-      <tr>
-          <td><em>Prefill</em></td>
-          <td><em>Encode</em></td>
-          <td style="text-align: right">50</td>
-      </tr>
-      <tr>
-          <td><em>Decode</em></td>
-          <td><em>Prefill</em></td>
-          <td style="text-align: right">100</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Replica</th>
+					<th>Preferred peer</th>
+					<th style="text-align: right">Weight</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><em>Encode</em></td>
+					<td><em>Prefill</em></td>
+					<td style="text-align: right">50</td>
+			</tr>
+			<tr>
+					<td><em>Prefill</em></td>
+					<td><em>Decode</em></td>
+					<td style="text-align: right">100</td>
+			</tr>
+			<tr>
+					<td><em>Prefill</em></td>
+					<td><em>Encode</em></td>
+					<td style="text-align: right">50</td>
+			</tr>
+			<tr>
+					<td><em>Decode</em></td>
+					<td><em>Prefill</em></td>
+					<td style="text-align: right">100</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="cleanup">Cleanup</h2>
 <p>Delete <code>epd-arm3-epd</code> and wait until all owned <code>Pod</code>s and <code>Service</code>s terminate:</p>
@@ -1604,59 +1604,59 @@ request counter; transfers still active when that window expires fail at the cli
 </ul>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Apply rejected on role structure</td>
-          <td>Webhook refusal on <code>ModelDeployment</code></td>
-          <td><em>Encode</em> requires both <em>Prefill</em> and <em>Decode</em> (one role per kind, no <em>Server</em>, no <em><code>spec.kvCache</code></em>, and no role <em><code>command</code></em>; see <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#admission-constraints">Admission constraints</a>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Apply rejected on role structure</td>
+					<td>Webhook refusal on <code>ModelDeployment</code></td>
+					<td><em>Encode</em> requires both <em>Prefill</em> and <em>Decode</em> (one role per kind, no <em>Server</em>, no <em><code>spec.kvCache</code></em>, and no role <em><code>command</code></em>; see <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#admission-constraints">Admission constraints</a>
 ).</td>
-      </tr>
-      <tr>
-          <td>Apply rejected on engine, router, or platform</td>
-          <td>Webhook refusal on <code>ModelDeployment</code></td>
-          <td>All three roles must share one accelerator platform and match <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#supported-serving-configurations">Supported serving configurations</a>
+			</tr>
+			<tr>
+					<td>Apply rejected on engine, router, or platform</td>
+					<td>Webhook refusal on <code>ModelDeployment</code></td>
+					<td>All three roles must share one accelerator platform and match <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#supported-serving-configurations">Supported serving configurations</a>
  (<code>vllm-router</code> is rejected on Ascend).</td>
-      </tr>
-      <tr>
-          <td>Encoder container exits on unknown flag</td>
-          <td>Container startup failure</td>
-          <td>Upgrade the runner image to meet the floor (<code>vLLM &gt;= 0.30.0</code>, <code>vllm-ascend &gt;= 0.30.0rc1</code>, <code>SGLang &gt;= 0.5.10</code>; see <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
+			</tr>
+			<tr>
+					<td>Encoder container exits on unknown flag</td>
+					<td>Container startup failure</td>
+					<td>Upgrade the runner image to meet the floor (<code>vLLM &gt;= 0.30.0</code>, <code>vllm-ascend &gt;= 0.30.0rc1</code>, <code>SGLang &gt;= 0.5.10</code>; see <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
 ).</td>
-      </tr>
-      <tr>
-          <td>Requests bypass <em>Prefill</em></td>
-          <td>Router routes directly to <em>Decode</em></td>
-          <td>Check vLLM token-counting support and <code>--enable-scale-out</code> rules (<a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#router-token-counting">Router token counting</a>
+			</tr>
+			<tr>
+					<td>Requests bypass <em>Prefill</em></td>
+					<td>Router routes directly to <em>Decode</em></td>
+					<td>Check vLLM token-counting support and <code>--enable-scale-out</code> rules (<a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#router-token-counting">Router token counting</a>
 ).</td>
-      </tr>
-      <tr>
-          <td>Ascend encoder fails storage setup</td>
-          <td><code>ECExampleConnector</code> missing shared path</td>
-          <td>Mount a shared <code>ReadWriteMany</code> PVC on both <em>Encode</em> (read-write) and <em>Prefill</em> with identical <em><code>claimName</code></em>, <em><code>mountPath</code></em>, and <em><code>subPath</code></em>.</td>
-      </tr>
-      <tr>
-          <td>Apply rejected on port <code>5601</code> or <code>8997</code></td>
-          <td>Owned-port collision</td>
-          <td><code>ECCPUConnector</code> owns <code>5601</code>, and SGLang <em>Prefill</em> in <em>EPD</em> owns <code>8997</code>; move custom HTTP ports off both numbers.</td>
-      </tr>
-      <tr>
-          <td><em>Encode</em> replica stays in <code>Draining</code> ~300 s</td>
-          <td>Bounded encoder drain timer</td>
-          <td>Expected behavior; wait for the ~300 s drain window to finish.</td>
-      </tr>
-      <tr>
-          <td><code>RoleKindsReady=False</code></td>
-          <td>Zero Ready replicas in one role kind</td>
-          <td>Read the failing kind from <code>ModelDeployment</code> status and inspect its <code>Pod</code> events and container logs.</td>
-      </tr>
-  </tbody>
+			</tr>
+			<tr>
+					<td>Ascend encoder fails storage setup</td>
+					<td><code>ECExampleConnector</code> missing shared path</td>
+					<td>Mount a shared <code>ReadWriteMany</code> PVC on both <em>Encode</em> (read-write) and <em>Prefill</em> with identical <em><code>claimName</code></em>, <em><code>mountPath</code></em>, and <em><code>subPath</code></em>.</td>
+			</tr>
+			<tr>
+					<td>Apply rejected on port <code>5601</code> or <code>8997</code></td>
+					<td>Owned-port collision</td>
+					<td><code>ECCPUConnector</code> owns <code>5601</code>, and SGLang <em>Prefill</em> in <em>EPD</em> owns <code>8997</code>; move custom HTTP ports off both numbers.</td>
+			</tr>
+			<tr>
+					<td><em>Encode</em> replica stays in <code>Draining</code> ~300 s</td>
+					<td>Bounded encoder drain timer</td>
+					<td>Expected behavior; wait for the ~300 s drain window to finish.</td>
+			</tr>
+			<tr>
+					<td><code>RoleKindsReady=False</code></td>
+					<td>Zero Ready replicas in one role kind</td>
+					<td>Read the failing kind from <code>ModelDeployment</code> status and inspect its <code>Pod</code> events and container logs.</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

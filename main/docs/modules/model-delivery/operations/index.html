@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Model Store Operations · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1259,86 +1259,86 @@ in Helm <code>values.yaml</code>, and check overrides on startup:</p>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system logs deploy/gpustack-operator-worker <span class="p">|</span> grep <span class="s1">&#39;setting overridden on start&#39;</span></span></span></code></pre></div>
 </div>
 <table>
-  <thead>
-      <tr>
-          <th><code>Setting</code> (<code>GPUSTACK_*</code> env)</th>
-          <th>Default</th>
-          <th>Effect and constraints</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>model-artifact-delivery-mode</code> (<code>..._DELIVERY_MODE</code>)</td>
-          <td><code>Engine</code> (<code>Node</code> in chart)</td>
-          <td>Immediate; <code>Engine</code> or <code>Node</code> (<code>Node</code> requires <code>CSIDriver</code>).</td>
-      </tr>
-      <tr>
-          <td><code>model-artifact-remote-delivery-policy</code> (<code>..._REMOTE_DELIVERY_POLICY</code>)</td>
-          <td><code>Prefer</code></td>
-          <td>Immediate; <code>Disabled</code>, <code>Require</code>, or <code>Prefer</code>.</td>
-      </tr>
-      <tr>
-          <td><code>model-artifact-huggingface-endpoint</code> (<code>..._HUGGINGFACE_ENDPOINT</code>)</td>
-          <td><code>https://huggingface.co</code></td>
-          <td>Next trigger; hub URL for resolution and downloads.</td>
-      </tr>
-      <tr>
-          <td><code>model-artifact-modelscope-endpoint</code> (<code>..._MODELSCOPE_ENDPOINT</code>)</td>
-          <td><code>https://www.modelscope.cn</code></td>
-          <td>Next trigger; bare host passed to engines as <code>MODELSCOPE_DOMAIN</code>.</td>
-      </tr>
-      <tr>
-          <td><code>model-artifact-https-proxy</code> (<code>..._HTTPS_PROXY</code>)</td>
-          <td><em>(blank)</em></td>
-          <td>Next trigger; <code>http</code>/<code>https</code> URL without embedded credentials.</td>
-      </tr>
-      <tr>
-          <td><code>model-artifact-no-proxy</code> (<code>..._NO_PROXY</code>)</td>
-          <td><em>(blank)</em></td>
-          <td>Next trigger; comma-separated hosts bypassing the proxy.</td>
-      </tr>
-      <tr>
-          <td><code>model-artifact-ca-bundle</code> (<code>..._CA_BUNDLE</code>)</td>
-          <td><em>(blank)</em></td>
-          <td>Next trigger; <code>ConfigMap</code> (<code>ca.crt</code>) in operator namespace (plugin and worker only).</td>
-      </tr>
-      <tr>
-          <td><code>model-artifact-revalidate-interval</code> (<code>..._REVALIDATE_INTERVAL</code>)</td>
-          <td><code>24h</code></td>
-          <td>Next trigger; minimum <code>1m</code>.</td>
-      </tr>
-      <tr>
-          <td><code>model-store-high-watermark</code> (<code>..._STORE_HIGH_WATERMARK</code>)</td>
-          <td><code>80</code></td>
-          <td>Immediate; integer above low watermark, max <code>95</code>.</td>
-      </tr>
-      <tr>
-          <td><code>model-store-low-watermark</code> (<code>..._STORE_LOW_WATERMARK</code>)</td>
-          <td><code>70</code></td>
-          <td>Immediate; integer <code>&gt;= 1</code>, below high watermark.</td>
-      </tr>
-      <tr>
-          <td><code>model-store-download-concurrency</code> (<code>..._STORE_DOWNLOAD_CONCURRENCY</code>)</td>
-          <td><code>8</code></td>
-          <td>Immediate; concurrent HTTP requests per <code>Node</code> (<code>1..64</code>).</td>
-      </tr>
-      <tr>
-          <td><code>model-store-download-bandwidth</code> (<code>..._STORE_DOWNLOAD_BANDWIDTH</code>)</td>
-          <td><code>0</code></td>
-          <td>Immediate; byte rate (<code>200Mi</code>); <code>0</code> means unlimited.</td>
-      </tr>
-      <tr>
-          <td><code>model-store-peer-sync</code> (<code>..._STORE_PEER_SYNC</code>)</td>
-          <td><code>true</code></td>
-          <td>Immediate; enables peer pulls on port <code>32445</code> (<a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/#node-to-node-sync">Node-to-node sync</a>
+	<thead>
+			<tr>
+					<th><code>Setting</code> (<code>GPUSTACK_*</code> env)</th>
+					<th>Default</th>
+					<th>Effect and constraints</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>model-artifact-delivery-mode</code> (<code>..._DELIVERY_MODE</code>)</td>
+					<td><code>Engine</code> (<code>Node</code> in chart)</td>
+					<td>Immediate; <code>Engine</code> or <code>Node</code> (<code>Node</code> requires <code>CSIDriver</code>).</td>
+			</tr>
+			<tr>
+					<td><code>model-artifact-remote-delivery-policy</code> (<code>..._REMOTE_DELIVERY_POLICY</code>)</td>
+					<td><code>Prefer</code></td>
+					<td>Immediate; <code>Disabled</code>, <code>Require</code>, or <code>Prefer</code>.</td>
+			</tr>
+			<tr>
+					<td><code>model-artifact-huggingface-endpoint</code> (<code>..._HUGGINGFACE_ENDPOINT</code>)</td>
+					<td><code>https://huggingface.co</code></td>
+					<td>Next trigger; hub URL for resolution and downloads.</td>
+			</tr>
+			<tr>
+					<td><code>model-artifact-modelscope-endpoint</code> (<code>..._MODELSCOPE_ENDPOINT</code>)</td>
+					<td><code>https://www.modelscope.cn</code></td>
+					<td>Next trigger; bare host passed to engines as <code>MODELSCOPE_DOMAIN</code>.</td>
+			</tr>
+			<tr>
+					<td><code>model-artifact-https-proxy</code> (<code>..._HTTPS_PROXY</code>)</td>
+					<td><em>(blank)</em></td>
+					<td>Next trigger; <code>http</code>/<code>https</code> URL without embedded credentials.</td>
+			</tr>
+			<tr>
+					<td><code>model-artifact-no-proxy</code> (<code>..._NO_PROXY</code>)</td>
+					<td><em>(blank)</em></td>
+					<td>Next trigger; comma-separated hosts bypassing the proxy.</td>
+			</tr>
+			<tr>
+					<td><code>model-artifact-ca-bundle</code> (<code>..._CA_BUNDLE</code>)</td>
+					<td><em>(blank)</em></td>
+					<td>Next trigger; <code>ConfigMap</code> (<code>ca.crt</code>) in operator namespace (plugin and worker only).</td>
+			</tr>
+			<tr>
+					<td><code>model-artifact-revalidate-interval</code> (<code>..._REVALIDATE_INTERVAL</code>)</td>
+					<td><code>24h</code></td>
+					<td>Next trigger; minimum <code>1m</code>.</td>
+			</tr>
+			<tr>
+					<td><code>model-store-high-watermark</code> (<code>..._STORE_HIGH_WATERMARK</code>)</td>
+					<td><code>80</code></td>
+					<td>Immediate; integer above low watermark, max <code>95</code>.</td>
+			</tr>
+			<tr>
+					<td><code>model-store-low-watermark</code> (<code>..._STORE_LOW_WATERMARK</code>)</td>
+					<td><code>70</code></td>
+					<td>Immediate; integer <code>&gt;= 1</code>, below high watermark.</td>
+			</tr>
+			<tr>
+					<td><code>model-store-download-concurrency</code> (<code>..._STORE_DOWNLOAD_CONCURRENCY</code>)</td>
+					<td><code>8</code></td>
+					<td>Immediate; concurrent HTTP requests per <code>Node</code> (<code>1..64</code>).</td>
+			</tr>
+			<tr>
+					<td><code>model-store-download-bandwidth</code> (<code>..._STORE_DOWNLOAD_BANDWIDTH</code>)</td>
+					<td><code>0</code></td>
+					<td>Immediate; byte rate (<code>200Mi</code>); <code>0</code> means unlimited.</td>
+			</tr>
+			<tr>
+					<td><code>model-store-peer-sync</code> (<code>..._STORE_PEER_SYNC</code>)</td>
+					<td><code>true</code></td>
+					<td>Immediate; enables peer pulls on port <code>32445</code> (<a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/#node-to-node-sync">Node-to-node sync</a>
 ).</td>
-      </tr>
-      <tr>
-          <td><code>model-prefetch-warmup-image</code> (<code>..._PREFETCH_WARMUP_IMAGE</code>)</td>
-          <td><code>gpustack/mirrored-python:3.12-alpine</code></td>
-          <td>Immediate; warm-up <code>Pod</code> image (<code>sh</code>, <code>find</code>, <code>sha256sum</code>).</td>
-      </tr>
-  </tbody>
+			</tr>
+			<tr>
+					<td><code>model-prefetch-warmup-image</code> (<code>..._PREFETCH_WARMUP_IMAGE</code>)</td>
+					<td><code>gpustack/mirrored-python:3.12-alpine</code></td>
+					<td>Immediate; warm-up <code>Pod</code> image (<code>sh</code>, <code>find</code>, <code>sha256sum</code>).</td>
+			</tr>
+	</tbody>
 </table>
 <p>Invalid <code>GPUSTACK_*</code> seeds stop worker startup; invalid <code>NodeModelStore.spec</code> values set
 <code>Ready=False/InvalidConfiguration</code> on the <code>Node</code> and halt new downloads while keeping published
@@ -1352,7 +1352,7 @@ mounts readable. Update an unseeded runtime <code>Setting</code> directly:</p>
 </span></span><span class="line"><span class="cl">   namespace: gpustack-system
 </span></span><span class="line"><span class="cl"> spec:
 </span></span><span class="line"><span class="cl"><span class="gd">-  value: &#34;0&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: 200Mi
+</span></span></span><span class="line"><span class="cl"><span class="gi">+  value: 200Mi
 </span></span></span></code></pre></div>
 </div>
 <h3 id="modelstore-overrides">ModelStore overrides</h3>
@@ -1390,40 +1390,40 @@ and wait past <em><code>retryTime</code></em> for the next mount retry.</li>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">gpustack-operator model-manager --node-name<span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>hostname<span class="k">)</span><span class="s2">&#34;</span> --cache-root<span class="o">=</span>/mnt/models</span></span></code></pre></div>
 </div>
 <table>
-  <thead>
-      <tr>
-          <th>Flag</th>
-          <th>Default</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>--node-name</code></td>
-          <td>—</td>
-          <td>Target <code>Node</code> and <code>NodeModelStore</code> name.</td>
-      </tr>
-      <tr>
-          <td><code>--kubelet-dir</code></td>
-          <td><code>/var/lib/kubelet</code></td>
-          <td>Kubelet root containing <code>pods</code> mount directories.</td>
-      </tr>
-      <tr>
-          <td><code>--cache-root</code></td>
-          <td><code>/var/lib/gpustack/models</code></td>
-          <td>Host directory storing cached model trees.</td>
-      </tr>
-      <tr>
-          <td><code>--csi-socket</code></td>
-          <td><code>&lt;kubelet-dir&gt;/plugins/model.csi.gpustack.ai/csi.sock</code></td>
-          <td>CSI Unix domain socket path.</td>
-      </tr>
-      <tr>
-          <td><code>--secure-port</code></td>
-          <td><code>32444</code></td>
-          <td>HTTPS port serving <code>/metrics</code>, <code>/readyz</code>, and <code>/livez</code>.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Flag</th>
+					<th>Default</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--node-name</code></td>
+					<td>—</td>
+					<td>Target <code>Node</code> and <code>NodeModelStore</code> name.</td>
+			</tr>
+			<tr>
+					<td><code>--kubelet-dir</code></td>
+					<td><code>/var/lib/kubelet</code></td>
+					<td>Kubelet root containing <code>pods</code> mount directories.</td>
+			</tr>
+			<tr>
+					<td><code>--cache-root</code></td>
+					<td><code>/var/lib/gpustack/models</code></td>
+					<td>Host directory storing cached model trees.</td>
+			</tr>
+			<tr>
+					<td><code>--csi-socket</code></td>
+					<td><code>&lt;kubelet-dir&gt;/plugins/model.csi.gpustack.ai/csi.sock</code></td>
+					<td>CSI Unix domain socket path.</td>
+			</tr>
+			<tr>
+					<td><code>--secure-port</code></td>
+					<td><code>32444</code></td>
+					<td>HTTPS port serving <code>/metrics</code>, <code>/readyz</code>, and <code>/livez</code>.</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="cache-collection-rules">Cache collection rules</h3>
 <p>Collection runs above the high watermark, when a reservation does not fit, and every <code>5m</code>. It evicts
@@ -1488,40 +1488,40 @@ files on disk; remove <code>/var/lib/gpustack/models</code> manually after all <
 </ul>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>No new <code>Pod</code> under <code>Node</code> delivery</td>
-          <td><code>WeightsReady=False</code> (<code>NodeDeliveryUnavailable</code>)</td>
-          <td>Verify <code>modelManager.enabled: true</code> and <code>CSIDriver</code> <code>model.csi.gpustack.ai</code>.</td>
-      </tr>
-      <tr>
-          <td>Patterned artifact creates no <code>Pod</code></td>
-          <td><code>WeightsReady=False</code> (<code>FilterNeedsNodeDelivery</code>)</td>
-          <td>Set <code>model-artifact-delivery-mode</code> to <code>Node</code> or remove patterns.</td>
-      </tr>
-      <tr>
-          <td><code>Pod</code> waiting on cold cache</td>
-          <td><code>WeightsReady=False</code> (<code>Materializing</code>)</td>
-          <td>Check <code>FailedMount</code> byte progress; <code>Pod</code> starts within <code>~2m</code> of download completion.</td>
-      </tr>
-      <tr>
-          <td>Node cache download failed</td>
-          <td><code>WeightsReady=False</code> (<code>MaterializationFailed</code>)</td>
-          <td>Inspect <code>NodeModelStore.status.models[]</code> <em><code>reason</code></em>, <em><code>message</code></em>, and <em><code>retryTime</code></em>.</td>
-      </tr>
-      <tr>
-          <td>Container mount blocked</td>
-          <td><code>WeightsReady=False</code> (<code>WeightsNotMounted</code>)</td>
-          <td>Inspect <code>Pod</code> <code>FailedMount</code> events (<code>PermissionDenied</code> or image pull error).</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>No new <code>Pod</code> under <code>Node</code> delivery</td>
+					<td><code>WeightsReady=False</code> (<code>NodeDeliveryUnavailable</code>)</td>
+					<td>Verify <code>modelManager.enabled: true</code> and <code>CSIDriver</code> <code>model.csi.gpustack.ai</code>.</td>
+			</tr>
+			<tr>
+					<td>Patterned artifact creates no <code>Pod</code></td>
+					<td><code>WeightsReady=False</code> (<code>FilterNeedsNodeDelivery</code>)</td>
+					<td>Set <code>model-artifact-delivery-mode</code> to <code>Node</code> or remove patterns.</td>
+			</tr>
+			<tr>
+					<td><code>Pod</code> waiting on cold cache</td>
+					<td><code>WeightsReady=False</code> (<code>Materializing</code>)</td>
+					<td>Check <code>FailedMount</code> byte progress; <code>Pod</code> starts within <code>~2m</code> of download completion.</td>
+			</tr>
+			<tr>
+					<td>Node cache download failed</td>
+					<td><code>WeightsReady=False</code> (<code>MaterializationFailed</code>)</td>
+					<td>Inspect <code>NodeModelStore.status.models[]</code> <em><code>reason</code></em>, <em><code>message</code></em>, and <em><code>retryTime</code></em>.</td>
+			</tr>
+			<tr>
+					<td>Container mount blocked</td>
+					<td><code>WeightsReady=False</code> (<code>WeightsNotMounted</code>)</td>
+					<td>Inspect <code>Pod</code> <code>FailedMount</code> events (<code>PermissionDenied</code> or image pull error).</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="failed-mount-inspection">Failed mount inspection</h3>
 <div class="code-block">
@@ -1533,76 +1533,76 @@ files on disk; remove <code>/var/lib/gpustack/models</code> manually after all <
 </div>
 <h3 id="mount-refusal-vs-unavailability">Mount refusal vs unavailability</h3>
 <table>
-  <thead>
-      <tr>
-          <th><code>FailedMount</code> signal</th>
-          <th>Cause</th>
-          <th>Next action</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>PermissionDenied</code></td>
-          <td>Missing inline CSI volume, missing or unresolved <code>ModelArtifact</code> in <code>Pod</code> namespace, or UID/<em><code>manifestDigest</code></em> mismatch</td>
-          <td>Ensure <code>ModelArtifact</code> in the <code>Pod</code> namespace is <code>Resolved=True</code>; recreate the <code>Pod</code> if the artifact was recreated.</td>
-      </tr>
-      <tr>
-          <td><code>Aborted</code> (<code>materializing sha256:...</code>)</td>
-          <td>Background download in progress</td>
-          <td>Wait for kubelet retry (<code>Pod</code> starts up to <code>~2m</code> after publication).</td>
-      </tr>
-      <tr>
-          <td><code>Unavailable</code> right after plugin restart</td>
-          <td>Plugin informer still syncing initial artifacts</td>
-          <td>Confirm <code>model-manager</code> <code>Pod</code> is <code>Ready</code> and wait for kubelet retry.</td>
-      </tr>
-      <tr>
-          <td><code>Unavailable</code> with <code>Failed</code> digest</td>
-          <td>Earlier download failed (<code>1m</code> to <code>1h</code> backoff)</td>
-          <td>Fix the <code>NodeModelStore</code> failure cause below and wait past <em><code>retryTime</code></em>.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th><code>FailedMount</code> signal</th>
+					<th>Cause</th>
+					<th>Next action</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>PermissionDenied</code></td>
+					<td>Missing inline CSI volume, missing or unresolved <code>ModelArtifact</code> in <code>Pod</code> namespace, or UID/<em><code>manifestDigest</code></em> mismatch</td>
+					<td>Ensure <code>ModelArtifact</code> in the <code>Pod</code> namespace is <code>Resolved=True</code>; recreate the <code>Pod</code> if the artifact was recreated.</td>
+			</tr>
+			<tr>
+					<td><code>Aborted</code> (<code>materializing sha256:...</code>)</td>
+					<td>Background download in progress</td>
+					<td>Wait for kubelet retry (<code>Pod</code> starts up to <code>~2m</code> after publication).</td>
+			</tr>
+			<tr>
+					<td><code>Unavailable</code> right after plugin restart</td>
+					<td>Plugin informer still syncing initial artifacts</td>
+					<td>Confirm <code>model-manager</code> <code>Pod</code> is <code>Ready</code> and wait for kubelet retry.</td>
+			</tr>
+			<tr>
+					<td><code>Unavailable</code> with <code>Failed</code> digest</td>
+					<td>Earlier download failed (<code>1m</code> to <code>1h</code> backoff)</td>
+					<td>Fix the <code>NodeModelStore</code> failure cause below and wait past <em><code>retryTime</code></em>.</td>
+			</tr>
+	</tbody>
 </table>
 <table>
-  <thead>
-      <tr>
-          <th><code>NodeModelStore</code> reason</th>
-          <th>Cause</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>InvalidRequest</code></td>
-          <td>Invalid hub URL, proxy, or CA bundle (<code>Ready=False/InvalidConfiguration</code>)</td>
-          <td>Fix the <code>Setting</code> or <code>ModelStore</code> so <code>NodeModelStore.spec</code> updates.</td>
-      </tr>
-      <tr>
-          <td><code>AccessDenied</code></td>
-          <td>Hub rejected token (<code>1m</code>–<code>1h</code> backoff)</td>
-          <td>Update the <code>ModelArtifact</code> <code>Secret</code> <code>token</code> and wait past <em><code>retryTime</code></em>.</td>
-      </tr>
-      <tr>
-          <td><code>SourceUnavailable</code></td>
-          <td>Hub unreachable/5xx/429, or no peer holds an <code>Expected</code> digest</td>
-          <td>Check network/proxy or seed one peer <code>Node</code> for <code>Expected</code> anchors.</td>
-      </tr>
-      <tr>
-          <td><code>IntegrityMismatch</code></td>
-          <td>File or manifest hash mismatch</td>
-          <td>Check upstream mirror integrity; corrupted partials are discarded.</td>
-      </tr>
-      <tr>
-          <td><code>InsufficientCapacity</code></td>
-          <td>Download exceeds high watermark (<code>CapacityLow=True/NothingToRemove</code>)</td>
-          <td>Unpin unused models, add disk space, or reduce concurrent cold mounts.</td>
-      </tr>
-      <tr>
-          <td><code>Canceled</code></td>
-          <td>No <code>Pod</code> requested the digest for <code>5m</code></td>
-          <td>None required; partial files remain and resume immediately on the next mount.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th><code>NodeModelStore</code> reason</th>
+					<th>Cause</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>InvalidRequest</code></td>
+					<td>Invalid hub URL, proxy, or CA bundle (<code>Ready=False/InvalidConfiguration</code>)</td>
+					<td>Fix the <code>Setting</code> or <code>ModelStore</code> so <code>NodeModelStore.spec</code> updates.</td>
+			</tr>
+			<tr>
+					<td><code>AccessDenied</code></td>
+					<td>Hub rejected token (<code>1m</code>–<code>1h</code> backoff)</td>
+					<td>Update the <code>ModelArtifact</code> <code>Secret</code> <code>token</code> and wait past <em><code>retryTime</code></em>.</td>
+			</tr>
+			<tr>
+					<td><code>SourceUnavailable</code></td>
+					<td>Hub unreachable/5xx/429, or no peer holds an <code>Expected</code> digest</td>
+					<td>Check network/proxy or seed one peer <code>Node</code> for <code>Expected</code> anchors.</td>
+			</tr>
+			<tr>
+					<td><code>IntegrityMismatch</code></td>
+					<td>File or manifest hash mismatch</td>
+					<td>Check upstream mirror integrity; corrupted partials are discarded.</td>
+			</tr>
+			<tr>
+					<td><code>InsufficientCapacity</code></td>
+					<td>Download exceeds high watermark (<code>CapacityLow=True/NothingToRemove</code>)</td>
+					<td>Unpin unused models, add disk space, or reduce concurrent cold mounts.</td>
+			</tr>
+			<tr>
+					<td><code>Canceled</code></td>
+					<td>No <code>Pod</code> requested the digest for <code>5m</code></td>
+					<td>None required; partial files remain and resume immediately on the next mount.</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

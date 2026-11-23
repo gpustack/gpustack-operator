@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Installation Modes · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1233,22 +1233,22 @@ flowchart TD
 <p>Kueue, NFD, Topograph, and the NFS and S3 CSI drivers ship under <code>deploy/gpustack-operator/chart/charts/</code>
 behind per-subchart <code>enabled</code> switches:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Mode</th>
-          <th>Installation</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><strong>Chart mode</strong></td>
-          <td><strong>Default.</strong> Helm renders the worker, Device Manager <code>DaemonSet</code>s, and enabled subcharts in one release. The worker runs with <code>--disable-applications=*</code> (<code>worker.disableApplications</code>, default <code>[&quot;*&quot;]</code>) and installs no Helm release at runtime.</td>
-      </tr>
-      <tr>
-          <td>Image mode</td>
-          <td>No Helm release deploys the worker. An external worker installs <code>${GPUSTACK_CONF_DIR:-/etc/gpustack}/charts/gpustack-operator-&lt;version&gt;.tgz</code> as release <code>gpustack-operator-device-manager</code><sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup>.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Mode</th>
+					<th>Installation</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><strong>Chart mode</strong></td>
+					<td><strong>Default.</strong> Helm renders the worker, Device Manager <code>DaemonSet</code>s, and enabled subcharts in one release. The worker runs with <code>--disable-applications=*</code> (<code>worker.disableApplications</code>, default <code>[&quot;*&quot;]</code>) and installs no Helm release at runtime.</td>
+			</tr>
+			<tr>
+					<td>Image mode</td>
+					<td>No Helm release deploys the worker. An external worker installs <code>${GPUSTACK_CONF_DIR:-/etc/gpustack}/charts/gpustack-operator-&lt;version&gt;.tgz</code> as release <code>gpustack-operator-device-manager</code><sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup>.</td>
+			</tr>
+	</tbody>
 </table>
 <p>In image mode, the worker generates its values overlay (<code>worker.enabled=false</code>,
 <code>fullnameOverride: gpustack-operator</code>, component switches, and manufacturer map) from flags and
@@ -1293,35 +1293,35 @@ overlay).</li>
 <code>kubectl -n gpustack-system patch setting &lt;name&gt; --type merge -p '{&quot;spec&quot;:{&quot;value&quot;:&quot;...&quot;}}'</code>. On every
 worker start, restart, or upgrade, the worker reconciles each <code>Setting</code> in four ordered rules:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Rule</th>
-          <th>Precedence</th>
-          <th>Behavior</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>1. <code>Backfill</code></td>
-          <td>Missing key only</td>
-          <td>Seeds an absent <code>Setting</code> from <code>GPUSTACK_&lt;UPPER_SNAKE_NAME&gt;</code> if set, else the built-in default.</td>
-      </tr>
-      <tr>
-          <td>2. <code>env-declared</code></td>
-          <td>Wins on every start</td>
-          <td>Any non-blank <code>GPUSTACK_*</code> variable on the worker <code>Deployment</code> (from <code>global.imageRegistry</code>, <code>global.imagePullPolicy</code>, <code>modelManager.enabled</code>, <code>modelTransfer.enabled</code>, or <code>worker.env</code>) overwrites the stored <code>Setting</code>.</td>
-      </tr>
-      <tr>
-          <td>3. <code>default-tracked</code></td>
-          <td>Wins if unclaimed by env</td>
-          <td>If <code>settings-default-tracking</code> lists the <code>Setting</code> (built-in image <code>Setting</code>s are tracked by default), the built-in default overwrites the stored value on start.</td>
-      </tr>
-      <tr>
-          <td>4. Administrator-owned</td>
-          <td>Preserved</td>
-          <td>Every other <code>Setting</code> keeps its stored value across restarts and upgrades.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Rule</th>
+					<th>Precedence</th>
+					<th>Behavior</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>1. <code>Backfill</code></td>
+					<td>Missing key only</td>
+					<td>Seeds an absent <code>Setting</code> from <code>GPUSTACK_&lt;UPPER_SNAKE_NAME&gt;</code> if set, else the built-in default.</td>
+			</tr>
+			<tr>
+					<td>2. <code>env-declared</code></td>
+					<td>Wins on every start</td>
+					<td>Any non-blank <code>GPUSTACK_*</code> variable on the worker <code>Deployment</code> (from <code>global.imageRegistry</code>, <code>global.imagePullPolicy</code>, <code>modelManager.enabled</code>, <code>modelTransfer.enabled</code>, or <code>worker.env</code>) overwrites the stored <code>Setting</code>.</td>
+			</tr>
+			<tr>
+					<td>3. <code>default-tracked</code></td>
+					<td>Wins if unclaimed by env</td>
+					<td>If <code>settings-default-tracking</code> lists the <code>Setting</code> (built-in image <code>Setting</code>s are tracked by default), the built-in default overwrites the stored value on start.</td>
+			</tr>
+			<tr>
+					<td>4. Administrator-owned</td>
+					<td>Preserved</td>
+					<td>Every other <code>Setting</code> keeps its stored value across restarts and upgrades.</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="reverted-setting-after-restart">Reverted setting after restart</h3>
 <p>If a patched <code>Setting</code> reverts after a worker restart or upgrade, inspect which startup rule overwrote
@@ -1355,25 +1355,25 @@ both modes once Kueue&rsquo;s templated CRDs exist, and marked <code>Active</cod
 <code>node-feature-discovery.enabled=false</code> omits bundled NFD CRDs.</li>
 </ul>
 <table>
-  <thead>
-      <tr>
-          <th><code>AdmissionCheck</code></th>
-          <th>Purpose</th>
-          <th>Referencing queues</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>gpustack-node-devices</code></td>
-          <td>Verifies per-accelerator fit before placement</td>
-          <td>Accelerated queues while <code>instance-type-derived-from-node</code> is <code>true</code></td>
-      </tr>
-      <tr>
-          <td><code>gpustack-model-deployment-joint</code></td>
-          <td>Holds multi-role <code>ModelDeployment</code> replicas for atomic gang admission</td>
-          <td>Every operator-managed queue, including CPU and custom <code>InstanceType</code> queues</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th><code>AdmissionCheck</code></th>
+					<th>Purpose</th>
+					<th>Referencing queues</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>gpustack-node-devices</code></td>
+					<td>Verifies per-accelerator fit before placement</td>
+					<td>Accelerated queues while <code>instance-type-derived-from-node</code> is <code>true</code></td>
+			</tr>
+			<tr>
+					<td><code>gpustack-model-deployment-joint</code></td>
+					<td>Holds multi-role <code>ModelDeployment</code> replicas for atomic gang admission</td>
+					<td>Every operator-managed queue, including CPU and custom <code>InstanceType</code> queues</td>
+			</tr>
+	</tbody>
 </table>
 <p><code>gpustack-model-deployment-joint</code> passes single-role deployments and standalone workloads immediately.</p>
 <p>The worker also installs and updates its own CRDs, aggregated <code>APIService</code>s, and webhook

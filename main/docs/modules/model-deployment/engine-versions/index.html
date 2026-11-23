@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Engine Compatibility · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1214,102 +1214,102 @@ older engine release.</p>
 <p>The matrix covers aggregated serving, <em>prefill/decode (PD)</em> and <em>encode/prefill/decode (EPD)</em>
 configurations.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Engine</th>
-          <th>Configuration</th>
-          <th>Minimum</th>
-          <th>Mooncake client</th>
-          <th>Store members</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>vLLM</td>
-          <td>alone</td>
-          <td><code>0.29.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0</code>+</td>
-          <td><code>0.3.13.post1</code>, on the <code>cuda12.9</code> and the <code>cuda13.0</code> tag</td>
-          <td>—</td>
-      </tr>
-      <tr>
-          <td>vLLM</td>
-          <td><em>prefill/decode</em>, direct transfer over <code>tcp</code></td>
-          <td><code>0.29.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0</code>+</td>
-          <td><code>0.3.13.post1</code></td>
-          <td>—</td>
-      </tr>
-      <tr>
-          <td>vLLM</td>
-          <td>with a Mooncake store, alone or as a pair</td>
-          <td><code>0.29.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0</code>+</td>
-          <td><code>0.3.13.post1</code></td>
-          <td>the 0.3.13 line; the <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#backend-images">default store image</a>
+	<thead>
+			<tr>
+					<th>Engine</th>
+					<th>Configuration</th>
+					<th>Minimum</th>
+					<th>Mooncake client</th>
+					<th>Store members</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>vLLM</td>
+					<td>alone</td>
+					<td><code>0.29.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0</code>+</td>
+					<td><code>0.3.13.post1</code>, on the <code>cuda12.9</code> and the <code>cuda13.0</code> tag</td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>vLLM</td>
+					<td><em>prefill/decode</em>, direct transfer over <code>tcp</code></td>
+					<td><code>0.29.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0</code>+</td>
+					<td><code>0.3.13.post1</code></td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>vLLM</td>
+					<td>with a Mooncake store, alone or as a pair</td>
+					<td><code>0.29.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0</code>+</td>
+					<td><code>0.3.13.post1</code></td>
+					<td>the 0.3.13 line; the <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#backend-images">default store image</a>
  is one</td>
-      </tr>
-      <tr>
-          <td>vLLM-Ascend</td>
-          <td>alone</td>
-          <td><code>0.23.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0rc1</code>+</td>
-          <td><code>0.3.11.post1</code>, the NPU build</td>
-          <td>—</td>
-      </tr>
-      <tr>
-          <td>vLLM-Ascend</td>
-          <td><em>prefill/decode</em>, direct transfer</td>
-          <td><code>0.23.0</code>, behind <code>llm-d-router</code>; <code>--enable-scale-out</code> is also required on <code>0.30.0rc1</code>+</td>
-          <td><code>0.3.11.post1</code>, the NPU build</td>
-          <td>—</td>
-      </tr>
-      <tr>
-          <td>vLLM-Ascend</td>
-          <td>with a Mooncake store</td>
-          <td>not verified</td>
-          <td><code>0.3.11.post1</code>, the NPU build</td>
-          <td>not verified</td>
-      </tr>
-      <tr>
-          <td>SGLang</td>
-          <td>alone</td>
-          <td><code>0.5.18</code>, run as the halves of a pair</td>
-          <td><code>0.3.12.post1</code></td>
-          <td>—</td>
-      </tr>
-      <tr>
-          <td>SGLang</td>
-          <td><em>prefill/decode</em>, direct transfer over <code>tcp</code></td>
-          <td><code>0.5.18</code></td>
-          <td><code>0.3.12.post1</code></td>
-          <td>—</td>
-      </tr>
-      <tr>
-          <td>SGLang</td>
-          <td>with a Mooncake store</td>
-          <td><code>0.5.18</code>, run as a pair</td>
-          <td><code>0.3.12.post1</code></td>
-          <td>the 0.3.12 line, such as <code>kvcacheai/mooncake:0.3.12.post1</code></td>
-      </tr>
-      <tr>
-          <td>vLLM</td>
-          <td><em>encode/prefill/decode</em>, direct transfer over NIXL (<code>ECCPUConnector</code>)</td>
-          <td><code>0.30.0</code>, behind <code>llm-d-router</code> or <code>vllm-router</code>: NVIDIA CUDA (verified on 4 × NVIDIA L40S) or AMD ROCm (unverified on hardware)</td>
-          <td>compiles its own, not run</td>
-          <td>—</td>
-      </tr>
-      <tr>
-          <td>vLLM-Ascend</td>
-          <td><em>encode/prefill/decode</em>, direct transfer (<code>ECExampleConnector</code>)</td>
-          <td><code>0.30.0rc1</code>, behind <code>llm-d-router</code> (verified on Ascend 910B2)</td>
-          <td><code>0.3.11.post1</code>, the NPU build</td>
-          <td>—</td>
-      </tr>
-      <tr>
-          <td>SGLang</td>
-          <td><em>encode/prefill/decode</em>, transfer by address (<code>encoder-urls</code>)</td>
-          <td><code>0.5.10</code>, behind <code>llm-d-router</code> or <code>sglang-gateway</code> (NVIDIA verified on 2 × NVIDIA L40S)</td>
-          <td><code>0.3.12.post1</code></td>
-          <td>—</td>
-      </tr>
-  </tbody>
+			</tr>
+			<tr>
+					<td>vLLM-Ascend</td>
+					<td>alone</td>
+					<td><code>0.23.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0rc1</code>+</td>
+					<td><code>0.3.11.post1</code>, the NPU build</td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>vLLM-Ascend</td>
+					<td><em>prefill/decode</em>, direct transfer</td>
+					<td><code>0.23.0</code>, behind <code>llm-d-router</code>; <code>--enable-scale-out</code> is also required on <code>0.30.0rc1</code>+</td>
+					<td><code>0.3.11.post1</code>, the NPU build</td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>vLLM-Ascend</td>
+					<td>with a Mooncake store</td>
+					<td>not verified</td>
+					<td><code>0.3.11.post1</code>, the NPU build</td>
+					<td>not verified</td>
+			</tr>
+			<tr>
+					<td>SGLang</td>
+					<td>alone</td>
+					<td><code>0.5.18</code>, run as the halves of a pair</td>
+					<td><code>0.3.12.post1</code></td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>SGLang</td>
+					<td><em>prefill/decode</em>, direct transfer over <code>tcp</code></td>
+					<td><code>0.5.18</code></td>
+					<td><code>0.3.12.post1</code></td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>SGLang</td>
+					<td>with a Mooncake store</td>
+					<td><code>0.5.18</code>, run as a pair</td>
+					<td><code>0.3.12.post1</code></td>
+					<td>the 0.3.12 line, such as <code>kvcacheai/mooncake:0.3.12.post1</code></td>
+			</tr>
+			<tr>
+					<td>vLLM</td>
+					<td><em>encode/prefill/decode</em>, direct transfer over NIXL (<code>ECCPUConnector</code>)</td>
+					<td><code>0.30.0</code>, behind <code>llm-d-router</code> or <code>vllm-router</code>: NVIDIA CUDA (verified on 4 × NVIDIA L40S) or AMD ROCm (unverified on hardware)</td>
+					<td>compiles its own, not run</td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>vLLM-Ascend</td>
+					<td><em>encode/prefill/decode</em>, direct transfer (<code>ECExampleConnector</code>)</td>
+					<td><code>0.30.0rc1</code>, behind <code>llm-d-router</code> (verified on Ascend 910B2)</td>
+					<td><code>0.3.11.post1</code>, the NPU build</td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>SGLang</td>
+					<td><em>encode/prefill/decode</em>, transfer by address (<code>encoder-urls</code>)</td>
+					<td><code>0.5.10</code>, behind <code>llm-d-router</code> or <code>sglang-gateway</code> (NVIDIA verified on 2 × NVIDIA L40S)</td>
+					<td><code>0.3.12.post1</code></td>
+					<td>—</td>
+			</tr>
+	</tbody>
 </table>
 <p>A row counts as verified when the configuration served requests and reported KV block transfers or
 store writes. The vLLM-Ascend rows ran on <code>cann9.1-910b-vllm0.23.0</code> via <em><code>roles[].image</code></em>. NVIDIA
@@ -1353,97 +1353,97 @@ admits a member, <code>Unknown</code> keeps prior eligibility, and only a failed
 ). Admission refuses
 deployments whose store and direct paths request incompatible fabrics.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Transport (API/Mooncake)</th>
-          <th>Engine</th>
-          <th>Store path</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>TCP</code> / <code>tcp</code></td>
-          <td>vLLM</td>
-          <td><strong>Works</strong>, default images; beside a direct path it keeps its store connections open and did not <a href="#limitations">run out of ports</a>
+	<thead>
+			<tr>
+					<th>Transport (API/Mooncake)</th>
+					<th>Engine</th>
+					<th>Store path</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>TCP</code> / <code>tcp</code></td>
+					<td>vLLM</td>
+					<td><strong>Works</strong>, default images; beside a direct path it keeps its store connections open and did not <a href="#limitations">run out of ports</a>
  where measured</td>
-      </tr>
-      <tr>
-          <td><code>TCP</code> / <code>tcp</code></td>
-          <td>SGLang</td>
-          <td><strong>Works</strong>, with a store image on <a href="#minimum-versions">its client&rsquo;s line</a>
+			</tr>
+			<tr>
+					<td><code>TCP</code> / <code>tcp</code></td>
+					<td>SGLang</td>
+					<td><strong>Works</strong>, with a store image on <a href="#minimum-versions">its client&rsquo;s line</a>
 ; beside a direct path, <a href="#limitations">it runs out of ports</a>
  unless <a href="#limitations"><code>model-deployment-tcp-tw-reuse</code></a>
  is on</td>
-      </tr>
-      <tr>
-          <td><code>TCP</code> / <code>tcp</code></td>
-          <td>vLLM-Ascend</td>
-          <td><strong>Not supported</strong>: refused at admission; store client accepts <code>CANN</code> only</td>
-      </tr>
-      <tr>
-          <td><code>RDMA</code> / <code>rdma</code></td>
-          <td>vLLM</td>
-          <td><strong>Not verified</strong></td>
-      </tr>
-      <tr>
-          <td><code>RDMA</code> / <code>rdma</code></td>
-          <td>SGLang</td>
-          <td><strong>Not verified</strong></td>
-      </tr>
-      <tr>
-          <td><code>RDMA</code> / <code>rdma</code></td>
-          <td>vLLM-Ascend</td>
-          <td><strong>Not supported</strong>: refused at admission, as for <code>TCP</code></td>
-      </tr>
-      <tr>
-          <td><code>EFA</code> / <code>efa</code></td>
-          <td>vLLM</td>
-          <td><strong>Own image</strong>: requires an <a href="/gpustack-operator/main/docs/modules/rdma/operations/#efa-engine-images">EFA build of Mooncake</a>
+			</tr>
+			<tr>
+					<td><code>TCP</code> / <code>tcp</code></td>
+					<td>vLLM-Ascend</td>
+					<td><strong>Not supported</strong>: refused at admission; store client accepts <code>CANN</code> only</td>
+			</tr>
+			<tr>
+					<td><code>RDMA</code> / <code>rdma</code></td>
+					<td>vLLM</td>
+					<td><strong>Not verified</strong></td>
+			</tr>
+			<tr>
+					<td><code>RDMA</code> / <code>rdma</code></td>
+					<td>SGLang</td>
+					<td><strong>Not verified</strong></td>
+			</tr>
+			<tr>
+					<td><code>RDMA</code> / <code>rdma</code></td>
+					<td>vLLM-Ascend</td>
+					<td><strong>Not supported</strong>: refused at admission, as for <code>TCP</code></td>
+			</tr>
+			<tr>
+					<td><code>EFA</code> / <code>efa</code></td>
+					<td>vLLM</td>
+					<td><strong>Own image</strong>: requires an <a href="/gpustack-operator/main/docs/modules/rdma/operations/#efa-engine-images">EFA build of Mooncake</a>
  in the engine; default store image</td>
-      </tr>
-      <tr>
-          <td><code>EFA</code> / <code>efa</code></td>
-          <td>SGLang</td>
-          <td><strong>Not supported</strong>: <a href="/gpustack-operator/main/docs/modules/rdma/operations/#sglang-and-efa">no EFA build serves SGLang</a>
+			</tr>
+			<tr>
+					<td><code>EFA</code> / <code>efa</code></td>
+					<td>SGLang</td>
+					<td><strong>Not supported</strong>: <a href="/gpustack-operator/main/docs/modules/rdma/operations/#sglang-and-efa">no EFA build serves SGLang</a>
 </td>
-      </tr>
-      <tr>
-          <td><code>EFA</code> / <code>efa</code></td>
-          <td>vLLM-Ascend</td>
-          <td><strong>Not supported</strong>: refused at admission, as for <code>TCP</code></td>
-      </tr>
-      <tr>
-          <td><code>CANN</code> / <code>ascend</code></td>
-          <td>vLLM</td>
-          <td><strong>Not supported</strong>: CUDA client has no Ascend transport</td>
-      </tr>
-      <tr>
-          <td><code>CANN</code> / <code>ascend</code></td>
-          <td>SGLang</td>
-          <td><strong>Not verified</strong></td>
-      </tr>
-      <tr>
-          <td><code>CANN</code> / <code>ascend</code></td>
-          <td>vLLM-Ascend</td>
-          <td><strong>Not verified</strong>; members need <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#backend-images">an image carrying CANN</a>
+			</tr>
+			<tr>
+					<td><code>EFA</code> / <code>efa</code></td>
+					<td>vLLM-Ascend</td>
+					<td><strong>Not supported</strong>: refused at admission, as for <code>TCP</code></td>
+			</tr>
+			<tr>
+					<td><code>CANN</code> / <code>ascend</code></td>
+					<td>vLLM</td>
+					<td><strong>Not supported</strong>: CUDA client has no Ascend transport</td>
+			</tr>
+			<tr>
+					<td><code>CANN</code> / <code>ascend</code></td>
+					<td>SGLang</td>
+					<td><strong>Not verified</strong></td>
+			</tr>
+			<tr>
+					<td><code>CANN</code> / <code>ascend</code></td>
+					<td>vLLM-Ascend</td>
+					<td><strong>Not verified</strong>; members need <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#backend-images">an image carrying CANN</a>
 </td>
-      </tr>
-      <tr>
-          <td><code>ROCM</code> / <code>hip</code></td>
-          <td>vLLM, SGLang</td>
-          <td><strong>Not verified</strong></td>
-      </tr>
-      <tr>
-          <td><code>ROCM</code> / <code>hip</code></td>
-          <td>vLLM-Ascend</td>
-          <td><strong>Not supported</strong>: refused at admission, as for <code>TCP</code></td>
-      </tr>
-      <tr>
-          <td><code>MUSA</code>, <code>MACA</code> / <code>musa</code>, <code>maca</code></td>
-          <td>vLLM, SGLang, vLLM-Ascend</td>
-          <td><strong>Not verified</strong></td>
-      </tr>
-  </tbody>
+			</tr>
+			<tr>
+					<td><code>ROCM</code> / <code>hip</code></td>
+					<td>vLLM, SGLang</td>
+					<td><strong>Not verified</strong></td>
+			</tr>
+			<tr>
+					<td><code>ROCM</code> / <code>hip</code></td>
+					<td>vLLM-Ascend</td>
+					<td><strong>Not supported</strong>: refused at admission, as for <code>TCP</code></td>
+			</tr>
+			<tr>
+					<td><code>MUSA</code>, <code>MACA</code> / <code>musa</code>, <code>maca</code></td>
+					<td>vLLM, SGLang, vLLM-Ascend</td>
+					<td><strong>Not verified</strong></td>
+			</tr>
+	</tbody>
 </table>
 <p>Direct-path observations apply only to the named configurations:</p>
 <ul>
@@ -1469,30 +1469,30 @@ plugin; SGLang uses <code>.pth</code> CLI and <code>LoadFormat</code> hooks. See
 <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">Remote Weight Delivery</a>
  for configuration.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Engine</th>
-          <th>Adapter entry</th>
-          <th>Qualification state</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>vLLM</td>
-          <td><code>NativeModelTransferLoader</code>, <code>--load-format model-transfer</code> on CUDA</td>
-          <td>H100 loading and inference observed for full-resident and paged 80B sources and full-resident 235B broadcast; production qualification remains open</td>
-      </tr>
-      <tr>
-          <td>vLLM-Ascend</td>
-          <td><code>NativeModelTransferLoader</code> through vLLM general plugin with <code>vllm_ascend</code> (requires CANN 9.2+ image with Python <code>hixl</code>, e.g. <code>cann9.2-910b-vllm0.30.0</code>)</td>
-          <td>Loading and inference measured on two Ascend 910B2 nodes for Qwen3-8B, Qwen3.6-35B-A3B and Qwen3-235B-A22B-W8A8; managed HIXL admitted by default; production qualification remains open</td>
-      </tr>
-      <tr>
-          <td>SGLang</td>
-          <td><code>NativeSGLangModelTransferLoader</code>, <code>--load-format model-transfer</code> via <code>.pth</code> CLI and <code>LoadFormat</code> hooks (requires CANN 9.2+ image on Ascend for Python <code>hixl</code>)</td>
-          <td>H100 80B loading and inference observed; Ascend covers CLI, <code>LoadFormat</code>, probe and session-open, with full loading qualification open</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Engine</th>
+					<th>Adapter entry</th>
+					<th>Qualification state</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>vLLM</td>
+					<td><code>NativeModelTransferLoader</code>, <code>--load-format model-transfer</code> on CUDA</td>
+					<td>H100 loading and inference observed for full-resident and paged 80B sources and full-resident 235B broadcast; production qualification remains open</td>
+			</tr>
+			<tr>
+					<td>vLLM-Ascend</td>
+					<td><code>NativeModelTransferLoader</code> through vLLM general plugin with <code>vllm_ascend</code> (requires CANN 9.2+ image with Python <code>hixl</code>, e.g. <code>cann9.2-910b-vllm0.30.0</code>)</td>
+					<td>Loading and inference measured on two Ascend 910B2 nodes for Qwen3-8B, Qwen3.6-35B-A3B and Qwen3-235B-A22B-W8A8; managed HIXL admitted by default; production qualification remains open</td>
+			</tr>
+			<tr>
+					<td>SGLang</td>
+					<td><code>NativeSGLangModelTransferLoader</code>, <code>--load-format model-transfer</code> via <code>.pth</code> CLI and <code>LoadFormat</code> hooks (requires CANN 9.2+ image on Ascend for Python <code>hixl</code>)</td>
+					<td>H100 80B loading and inference observed; Ascend covers CLI, <code>LoadFormat</code>, probe and session-open, with full loading qualification open</td>
+			</tr>
+	</tbody>
 </table>
 <p>A CUDA capture does not qualify Ascend or ROCm. Under delivery policy <code>Require</code>, an unqualified
 engine and pool combination blocks instead of falling back.</p>
@@ -1521,7 +1521,7 @@ node (otherwise <em>Prefill</em> <code>Pod</code>s fail with <code>SysctlForbidd
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-deployment-tcp-tw-reuse <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;true&#34;}}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;true&#34;}}&#39;</span></span></span></code></pre></div>
 </div>
 <ul>
 <li><strong>Untested boundaries</strong>: The store-free SGLang pair was not tested with <code>tcp_tw_reuse</code>, widening

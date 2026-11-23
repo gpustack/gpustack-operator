@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>RDMA Operations · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1219,34 +1219,34 @@ rules.</p>
 <h2 id="rdma-resource-requests">RDMA resource requests</h2>
 <p>Device Manager advertises three RDMA resource keys depending on each interface&rsquo;s configuration:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Key</th>
-          <th>Mode</th>
-          <th>Request unit</th>
-          <th>Tokens</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>device.gpustack.ai/rdma</code></td>
-          <td>Exclusive</td>
-          <td>One whole interface</td>
-          <td><code>1</code> per endpoint</td>
-      </tr>
-      <tr>
-          <td><code>device.gpustack.ai/rdma.shared</code></td>
-          <td>Shared</td>
-          <td>One concurrent share of an interface</td>
-          <td><code>64</code> per endpoint</td>
-      </tr>
-      <tr>
-          <td><code>device.gpustack.ai/rdma.partitioned</code></td>
-          <td>Partitioned</td>
-          <td>One <em>SR-IOV</em> virtual function</td>
-          <td><code>1</code> per virtual function</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Key</th>
+					<th>Mode</th>
+					<th>Request unit</th>
+					<th>Tokens</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>device.gpustack.ai/rdma</code></td>
+					<td>Exclusive</td>
+					<td>One whole interface</td>
+					<td><code>1</code> per endpoint</td>
+			</tr>
+			<tr>
+					<td><code>device.gpustack.ai/rdma.shared</code></td>
+					<td>Shared</td>
+					<td>One concurrent share of an interface</td>
+					<td><code>64</code> per endpoint</td>
+			</tr>
+			<tr>
+					<td><code>device.gpustack.ai/rdma.partitioned</code></td>
+					<td>Partitioned</td>
+					<td>One <em>SR-IOV</em> virtual function</td>
+					<td><code>1</code> per virtual function</td>
+			</tr>
+	</tbody>
 </table>
 <p>A <em>single-root I/O virtualization (SR-IOV)</em> physical function with virtual functions serves
 <code>device.gpustack.ai/rdma.partitioned</code> <strong>only</strong>; all other RDMA interfaces serve <code>rdma</code> and
@@ -1284,13 +1284,13 @@ the <code>Node</code>.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">rdma-trainer</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;local-queue&gt; </span><span class="w"> </span><span class="c"># required for accelerator webhook checks</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">gpu.gpustack.ai/model</span><span class="p">:</span><span class="w"> </span><span class="l">b300 </span><span class="w"> </span><span class="c"># user label identifying verified NIC/GPU hardware layout</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
@@ -1308,30 +1308,30 @@ distinct adapters first.</p>
 <p>Every RDMA allocation (<code>rdma</code>, <code>rdma.shared</code>, or <code>rdma.partitioned</code>) injects deduplicated character
 devices and HCA environment variables into the container:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Injected item</th>
-          <th>Value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>/dev/infiniband/uverbs&lt;N&gt;</code></td>
-          <td>One character device per distinct granted HCA (allocation fails whole if any node is missing).</td>
-      </tr>
-      <tr>
-          <td><code>/dev/infiniband/rdma_cm</code></td>
-          <td>At most one connection-manager device per allocation response, when present on the host.</td>
-      </tr>
-      <tr>
-          <td><code>NCCL_IB_HCA</code></td>
-          <td>Sorted, comma-joined HCA names prefixed with <code>=</code> (such as <code>=mlx5_1,mlx5_10</code>, or <code>=mlx5_1:1,mlx5_10:1</code> when a selection policy pins <code>port</code>).</td>
-      </tr>
-      <tr>
-          <td><code>GPUSTACK_RDMA_DEVICES</code></td>
-          <td>Sorted, comma-joined bare HCA names without <code>=</code> or port suffixes (<code>mlx5_1,mlx5_10</code>).</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Injected item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>/dev/infiniband/uverbs&lt;N&gt;</code></td>
+					<td>One character device per distinct granted HCA (allocation fails whole if any node is missing).</td>
+			</tr>
+			<tr>
+					<td><code>/dev/infiniband/rdma_cm</code></td>
+					<td>At most one connection-manager device per allocation response, when present on the host.</td>
+			</tr>
+			<tr>
+					<td><code>NCCL_IB_HCA</code></td>
+					<td>Sorted, comma-joined HCA names prefixed with <code>=</code> (such as <code>=mlx5_1,mlx5_10</code>, or <code>=mlx5_1:1,mlx5_10:1</code> when a selection policy pins <code>port</code>).</td>
+			</tr>
+			<tr>
+					<td><code>GPUSTACK_RDMA_DEVICES</code></td>
+					<td>Sorted, comma-joined bare HCA names without <code>=</code> or port suffixes (<code>mlx5_1,mlx5_10</code>).</td>
+			</tr>
+	</tbody>
 </table>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1369,10 +1369,10 @@ or <em><code>exclude</code></em> (never both):</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">DevicesRDMASelectionPolicy </span><span class="w"> </span><span class="c"># cluster-scoped, short name rdmasel</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">DevicesRDMASelectionPolicy </span><span class="w"> </span><span class="c"># cluster-scoped, short name rdmasel</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">b300-compute-hcas</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">  </span><span class="c"># required, non-null; {} matches all Nodes</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">gpu.gpustack.ai/model</span><span class="p">:</span><span class="w"> </span><span class="l">b300</span><span class="w">
@@ -1409,7 +1409,7 @@ or <em><code>exclude</code></em> (never both):</p>
 </span></span><span class="line"><span class="cl">     - mlx5_9
 </span></span><span class="line"><span class="cl">     - mlx5_10
 </span></span><span class="line"><span class="cl"><span class="gd">-    - mlx5_11
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  port: 1  # optional 1-based port; every selected HCA on matched Nodes must expose it
+</span></span></span><span class="line"><span class="cl"><span class="gi">+  port: 1  # optional 1-based port; every selected HCA on matched Nodes must expose it
 </span></span></span></code></pre></div>
 </div>
 <p>Verify resolution on the policy and each <code>Node</code>&rsquo;s <code>Devices</code> status:</p>
@@ -1421,10 +1421,10 @@ or <em><code>exclude</code></em> (never both):</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Devices</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Devices</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">b300-node-0</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">status</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">interfaces</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">rdmaSelectionPolicy</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">policyRef</span><span class="p">:</span><span class="w">
@@ -1455,9 +1455,9 @@ directory, or <code>--topology-manager-policy</code>):</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">kubelet.config.k8s.io/v1beta1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KubeletConfiguration</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">topologyManagerPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">restricted </span><span class="w"> </span><span class="c"># aligns single-socket Pods and admits multi-socket 8-GPU Pods</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">topologyManagerScope</span><span class="p">:</span><span class="w"> </span><span class="l">container </span><span class="w"> </span><span class="c"># default; aligns GPU and RDMA requests inside each container</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KubeletConfiguration</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">topologyManagerPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">restricted </span><span class="w"> </span><span class="c"># aligns single-socket Pods and admits multi-socket 8-GPU Pods</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">topologyManagerScope</span><span class="p">:</span><span class="w"> </span><span class="l">container </span><span class="w"> </span><span class="c"># default; aligns GPU and RDMA requests inside each container</span></span></span></code></pre></div>
 </div>
 <p>Prefer <code>restricted</code> over <code>single-numa-node</code>: <code>single-numa-node</code> rejects any container spanning two
 sockets (such as an 8-GPU job on a dual-socket host) with terminal <code>TopologyAffinityError</code>. See
@@ -1507,16 +1507,16 @@ build a custom image and set it on <em><code>roles[].image</code></em>.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>dockerfile</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-dockerfile" data-lang="dockerfile"><span class="line"><span class="cl"><span class="k">FROM</span><span class="w"> </span><span class="s">gpustack/runner:cuda13.0-vllm0.29.0</span><span class="err">
-</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">SHELL</span> <span class="p">[</span><span class="s2">&#34;/bin/bash&#34;</span><span class="p">,</span> <span class="s2">&#34;-eo&#34;</span><span class="p">,</span> <span class="s2">&#34;pipefail&#34;</span><span class="p">,</span> <span class="s2">&#34;-c&#34;</span><span class="p">]</span><span class="err">
-</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">ARG</span> <span class="nv">AWS_EFA_VERSION</span><span class="o">=</span><span class="m">1</span>.44.0<span class="err">
-</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">RUN</span> curl --retry <span class="m">3</span> --retry-connrefused -fL <span class="s2">&#34;https://efa-installer.amazonaws.com/aws-efa-installer-</span><span class="si">${</span><span class="nv">AWS_EFA_VERSION</span><span class="si">}</span><span class="s2">.tar.gz&#34;</span> <span class="p">|</span> tar -zx -C /tmp <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span> <span class="o">&amp;&amp;</span> <span class="nb">cd</span> /tmp/aws-efa-installer <span class="o">&amp;&amp;</span> ./efa_installer.sh -y --skip-kmod <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span> <span class="o">&amp;&amp;</span> rm -f /opt/amazon/efa/lib/libfabric.a <span class="o">&amp;&amp;</span> ldconfig <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span> <span class="o">&amp;&amp;</span> rm -rf /tmp/aws-efa-installer /var/cache/apt /var/lib/apt/lists/*<span class="err">
-</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">ENV</span> <span class="nv">PATH</span><span class="o">=</span><span class="s2">&#34;</span><span class="si">${</span><span class="nv">PATH</span><span class="si">}</span><span class="s2">:/opt/amazon/efa/bin&#34;</span><span class="err">
-</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="c"># Use mooncake-transfer-engine-efa on CUDA 12 bases.</span><span class="err">
-</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">RUN</span> python3 -m pip uninstall -y mooncake-transfer-engine mooncake-transfer-engine-cuda13 <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span> <span class="o">&amp;&amp;</span> python3 -m pip install --no-cache-dir --no-deps mooncake-transfer-engine-efa-cuda13<span class="o">==</span>0.3.13.post1</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="k">SHELL</span> <span class="p">[</span><span class="s2">&#34;/bin/bash&#34;</span><span class="p">,</span> <span class="s2">&#34;-eo&#34;</span><span class="p">,</span> <span class="s2">&#34;pipefail&#34;</span><span class="p">,</span> <span class="s2">&#34;-c&#34;</span><span class="p">]</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="k">ARG</span> <span class="nv">AWS_EFA_VERSION</span><span class="o">=</span><span class="m">1</span>.44.0<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="k">RUN</span> curl --retry <span class="m">3</span> --retry-connrefused -fL <span class="s2">&#34;https://efa-installer.amazonaws.com/aws-efa-installer-</span><span class="si">${</span><span class="nv">AWS_EFA_VERSION</span><span class="si">}</span><span class="s2">.tar.gz&#34;</span> <span class="p">|</span> tar -zx -C /tmp <span class="se">\
+</span></span></span><span class="line"><span class="cl"> <span class="o">&amp;&amp;</span> <span class="nb">cd</span> /tmp/aws-efa-installer <span class="o">&amp;&amp;</span> ./efa_installer.sh -y --skip-kmod <span class="se">\
+</span></span></span><span class="line"><span class="cl"> <span class="o">&amp;&amp;</span> rm -f /opt/amazon/efa/lib/libfabric.a <span class="o">&amp;&amp;</span> ldconfig <span class="se">\
+</span></span></span><span class="line"><span class="cl"> <span class="o">&amp;&amp;</span> rm -rf /tmp/aws-efa-installer /var/cache/apt /var/lib/apt/lists/*<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="k">ENV</span> <span class="nv">PATH</span><span class="o">=</span><span class="s2">&#34;</span><span class="si">${</span><span class="nv">PATH</span><span class="si">}</span><span class="s2">:/opt/amazon/efa/bin&#34;</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="c"># Use mooncake-transfer-engine-efa on CUDA 12 bases.</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="k">RUN</span> python3 -m pip uninstall -y mooncake-transfer-engine mooncake-transfer-engine-cuda13 <span class="se">\
+</span></span></span><span class="line"><span class="cl"> <span class="o">&amp;&amp;</span> python3 -m pip install --no-cache-dir --no-deps mooncake-transfer-engine-efa-cuda13<span class="o">==</span>0.3.13.post1</span></span></code></pre></div>
 </div>
 <p>Verify <code>EfaTransport</code> inside the built image and in engine startup logs:</p>
 <div class="code-block">
@@ -1546,50 +1546,50 @@ on AWS.</p>
 allocatable counts remain <code>0</code> on EFA-only hosts.</p>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>RDMA key absent on all <code>Node</code>s</td>
-          <td>Zero allocatable <code>device.gpustack.ai/rdma*</code></td>
-          <td>Verify verbs hardware and Device Manager <code>--no-shared</code> / <code>--no-partitioned</code> flags.</td>
-      </tr>
-      <tr>
-          <td>Key present, <code>0</code> allocatable</td>
-          <td>Link <code>Failed</code> or <code>RDMASelectionResolved!=True</code></td>
-          <td>Check <a href="#selection-policy">Selection policy</a>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>RDMA key absent on all <code>Node</code>s</td>
+					<td>Zero allocatable <code>device.gpustack.ai/rdma*</code></td>
+					<td>Verify verbs hardware and Device Manager <code>--no-shared</code> / <code>--no-partitioned</code> flags.</td>
+			</tr>
+			<tr>
+					<td>Key present, <code>0</code> allocatable</td>
+					<td>Link <code>Failed</code> or <code>RDMASelectionResolved!=True</code></td>
+					<td>Check <a href="#selection-policy">Selection policy</a>
  and <a href="#nic-record-inspection">NIC record inspection</a>
 .</td>
-      </tr>
-      <tr>
-          <td><code>Workload</code> <code>Admitted</code>, <code>Pod</code> <code>Pending</code></td>
-          <td>Unmet <code>device.gpustack.ai/rdma*</code> in scheduler events</td>
-          <td>Free RDMA endpoints or switch to <code>rdma.shared</code> (<a href="#rdma-quota-limits">RDMA quota limits</a>
+			</tr>
+			<tr>
+					<td><code>Workload</code> <code>Admitted</code>, <code>Pod</code> <code>Pending</code></td>
+					<td>Unmet <code>device.gpustack.ai/rdma*</code> in scheduler events</td>
+					<td>Free RDMA endpoints or switch to <code>rdma.shared</code> (<a href="#rdma-quota-limits">RDMA quota limits</a>
 ).</td>
-      </tr>
-      <tr>
-          <td><code>Pod</code> fails with <code>TopologyAffinityError</code></td>
-          <td>Kubelet rejects cross-socket allocation</td>
-          <td>Use <code>topologyManagerPolicy: restricted</code> and keep GPU and RDMA requests in one container.</td>
-      </tr>
-      <tr>
-          <td>Fewer <code>/dev/infiniband</code> entries than requested</td>
-          <td>Shared HCA tokens deduplicated</td>
-          <td>Count <code>uverbs&lt;N&gt;</code> nodes (<code>rdma_cm</code> appears once); check <a href="#injected-devices">Injected devices</a>
+			</tr>
+			<tr>
+					<td><code>Pod</code> fails with <code>TopologyAffinityError</code></td>
+					<td>Kubelet rejects cross-socket allocation</td>
+					<td>Use <code>topologyManagerPolicy: restricted</code> and keep GPU and RDMA requests in one container.</td>
+			</tr>
+			<tr>
+					<td>Fewer <code>/dev/infiniband</code> entries than requested</td>
+					<td>Shared HCA tokens deduplicated</td>
+					<td>Count <code>uverbs&lt;N&gt;</code> nodes (<code>rdma_cm</code> appears once); check <a href="#injected-devices">Injected devices</a>
 .</td>
-      </tr>
-      <tr>
-          <td><code>Node</code> loses <code>rdma.capable</code> label</td>
-          <td>All NIC/VF links <code>Failed</code></td>
-          <td>Run <a href="#nic-record-inspection">NIC record inspection</a>
+			</tr>
+			<tr>
+					<td><code>Node</code> loses <code>rdma.capable</code> label</td>
+					<td>All NIC/VF links <code>Failed</code></td>
+					<td>Run <a href="#nic-record-inspection">NIC record inspection</a>
  and repair physical links.</td>
-      </tr>
-  </tbody>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

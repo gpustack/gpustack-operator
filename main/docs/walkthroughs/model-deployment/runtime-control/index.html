@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Online Runtime Control Walkthrough · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1218,71 +1218,71 @@ and verify restart replay and Elastic EP expansion without restarting worker <co
 non-<em>Encode</em> roles without API-key <code>Secret</code>s. Managed routers enforce an Envoy inference allowlist on
 port <code>8000</code> and serve <code>/observer/endpoints</code> on pod-internal port <code>9091</code>:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Capability</th>
-          <th>Engine and router</th>
-          <th>Verified behavior</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Envoy allowlist and router hash decoupling</td>
-          <td><code>vLLM 0.32.0</code> + <code>vllm-router</code>, <code>SGLang 0.5.22</code> + <code>sglang-gateway</code></td>
-          <td><code>200</code> on <code>/v1/chat/completions</code>, <code>403</code> on control routes; editing <em><code>requestTimeoutSeconds</code></em> rolls only the router</td>
-      </tr>
-      <tr>
-          <td>Live parameter tuning and auto-reset</td>
-          <td><code>vLLM 0.32.0</code>, <code>SGLang 0.5.22</code> (including NGRAM speculative)</td>
-          <td>Applies live via <code>/gpustack/v1/runtime_config</code>; removing keys restores <code>boot_defaults</code> with zero <code>Pod</code> restarts</td>
-      </tr>
-      <tr>
-          <td>Version-gated unsupported parameters</td>
-          <td><code>vLLM 0.32.0</code>, <code>SGLang 0.5.22</code></td>
-          <td>Reports <code>UnsupportedEngineVersion</code> (<code>unsupportedFields</code>); removing keys recovers <code>Synced</code></td>
-      </tr>
-      <tr>
-          <td>Role pause and scaler guard</td>
-          <td><code>vLLM 0.32.0</code> + <code>Active</code> scaler, <code>SGLang 0.5.22</code>, <code>1P+1D</code> <code>llm-d-router</code></td>
-          <td><code>/live=200</code>, <code>/ready=503</code>, direct inference <code>503</code>, scaler <code>Blocked=True (RolePaused)</code>; resume restores <code>200</code></td>
-      </tr>
-      <tr>
-          <td>Same-UID restart latch and Elastic EP resize</td>
-          <td><code>vLLM 0.32.0</code> (<code>Qwen3-8B</code>, <code>DeepSeek-V2-Lite-Chat</code>)</td>
-          <td>Container restart rotates <code>boot_id</code> and replays parameters before readiness; Elastic EP grows <code>2 → 3</code> keeping master <code>Pod</code> UID</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Capability</th>
+					<th>Engine and router</th>
+					<th>Verified behavior</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Envoy allowlist and router hash decoupling</td>
+					<td><code>vLLM 0.32.0</code> + <code>vllm-router</code>, <code>SGLang 0.5.22</code> + <code>sglang-gateway</code></td>
+					<td><code>200</code> on <code>/v1/chat/completions</code>, <code>403</code> on control routes; editing <em><code>requestTimeoutSeconds</code></em> rolls only the router</td>
+			</tr>
+			<tr>
+					<td>Live parameter tuning and auto-reset</td>
+					<td><code>vLLM 0.32.0</code>, <code>SGLang 0.5.22</code> (including NGRAM speculative)</td>
+					<td>Applies live via <code>/gpustack/v1/runtime_config</code>; removing keys restores <code>boot_defaults</code> with zero <code>Pod</code> restarts</td>
+			</tr>
+			<tr>
+					<td>Version-gated unsupported parameters</td>
+					<td><code>vLLM 0.32.0</code>, <code>SGLang 0.5.22</code></td>
+					<td>Reports <code>UnsupportedEngineVersion</code> (<code>unsupportedFields</code>); removing keys recovers <code>Synced</code></td>
+			</tr>
+			<tr>
+					<td>Role pause and scaler guard</td>
+					<td><code>vLLM 0.32.0</code> + <code>Active</code> scaler, <code>SGLang 0.5.22</code>, <code>1P+1D</code> <code>llm-d-router</code></td>
+					<td><code>/live=200</code>, <code>/ready=503</code>, direct inference <code>503</code>, scaler <code>Blocked=True (RolePaused)</code>; resume restores <code>200</code></td>
+			</tr>
+			<tr>
+					<td>Same-UID restart latch and Elastic EP resize</td>
+					<td><code>vLLM 0.32.0</code> (<code>Qwen3-8B</code>, <code>DeepSeek-V2-Lite-Chat</code>)</td>
+					<td>Container restart rotates <code>boot_id</code> and replays parameters before readiness; Elastic EP grows <code>2 → 3</code> keeping master <code>Pod</code> UID</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="environment">Environment</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Item</th>
-          <th>Value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Cluster</td>
-          <td>Kubernetes <code>v1.35.7</code>; 1 CPU node (<code>cpu-d3</code>) and 3 GPU nodes (<code>gpu-h200-sxm</code>, 1 GPU per node)</td>
-      </tr>
-      <tr>
-          <td>Hardware</td>
-          <td>3 × NVIDIA H200 SXM 141 GB (<code>gpustack--nvidia-h200-linux-amd64</code>)</td>
-      </tr>
-      <tr>
-          <td>Runners</td>
-          <td><code>gpustack/runner:cuda13.0-vllm0.32.0</code>, <code>gpustack/runner:cuda13.0-sglang0.5.22</code></td>
-      </tr>
-      <tr>
-          <td>Models</td>
-          <td><code>Qwen/Qwen3-8B</code> (<code>ModelArtifact</code> <code>qwen3-8b</code>), <code>deepseek-ai/DeepSeek-V2-Lite-Chat</code> (<code>deepseek-v2-lite-chat</code>)</td>
-      </tr>
-      <tr>
-          <td>Routers</td>
-          <td><code>vllm-router</code>, <code>sglang-gateway</code>, <code>llm-d-router</code> (<code>gpustack/llm-router:v0.5.0</code>)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Cluster</td>
+					<td>Kubernetes <code>v1.35.7</code>; 1 CPU node (<code>cpu-d3</code>) and 3 GPU nodes (<code>gpu-h200-sxm</code>, 1 GPU per node)</td>
+			</tr>
+			<tr>
+					<td>Hardware</td>
+					<td>3 × NVIDIA H200 SXM 141 GB (<code>gpustack--nvidia-h200-linux-amd64</code>)</td>
+			</tr>
+			<tr>
+					<td>Runners</td>
+					<td><code>gpustack/runner:cuda13.0-vllm0.32.0</code>, <code>gpustack/runner:cuda13.0-sglang0.5.22</code></td>
+			</tr>
+			<tr>
+					<td>Models</td>
+					<td><code>Qwen/Qwen3-8B</code> (<code>ModelArtifact</code> <code>qwen3-8b</code>), <code>deepseek-ai/DeepSeek-V2-Lite-Chat</code> (<code>deepseek-v2-lite-chat</code>)</td>
+			</tr>
+			<tr>
+					<td>Routers</td>
+					<td><code>vllm-router</code>, <code>sglang-gateway</code>, <code>llm-d-router</code> (<code>gpustack/llm-router:v0.5.0</code>)</td>
+			</tr>
+	</tbody>
 </table>
 <p>Enable <a href="/gpustack-operator/main/docs/modules/model-delivery/operations/">node model delivery</a>
  and complete
@@ -1313,11 +1313,11 @@ cluster capacity:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-vllm-rc</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">default</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-8B</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
@@ -1352,11 +1352,11 @@ router hash decoupling:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">BEFORE_UID</span><span class="o">=</span><span class="k">$(</span>kubectl -n default get pod -l app.kubernetes.io/instance<span class="o">=</span>qwen-vllm-rc,app.kubernetes.io/component<span class="o">=</span>server <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].metadata.uid}&#39;</span><span class="k">)</span>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].metadata.uid}&#39;</span><span class="k">)</span>
 </span></span><span class="line"><span class="cl">kubectl -n default patch modeldeployment qwen-vllm-rc --type<span class="o">=</span>merge <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;router&#34;:{&#34;requestTimeoutSeconds&#34;:90}}}&#39;</span>
+</span></span></span><span class="line"><span class="cl">  -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;router&#34;:{&#34;requestTimeoutSeconds&#34;:90}}}&#39;</span>
 </span></span><span class="line"><span class="cl"><span class="nv">AFTER_UID</span><span class="o">=</span><span class="k">$(</span>kubectl -n default get pod -l app.kubernetes.io/instance<span class="o">=</span>qwen-vllm-rc,app.kubernetes.io/component<span class="o">=</span>server <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].metadata.uid}&#39;</span><span class="k">)</span>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].metadata.uid}&#39;</span><span class="k">)</span>
 </span></span><span class="line"><span class="cl"><span class="nb">test</span> <span class="s2">&#34;</span><span class="nv">$BEFORE_UID</span><span class="s2">&#34;</span> <span class="o">=</span> <span class="s2">&#34;</span><span class="nv">$AFTER_UID</span><span class="s2">&#34;</span> <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">&#34;worker UID unchanged&#34;</span></span></span></code></pre></div>
 </div>
 <p>Expected behavior:</p>
@@ -1380,7 +1380,7 @@ the worker <code>Pod</code> UID identical with <code>restartCount: 0</code>.</li
 </span></span></span><span class="line"><span class="cl"><span class="s1">  }}}
 </span></span></span><span class="line"><span class="cl"><span class="s1">]&#39;</span>
 </span></span><span class="line"><span class="cl">kubectl -n default get modeldeployment qwen-vllm-rc <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.conditions[?(@.type==&#34;RuntimeControlSynced&#34;)]}{&#34;\n&#34;}{.status.roles[0].runtimeControl}{&#34;\n&#34;}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.conditions[?(@.type==&#34;RuntimeControlSynced&#34;)]}{&#34;\n&#34;}{.status.roles[0].runtimeControl}{&#34;\n&#34;}&#39;</span></span></span></code></pre></div>
 </div>
 <p>Expected convergence, parameter reset, and version-gating behavior:</p>
 <ul>
@@ -1401,9 +1401,9 @@ worker <code>Pod</code> UID.</li>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n default patch modeldeployment qwen-vllm-rc --type<span class="o">=</span>json <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;add&#34;,&#34;path&#34;:&#34;/spec/roles/0/pause&#34;,&#34;value&#34;:true}]&#39;</span>
+</span></span></span><span class="line"><span class="cl">  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;add&#34;,&#34;path&#34;:&#34;/spec/roles/0/pause&#34;,&#34;value&#34;:true}]&#39;</span>
 </span></span><span class="line"><span class="cl">kubectl -n default get modeldeploymentscaler <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.metadata.name}{&#34;\t&#34;}{.status.conditions[?(@.type==&#34;Blocked&#34;)]}{&#34;\n&#34;}{end}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.metadata.name}{&#34;\t&#34;}{.status.conditions[?(@.type==&#34;Blocked&#34;)]}{&#34;\n&#34;}{end}&#39;</span></span></span></code></pre></div>
 </div>
 <p>Expected pause, resume, and drain behavior:</p>
 <ul>
@@ -1496,40 +1496,40 @@ rejection and recovery path.</li>
 </ul>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>RuntimeControlSynced=False</code></td>
-          <td><code>Reason: UnsupportedEngineVersion</code></td>
-          <td>Inspect <em><code>status.roles[].runtimeControl.unsupportedFields</code></em> on <code>ModelDeployment</code>, then remove those keys or upgrade the runner image.</td>
-      </tr>
-      <tr>
-          <td>Control routes return <code>403</code> on router <code>:8000</code></td>
-          <td>Envoy inference allowlist active</td>
-          <td>Expected security boundary; query <code>/observer/endpoints</code> on the router pod&rsquo;s internal port (<code>:9091</code> or <code>:9090</code>) rather than <code>:8000</code>.</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeploymentScaler</code> stops scaling</td>
-          <td><code>Blocked=True</code> (<code>Reason: RolePaused</code>)</td>
-          <td>Expected while any target role sets <code>pause: true</code>; set <code>pause: false</code> on <code>ModelDeployment</code> to resume autoscaling.</td>
-      </tr>
-      <tr>
-          <td>Restarted container stays unready briefly</td>
-          <td><code>/gpustack/v1/ready</code> returns <code>503</code> after container restart</td>
-          <td>Sentinel holds readiness fail-closed on a new <code>boot_id</code> until the worker replays <em><code>runtimeControl.parameters</code></em> and <code>/gpustack/v1/ack</code>; check worker connectivity if it does not clear.</td>
-      </tr>
-      <tr>
-          <td>Router fails to render</td>
-          <td><code>RouterReady=False/RenderFailed</code></td>
-          <td>No Router <code>Pod</code> exists when rendering fails; inspect <code>RouterReady</code> on <code>ModelDeployment</code> and fix <em><code>spec.router</code></em>.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>RuntimeControlSynced=False</code></td>
+					<td><code>Reason: UnsupportedEngineVersion</code></td>
+					<td>Inspect <em><code>status.roles[].runtimeControl.unsupportedFields</code></em> on <code>ModelDeployment</code>, then remove those keys or upgrade the runner image.</td>
+			</tr>
+			<tr>
+					<td>Control routes return <code>403</code> on router <code>:8000</code></td>
+					<td>Envoy inference allowlist active</td>
+					<td>Expected security boundary; query <code>/observer/endpoints</code> on the router pod&rsquo;s internal port (<code>:9091</code> or <code>:9090</code>) rather than <code>:8000</code>.</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeploymentScaler</code> stops scaling</td>
+					<td><code>Blocked=True</code> (<code>Reason: RolePaused</code>)</td>
+					<td>Expected while any target role sets <code>pause: true</code>; set <code>pause: false</code> on <code>ModelDeployment</code> to resume autoscaling.</td>
+			</tr>
+			<tr>
+					<td>Restarted container stays unready briefly</td>
+					<td><code>/gpustack/v1/ready</code> returns <code>503</code> after container restart</td>
+					<td>Sentinel holds readiness fail-closed on a new <code>boot_id</code> until the worker replays <em><code>runtimeControl.parameters</code></em> and <code>/gpustack/v1/ack</code>; check worker connectivity if it does not clear.</td>
+			</tr>
+			<tr>
+					<td>Router fails to render</td>
+					<td><code>RouterReady=False/RenderFailed</code></td>
+					<td>No Router <code>Pod</code> exists when rendering fails; inspect <code>RouterReady</code> on <code>ModelDeployment</code> and fix <em><code>spec.router</code></em>.</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Model Prefetch Walkthrough · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1217,46 +1217,46 @@ DP walkthroughs start from the namespace and artifact you create here.</p>
 <p>Prefetching verifies Hugging Face weights on disk and records the result in <code>NodeModelStore</code> so
 serving <code>Pod</code>s mount the warm cache without re-downloading:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Object</th>
-          <th>Scope</th>
-          <th>Creator</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ModelArtifact</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>the weight files to cache and their revision</td>
-      </tr>
-      <tr>
-          <td><code>ModelStore</code></td>
-          <td>cluster</td>
-          <td>administrator</td>
-          <td>the nodes that hold cached weights</td>
-      </tr>
-      <tr>
-          <td><code>ModelStoreBinding</code></td>
-          <td>namespace</td>
-          <td>administrator</td>
-          <td>how much the namespace may cache, and the right to pin</td>
-      </tr>
-      <tr>
-          <td><code>ModelPrefetch</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>warming the artifact onto the store&rsquo;s nodes</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>the serving workload that finds the weights warm</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Object</th>
+					<th>Scope</th>
+					<th>Creator</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ModelArtifact</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>the weight files to cache and their revision</td>
+			</tr>
+			<tr>
+					<td><code>ModelStore</code></td>
+					<td>cluster</td>
+					<td>administrator</td>
+					<td>the nodes that hold cached weights</td>
+			</tr>
+			<tr>
+					<td><code>ModelStoreBinding</code></td>
+					<td>namespace</td>
+					<td>administrator</td>
+					<td>how much the namespace may cache, and the right to pin</td>
+			</tr>
+			<tr>
+					<td><code>ModelPrefetch</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>warming the artifact onto the store&rsquo;s nodes</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>the serving workload that finds the weights warm</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="prerequisites">Prerequisites</h3>
 <ul>
@@ -1267,26 +1267,26 @@ serving <code>Pod</code>s mount the warm cache without re-downloading:</p>
 </ul>
 <h3 id="environment">Environment</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Item</th>
-          <th>Value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Cluster</td>
-          <td>Kubernetes with GPUStack, node model delivery enabled</td>
-      </tr>
-      <tr>
-          <td>Node</td>
-          <td>one GPU node, named <code>gpu-node</code> in the manifests, with disk for the weights</td>
-      </tr>
-      <tr>
-          <td>Model</td>
-          <td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code> at revision <code>85864749cd611b4353ce1decdb286193298f64c7</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Cluster</td>
+					<td>Kubernetes with GPUStack, node model delivery enabled</td>
+			</tr>
+			<tr>
+					<td>Node</td>
+					<td>one GPU node, named <code>gpu-node</code> in the manifests, with disk for the weights</td>
+			</tr>
+			<tr>
+					<td>Model</td>
+					<td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code> at revision <code>85864749cd611b4353ce1decdb286193298f64c7</code></td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="cache-preparation">Cache preparation</h2>
 <h3 id="step-1-create-artifact-and-prefetch">Step 1: Create artifact and prefetch</h3>
@@ -1300,16 +1300,16 @@ resolved weights.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Namespace</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Namespace</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-elastic</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelArtifact</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelArtifact</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-elastic</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">huggingFace</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">repository</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-ai/DeepSeek-V2-Lite-Chat</span><span class="w">
@@ -1327,33 +1327,33 @@ resolved weights.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">tokenization_deepseek_fast.py</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">tokenizer.json</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">tokenizer_config.json</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelStore</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelStore</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">rtx6000-models</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kubernetes.io/hostname</span><span class="p">:</span><span class="w"> </span><span class="l">gpu-node</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelStoreBinding</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelStoreBinding</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">rtx6000-models</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-elastic</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">storeRefs</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">rtx6000-models</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">quota</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bytes</span><span class="p">:</span><span class="w"> </span><span class="l">64Gi</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelPrefetch</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelPrefetch</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-elastic</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">bindingRef</span><span class="p">:</span><span class="w">
@@ -1396,7 +1396,7 @@ desired. If either wait times out or reports <code>False</code>, inspect the con
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic get modelprefetch deepseek-v2-lite-chat <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{&#34;\n&#34;}{end}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{&#34;\n&#34;}{end}&#39;</span></span></span></code></pre></div>
 </div>
 <p>Then confirm that the selected node holds this artifact&rsquo;s resolved digest:</p>
 <div class="code-block">
@@ -1405,7 +1405,7 @@ desired. If either wait times out or reports <code>False</code>, inspect the con
 </span></span><span class="line"><span class="cl">  jq -r <span class="s1">&#39;.spec.placement.nodeSelector[&#34;kubernetes.io/hostname&#34;]&#39;</span><span class="k">)</span>
 </span></span><span class="line"><span class="cl"><span class="nv">NODE</span><span class="o">=</span><span class="k">$(</span>kubectl get nodes -l <span class="s2">&#34;kubernetes.io/hostname=</span><span class="nv">$HOST</span><span class="s2">&#34;</span> -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].metadata.name}&#39;</span><span class="k">)</span>
 </span></span><span class="line"><span class="cl"><span class="nv">DIGEST</span><span class="o">=</span><span class="k">$(</span>kubectl -n gpustack-elastic get modelartifact deepseek-v2-lite-chat <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.resolved.manifestDigest}&#39;</span><span class="k">)</span>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.resolved.manifestDigest}&#39;</span><span class="k">)</span>
 </span></span><span class="line"><span class="cl">kubectl get nodemodelstore <span class="s2">&#34;</span><span class="nv">$NODE</span><span class="s2">&#34;</span> -o json <span class="p">|</span>
 </span></span><span class="line"><span class="cl">  jq --arg d <span class="s2">&#34;</span><span class="nv">$DIGEST</span><span class="s2">&#34;</span> <span class="s1">&#39;.status.models[]? | select(.digest == $d) | {sizeBytes, state}&#39;</span></span></span></code></pre></div>
 </div>
@@ -1510,75 +1510,75 @@ finds no warm cache.</p>
 .</p>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ModelArtifact</code> resolution failed</td>
-          <td>Condition: <code>Resolved=False/AccessDenied</code></td>
-          <td>Private or gated repository. Check the namespace <code>Secret</code> token and inspect the <code>InvalidToken</code> event.</td>
-      </tr>
-      <tr>
-          <td><code>ModelArtifact</code> resolution failed</td>
-          <td>Condition: <code>Resolved=False/RevisionNotFound</code></td>
-          <td>Branch, tag or commit hash misspelled. ModelScope does not silently default to master.</td>
-      </tr>
-      <tr>
-          <td><code>ModelArtifact</code> resolution failed</td>
-          <td>Condition: <code>Resolved=False/SourceUnavailable</code></td>
-          <td>Hub endpoint unreachable, large directory enumeration timeout, or 5xx network error.</td>
-      </tr>
-      <tr>
-          <td><code>ModelArtifact</code> resolution failed</td>
-          <td>Condition: <code>Resolved=False/EmptyManifest</code></td>
-          <td>Allow or ignore patterns excluded every file. Review the glob patterns.</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code> blocked at <code>Starting</code></td>
-          <td>Condition: <code>WeightsReady=False/NodeDeliveryUnavailable</code></td>
-          <td>CSI driver <code>model.csi.gpustack.ai</code> is missing, or Helm values set <code>modelManager.enabled: false</code>.</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code> blocked with pattern filters</td>
-          <td>Condition: <code>WeightsReady=False/FilterNeedsNodeDelivery</code></td>
-          <td>Pattern filtering needs <code>Node</code> delivery mode. Set <code>model-artifact-delivery-mode: Node</code>.</td>
-      </tr>
-      <tr>
-          <td><code>Pod</code> stuck in <code>ContainerCreating</code></td>
-          <td>Condition: <code>WeightsReady=False/Materializing</code></td>
-          <td>The node plugin is downloading. The <code>Pod</code> <code>FailedMount</code> event shows the downloaded byte count.</td>
-      </tr>
-      <tr>
-          <td>Weight download failed on node</td>
-          <td>Condition: <code>WeightsReady=False/MaterializationFailed</code></td>
-          <td>Run <code>kubectl get nodemodelstore &lt;node&gt; -o yaml</code> and read the digest&rsquo;s <em><code>reason</code></em>, <em><code>message</code></em> and <em><code>retryTime</code></em>.</td>
-      </tr>
-      <tr>
-          <td><code>ModelPrefetch</code> does not reach <code>Available</code></td>
-          <td>Condition: <code>Degraded=True/NodeFailed</code></td>
-          <td>One or more target nodes failed the download. Check node disk capacity and logs.</td>
-      </tr>
-      <tr>
-          <td><code>ModelPrefetch</code> shows fewer ready nodes than <em><code>minReady</code></em></td>
-          <td>Condition: <code>Lapsed=True/RetentionTTLExpired</code></td>
-          <td><code>Node</code> copies went unused past <em><code>retention.ttlAfterLastUse</code></em>. They left <em><code>readyNodes</code></em>, released any pin and are not re-warmed. Raise or remove the TTL.</td>
-      </tr>
-      <tr>
-          <td>New <code>ModelPrefetch</code> rejected at admission</td>
-          <td>Over quota or unauthorized</td>
-          <td>The prefetch exceeds <code>ModelStoreBinding</code> <em><code>quota.bytes</code></em>, sets <em><code>retention.pinned</code></em> without <code>allowPinned: true</code>, or targets an undeclared store.</td>
-      </tr>
-      <tr>
-          <td>Peer sync downloads continuously from Hub</td>
-          <td><code>modelManager.port: 0</code> or peer sync disabled</td>
-          <td>Restore a positive <code>modelManager.port</code> in Helm values if peer sync is intended, enable the <code>model-store-peer-sync</code> <code>Setting</code>, and verify that <code>NodeModelStore</code> <em><code>spec.peerSyncEnabled</code></em> reconciles to <code>true</code>.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ModelArtifact</code> resolution failed</td>
+					<td>Condition: <code>Resolved=False/AccessDenied</code></td>
+					<td>Private or gated repository. Check the namespace <code>Secret</code> token and inspect the <code>InvalidToken</code> event.</td>
+			</tr>
+			<tr>
+					<td><code>ModelArtifact</code> resolution failed</td>
+					<td>Condition: <code>Resolved=False/RevisionNotFound</code></td>
+					<td>Branch, tag or commit hash misspelled. ModelScope does not silently default to master.</td>
+			</tr>
+			<tr>
+					<td><code>ModelArtifact</code> resolution failed</td>
+					<td>Condition: <code>Resolved=False/SourceUnavailable</code></td>
+					<td>Hub endpoint unreachable, large directory enumeration timeout, or 5xx network error.</td>
+			</tr>
+			<tr>
+					<td><code>ModelArtifact</code> resolution failed</td>
+					<td>Condition: <code>Resolved=False/EmptyManifest</code></td>
+					<td>Allow or ignore patterns excluded every file. Review the glob patterns.</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code> blocked at <code>Starting</code></td>
+					<td>Condition: <code>WeightsReady=False/NodeDeliveryUnavailable</code></td>
+					<td>CSI driver <code>model.csi.gpustack.ai</code> is missing, or Helm values set <code>modelManager.enabled: false</code>.</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code> blocked with pattern filters</td>
+					<td>Condition: <code>WeightsReady=False/FilterNeedsNodeDelivery</code></td>
+					<td>Pattern filtering needs <code>Node</code> delivery mode. Set <code>model-artifact-delivery-mode: Node</code>.</td>
+			</tr>
+			<tr>
+					<td><code>Pod</code> stuck in <code>ContainerCreating</code></td>
+					<td>Condition: <code>WeightsReady=False/Materializing</code></td>
+					<td>The node plugin is downloading. The <code>Pod</code> <code>FailedMount</code> event shows the downloaded byte count.</td>
+			</tr>
+			<tr>
+					<td>Weight download failed on node</td>
+					<td>Condition: <code>WeightsReady=False/MaterializationFailed</code></td>
+					<td>Run <code>kubectl get nodemodelstore &lt;node&gt; -o yaml</code> and read the digest&rsquo;s <em><code>reason</code></em>, <em><code>message</code></em> and <em><code>retryTime</code></em>.</td>
+			</tr>
+			<tr>
+					<td><code>ModelPrefetch</code> does not reach <code>Available</code></td>
+					<td>Condition: <code>Degraded=True/NodeFailed</code></td>
+					<td>One or more target nodes failed the download. Check node disk capacity and logs.</td>
+			</tr>
+			<tr>
+					<td><code>ModelPrefetch</code> shows fewer ready nodes than <em><code>minReady</code></em></td>
+					<td>Condition: <code>Lapsed=True/RetentionTTLExpired</code></td>
+					<td><code>Node</code> copies went unused past <em><code>retention.ttlAfterLastUse</code></em>. They left <em><code>readyNodes</code></em>, released any pin and are not re-warmed. Raise or remove the TTL.</td>
+			</tr>
+			<tr>
+					<td>New <code>ModelPrefetch</code> rejected at admission</td>
+					<td>Over quota or unauthorized</td>
+					<td>The prefetch exceeds <code>ModelStoreBinding</code> <em><code>quota.bytes</code></em>, sets <em><code>retention.pinned</code></em> without <code>allowPinned: true</code>, or targets an undeclared store.</td>
+			</tr>
+			<tr>
+					<td>Peer sync downloads continuously from Hub</td>
+					<td><code>modelManager.port: 0</code> or peer sync disabled</td>
+					<td>Restore a positive <code>modelManager.port</code> in Helm values if peer sync is intended, enable the <code>model-store-peer-sync</code> <code>Setting</code>, and verify that <code>NodeModelStore</code> <em><code>spec.peerSyncEnabled</code></em> reconciles to <code>true</code>.</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

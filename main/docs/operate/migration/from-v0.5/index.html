@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Migrating from v0.5.x · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1196,7 +1196,7 @@
       <article>
         
   <h1 id="migrating-from-v05x">Migrating from v0.5.x</h1>
-<p>Releases starting at v0.6.x (<a href="https://github.com/gpustack/gpustack-operator/blob/016fe1d2b2b20bbdaeeec4c4f15d18c349393b24/specs/2026-06-29-instancetype-unified-pool-refactor.md">unified-pool refactor</a>
+<p>Releases starting at v0.6.x (<a href="https://github.com/gpustack/gpustack-operator/blob/b02ee46681ba0224d2d86142381ffb6164b5c9cd/specs/2026-06-29-instancetype-unified-pool-refactor.md">unified-pool refactor</a>
 )
 rename the scheduling objects managed by GPUStack Operator and remove the Kueue <code>Cohort</code> layer.
 Running workload <code>Pod</code>s continue uninterrupted, while an in-place <code>helm upgrade</code> leaves v0.5.x
@@ -1221,45 +1221,45 @@ substitute the version you are installing.</p>
 </ul>
 <h2 id="changes-in-v06">Changes in v0.6</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Object</th>
-          <th>v0.5.x</th>
-          <th>v0.6.x and later</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><strong><code>ResourceFlavor</code></strong></td>
-          <td>Composite CPU+device name with abbreviated <code>ln-x64</code> and unit spec (<code>-4c-16g-98g</code>)</td>
-          <td>Split CPU (<code>gpustack--&lt;cpu&gt;-linux-amd64-4c</code>) and device (<code>gpustack--&lt;cpu&gt;--nvidia-tesla-t4-linux-amd64-1d</code>) flavors</td>
-      </tr>
-      <tr>
-          <td><strong><code>ClusterQueue</code></strong></td>
-          <td>Composite name; up to two queues per pool joined by <em><code>spec.cohortName</code></em></td>
-          <td><code>gpustack--&lt;key&gt;-&lt;os&gt;-&lt;arch&gt;</code>; one isolated queue per pool with empty <em><code>spec.cohortName</code></em></td>
-      </tr>
-      <tr>
-          <td><strong><code>Cohort</code></strong></td>
-          <td>One per pool</td>
-          <td>Removed (<code>CohortReconciler</code> deleted)</td>
-      </tr>
-      <tr>
-          <td><strong><code>AdmissionCheck</code></strong></td>
-          <td>Not present</td>
-          <td><code>gpustack-node-devices</code> per-accelerator feasibility gate</td>
-      </tr>
-      <tr>
-          <td><strong><code>InstanceType</code></strong></td>
-          <td>Virtual aggregated API projected from <code>ClusterQueue</code>s</td>
-          <td>Stored CRD <code>instancetypes.worker.gpustack.ai</code> with <code>.status</code>, <em><code>spec.acceleratorGroup</code></em>, and <em><code>spec.generalGroup</code></em></td>
-      </tr>
-      <tr>
-          <td><strong><code>Node</code> feature labels</strong></td>
-          <td><code>general.feature.gpustack.ai/generic-ln-x64</code>, <code>.z-*</code>, and <code>.cpu</code>/<code>.ram</code>/<code>.storage</code></td>
-          <td>Per-CPU <code>general.feature.gpustack.ai/&lt;cpu&gt;</code> (<code>.count</code>, <code>.capacity</code>) and <code>feature.gpustack.ai/acceleratable</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Object</th>
+					<th>v0.5.x</th>
+					<th>v0.6.x and later</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><strong><code>ResourceFlavor</code></strong></td>
+					<td>Composite CPU+device name with abbreviated <code>ln-x64</code> and unit spec (<code>-4c-16g-98g</code>)</td>
+					<td>Split CPU (<code>gpustack--&lt;cpu&gt;-linux-amd64-4c</code>) and device (<code>gpustack--&lt;cpu&gt;--nvidia-tesla-t4-linux-amd64-1d</code>) flavors</td>
+			</tr>
+			<tr>
+					<td><strong><code>ClusterQueue</code></strong></td>
+					<td>Composite name; up to two queues per pool joined by <em><code>spec.cohortName</code></em></td>
+					<td><code>gpustack--&lt;key&gt;-&lt;os&gt;-&lt;arch&gt;</code>; one isolated queue per pool with empty <em><code>spec.cohortName</code></em></td>
+			</tr>
+			<tr>
+					<td><strong><code>Cohort</code></strong></td>
+					<td>One per pool</td>
+					<td>Removed (<code>CohortReconciler</code> deleted)</td>
+			</tr>
+			<tr>
+					<td><strong><code>AdmissionCheck</code></strong></td>
+					<td>Not present</td>
+					<td><code>gpustack-node-devices</code> per-accelerator feasibility gate</td>
+			</tr>
+			<tr>
+					<td><strong><code>InstanceType</code></strong></td>
+					<td>Virtual aggregated API projected from <code>ClusterQueue</code>s</td>
+					<td>Stored CRD <code>instancetypes.worker.gpustack.ai</code> with <code>.status</code>, <em><code>spec.acceleratorGroup</code></em>, and <em><code>spec.generalGroup</code></em></td>
+			</tr>
+			<tr>
+					<td><strong><code>Node</code> feature labels</strong></td>
+					<td><code>general.feature.gpustack.ai/generic-ln-x64</code>, <code>.z-*</code>, and <code>.cpu</code>/<code>.ram</code>/<code>.storage</code></td>
+					<td>Per-CPU <code>general.feature.gpustack.ai/&lt;cpu&gt;</code> (<code>.count</code>, <code>.capacity</code>) and <code>feature.gpustack.ai/acceleratable</code></td>
+			</tr>
+	</tbody>
 </table>
 <p><code>Devices</code> and <code>Instance</code> keep their names and update in place without creating orphans.</p>
 <h2 id="orphaned-objects-after-upgrade">Orphaned objects after upgrade</h2>

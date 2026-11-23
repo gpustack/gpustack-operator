@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>KV Cache Local Disk Tier · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1216,10 +1216,10 @@ enables deferred offload (<code>-enable_offload=true -offload_on_evict=true</cod
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-mooncake</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
@@ -1231,43 +1231,43 @@ enables deferred offload (<code>-enable_offload=true -offload_on_evict=true</cod
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/var/lib/kvcache </span><span class="w"> </span><span class="c"># required; must pre-exist on every selected Node</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="l">4Ti </span><span class="w"> </span><span class="c"># optional; defaults to store ceiling (&gt;= 16Mi when set)</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">keyLimit</span><span class="p">:</span><span class="w"> </span><span class="m">10000000</span><span class="w">  </span><span class="c"># optional; defaults to store limit (&gt;= 64 when set)</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">cleanAfterDelete: false  # optional, default</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">cleanAfterDelete</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># optional, default: false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">eviction</span><span class="p">:</span><span class="w">  </span><span class="c"># optional</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">enabled: true  # optional, default</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="l">when eviction block is set</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">policy: LRU  # optional, default: FIFO; enum</span><span class="p">:</span><span class="w"> </span><span class="l">FIFO, LRU</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># optional, default: true when eviction block is set</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">LRU </span><span class="w"> </span><span class="c"># optional, default: FIFO; enum: FIFO, LRU</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">watermark</span><span class="p">:</span><span class="w">  </span><span class="c"># optional; percentages of capacity (low &lt; high)</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">high</span><span class="p">:</span><span class="w"> </span><span class="m">90</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">low</span><span class="p">:</span><span class="w"> </span><span class="m">80</span></span></span></code></pre></div>
 </div>
 <table>
-  <thead>
-      <tr>
-          <th>Rendered setting</th>
-          <th>Target</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>MOONCAKE_OFFLOAD_ENABLED</code>, <code>..._FILE_STORAGE_PATH</code>, <code>..._BUCKET_SIZE_LIMIT_BYTES</code> (<code>16 MiB</code>), <code>..._BUCKET_KEYS_LIMIT</code> (<code>64</code>)</td>
-          <td>Member container</td>
-      </tr>
-      <tr>
-          <td><code>..._TOTAL_SIZE_LIMIT_BYTES</code>, <code>..._BUCKET_MAX_TOTAL_SIZE</code> (from <em><code>capacity</code></em>), <code>..._TOTAL_KEYS_LIMIT</code> (from <em><code>keyLimit</code></em>)</td>
-          <td>Member container</td>
-      </tr>
-      <tr>
-          <td><code>..._BUCKET_EVICTION_POLICY</code>, <code>..._ENABLE_DISK_WATERMARK_EVICTION</code>, watermark ratios</td>
-          <td>Member container</td>
-      </tr>
-      <tr>
-          <td><code>Directory</code> <em><code>hostPath</code></em> mount at <em><code>localDisks[].path</code></em>, <code>preStop</code> hook, and <em><code>scaleIn.gracePeriodSeconds</code></em> window</td>
-          <td>Member <code>Pod</code></td>
-      </tr>
-      <tr>
-          <td><code>-enable_offload=true</code>, <code>-offload_on_evict=true</code> (refused in <em><code>leader.extraArgs</code></em>)</td>
-          <td>Leader argv</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Rendered setting</th>
+					<th>Target</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>MOONCAKE_OFFLOAD_ENABLED</code>, <code>..._FILE_STORAGE_PATH</code>, <code>..._BUCKET_SIZE_LIMIT_BYTES</code> (<code>16 MiB</code>), <code>..._BUCKET_KEYS_LIMIT</code> (<code>64</code>)</td>
+					<td>Member container</td>
+			</tr>
+			<tr>
+					<td><code>..._TOTAL_SIZE_LIMIT_BYTES</code>, <code>..._BUCKET_MAX_TOTAL_SIZE</code> (from <em><code>capacity</code></em>), <code>..._TOTAL_KEYS_LIMIT</code> (from <em><code>keyLimit</code></em>)</td>
+					<td>Member container</td>
+			</tr>
+			<tr>
+					<td><code>..._BUCKET_EVICTION_POLICY</code>, <code>..._ENABLE_DISK_WATERMARK_EVICTION</code>, watermark ratios</td>
+					<td>Member container</td>
+			</tr>
+			<tr>
+					<td><code>Directory</code> <em><code>hostPath</code></em> mount at <em><code>localDisks[].path</code></em>, <code>preStop</code> hook, and <em><code>scaleIn.gracePeriodSeconds</code></em> window</td>
+					<td>Member <code>Pod</code></td>
+			</tr>
+			<tr>
+					<td><code>-enable_offload=true</code>, <code>-offload_on_evict=true</code> (refused in <em><code>leader.extraArgs</code></em>)</td>
+					<td>Leader argv</td>
+			</tr>
+	</tbody>
 </table>
 <p>The tier always runs in deferred mode, keeping queued objects in memory until their disk bucket
 flushes.</p>
@@ -1291,30 +1291,30 @@ remove a tier without deleting the whole <code>KVCacheBackend</code>, place the 
 ).</li>
 </ul>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Refused at <code>kubectl apply</code></td>
-          <td>Admission error on <em><code>localDisks</code></em></td>
-          <td>Fix the path rule violation, or avoid adding/removing/repathing <em><code>localDisks</code></em> in place.</td>
-      </tr>
-      <tr>
-          <td>Member <code>Pod</code> stuck <code>Pending</code> / <code>ContainerCreating</code></td>
-          <td><code>FailedMount ... hostPath type check failed</code></td>
-          <td>Create <em><code>localDisks[].path</code></em> on the <code>Node</code> before starting the member.</td>
-      </tr>
-      <tr>
-          <td>Member <code>Pod</code> running, <code>0/1</code> Ready (<code>MembersMounted=False</code>)</td>
-          <td>Log: <code>FileStorageConfig: no write permission on directory</code></td>
-          <td><code>chown</code> the host directory to the member container&rsquo;s UID.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Refused at <code>kubectl apply</code></td>
+					<td>Admission error on <em><code>localDisks</code></em></td>
+					<td>Fix the path rule violation, or avoid adding/removing/repathing <em><code>localDisks</code></em> in place.</td>
+			</tr>
+			<tr>
+					<td>Member <code>Pod</code> stuck <code>Pending</code> / <code>ContainerCreating</code></td>
+					<td><code>FailedMount ... hostPath type check failed</code></td>
+					<td>Create <em><code>localDisks[].path</code></em> on the <code>Node</code> before starting the member.</td>
+			</tr>
+			<tr>
+					<td>Member <code>Pod</code> running, <code>0/1</code> Ready (<code>MembersMounted=False</code>)</td>
+					<td>Log: <code>FileStorageConfig: no write permission on directory</code></td>
+					<td><code>chown</code> the host directory to the member container&rsquo;s UID.</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="bucket-writes">Bucket writes</h2>
 <p>Mooncake batches offloaded objects per member and writes to disk only when a member&rsquo;s bucket reaches
@@ -1328,51 +1328,51 @@ writes with <code>master_allocated_file_size_bytes</code> on the leader:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl <span class="nb">exec</span> -n gpustack-system deploy/&lt;backend&gt;-leader -- <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  python3 -c <span class="s2">&#34;import urllib.request;print([l for l in \
+</span></span></span><span class="line"><span class="cl">  python3 -c <span class="s2">&#34;import urllib.request;print([l for l in \
 </span></span></span><span class="line"><span class="cl"><span class="s2">  urllib.request.urlopen(&#39;http://127.0.0.1:9003/metrics&#39;).read().decode().splitlines() \
 </span></span></span><span class="line"><span class="cl"><span class="s2">  if l.startswith(&#39;master_allocated_file_size_bytes&#39;)])&#34;</span></span></span></code></pre></div>
 </div>
 <table>
-  <thead>
-      <tr>
-          <th>Offered data</th>
-          <th>Zero gauge meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Below <code>16 MiB</code> / <code>64</code> keys per member</td>
-          <td>Expected: no member bucket has closed yet.</td>
-      </tr>
-      <tr>
-          <td>At least one bucket per member (after <code>~30 s</code>)</td>
-          <td><strong>Disk tier is not writing</strong>: inspect member logs and directory permissions.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Offered data</th>
+					<th>Zero gauge meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Below <code>16 MiB</code> / <code>64</code> keys per member</td>
+					<td>Expected: no member bucket has closed yet.</td>
+			</tr>
+			<tr>
+					<td>At least one bucket per member (after <code>~30 s</code>)</td>
+					<td><strong>Disk tier is not writing</strong>: inspect member logs and directory permissions.</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="eviction">Eviction</h2>
 <p><em><code>localDisks[].eviction</code></em> controls full-disk behavior:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Setting</th>
-          <th>Full-disk behavior</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Omitted</td>
-          <td>Uses Mooncake&rsquo;s default (<code>FIFO</code> eviction).</td>
-      </tr>
-      <tr>
-          <td><code>enabled: true</code> (block default)</td>
-          <td>Evicts <code>FIFO</code> (oldest written) or <code>LRU</code> (least recently read) entries between <code>watermark.high</code> and <code>watermark.low</code>.</td>
-      </tr>
-      <tr>
-          <td><code>enabled: false</code></td>
-          <td>Stops accepting new disk writes while keeping existing disk entries readable.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Setting</th>
+					<th>Full-disk behavior</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Omitted</td>
+					<td>Uses Mooncake&rsquo;s default (<code>FIFO</code> eviction).</td>
+			</tr>
+			<tr>
+					<td><code>enabled: true</code> (block default)</td>
+					<td>Evicts <code>FIFO</code> (oldest written) or <code>LRU</code> (least recently read) entries between <code>watermark.high</code> and <code>watermark.low</code>.</td>
+			</tr>
+			<tr>
+					<td><code>enabled: false</code></td>
+					<td>Stops accepting new disk writes while keeping existing disk entries readable.</td>
+			</tr>
+	</tbody>
 </table>
 <p>Admission rejects four no-op combinations: <code>enabled: false</code> with <em><code>policy</code></em>, <code>enabled: false</code> with
 <em><code>watermark</code></em>, <em><code>watermark</code></em> without <em><code>localDisks[].capacity</code></em>, and <code>watermark.low &gt;= watermark.high</code>.
@@ -1435,10 +1435,10 @@ filesystem yourself and set <em><code>localDisks[].capacity</code></em> inside t
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mooncake-disk</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Mooncake</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">

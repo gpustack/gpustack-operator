@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Topology-Aware Scheduling Operations · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1216,30 +1216,30 @@ PodSets. Legacy non-<em>TAS</em> queues from earlier releases are not migrated a
 <p>Assign at most one <code>Ready</code> <code>TopologySource</code> per <code>Node</code>. Zero or multiple matching <code>Ready</code> sources
 fall back to the hostname-only profile so conflicting hierarchies never merge.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Scenario</th>
-          <th>Inventory source</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Bundled Topograph supports your cloud, fabric, DRA, or on-prem topology</td>
-          <td>Enable <code>topograph</code> in Helm values and read its labels with <em><code>nodeLabels</code></em>.</td>
-      </tr>
-      <tr>
-          <td>Cloud provider or admin already labels <code>Node</code>s</td>
-          <td>Use <em><code>nodeLabels</code></em> (read-only).</td>
-      </tr>
-      <tr>
-          <td>Inventory is exported as a versioned document</td>
-          <td>Publish YAML/JSON in a <code>ConfigMap</code> and use <em><code>configMap</code></em>.</td>
-      </tr>
-      <tr>
-          <td>External inventory service serves snapshots</td>
-          <td>Serve authenticated HTTPS JSON/YAML and use <em><code>webhook</code></em>.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Scenario</th>
+					<th>Inventory source</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Bundled Topograph supports your cloud, fabric, DRA, or on-prem topology</td>
+					<td>Enable <code>topograph</code> in Helm values and read its labels with <em><code>nodeLabels</code></em>.</td>
+			</tr>
+			<tr>
+					<td>Cloud provider or admin already labels <code>Node</code>s</td>
+					<td>Use <em><code>nodeLabels</code></em> (read-only).</td>
+			</tr>
+			<tr>
+					<td>Inventory is exported as a versioned document</td>
+					<td>Publish YAML/JSON in a <code>ConfigMap</code> and use <em><code>configMap</code></em>.</td>
+			</tr>
+			<tr>
+					<td>External inventory service serves snapshots</td>
+					<td>Serve authenticated HTTPS JSON/YAML and use <em><code>webhook</code></em>.</td>
+			</tr>
+	</tbody>
 </table>
 <p>Declare only strictly nested trees (every rack belongs to one zone, and every zone to one region);
 independent axes such as rack and MIG partition do not form a valid hierarchy.</p>
@@ -1270,10 +1270,10 @@ read-only <code>TopologySource</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource </span><span class="w"> </span><span class="c"># cluster-scoped</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource </span><span class="w"> </span><span class="c"># cluster-scoped</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cloud-fabric</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># {} matches every Node</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">levels</span><span class="p">:</span><span class="w">  </span><span class="c"># 1..16 unique keys, broadest to narrowest; kubernetes.io/hostname appended automatically</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.kubernetes.io/region</span><span class="w">
@@ -1290,10 +1290,10 @@ coarsest-to-finest, appends <code>kubernetes.io/hostname</code>, and hashes the 
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cloud-zones</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">node-role.kubernetes.io/worker</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">
@@ -1303,39 +1303,39 @@ coarsest-to-finest, appends <code>kubernetes.io/hostname</code>, and hashes the 
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeLabels</span><span class="p">:</span><span class="w"> </span>{}</span></span></code></pre></div>
 </div>
 <table>
-  <thead>
-      <tr>
-          <th>Condition</th>
-          <th>Reason</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Duplicate key in <em><code>levels</code></em></td>
-          <td>Levels must be unique</td>
-          <td>Remove the repeated label key.</td>
-      </tr>
-      <tr>
-          <td>Child label present without parent</td>
-          <td>Broken parent chain on <code>Node</code></td>
-          <td>Populate every ancestor label (missing fine suffixes are allowed).</td>
-      </tr>
-      <tr>
-          <td><code>kubernetes.io/hostname</code> in <em><code>levels</code></em></td>
-          <td>Reserved implicit leaf level</td>
-          <td>Remove <code>kubernetes.io/hostname</code> from <em><code>levels</code></em>.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Condition</th>
+					<th>Reason</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Duplicate key in <em><code>levels</code></em></td>
+					<td>Levels must be unique</td>
+					<td>Remove the repeated label key.</td>
+			</tr>
+			<tr>
+					<td>Child label present without parent</td>
+					<td>Broken parent chain on <code>Node</code></td>
+					<td>Populate every ancestor label (missing fine suffixes are allowed).</td>
+			</tr>
+			<tr>
+					<td><code>kubernetes.io/hostname</code> in <em><code>levels</code></em></td>
+					<td>Reserved implicit leaf level</td>
+					<td>Remove <code>kubernetes.io/hostname</code> from <em><code>levels</code></em>.</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="configmap-snapshot">ConfigMap snapshot</h3>
 <p>Store a <code>TopologySourceConfiguration</code> YAML or JSON document in the worker namespace (<code>gpustack-system</code>):</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1alpha1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySourceConfiguration</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">revision</span><span class="p">:</span><span class="w"> </span><span class="l">inventory-42</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">nodes</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySourceConfiguration</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">revision</span><span class="p">:</span><span class="w"> </span><span class="l">inventory-42</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">nodes</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">worker-a</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topology.gpustack.ai/region</span><span class="p">:</span><span class="w"> </span><span class="l">region-a</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topology.gpustack.ai/zone</span><span class="p">:</span><span class="w"> </span><span class="l">zone-a</span><span class="w">
@@ -1344,12 +1344,12 @@ coarsest-to-finest, appends <code>kubernetes.io/hostname</code>, and hashes the 
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topology.gpustack.ai/region</span><span class="p">:</span><span class="w"> </span><span class="l">region-a</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topology.gpustack.ai/zone</span><span class="p">:</span><span class="w"> </span><span class="l">zone-a</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topology.gpustack.ai/rack</span><span class="p">:</span><span class="w"> </span><span class="l">rack-02</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">data-center</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w"> </span>{}<span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">levels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.gpustack.ai/region</span><span class="w">
@@ -1372,10 +1372,10 @@ redirects and proxies disabled) using worker-namespace credentials:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">inventory-service</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w"> </span>{}<span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">levels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.gpustack.ai/rack</span><span class="w">
@@ -1386,8 +1386,8 @@ redirects and proxies disabled) using worker-namespace credentials:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxStaleness</span><span class="p">:</span><span class="w"> </span><span class="l">5m </span><span class="w"> </span><span class="c"># positive duration</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">caBundleConfigMapRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-system</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name: topology-inventory-ca  # key</span><span class="p">:</span><span class="w"> </span><span class="l">ca.crt</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bearerTokenSecretRef:  # set exactly one of bearerTokenSecretRef (key</span><span class="p">:</span><span class="w"> </span><span class="l">token) or tlsClientCertificateSecretRef (tls.crt/tls.key)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">topology-inventory-ca </span><span class="w"> </span><span class="c"># key: ca.crt</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bearerTokenSecretRef</span><span class="p">:</span><span class="w">  </span><span class="c"># set exactly one of bearerTokenSecretRef (key: token) or tlsClientCertificateSecretRef (tls.crt/tls.key)</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-system</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">topology-inventory-token</span></span></span></code></pre></div>
 </div>
@@ -1460,40 +1460,40 @@ fresh queues, and destroy all billable resources afterward.</p>
 </span></span><span class="line"><span class="cl">kubectl get nodes -L topology.gpustack.ai/profile</span></span></code></pre></div>
 </div>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Next action</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Replica stays <code>Pending</code></td>
-          <td><code>Workload</code> <code>QuotaReserved=False</code> with <em><code>topologyRequest.required</code></em> set</td>
-          <td>Free capacity inside a single domain at that level (e.g., 2 <code>Node</code>s/zone cannot fit a 3-<code>Pod</code> zone group) or relax <em><code>requiredLevel</code></em>.</td>
-      </tr>
-      <tr>
-          <td>Aggregate capacity exists, no fit</td>
-          <td>Mixed <code>topology.gpustack.ai/profile</code> labels across candidate <code>Node</code>s</td>
-          <td>Align <code>TopologySource</code> selectors so all pool <code>Node</code>s publish the same profile.</td>
-      </tr>
-      <tr>
-          <td>One role reserved, <code>Pod</code>s gated</td>
-          <td><code>Workload</code> <code>QuotaReserved=True</code>, joint check <code>Pending</code> (or <code>Parked</code> after <code>30m</code>)</td>
-          <td>Free sibling role capacity in a valid domain, or recreate/reactivate <code>Parked</code> deployments.</td>
-      </tr>
-      <tr>
-          <td>Queue blocks admission</td>
-          <td><code>ClusterQueue</code> <code>TopologyReady=False</code> or <code>Unknown</code> (<code>AwaitingQueueStatus</code>)</td>
-          <td>Check flavor profiles, Kueue <code>Active</code> status, and keep flavors <code>&lt;= 64</code> per resource group.</td>
-      </tr>
-      <tr>
-          <td>Source not applied</td>
-          <td><code>TopologySource</code> <code>Ready=False</code> (<code>Valid</code> or <code>OwnershipConflict</code>)</td>
-          <td>Fix broken parent chains, snapshot errors, or overlapping <code>TopologySource</code> selectors.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Next action</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Replica stays <code>Pending</code></td>
+					<td><code>Workload</code> <code>QuotaReserved=False</code> with <em><code>topologyRequest.required</code></em> set</td>
+					<td>Free capacity inside a single domain at that level (e.g., 2 <code>Node</code>s/zone cannot fit a 3-<code>Pod</code> zone group) or relax <em><code>requiredLevel</code></em>.</td>
+			</tr>
+			<tr>
+					<td>Aggregate capacity exists, no fit</td>
+					<td>Mixed <code>topology.gpustack.ai/profile</code> labels across candidate <code>Node</code>s</td>
+					<td>Align <code>TopologySource</code> selectors so all pool <code>Node</code>s publish the same profile.</td>
+			</tr>
+			<tr>
+					<td>One role reserved, <code>Pod</code>s gated</td>
+					<td><code>Workload</code> <code>QuotaReserved=True</code>, joint check <code>Pending</code> (or <code>Parked</code> after <code>30m</code>)</td>
+					<td>Free sibling role capacity in a valid domain, or recreate/reactivate <code>Parked</code> deployments.</td>
+			</tr>
+			<tr>
+					<td>Queue blocks admission</td>
+					<td><code>ClusterQueue</code> <code>TopologyReady=False</code> or <code>Unknown</code> (<code>AwaitingQueueStatus</code>)</td>
+					<td>Check flavor profiles, Kueue <code>Active</code> status, and keep flavors <code>&lt;= 64</code> per resource group.</td>
+			</tr>
+			<tr>
+					<td>Source not applied</td>
+					<td><code>TopologySource</code> <code>Ready=False</code> (<code>Valid</code> or <code>OwnershipConflict</code>)</td>
+					<td>Fix broken parent chains, snapshot errors, or overlapping <code>TopologySource</code> selectors.</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

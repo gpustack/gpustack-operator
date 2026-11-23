@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Prefill and Decode Walkthrough · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1220,46 +1220,46 @@ memory-bandwidth-bound token <em>decode</em>. A managed router fronts both roles
 endpoint, coordinates Mooncake KV cache transfer between roles, and waits for Kueue to admit the full
 role set atomically:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Object</th>
-          <th>Scope</th>
-          <th>Creator</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ModelArtifact</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Resolves and pins <code>Qwen/Qwen3-32B</code> weights</td>
-      </tr>
-      <tr>
-          <td><code>ModelPrefetch</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Warms <code>qwen3-32b</code> onto the H100 node before serving</td>
-      </tr>
-      <tr>
-          <td><code>AcceleratorType</code></td>
-          <td>cluster</td>
-          <td>operator</td>
-          <td>H100 pool requested by both roles</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Declares 1 <em>Prefill</em> and 2 <em>Decode</em> replicas behind <code>llm-d-router</code></td>
-      </tr>
-      <tr>
-          <td>Router <code>Deployment</code> and <code>Service</code></td>
-          <td>namespace</td>
-          <td>operator</td>
-          <td>Single HTTP entrypoint routing requests across roles</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Object</th>
+					<th>Scope</th>
+					<th>Creator</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ModelArtifact</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Resolves and pins <code>Qwen/Qwen3-32B</code> weights</td>
+			</tr>
+			<tr>
+					<td><code>ModelPrefetch</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Warms <code>qwen3-32b</code> onto the H100 node before serving</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td>cluster</td>
+					<td>operator</td>
+					<td>H100 pool requested by both roles</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Declares 1 <em>Prefill</em> and 2 <em>Decode</em> replicas behind <code>llm-d-router</code></td>
+			</tr>
+			<tr>
+					<td>Router <code>Deployment</code> and <code>Service</code></td>
+					<td>namespace</td>
+					<td>operator</td>
+					<td>Single HTTP entrypoint routing requests across roles</td>
+			</tr>
+	</tbody>
 </table>
 <p>On one 8-GPU H100 SXM5 node (6 GPUs per configuration), <em>PD</em> cut concurrency-16 long-prompt <em>inter-token
 latency (ITL)</em> p99 by <strong>25.6×–27.8×</strong> (and cut mixed steady-stream max <em>ITL</em> by <strong>23.3×</strong> with no p99
@@ -1268,38 +1268,38 @@ cells; see <a href="/gpustack-operator/main/docs/modules/model-deployment/prefil
 .</p>
 <h3 id="environment">Environment</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Item</th>
-          <th>Value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Cluster</td>
-          <td>Kubernetes v1.35.7; 1 CPU node and 1 GPU node (<code>gpu-node-0</code>)</td>
-      </tr>
-      <tr>
-          <td>GPUs</td>
-          <td>8 × NVIDIA H100 80 GB HBM3 SXM5 (6 GPUs allocated to serving)</td>
-      </tr>
-      <tr>
-          <td>Pool</td>
-          <td>Captured on custom <code>InstanceType</code> <code>bench-gpu</code>; reusable manifest uses <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
-      </tr>
-      <tr>
-          <td>Model</td>
-          <td><code>Qwen/Qwen3-32B</code> via <code>ModelArtifact</code> <code>qwen3-32b</code> (node model delivery)</td>
-      </tr>
-      <tr>
-          <td>Engine and router</td>
-          <td>vLLM <code>gpustack/runner:cuda13.0-vllm0.30.0</code> with <code>llm-d-router</code></td>
-      </tr>
-      <tr>
-          <td>KV transfer</td>
-          <td>Mooncake over TCP (<code>mooncake_protocol: &quot;tcp&quot;</code>)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Cluster</td>
+					<td>Kubernetes v1.35.7; 1 CPU node and 1 GPU node (<code>gpu-node-0</code>)</td>
+			</tr>
+			<tr>
+					<td>GPUs</td>
+					<td>8 × NVIDIA H100 80 GB HBM3 SXM5 (6 GPUs allocated to serving)</td>
+			</tr>
+			<tr>
+					<td>Pool</td>
+					<td>Captured on custom <code>InstanceType</code> <code>bench-gpu</code>; reusable manifest uses <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
+			</tr>
+			<tr>
+					<td>Model</td>
+					<td><code>Qwen/Qwen3-32B</code> via <code>ModelArtifact</code> <code>qwen3-32b</code> (node model delivery)</td>
+			</tr>
+			<tr>
+					<td>Engine and router</td>
+					<td>vLLM <code>gpustack/runner:cuda13.0-vllm0.30.0</code> with <code>llm-d-router</code></td>
+			</tr>
+			<tr>
+					<td>KV transfer</td>
+					<td>Mooncake over TCP (<code>mooncake_protocol: &quot;tcp&quot;</code>)</td>
+			</tr>
+	</tbody>
 </table>
 <p>Each engine <code>Pod</code> saw only its two assigned GPUs with private IPC, private <code>/dev/shm</code>, and no <em>remote
 direct memory access (RDMA)</em> interface. Intra-<code>Pod</code> <em>tensor parallelism (TP)</em> (<code>*TP* = 2</code>) used
@@ -1316,11 +1316,11 @@ NVLink, while <strong>cross-<code>Pod</code> Mooncake KV transfer ran over TCP o
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">pd-arm2-pd</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-32B</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
@@ -1375,9 +1375,9 @@ NVLink, while <strong>cross-<code>Pod</code> Mooncake KV transfer ran over TCP o
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f pd-deployment.yaml
 </span></span><span class="line"><span class="cl">kubectl get modeldeployment pd-arm2-pd -n gpustack-bench <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o custom-columns<span class="o">=</span>NAME:.metadata.name,ENGINE:.spec.engine.name,ROLES:.status.roleSummary,PHASE:.status.phase
+</span></span></span><span class="line"><span class="cl">  -o custom-columns<span class="o">=</span>NAME:.metadata.name,ENGINE:.spec.engine.name,ROLES:.status.roleSummary,PHASE:.status.phase
 </span></span><span class="line"><span class="cl">kubectl get pods -n gpustack-bench -l app.kubernetes.io/instance<span class="o">=</span>pd-arm2-pd <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o custom-columns<span class="o">=</span>NAME:.metadata.name,READY:.status.containerStatuses<span class="o">[</span>*<span class="o">]</span>.ready,STATUS:.status.phase,NODE:.spec.nodeName</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -o custom-columns<span class="o">=</span>NAME:.metadata.name,READY:.status.containerStatuses<span class="o">[</span>*<span class="o">]</span>.ready,STATUS:.status.phase,NODE:.spec.nodeName</span></span></code></pre></div>
 </div>
 <p>Captured output:</p>
 <div class="code-block">
@@ -1437,10 +1437,10 @@ If you also attach a shared KV store via <em><code>spec.kvCache.poolRef</code></
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">ENDPOINT</span><span class="o">=</span><span class="k">$(</span>kubectl -n gpustack-bench get modeldeployment pd-arm2-pd -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.endpoint}&#39;</span><span class="k">)</span>
 </span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;</span><span class="nv">$ENDPOINT</span><span class="s2">&#34;</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench run test-client --rm -i --restart<span class="o">=</span>Never <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --image<span class="o">=</span>curlimages/curl -- <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  curl -fsS <span class="s2">&#34;</span><span class="nv">$ENDPOINT</span><span class="s2">/v1/chat/completions&#34;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -H <span class="s2">&#34;Content-Type: application/json&#34;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -d <span class="s1">&#39;{
+</span></span></span><span class="line"><span class="cl">  --image<span class="o">=</span>curlimages/curl -- <span class="se">\
+</span></span></span><span class="line"><span class="cl">  curl -fsS <span class="s2">&#34;</span><span class="nv">$ENDPOINT</span><span class="s2">/v1/chat/completions&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -H <span class="s2">&#34;Content-Type: application/json&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -d <span class="s1">&#39;{
 </span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;model&#34;: &#34;Qwen/Qwen3-32B&#34;,
 </span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;messages&#34;: [{&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: &#34;Explain prefill and decode disaggregation.&#34;}],
 </span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;max_tokens&#34;: 16
@@ -1505,56 +1505,56 @@ router lifecycle contracts.</li>
 </ul>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ModelDeployment</code> stuck in <code>Starting</code>, missing <code>Workload</code>s</td>
-          <td><code>QuotaReserved=False/PodGroupIncomplete</code></td>
-          <td>Read the condition message on <code>ModelDeployment</code> and inspect unschedulable or rejected role <code>Pod</code>s.</td>
-      </tr>
-      <tr>
-          <td><code>Workload</code>s stop requesting quota</td>
-          <td><code>QuotaReserved=False/Parked</code></td>
-          <td>Joint placement timed out and deactivated the <code>Workload</code>s; free pool capacity and reactivate the <code>Workload</code>s or recreate the <code>ModelDeployment</code> (re-applying identical YAML does not unpark).</td>
-      </tr>
-      <tr>
-          <td>Partial preemption holds remaining GPUs</td>
-          <td><code>QuotaReserved=False/PreemptedInPart</code></td>
-          <td>Higher-priority work preempted part of the deployment; free pool quota so preempted replicas re-admit, or delete the <code>ModelDeployment</code>.</td>
-      </tr>
-      <tr>
-          <td><em><code>status.endpoint</code></em> stays empty with Router <code>Pod</code> present</td>
-          <td><code>RouterReady=False/NoReadyReplicas</code></td>
-          <td>Inspect Router <code>Pod</code> events and logs for image pull or readiness probe failures.</td>
-      </tr>
-      <tr>
-          <td>No Router <code>Deployment</code> or <code>Pod</code> exists</td>
-          <td><code>RouterReady=False/RenderFailed</code></td>
-          <td>Read <code>RouterReady</code> on <code>ModelDeployment</code> and fix invalid fields under <em><code>spec.router</code></em>.</td>
-      </tr>
-      <tr>
-          <td>KV transfer fails between <em>Prefill</em> and <em>Decode</em></td>
-          <td>Engine transfer errors in both role logs</td>
-          <td>Verify matching Mooncake build versions in the runner image, valid <em><code>resources.interface</code></em> counts, and pod-to-pod network reachability.</td>
-      </tr>
-      <tr>
-          <td><code>KVEventsPublishing=False/PublisherDisabled</code></td>
-          <td>Expected on routed SGLang or disabled publisher</td>
-          <td>Informational condition reporting configuration rather than runtime failure (<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#operator-owned-keys">Operator-owned keys</a>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ModelDeployment</code> stuck in <code>Starting</code>, missing <code>Workload</code>s</td>
+					<td><code>QuotaReserved=False/PodGroupIncomplete</code></td>
+					<td>Read the condition message on <code>ModelDeployment</code> and inspect unschedulable or rejected role <code>Pod</code>s.</td>
+			</tr>
+			<tr>
+					<td><code>Workload</code>s stop requesting quota</td>
+					<td><code>QuotaReserved=False/Parked</code></td>
+					<td>Joint placement timed out and deactivated the <code>Workload</code>s; free pool capacity and reactivate the <code>Workload</code>s or recreate the <code>ModelDeployment</code> (re-applying identical YAML does not unpark).</td>
+			</tr>
+			<tr>
+					<td>Partial preemption holds remaining GPUs</td>
+					<td><code>QuotaReserved=False/PreemptedInPart</code></td>
+					<td>Higher-priority work preempted part of the deployment; free pool quota so preempted replicas re-admit, or delete the <code>ModelDeployment</code>.</td>
+			</tr>
+			<tr>
+					<td><em><code>status.endpoint</code></em> stays empty with Router <code>Pod</code> present</td>
+					<td><code>RouterReady=False/NoReadyReplicas</code></td>
+					<td>Inspect Router <code>Pod</code> events and logs for image pull or readiness probe failures.</td>
+			</tr>
+			<tr>
+					<td>No Router <code>Deployment</code> or <code>Pod</code> exists</td>
+					<td><code>RouterReady=False/RenderFailed</code></td>
+					<td>Read <code>RouterReady</code> on <code>ModelDeployment</code> and fix invalid fields under <em><code>spec.router</code></em>.</td>
+			</tr>
+			<tr>
+					<td>KV transfer fails between <em>Prefill</em> and <em>Decode</em></td>
+					<td>Engine transfer errors in both role logs</td>
+					<td>Verify matching Mooncake build versions in the runner image, valid <em><code>resources.interface</code></em> counts, and pod-to-pod network reachability.</td>
+			</tr>
+			<tr>
+					<td><code>KVEventsPublishing=False/PublisherDisabled</code></td>
+					<td>Expected on routed SGLang or disabled publisher</td>
+					<td>Informational condition reporting configuration rather than runtime failure (<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#operator-owned-keys">Operator-owned keys</a>
 ).</td>
-      </tr>
-      <tr>
-          <td><code>RoleKindsReady=False</code></td>
-          <td>Zero Ready replicas in <em>Prefill</em> or <em>Decode</em></td>
-          <td>Inspect <code>Pod</code> logs and events for the unready role named in the condition message.</td>
-      </tr>
-  </tbody>
+			</tr>
+			<tr>
+					<td><code>RoleKindsReady=False</code></td>
+					<td>Zero Ready replicas in <em>Prefill</em> or <em>Decode</em></td>
+					<td>Inspect <code>Pod</code> logs and events for the unready role named in the condition message.</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

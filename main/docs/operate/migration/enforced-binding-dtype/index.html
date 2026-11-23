@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Upgrading to an Enforced Binding Dtype · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1233,7 +1233,7 @@ causing <code>FailedCreate</code> on the owning controller until removed.</li>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get kvcachepoolbindings -A <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o custom-columns<span class="o">=</span>NAMESPACE:.metadata.namespace,NAME:.metadata.name,DTYPE:.spec.domain.dtype</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -o custom-columns<span class="o">=</span>NAMESPACE:.metadata.namespace,NAME:.metadata.name,DTYPE:.spec.domain.dtype</span></span></code></pre></div>
 </div>
 <p>Compare each value against the accepted spellings in
 <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#engine-cache-precision">Engine cache precision</a>
@@ -1257,7 +1257,7 @@ restore serving immediately:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-deployment-kv-cache-dtype-owned <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;false&#34;}}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;false&#34;}}&#39;</span></span></span></code></pre></div>
 </div>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1268,7 +1268,7 @@ restore serving immediately:</p>
 </span></span><span class="line"><span class="cl">   namespace: gpustack-system
 </span></span><span class="line"><span class="cl"> spec:
 </span></span><span class="line"><span class="cl"><span class="gd">-  value: &#34;true&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;false&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+  value: &#34;false&#34;
 </span></span></span></code></pre></div>
 </div>
 <p>Then migrate workloads to a valid Binding and re-enable enforcement:</p>
@@ -1287,8 +1287,8 @@ its synthesized <em><code>command</code></em>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n &lt;namespace&gt; get pods -l app.kubernetes.io/instance<span class="o">=</span>&lt;deployment&gt; <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.metadata.name}{&#34;\t&#34;}{.spec.containers[0].command}{&#34;\n&#34;}{end}&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> grep -o -- <span class="s1">&#39;--kv-cache-dtype&#34;,&#34;[^&#34;]*&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.metadata.name}{&#34;\t&#34;}{.spec.containers[0].command}{&#34;\n&#34;}{end}&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> grep -o -- <span class="s1">&#39;--kv-cache-dtype&#34;,&#34;[^&#34;]*&#39;</span></span></span></code></pre></div>
 </div>
 <p>On webhook-injected standalone <code>Pod</code>s, the same two entries appear at the end of <code>containers[].args</code>.</p>
 <nav class="reading-footer" aria-label="Further reading">

@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Architecture · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1216,46 +1216,46 @@ memory access (RDMA)</em> accelerates transfers, and shared KV cache stores reus
 <h2 id="components">Components</h2>
 <p>The <code>gpustack-operator</code> binary provides five subcommands, paired with the <code>engine-sentinel</code> runtime package staged into managed inference <code>Pod</code>s:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Component</th>
-          <th>Deployment</th>
-          <th>Role</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>worker</code></td>
-          <td>Control-plane <code>Deployment</code></td>
-          <td>Serves APIs and reconciles workloads, queues, and supporting resources.</td>
-      </tr>
-      <tr>
-          <td><code>device-manager</code></td>
-          <td>Vendor <code>DaemonSet</code></td>
-          <td>Discovers accelerators and NICs,<br/>publishes capacity, and allocates devices.</td>
-      </tr>
-      <tr>
-          <td><code>model-manager</code></td>
-          <td>Per-node <code>DaemonSet</code></td>
-          <td>Caches verified model weights and mounts them through CSI.</td>
-      </tr>
-      <tr>
-          <td><code>model-transfer</code></td>
-          <td>Vendor source <code>DaemonSet</code></td>
-          <td>Runs the source broker and worker service, paired with the staged <code>gpustack_model_transfer</code> Python reader package for remote weight delivery.</td>
-      </tr>
-      <tr>
-          <td><code>worker-gateway</code></td>
-          <td>Separate installation</td>
-          <td>Aggregates <code>InstanceType</code>s and capacity across clusters into one fleet view.</td>
-      </tr>
-      <tr>
-          <td><code>engine-sentinel</code></td>
-          <td>Read-only host mount in engine <code>Pod</code>s</td>
-          <td>Pure-Python runtime package (<code>gpustack_engine_sentinel</code>) for live parameter tuning, unified <code>/gpustack/v1/{live,ready}</code> probes, role pause, and <code>PreStop</code> drain; see <a href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/">Online Runtime Control</a>
+	<thead>
+			<tr>
+					<th>Component</th>
+					<th>Deployment</th>
+					<th>Role</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>worker</code></td>
+					<td>Control-plane <code>Deployment</code></td>
+					<td>Serves APIs and reconciles workloads, queues, and supporting resources.</td>
+			</tr>
+			<tr>
+					<td><code>device-manager</code></td>
+					<td>Vendor <code>DaemonSet</code></td>
+					<td>Discovers accelerators and NICs,<br/>publishes capacity, and allocates devices.</td>
+			</tr>
+			<tr>
+					<td><code>model-manager</code></td>
+					<td>Per-node <code>DaemonSet</code></td>
+					<td>Caches verified model weights and mounts them through CSI.</td>
+			</tr>
+			<tr>
+					<td><code>model-transfer</code></td>
+					<td>Vendor source <code>DaemonSet</code></td>
+					<td>Runs the source broker and worker service, paired with the staged <code>gpustack_model_transfer</code> Python reader package for remote weight delivery.</td>
+			</tr>
+			<tr>
+					<td><code>worker-gateway</code></td>
+					<td>Separate installation</td>
+					<td>Aggregates <code>InstanceType</code>s and capacity across clusters into one fleet view.</td>
+			</tr>
+			<tr>
+					<td><code>engine-sentinel</code></td>
+					<td>Read-only host mount in engine <code>Pod</code>s</td>
+					<td>Pure-Python runtime package (<code>gpustack_engine_sentinel</code>) for live parameter tuning, unified <code>/gpustack/v1/{live,ready}</code> probes, role pause, and <code>PreStop</code> drain; see <a href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/">Online Runtime Control</a>
 .</td>
-      </tr>
-  </tbody>
+			</tr>
+	</tbody>
 </table>
 <p>The Helm chart bundles <a href="https://github.com/kubernetes-sigs/node-feature-discovery">Node Feature Discovery (NFD)</a>
 ,
@@ -1341,58 +1341,58 @@ bind devices; see <a href="/gpustack-operator/main/docs/modules/devices/requests
 .</p>
 <h2 id="vocabulary">Vocabulary</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Term</th>
-          <th>Meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Pool</td>
-          <td><code>Node</code>s with matching CPU, accelerator, OS, and architecture identities, served by one isolated <code>ClusterQueue</code>.</td>
-      </tr>
-      <tr>
-          <td><code>AcceleratorType</code></td>
-          <td>Cluster-scoped accelerator pool for serving and prefetch workloads; short name <code>acctype</code>.</td>
-      </tr>
-      <tr>
-          <td><code>InstanceType</code></td>
-          <td>Cluster-scoped workspace sizing and capacity view for <code>Instance</code>s.</td>
-      </tr>
-      <tr>
-          <td>Allocation mode</td>
-          <td>Whole cards, shared cards, logical slices, or hardware partitions.</td>
-      </tr>
-      <tr>
-          <td>Credits</td>
-          <td>Quota units (<code>credits.gpustack.ai/&lt;manufacturer&gt;</code>) metered on a pool <code>ClusterQueue</code>.</td>
-      </tr>
-      <tr>
-          <td>Four capacity views</td>
-          <td>Exclusive (<code>EX</code>), shared (<code>SH</code>), sliced (<code>SL</code>), and partitioned (<code>PT</code>) counts on pool status.</td>
-      </tr>
-      <tr>
-          <td><code>Devices</code> ledger</td>
-          <td>Per-node custom resource recording discovered hardware and active allocations.</td>
-      </tr>
-      <tr>
-          <td><code>LocalQueue</code></td>
-          <td>Namespace queue entrance that routes a workload into its target <code>ClusterQueue</code>.</td>
-      </tr>
-      <tr>
-          <td><code>ModelArtifact</code></td>
-          <td>Namespaced weight source and resolved manifest digest referenced by workloads.</td>
-      </tr>
-      <tr>
-          <td><code>NodeModelStore</code></td>
-          <td>Per-node cache configuration and observed digest state.</td>
-      </tr>
-      <tr>
-          <td><code>ModelPrefetch</code></td>
-          <td>Namespaced request to warm a <code>ModelArtifact</code> onto bound <code>ModelStore</code> nodes.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Term</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Pool</td>
+					<td><code>Node</code>s with matching CPU, accelerator, OS, and architecture identities, served by one isolated <code>ClusterQueue</code>.</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td>Cluster-scoped accelerator pool for serving and prefetch workloads; short name <code>acctype</code>.</td>
+			</tr>
+			<tr>
+					<td><code>InstanceType</code></td>
+					<td>Cluster-scoped workspace sizing and capacity view for <code>Instance</code>s.</td>
+			</tr>
+			<tr>
+					<td>Allocation mode</td>
+					<td>Whole cards, shared cards, logical slices, or hardware partitions.</td>
+			</tr>
+			<tr>
+					<td>Credits</td>
+					<td>Quota units (<code>credits.gpustack.ai/&lt;manufacturer&gt;</code>) metered on a pool <code>ClusterQueue</code>.</td>
+			</tr>
+			<tr>
+					<td>Four capacity views</td>
+					<td>Exclusive (<code>EX</code>), shared (<code>SH</code>), sliced (<code>SL</code>), and partitioned (<code>PT</code>) counts on pool status.</td>
+			</tr>
+			<tr>
+					<td><code>Devices</code> ledger</td>
+					<td>Per-node custom resource recording discovered hardware and active allocations.</td>
+			</tr>
+			<tr>
+					<td><code>LocalQueue</code></td>
+					<td>Namespace queue entrance that routes a workload into its target <code>ClusterQueue</code>.</td>
+			</tr>
+			<tr>
+					<td><code>ModelArtifact</code></td>
+					<td>Namespaced weight source and resolved manifest digest referenced by workloads.</td>
+			</tr>
+			<tr>
+					<td><code>NodeModelStore</code></td>
+					<td>Per-node cache configuration and observed digest state.</td>
+			</tr>
+			<tr>
+					<td><code>ModelPrefetch</code></td>
+					<td>Namespaced request to warm a <code>ModelArtifact</code> onto bound <code>ModelStore</code> nodes.</td>
+			</tr>
+	</tbody>
 </table>
 <p>A physical card or module is a <em>device</em>, each schedulable unit on it is an <em>accelerator</em>, and the
 Kubernetes extended resource key a container requests is a <em>resource</em>.</p>

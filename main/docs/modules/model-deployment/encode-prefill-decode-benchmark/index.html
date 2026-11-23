@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Encode, Prefill and Decode Benchmark · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1248,54 +1248,54 @@ much lower <em>ITL</em> p99.</li>
 </ul>
 <h2 id="environment">Environment</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Property</th>
-          <th>Captured value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Cluster</td>
-          <td>Kubernetes v1.35.7; one CPU node and one GPU node</td>
-      </tr>
-      <tr>
-          <td>Hardware</td>
-          <td>8 × NVIDIA H100 80 GB HBM3 SXM5 on one node</td>
-      </tr>
-      <tr>
-          <td>GPUStack Operator</td>
-          <td>v0.9.1</td>
-      </tr>
-      <tr>
-          <td>Captured <code>InstanceType</code></td>
-          <td><code>bench-gpu</code>, selecting the H100 accelerator group</td>
-      </tr>
-      <tr>
-          <td>Runner</td>
-          <td><code>gpustack/runner:cuda13.0-vllm0.30.0</code></td>
-      </tr>
-      <tr>
-          <td>Router</td>
-          <td><code>gpustack/llm-router:v0.3.1</code>; disaggregation sidecar v0.11.0</td>
-      </tr>
-      <tr>
-          <td>Model</td>
-          <td><code>Qwen/Qwen2.5-VL-7B-Instruct</code>, revision <code>cc594898137f460bfe9f0759e9844b3ce807cfb5</code></td>
-      </tr>
-      <tr>
-          <td>Model delivery</td>
-          <td><code>ModelArtifact</code> <code>qwen2-5-vl-7b-instruct</code>; node delivery mount <code>/var/lib/gpustack/model</code>, served as <code>/models</code></td>
-      </tr>
-      <tr>
-          <td>Engine limits</td>
-          <td><code>--max-model-len 16384</code>, <code>--gpu-memory-utilization 0.85</code></td>
-      </tr>
-      <tr>
-          <td>Parallelism</td>
-          <td><em>Tensor parallelism (TP)</em> = 1 per role</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Property</th>
+					<th>Captured value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Cluster</td>
+					<td>Kubernetes v1.35.7; one CPU node and one GPU node</td>
+			</tr>
+			<tr>
+					<td>Hardware</td>
+					<td>8 × NVIDIA H100 80 GB HBM3 SXM5 on one node</td>
+			</tr>
+			<tr>
+					<td>GPUStack Operator</td>
+					<td>v0.9.1</td>
+			</tr>
+			<tr>
+					<td>Captured <code>InstanceType</code></td>
+					<td><code>bench-gpu</code>, selecting the H100 accelerator group</td>
+			</tr>
+			<tr>
+					<td>Runner</td>
+					<td><code>gpustack/runner:cuda13.0-vllm0.30.0</code></td>
+			</tr>
+			<tr>
+					<td>Router</td>
+					<td><code>gpustack/llm-router:v0.3.1</code>; disaggregation sidecar v0.11.0</td>
+			</tr>
+			<tr>
+					<td>Model</td>
+					<td><code>Qwen/Qwen2.5-VL-7B-Instruct</code>, revision <code>cc594898137f460bfe9f0759e9844b3ce807cfb5</code></td>
+			</tr>
+			<tr>
+					<td>Model delivery</td>
+					<td><code>ModelArtifact</code> <code>qwen2-5-vl-7b-instruct</code>; node delivery mount <code>/var/lib/gpustack/model</code>, served as <code>/models</code></td>
+			</tr>
+			<tr>
+					<td>Engine limits</td>
+					<td><code>--max-model-len 16384</code>, <code>--gpu-memory-utilization 0.85</code></td>
+			</tr>
+			<tr>
+					<td>Parallelism</td>
+					<td><em>Tensor parallelism (TP)</em> = 1 per role</td>
+			</tr>
+	</tbody>
 </table>
 <p>The operator added <code>--enforce-eager</code> and <code>--no-enable-prefix-caching</code> only to <em>Encode</em>. <em>Prefill</em>
 and <em>Decode</em> retained CUDA graphs. Aggregated serving and <em>PD</em> set <code>--enable-scale-out</code> for router
@@ -1304,38 +1304,38 @@ token rendering; <em>EPD</em> did not.</p>
 <p>Each configuration ran one <code>ModelDeployment</code> on <code>gpu-node-0</code> with one replica per role and one GPU
 per <code>Pod</code>.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Configuration</th>
-          <th>Roles</th>
-          <th style="text-align: right">GPUs</th>
-          <th>KV connector</th>
-          <th>Encoder connector</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Aggregated</td>
-          <td>1 <em>Server</em></td>
-          <td style="text-align: right">1</td>
-          <td>None</td>
-          <td>None</td>
-      </tr>
-      <tr>
-          <td><em>PD</em></td>
-          <td>1 <em>Prefill</em> + 1 <em>Decode</em></td>
-          <td style="text-align: right">2</td>
-          <td><code>MooncakeConnector</code>, TCP</td>
-          <td>None</td>
-      </tr>
-      <tr>
-          <td><em>EPD</em></td>
-          <td>1 <em>Encode</em> + 1 <em>Prefill</em> + 1 <em>Decode</em></td>
-          <td style="text-align: right">3</td>
-          <td><code>MooncakeConnector</code>, TCP</td>
-          <td><code>ECCPUConnector</code>, NIXL</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Configuration</th>
+					<th>Roles</th>
+					<th style="text-align: right">GPUs</th>
+					<th>KV connector</th>
+					<th>Encoder connector</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Aggregated</td>
+					<td>1 <em>Server</em></td>
+					<td style="text-align: right">1</td>
+					<td>None</td>
+					<td>None</td>
+			</tr>
+			<tr>
+					<td><em>PD</em></td>
+					<td>1 <em>Prefill</em> + 1 <em>Decode</em></td>
+					<td style="text-align: right">2</td>
+					<td><code>MooncakeConnector</code>, TCP</td>
+					<td>None</td>
+			</tr>
+			<tr>
+					<td><em>EPD</em></td>
+					<td>1 <em>Encode</em> + 1 <em>Prefill</em> + 1 <em>Decode</em></td>
+					<td style="text-align: right">3</td>
+					<td><code>MooncakeConnector</code>, TCP</td>
+					<td><code>ECCPUConnector</code>, NIXL</td>
+			</tr>
+	</tbody>
 </table>
 <p>Each <code>Pod</code> exposed only its assigned GPU with a private <code>/dev/shm</code> and IPC namespace. <em><code>hostIPC</code></em>
 was disabled, and no <em>remote direct memory access (RDMA)</em> interface was attached. <strong>All cross-<code>Pod</code>
@@ -1345,40 +1345,40 @@ cross-role traffic.</p>
 <p>Suite 1 varied image and text length with a <code>128</code>-token completion limit. Image dimensions are
 pixels; text-token values are generator targets. Measured prompts include multimodal formatting.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Context</th>
-          <th>Image</th>
-          <th style="text-align: right">Text target</th>
-          <th>Measured prompt tokens</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>1k</code></td>
-          <td>560 × 560</td>
-          <td style="text-align: right">624</td>
-          <td>1,047–1,050</td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td>840 × 840</td>
-          <td style="text-align: right">1,148</td>
-          <td>2,071–2,074</td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td>1260 × 1260</td>
-          <td style="text-align: right">2,071</td>
-          <td>4,119–4,122</td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td>1792 × 1792</td>
-          <td style="text-align: right">4,096</td>
-          <td>8,215–8,219</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Context</th>
+					<th>Image</th>
+					<th style="text-align: right">Text target</th>
+					<th>Measured prompt tokens</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>1k</code></td>
+					<td>560 × 560</td>
+					<td style="text-align: right">624</td>
+					<td>1,047–1,050</td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td>840 × 840</td>
+					<td style="text-align: right">1,148</td>
+					<td>2,071–2,074</td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td>1260 × 1260</td>
+					<td style="text-align: right">2,071</td>
+					<td>4,119–4,122</td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td>1792 × 1792</td>
+					<td style="text-align: right">4,096</td>
+					<td>8,215–8,219</td>
+			</tr>
+	</tbody>
 </table>
 <p>Concurrency 1, 4 and 8 used 8, 12 and 24 measured requests per context, respectively.</p>
 <h3 id="concurrent-vision-and-decode">Concurrent vision and decode</h3>
@@ -1408,454 +1408,454 @@ aggregated serving at <code>4k</code> and <code>8k</code>, concurrency 8 (231.45
 cell, lower <em>TTFT</em> p95 in every <code>2k</code> cell, and lower <em>TTFT</em> p50 at <code>8k</code>, concurrency 8 (3,963.085
 versus 4,182.324 ms), while <code>8k</code>, concurrency 4 lowered <em>EPD</em> median <em>TTFT</em> but worsened <em>TTFT</em> p95.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Workload</th>
-          <th style="text-align: right">Concurrency</th>
-          <th>Configuration</th>
-          <th style="text-align: right">Requests</th>
-          <th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
-          <th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">Output (tok/s)</th>
-          <th style="text-align: right">Throughput (req/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>1k</code></td>
-          <td style="text-align: right">1</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">8/8</td>
-          <td style="text-align: right"><strong>127.488</strong></td>
-          <td style="text-align: right"><strong>133.658</strong></td>
-          <td style="text-align: right"><strong>5.904</strong></td>
-          <td style="text-align: right"><strong>8.885</strong></td>
-          <td style="text-align: right"><strong>143.767</strong></td>
-          <td style="text-align: right">1.234</td>
-      </tr>
-      <tr>
-          <td><code>1k</code></td>
-          <td style="text-align: right">1</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">8/8</td>
-          <td style="text-align: right">193.346</td>
-          <td style="text-align: right">202.953</td>
-          <td style="text-align: right">6.014</td>
-          <td style="text-align: right">9.089</td>
-          <td style="text-align: right">130.569</td>
-          <td style="text-align: right">1.140</td>
-      </tr>
-      <tr>
-          <td><code>1k</code></td>
-          <td style="text-align: right">1</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">8/8</td>
-          <td style="text-align: right">157.290</td>
-          <td style="text-align: right">172.886</td>
-          <td style="text-align: right">5.926</td>
-          <td style="text-align: right">9.168</td>
-          <td style="text-align: right">135.864</td>
-          <td style="text-align: right"><strong>1.259</strong></td>
-      </tr>
-      <tr>
-          <td><code>1k</code></td>
-          <td style="text-align: right">4</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right"><strong>132.585</strong></td>
-          <td style="text-align: right"><strong>317.836</strong></td>
-          <td style="text-align: right">6.810</td>
-          <td style="text-align: right">40.568</td>
-          <td style="text-align: right"><strong>429.372</strong></td>
-          <td style="text-align: right"><strong>4.179</strong></td>
-      </tr>
-      <tr>
-          <td><code>1k</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">352.986</td>
-          <td style="text-align: right">514.518</td>
-          <td style="text-align: right"><strong>6.302</strong></td>
-          <td style="text-align: right"><strong>12.260</strong></td>
-          <td style="text-align: right">371.169</td>
-          <td style="text-align: right">3.924</td>
-      </tr>
-      <tr>
-          <td><code>1k</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">234.481</td>
-          <td style="text-align: right">435.045</td>
-          <td style="text-align: right">6.423</td>
-          <td style="text-align: right">13.121</td>
-          <td style="text-align: right">420.666</td>
-          <td style="text-align: right">3.925</td>
-      </tr>
-      <tr>
-          <td><code>1k</code></td>
-          <td style="text-align: right">8</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right"><strong>294.960</strong></td>
-          <td style="text-align: right"><strong>574.336</strong></td>
-          <td style="text-align: right">7.359</td>
-          <td style="text-align: right">43.814</td>
-          <td style="text-align: right"><strong>744.704</strong></td>
-          <td style="text-align: right"><strong>6.722</strong></td>
-      </tr>
-      <tr>
-          <td><code>1k</code></td>
-          <td style="text-align: right">8</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right">397.371</td>
-          <td style="text-align: right">929.204</td>
-          <td style="text-align: right"><strong>6.956</strong></td>
-          <td style="text-align: right">16.274</td>
-          <td style="text-align: right">646.274</td>
-          <td style="text-align: right">5.925</td>
-      </tr>
-      <tr>
-          <td><code>1k</code></td>
-          <td style="text-align: right">8</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right">343.176</td>
-          <td style="text-align: right">725.719</td>
-          <td style="text-align: right">6.987</td>
-          <td style="text-align: right"><strong>14.933</strong></td>
-          <td style="text-align: right">715.225</td>
-          <td style="text-align: right">6.592</td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td style="text-align: right">1</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">8/8</td>
-          <td style="text-align: right"><strong>221.341</strong></td>
-          <td style="text-align: right"><strong>228.913</strong></td>
-          <td style="text-align: right"><strong>5.922</strong></td>
-          <td style="text-align: right"><strong>8.879</strong></td>
-          <td style="text-align: right"><strong>126.909</strong></td>
-          <td style="text-align: right"><strong>1.146</strong></td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td style="text-align: right">1</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">8/8</td>
-          <td style="text-align: right">323.722</td>
-          <td style="text-align: right">333.260</td>
-          <td style="text-align: right">6.022</td>
-          <td style="text-align: right">8.968</td>
-          <td style="text-align: right">109.430</td>
-          <td style="text-align: right">1.068</td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td style="text-align: right">1</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">8/8</td>
-          <td style="text-align: right">261.095</td>
-          <td style="text-align: right">266.917</td>
-          <td style="text-align: right">5.935</td>
-          <td style="text-align: right">9.255</td>
-          <td style="text-align: right">120.054</td>
-          <td style="text-align: right">1.125</td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td style="text-align: right">4</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right"><strong>393.122</strong></td>
-          <td style="text-align: right"><strong>584.277</strong></td>
-          <td style="text-align: right">6.611</td>
-          <td style="text-align: right">58.282</td>
-          <td style="text-align: right"><strong>385.090</strong></td>
-          <td style="text-align: right"><strong>3.245</strong></td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">583.651</td>
-          <td style="text-align: right">1,008.471</td>
-          <td style="text-align: right">6.589</td>
-          <td style="text-align: right">12.813</td>
-          <td style="text-align: right">300.633</td>
-          <td style="text-align: right">2.752</td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">581.520</td>
-          <td style="text-align: right">794.935</td>
-          <td style="text-align: right"><strong>6.365</strong></td>
-          <td style="text-align: right"><strong>12.136</strong></td>
-          <td style="text-align: right">326.686</td>
-          <td style="text-align: right">3.025</td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td style="text-align: right">8</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right">772.251</td>
-          <td style="text-align: right"><strong>1,137.334</strong></td>
-          <td style="text-align: right">7.751</td>
-          <td style="text-align: right">72.554</td>
-          <td style="text-align: right">528.024</td>
-          <td style="text-align: right">4.771</td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td style="text-align: right">8</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right">1,056.469</td>
-          <td style="text-align: right">2,005.102</td>
-          <td style="text-align: right"><strong>7.622</strong></td>
-          <td style="text-align: right">15.551</td>
-          <td style="text-align: right">446.540</td>
-          <td style="text-align: right">3.887</td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td style="text-align: right">8</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right"><strong>613.996</strong></td>
-          <td style="text-align: right">1,230.158</td>
-          <td style="text-align: right">7.714</td>
-          <td style="text-align: right"><strong>15.438</strong></td>
-          <td style="text-align: right"><strong>537.856</strong></td>
-          <td style="text-align: right"><strong>5.092</strong></td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">1</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">8/8</td>
-          <td style="text-align: right">442.405</td>
-          <td style="text-align: right"><strong>448.422</strong></td>
-          <td style="text-align: right"><strong>5.956</strong></td>
-          <td style="text-align: right"><strong>8.646</strong></td>
-          <td style="text-align: right"><strong>94.195</strong></td>
-          <td style="text-align: right">1.006</td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">1</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">8/8</td>
-          <td style="text-align: right">633.100</td>
-          <td style="text-align: right">649.480</td>
-          <td style="text-align: right">6.054</td>
-          <td style="text-align: right">9.639</td>
-          <td style="text-align: right">68.685</td>
-          <td style="text-align: right">0.931</td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">1</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">8/8</td>
-          <td style="text-align: right"><strong>440.770</strong></td>
-          <td style="text-align: right">451.024</td>
-          <td style="text-align: right">5.959</td>
-          <td style="text-align: right">9.268</td>
-          <td style="text-align: right">88.808</td>
-          <td style="text-align: right"><strong>1.080</strong></td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">4</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">1,151.042</td>
-          <td style="text-align: right"><strong>1,229.450</strong></td>
-          <td style="text-align: right"><strong>6.301</strong></td>
-          <td style="text-align: right"><strong>10.512</strong></td>
-          <td style="text-align: right">179.650</td>
-          <td style="text-align: right">2.255</td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">1,504.409</td>
-          <td style="text-align: right">2,001.824</td>
-          <td style="text-align: right">7.141</td>
-          <td style="text-align: right">13.195</td>
-          <td style="text-align: right">164.679</td>
-          <td style="text-align: right">1.685</td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right"><strong>808.650</strong></td>
-          <td style="text-align: right">1,430.554</td>
-          <td style="text-align: right">6.994</td>
-          <td style="text-align: right">13.602</td>
-          <td style="text-align: right"><strong>204.756</strong></td>
-          <td style="text-align: right"><strong>2.363</strong></td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">8</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right">1,972.504</td>
-          <td style="text-align: right"><strong>2,403.576</strong></td>
-          <td style="text-align: right">9.298</td>
-          <td style="text-align: right">231.453</td>
-          <td style="text-align: right">231.845</td>
-          <td style="text-align: right">2.785</td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">8</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right">2,055.500</td>
-          <td style="text-align: right">4,379.420</td>
-          <td style="text-align: right">8.578</td>
-          <td style="text-align: right">15.481</td>
-          <td style="text-align: right">216.193</td>
-          <td style="text-align: right">2.333</td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">8</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right"><strong>1,690.166</strong></td>
-          <td style="text-align: right">2,715.341</td>
-          <td style="text-align: right"><strong>8.469</strong></td>
-          <td style="text-align: right"><strong>15.352</strong></td>
-          <td style="text-align: right"><strong>255.080</strong></td>
-          <td style="text-align: right"><strong>2.985</strong></td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">1</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">8/8</td>
-          <td style="text-align: right">868.512</td>
-          <td style="text-align: right">893.580</td>
-          <td style="text-align: right"><strong>6.039</strong></td>
-          <td style="text-align: right"><strong>8.905</strong></td>
-          <td style="text-align: right">64.577</td>
-          <td style="text-align: right">0.705</td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">1</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">8/8</td>
-          <td style="text-align: right">1,226.636</td>
-          <td style="text-align: right">1,266.734</td>
-          <td style="text-align: right">6.130</td>
-          <td style="text-align: right">9.598</td>
-          <td style="text-align: right">50.824</td>
-          <td style="text-align: right">0.565</td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">1</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">8/8</td>
-          <td style="text-align: right"><strong>798.743</strong></td>
-          <td style="text-align: right"><strong>805.795</strong></td>
-          <td style="text-align: right">6.052</td>
-          <td style="text-align: right">9.204</td>
-          <td style="text-align: right"><strong>68.562</strong></td>
-          <td style="text-align: right"><strong>0.739</strong></td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">4</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">2,129.912</td>
-          <td style="text-align: right"><strong>2,439.747</strong></td>
-          <td style="text-align: right">7.527</td>
-          <td style="text-align: right">247.270</td>
-          <td style="text-align: right"><strong>136.270</strong></td>
-          <td style="text-align: right">1.289</td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">2,867.606</td>
-          <td style="text-align: right">4,361.361</td>
-          <td style="text-align: right"><strong>6.991</strong></td>
-          <td style="text-align: right"><strong>12.842</strong></td>
-          <td style="text-align: right">104.379</td>
-          <td style="text-align: right">1.004</td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right"><strong>1,572.574</strong></td>
-          <td style="text-align: right">3,156.539</td>
-          <td style="text-align: right">8.386</td>
-          <td style="text-align: right">15.283</td>
-          <td style="text-align: right">134.224</td>
-          <td style="text-align: right"><strong>1.393</strong></td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">8</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right"><strong>3,963.085</strong></td>
-          <td style="text-align: right"><strong>4,794.768</strong></td>
-          <td style="text-align: right">16.081</td>
-          <td style="text-align: right">296.710</td>
-          <td style="text-align: right">143.211</td>
-          <td style="text-align: right"><strong>1.460</strong></td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">8</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right">4,895.645</td>
-          <td style="text-align: right">8,582.882</td>
-          <td style="text-align: right"><strong>8.180</strong></td>
-          <td style="text-align: right">13.822</td>
-          <td style="text-align: right">105.850</td>
-          <td style="text-align: right">1.162</td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">8</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right">4,182.324</td>
-          <td style="text-align: right">5,839.159</td>
-          <td style="text-align: right">8.357</td>
-          <td style="text-align: right"><strong>13.607</strong></td>
-          <td style="text-align: right"><strong>144.753</strong></td>
-          <td style="text-align: right">1.434</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Workload</th>
+					<th style="text-align: right">Concurrency</th>
+					<th>Configuration</th>
+					<th style="text-align: right">Requests</th>
+					<th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
+					<th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">Output (tok/s)</th>
+					<th style="text-align: right">Throughput (req/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>1k</code></td>
+					<td style="text-align: right">1</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">8/8</td>
+					<td style="text-align: right"><strong>127.488</strong></td>
+					<td style="text-align: right"><strong>133.658</strong></td>
+					<td style="text-align: right"><strong>5.904</strong></td>
+					<td style="text-align: right"><strong>8.885</strong></td>
+					<td style="text-align: right"><strong>143.767</strong></td>
+					<td style="text-align: right">1.234</td>
+			</tr>
+			<tr>
+					<td><code>1k</code></td>
+					<td style="text-align: right">1</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">8/8</td>
+					<td style="text-align: right">193.346</td>
+					<td style="text-align: right">202.953</td>
+					<td style="text-align: right">6.014</td>
+					<td style="text-align: right">9.089</td>
+					<td style="text-align: right">130.569</td>
+					<td style="text-align: right">1.140</td>
+			</tr>
+			<tr>
+					<td><code>1k</code></td>
+					<td style="text-align: right">1</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">8/8</td>
+					<td style="text-align: right">157.290</td>
+					<td style="text-align: right">172.886</td>
+					<td style="text-align: right">5.926</td>
+					<td style="text-align: right">9.168</td>
+					<td style="text-align: right">135.864</td>
+					<td style="text-align: right"><strong>1.259</strong></td>
+			</tr>
+			<tr>
+					<td><code>1k</code></td>
+					<td style="text-align: right">4</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right"><strong>132.585</strong></td>
+					<td style="text-align: right"><strong>317.836</strong></td>
+					<td style="text-align: right">6.810</td>
+					<td style="text-align: right">40.568</td>
+					<td style="text-align: right"><strong>429.372</strong></td>
+					<td style="text-align: right"><strong>4.179</strong></td>
+			</tr>
+			<tr>
+					<td><code>1k</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">352.986</td>
+					<td style="text-align: right">514.518</td>
+					<td style="text-align: right"><strong>6.302</strong></td>
+					<td style="text-align: right"><strong>12.260</strong></td>
+					<td style="text-align: right">371.169</td>
+					<td style="text-align: right">3.924</td>
+			</tr>
+			<tr>
+					<td><code>1k</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">234.481</td>
+					<td style="text-align: right">435.045</td>
+					<td style="text-align: right">6.423</td>
+					<td style="text-align: right">13.121</td>
+					<td style="text-align: right">420.666</td>
+					<td style="text-align: right">3.925</td>
+			</tr>
+			<tr>
+					<td><code>1k</code></td>
+					<td style="text-align: right">8</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right"><strong>294.960</strong></td>
+					<td style="text-align: right"><strong>574.336</strong></td>
+					<td style="text-align: right">7.359</td>
+					<td style="text-align: right">43.814</td>
+					<td style="text-align: right"><strong>744.704</strong></td>
+					<td style="text-align: right"><strong>6.722</strong></td>
+			</tr>
+			<tr>
+					<td><code>1k</code></td>
+					<td style="text-align: right">8</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right">397.371</td>
+					<td style="text-align: right">929.204</td>
+					<td style="text-align: right"><strong>6.956</strong></td>
+					<td style="text-align: right">16.274</td>
+					<td style="text-align: right">646.274</td>
+					<td style="text-align: right">5.925</td>
+			</tr>
+			<tr>
+					<td><code>1k</code></td>
+					<td style="text-align: right">8</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right">343.176</td>
+					<td style="text-align: right">725.719</td>
+					<td style="text-align: right">6.987</td>
+					<td style="text-align: right"><strong>14.933</strong></td>
+					<td style="text-align: right">715.225</td>
+					<td style="text-align: right">6.592</td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td style="text-align: right">1</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">8/8</td>
+					<td style="text-align: right"><strong>221.341</strong></td>
+					<td style="text-align: right"><strong>228.913</strong></td>
+					<td style="text-align: right"><strong>5.922</strong></td>
+					<td style="text-align: right"><strong>8.879</strong></td>
+					<td style="text-align: right"><strong>126.909</strong></td>
+					<td style="text-align: right"><strong>1.146</strong></td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td style="text-align: right">1</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">8/8</td>
+					<td style="text-align: right">323.722</td>
+					<td style="text-align: right">333.260</td>
+					<td style="text-align: right">6.022</td>
+					<td style="text-align: right">8.968</td>
+					<td style="text-align: right">109.430</td>
+					<td style="text-align: right">1.068</td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td style="text-align: right">1</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">8/8</td>
+					<td style="text-align: right">261.095</td>
+					<td style="text-align: right">266.917</td>
+					<td style="text-align: right">5.935</td>
+					<td style="text-align: right">9.255</td>
+					<td style="text-align: right">120.054</td>
+					<td style="text-align: right">1.125</td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td style="text-align: right">4</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right"><strong>393.122</strong></td>
+					<td style="text-align: right"><strong>584.277</strong></td>
+					<td style="text-align: right">6.611</td>
+					<td style="text-align: right">58.282</td>
+					<td style="text-align: right"><strong>385.090</strong></td>
+					<td style="text-align: right"><strong>3.245</strong></td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">583.651</td>
+					<td style="text-align: right">1,008.471</td>
+					<td style="text-align: right">6.589</td>
+					<td style="text-align: right">12.813</td>
+					<td style="text-align: right">300.633</td>
+					<td style="text-align: right">2.752</td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">581.520</td>
+					<td style="text-align: right">794.935</td>
+					<td style="text-align: right"><strong>6.365</strong></td>
+					<td style="text-align: right"><strong>12.136</strong></td>
+					<td style="text-align: right">326.686</td>
+					<td style="text-align: right">3.025</td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td style="text-align: right">8</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right">772.251</td>
+					<td style="text-align: right"><strong>1,137.334</strong></td>
+					<td style="text-align: right">7.751</td>
+					<td style="text-align: right">72.554</td>
+					<td style="text-align: right">528.024</td>
+					<td style="text-align: right">4.771</td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td style="text-align: right">8</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right">1,056.469</td>
+					<td style="text-align: right">2,005.102</td>
+					<td style="text-align: right"><strong>7.622</strong></td>
+					<td style="text-align: right">15.551</td>
+					<td style="text-align: right">446.540</td>
+					<td style="text-align: right">3.887</td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td style="text-align: right">8</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right"><strong>613.996</strong></td>
+					<td style="text-align: right">1,230.158</td>
+					<td style="text-align: right">7.714</td>
+					<td style="text-align: right"><strong>15.438</strong></td>
+					<td style="text-align: right"><strong>537.856</strong></td>
+					<td style="text-align: right"><strong>5.092</strong></td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">1</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">8/8</td>
+					<td style="text-align: right">442.405</td>
+					<td style="text-align: right"><strong>448.422</strong></td>
+					<td style="text-align: right"><strong>5.956</strong></td>
+					<td style="text-align: right"><strong>8.646</strong></td>
+					<td style="text-align: right"><strong>94.195</strong></td>
+					<td style="text-align: right">1.006</td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">1</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">8/8</td>
+					<td style="text-align: right">633.100</td>
+					<td style="text-align: right">649.480</td>
+					<td style="text-align: right">6.054</td>
+					<td style="text-align: right">9.639</td>
+					<td style="text-align: right">68.685</td>
+					<td style="text-align: right">0.931</td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">1</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">8/8</td>
+					<td style="text-align: right"><strong>440.770</strong></td>
+					<td style="text-align: right">451.024</td>
+					<td style="text-align: right">5.959</td>
+					<td style="text-align: right">9.268</td>
+					<td style="text-align: right">88.808</td>
+					<td style="text-align: right"><strong>1.080</strong></td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">4</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">1,151.042</td>
+					<td style="text-align: right"><strong>1,229.450</strong></td>
+					<td style="text-align: right"><strong>6.301</strong></td>
+					<td style="text-align: right"><strong>10.512</strong></td>
+					<td style="text-align: right">179.650</td>
+					<td style="text-align: right">2.255</td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">1,504.409</td>
+					<td style="text-align: right">2,001.824</td>
+					<td style="text-align: right">7.141</td>
+					<td style="text-align: right">13.195</td>
+					<td style="text-align: right">164.679</td>
+					<td style="text-align: right">1.685</td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right"><strong>808.650</strong></td>
+					<td style="text-align: right">1,430.554</td>
+					<td style="text-align: right">6.994</td>
+					<td style="text-align: right">13.602</td>
+					<td style="text-align: right"><strong>204.756</strong></td>
+					<td style="text-align: right"><strong>2.363</strong></td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">8</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right">1,972.504</td>
+					<td style="text-align: right"><strong>2,403.576</strong></td>
+					<td style="text-align: right">9.298</td>
+					<td style="text-align: right">231.453</td>
+					<td style="text-align: right">231.845</td>
+					<td style="text-align: right">2.785</td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">8</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right">2,055.500</td>
+					<td style="text-align: right">4,379.420</td>
+					<td style="text-align: right">8.578</td>
+					<td style="text-align: right">15.481</td>
+					<td style="text-align: right">216.193</td>
+					<td style="text-align: right">2.333</td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">8</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right"><strong>1,690.166</strong></td>
+					<td style="text-align: right">2,715.341</td>
+					<td style="text-align: right"><strong>8.469</strong></td>
+					<td style="text-align: right"><strong>15.352</strong></td>
+					<td style="text-align: right"><strong>255.080</strong></td>
+					<td style="text-align: right"><strong>2.985</strong></td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">1</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">8/8</td>
+					<td style="text-align: right">868.512</td>
+					<td style="text-align: right">893.580</td>
+					<td style="text-align: right"><strong>6.039</strong></td>
+					<td style="text-align: right"><strong>8.905</strong></td>
+					<td style="text-align: right">64.577</td>
+					<td style="text-align: right">0.705</td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">1</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">8/8</td>
+					<td style="text-align: right">1,226.636</td>
+					<td style="text-align: right">1,266.734</td>
+					<td style="text-align: right">6.130</td>
+					<td style="text-align: right">9.598</td>
+					<td style="text-align: right">50.824</td>
+					<td style="text-align: right">0.565</td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">1</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">8/8</td>
+					<td style="text-align: right"><strong>798.743</strong></td>
+					<td style="text-align: right"><strong>805.795</strong></td>
+					<td style="text-align: right">6.052</td>
+					<td style="text-align: right">9.204</td>
+					<td style="text-align: right"><strong>68.562</strong></td>
+					<td style="text-align: right"><strong>0.739</strong></td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">4</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">2,129.912</td>
+					<td style="text-align: right"><strong>2,439.747</strong></td>
+					<td style="text-align: right">7.527</td>
+					<td style="text-align: right">247.270</td>
+					<td style="text-align: right"><strong>136.270</strong></td>
+					<td style="text-align: right">1.289</td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">2,867.606</td>
+					<td style="text-align: right">4,361.361</td>
+					<td style="text-align: right"><strong>6.991</strong></td>
+					<td style="text-align: right"><strong>12.842</strong></td>
+					<td style="text-align: right">104.379</td>
+					<td style="text-align: right">1.004</td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right"><strong>1,572.574</strong></td>
+					<td style="text-align: right">3,156.539</td>
+					<td style="text-align: right">8.386</td>
+					<td style="text-align: right">15.283</td>
+					<td style="text-align: right">134.224</td>
+					<td style="text-align: right"><strong>1.393</strong></td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">8</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right"><strong>3,963.085</strong></td>
+					<td style="text-align: right"><strong>4,794.768</strong></td>
+					<td style="text-align: right">16.081</td>
+					<td style="text-align: right">296.710</td>
+					<td style="text-align: right">143.211</td>
+					<td style="text-align: right"><strong>1.460</strong></td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">8</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right">4,895.645</td>
+					<td style="text-align: right">8,582.882</td>
+					<td style="text-align: right"><strong>8.180</strong></td>
+					<td style="text-align: right">13.822</td>
+					<td style="text-align: right">105.850</td>
+					<td style="text-align: right">1.162</td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">8</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right">4,182.324</td>
+					<td style="text-align: right">5,839.159</td>
+					<td style="text-align: right">8.357</td>
+					<td style="text-align: right"><strong>13.607</strong></td>
+					<td style="text-align: right"><strong>144.753</strong></td>
+					<td style="text-align: right">1.434</td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="suite-2-mixed-vision-and-decode">Suite 2: Mixed vision and decode</h3>
 <p>The mixed windows lasted 8.473 s (aggregated), 9.608 s (<em>PD</em>) and <strong>5.217 s</strong> (<em>EPD</em>). Each
@@ -1864,94 +1864,94 @@ stream&rsquo;s throughput divides by its configuration&rsquo;s full mixed window
 cut small-stream <em>ITL</em> p99 by <strong>18.4×</strong> (296.566 to <strong>16.130 ms</strong>) and lowered <em>TTFT</em> p50 on both
 streams (1,214.046 to <strong>647.387 ms</strong>; 2,215.441 to <strong>959.134 ms</strong>).</p>
 <table>
-  <thead>
-      <tr>
-          <th>Workload</th>
-          <th style="text-align: right">Concurrency</th>
-          <th>Configuration</th>
-          <th style="text-align: right">Requests</th>
-          <th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
-          <th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">Output (tok/s)</th>
-          <th style="text-align: right">Throughput (req/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>concurrent_decode_1k</code></td>
-          <td style="text-align: right">4</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">1,214.046</td>
-          <td style="text-align: right">1,573.818</td>
-          <td style="text-align: right">12.417</td>
-          <td style="text-align: right">296.566</td>
-          <td style="text-align: right">176.449</td>
-          <td style="text-align: right">1.416</td>
-      </tr>
-      <tr>
-          <td><code>concurrent_decode_1k</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">1,487.862</td>
-          <td style="text-align: right">1,828.701</td>
-          <td style="text-align: right"><strong>6.432</strong></td>
-          <td style="text-align: right">16.708</td>
-          <td style="text-align: right">158.198</td>
-          <td style="text-align: right">1.249</td>
-      </tr>
-      <tr>
-          <td><code>concurrent_decode_1k</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right"><strong>647.387</strong></td>
-          <td style="text-align: right"><strong>1,001.308</strong></td>
-          <td style="text-align: right">8.551</td>
-          <td style="text-align: right"><strong>16.130</strong></td>
-          <td style="text-align: right"><strong>241.119</strong></td>
-          <td style="text-align: right"><strong>2.300</strong></td>
-      </tr>
-      <tr>
-          <td><code>heavy_vision_4k</code></td>
-          <td style="text-align: right">4</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">2,215.441</td>
-          <td style="text-align: right">2,419.269</td>
-          <td style="text-align: right"><strong>6.597</strong></td>
-          <td style="text-align: right">197.815</td>
-          <td style="text-align: right">90.644</td>
-          <td style="text-align: right">1.416</td>
-      </tr>
-      <tr>
-          <td><code>heavy_vision_4k</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">2,379.965</td>
-          <td style="text-align: right">3,770.445</td>
-          <td style="text-align: right">7.138</td>
-          <td style="text-align: right"><strong>16.348</strong></td>
-          <td style="text-align: right">79.932</td>
-          <td style="text-align: right">1.249</td>
-      </tr>
-      <tr>
-          <td><code>heavy_vision_4k</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right"><strong>959.134</strong></td>
-          <td style="text-align: right"><strong>1,971.796</strong></td>
-          <td style="text-align: right">8.625</td>
-          <td style="text-align: right">16.845</td>
-          <td style="text-align: right"><strong>147.201</strong></td>
-          <td style="text-align: right"><strong>2.300</strong></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Workload</th>
+					<th style="text-align: right">Concurrency</th>
+					<th>Configuration</th>
+					<th style="text-align: right">Requests</th>
+					<th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
+					<th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">Output (tok/s)</th>
+					<th style="text-align: right">Throughput (req/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>concurrent_decode_1k</code></td>
+					<td style="text-align: right">4</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">1,214.046</td>
+					<td style="text-align: right">1,573.818</td>
+					<td style="text-align: right">12.417</td>
+					<td style="text-align: right">296.566</td>
+					<td style="text-align: right">176.449</td>
+					<td style="text-align: right">1.416</td>
+			</tr>
+			<tr>
+					<td><code>concurrent_decode_1k</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">1,487.862</td>
+					<td style="text-align: right">1,828.701</td>
+					<td style="text-align: right"><strong>6.432</strong></td>
+					<td style="text-align: right">16.708</td>
+					<td style="text-align: right">158.198</td>
+					<td style="text-align: right">1.249</td>
+			</tr>
+			<tr>
+					<td><code>concurrent_decode_1k</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right"><strong>647.387</strong></td>
+					<td style="text-align: right"><strong>1,001.308</strong></td>
+					<td style="text-align: right">8.551</td>
+					<td style="text-align: right"><strong>16.130</strong></td>
+					<td style="text-align: right"><strong>241.119</strong></td>
+					<td style="text-align: right"><strong>2.300</strong></td>
+			</tr>
+			<tr>
+					<td><code>heavy_vision_4k</code></td>
+					<td style="text-align: right">4</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">2,215.441</td>
+					<td style="text-align: right">2,419.269</td>
+					<td style="text-align: right"><strong>6.597</strong></td>
+					<td style="text-align: right">197.815</td>
+					<td style="text-align: right">90.644</td>
+					<td style="text-align: right">1.416</td>
+			</tr>
+			<tr>
+					<td><code>heavy_vision_4k</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">2,379.965</td>
+					<td style="text-align: right">3,770.445</td>
+					<td style="text-align: right">7.138</td>
+					<td style="text-align: right"><strong>16.348</strong></td>
+					<td style="text-align: right">79.932</td>
+					<td style="text-align: right">1.249</td>
+			</tr>
+			<tr>
+					<td><code>heavy_vision_4k</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right"><strong>959.134</strong></td>
+					<td style="text-align: right"><strong>1,971.796</strong></td>
+					<td style="text-align: right">8.625</td>
+					<td style="text-align: right">16.845</td>
+					<td style="text-align: right"><strong>147.201</strong></td>
+					<td style="text-align: right"><strong>2.300</strong></td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="suite-3-encoder-cache-reuse">Suite 3: Encoder-cache reuse</h3>
 <p>At concurrency 8 on repeated <code>1792 × 1792</code> images, <em>EPD</em> cut <em>TTFT</em> p50 <strong>5.9×</strong> (2,196.771 to
@@ -1960,145 +1960,145 @@ aggregated serving, while <em>PD</em> kept the lowest <em>ITL</em> p99 (14.864 v
 cumulative across suites, so these numbers do not isolate encoder-cache hits from prefix caching,
 batching or the extra GPUs.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Workload</th>
-          <th style="text-align: right">Concurrency</th>
-          <th>Configuration</th>
-          <th style="text-align: right">Requests</th>
-          <th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
-          <th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">Output (tok/s)</th>
-          <th style="text-align: right">Throughput (req/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>repeated_4k_c4</code></td>
-          <td style="text-align: right">4</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">1,077.919</td>
-          <td style="text-align: right">1,337.691</td>
-          <td style="text-align: right">6.403</td>
-          <td style="text-align: right">25.708</td>
-          <td style="text-align: right">154.699</td>
-          <td style="text-align: right">2.417</td>
-      </tr>
-      <tr>
-          <td><code>repeated_4k_c4</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right">1,304.894</td>
-          <td style="text-align: right">1,418.578</td>
-          <td style="text-align: right">6.223</td>
-          <td style="text-align: right">12.202</td>
-          <td style="text-align: right">146.941</td>
-          <td style="text-align: right">2.296</td>
-      </tr>
-      <tr>
-          <td><code>repeated_4k_c4</code></td>
-          <td style="text-align: right">4</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">12/12</td>
-          <td style="text-align: right"><strong>298.825</strong></td>
-          <td style="text-align: right"><strong>322.128</strong></td>
-          <td style="text-align: right"><strong>6.144</strong></td>
-          <td style="text-align: right"><strong>9.712</strong></td>
-          <td style="text-align: right"><strong>367.278</strong></td>
-          <td style="text-align: right"><strong>5.739</strong></td>
-      </tr>
-      <tr>
-          <td><code>repeated_4k_c8</code></td>
-          <td style="text-align: right">8</td>
-          <td>Aggregated</td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right">2,196.771</td>
-          <td style="text-align: right">2,364.464</td>
-          <td style="text-align: right">6.988</td>
-          <td style="text-align: right">17.550</td>
-          <td style="text-align: right">187.667</td>
-          <td style="text-align: right">2.932</td>
-      </tr>
-      <tr>
-          <td><code>repeated_4k_c8</code></td>
-          <td style="text-align: right">8</td>
-          <td><em>PD</em></td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right">2,596.832</td>
-          <td style="text-align: right">2,685.146</td>
-          <td style="text-align: right"><strong>6.430</strong></td>
-          <td style="text-align: right"><strong>14.864</strong></td>
-          <td style="text-align: right">170.026</td>
-          <td style="text-align: right">2.657</td>
-      </tr>
-      <tr>
-          <td><code>repeated_4k_c8</code></td>
-          <td style="text-align: right">8</td>
-          <td><em>EPD</em></td>
-          <td style="text-align: right">24/24</td>
-          <td style="text-align: right"><strong>371.850</strong></td>
-          <td style="text-align: right"><strong>753.291</strong></td>
-          <td style="text-align: right">7.272</td>
-          <td style="text-align: right">15.744</td>
-          <td style="text-align: right"><strong>536.280</strong></td>
-          <td style="text-align: right"><strong>8.379</strong></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Workload</th>
+					<th style="text-align: right">Concurrency</th>
+					<th>Configuration</th>
+					<th style="text-align: right">Requests</th>
+					<th style="text-align: right"><em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>TTFT</em> p95 (ms)</th>
+					<th style="text-align: right"><em>TPOT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">Output (tok/s)</th>
+					<th style="text-align: right">Throughput (req/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>repeated_4k_c4</code></td>
+					<td style="text-align: right">4</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">1,077.919</td>
+					<td style="text-align: right">1,337.691</td>
+					<td style="text-align: right">6.403</td>
+					<td style="text-align: right">25.708</td>
+					<td style="text-align: right">154.699</td>
+					<td style="text-align: right">2.417</td>
+			</tr>
+			<tr>
+					<td><code>repeated_4k_c4</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right">1,304.894</td>
+					<td style="text-align: right">1,418.578</td>
+					<td style="text-align: right">6.223</td>
+					<td style="text-align: right">12.202</td>
+					<td style="text-align: right">146.941</td>
+					<td style="text-align: right">2.296</td>
+			</tr>
+			<tr>
+					<td><code>repeated_4k_c4</code></td>
+					<td style="text-align: right">4</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">12/12</td>
+					<td style="text-align: right"><strong>298.825</strong></td>
+					<td style="text-align: right"><strong>322.128</strong></td>
+					<td style="text-align: right"><strong>6.144</strong></td>
+					<td style="text-align: right"><strong>9.712</strong></td>
+					<td style="text-align: right"><strong>367.278</strong></td>
+					<td style="text-align: right"><strong>5.739</strong></td>
+			</tr>
+			<tr>
+					<td><code>repeated_4k_c8</code></td>
+					<td style="text-align: right">8</td>
+					<td>Aggregated</td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right">2,196.771</td>
+					<td style="text-align: right">2,364.464</td>
+					<td style="text-align: right">6.988</td>
+					<td style="text-align: right">17.550</td>
+					<td style="text-align: right">187.667</td>
+					<td style="text-align: right">2.932</td>
+			</tr>
+			<tr>
+					<td><code>repeated_4k_c8</code></td>
+					<td style="text-align: right">8</td>
+					<td><em>PD</em></td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right">2,596.832</td>
+					<td style="text-align: right">2,685.146</td>
+					<td style="text-align: right"><strong>6.430</strong></td>
+					<td style="text-align: right"><strong>14.864</strong></td>
+					<td style="text-align: right">170.026</td>
+					<td style="text-align: right">2.657</td>
+			</tr>
+			<tr>
+					<td><code>repeated_4k_c8</code></td>
+					<td style="text-align: right">8</td>
+					<td><em>EPD</em></td>
+					<td style="text-align: right">24/24</td>
+					<td style="text-align: right"><strong>371.850</strong></td>
+					<td style="text-align: right"><strong>753.291</strong></td>
+					<td style="text-align: right">7.272</td>
+					<td style="text-align: right">15.744</td>
+					<td style="text-align: right"><strong>536.280</strong></td>
+					<td style="text-align: right"><strong>8.379</strong></td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="verification">Verification</h2>
 <p>Stage counts separate completion lines from token-render calls and include warm-up traffic, so they
 exceed the 236 measured requests per configuration.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Configuration</th>
-          <th>Role</th>
-          <th style="text-align: right">Completion lines</th>
-          <th style="text-align: right">Render lines</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Aggregated</td>
-          <td><em>Server</em></td>
-          <td style="text-align: right">264</td>
-          <td style="text-align: right">266</td>
-      </tr>
-      <tr>
-          <td><em>PD</em></td>
-          <td><em>Prefill</em></td>
-          <td style="text-align: right">246</td>
-          <td style="text-align: right">266</td>
-      </tr>
-      <tr>
-          <td><em>PD</em></td>
-          <td><em>Decode</em></td>
-          <td style="text-align: right">264</td>
-          <td style="text-align: right">0</td>
-      </tr>
-      <tr>
-          <td><em>EPD</em></td>
-          <td><em>Encode</em></td>
-          <td style="text-align: right">264</td>
-          <td style="text-align: right">0</td>
-      </tr>
-      <tr>
-          <td><em>EPD</em></td>
-          <td><em>Prefill</em></td>
-          <td style="text-align: right">264</td>
-          <td style="text-align: right">0</td>
-      </tr>
-      <tr>
-          <td><em>EPD</em></td>
-          <td><em>Decode</em></td>
-          <td style="text-align: right">264</td>
-          <td style="text-align: right">0</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Configuration</th>
+					<th>Role</th>
+					<th style="text-align: right">Completion lines</th>
+					<th style="text-align: right">Render lines</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Aggregated</td>
+					<td><em>Server</em></td>
+					<td style="text-align: right">264</td>
+					<td style="text-align: right">266</td>
+			</tr>
+			<tr>
+					<td><em>PD</em></td>
+					<td><em>Prefill</em></td>
+					<td style="text-align: right">246</td>
+					<td style="text-align: right">266</td>
+			</tr>
+			<tr>
+					<td><em>PD</em></td>
+					<td><em>Decode</em></td>
+					<td style="text-align: right">264</td>
+					<td style="text-align: right">0</td>
+			</tr>
+			<tr>
+					<td><em>EPD</em></td>
+					<td><em>Encode</em></td>
+					<td style="text-align: right">264</td>
+					<td style="text-align: right">0</td>
+			</tr>
+			<tr>
+					<td><em>EPD</em></td>
+					<td><em>Prefill</em></td>
+					<td style="text-align: right">264</td>
+					<td style="text-align: right">0</td>
+			</tr>
+			<tr>
+					<td><em>EPD</em></td>
+					<td><em>Decode</em></td>
+					<td style="text-align: right">264</td>
+					<td style="text-align: right">0</td>
+			</tr>
+	</tbody>
 </table>
 <p>The <em>EPD</em> <em>Decode</em> sidecar logged <strong>264 multimodal-item events</strong>, and each router capture held 280
 access lines. These counts confirm traffic at every <em>EPD</em> stage without per-request ID correlation
@@ -2133,7 +2133,7 @@ requests with zero errors.</strong></p>
 </span></span><span class="line"><span class="cl">       resources:
 </span></span><span class="line"><span class="cl">         accelerator: &#34;1&#34;
 </span></span><span class="line"><span class="cl"><span class="gi">+        interface: &#34;1&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>     - name: decode
+</span></span></span><span class="line"><span class="cl">     - name: decode
 </span></span><span class="line"><span class="cl">       kind: Decode
 </span></span><span class="line"><span class="cl">       resources:
 </span></span><span class="line"><span class="cl">         accelerator: &#34;1&#34;
@@ -2155,224 +2155,224 @@ output). Unequal GPU budgets (3 versus 1 GPU) and separate runs prevent equal-co
 transport-only causal claims; single-request <em>ITL</em> p99 also rose slightly in all four contexts.</p>
 <p>Bold values mark lower median <em>TTFT</em> or higher output throughput within each TCP/RDMA pair.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Context</th>
-          <th style="text-align: right">Concurrency</th>
-          <th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right"><em>TTFT</em> reduction</th>
-          <th style="text-align: right">TCP output (tok/s)</th>
-          <th style="text-align: right">RDMA output (tok/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>1k</code></td>
-          <td style="text-align: right">1</td>
-          <td style="text-align: right">157.290</td>
-          <td style="text-align: right"><strong>125.393</strong></td>
-          <td style="text-align: right"><strong>1.25×</strong></td>
-          <td style="text-align: right">135.864</td>
-          <td style="text-align: right"><strong>140.079</strong></td>
-      </tr>
-      <tr>
-          <td><code>1k</code></td>
-          <td style="text-align: right">4</td>
-          <td style="text-align: right">234.481</td>
-          <td style="text-align: right"><strong>176.407</strong></td>
-          <td style="text-align: right"><strong>1.33×</strong></td>
-          <td style="text-align: right">420.666</td>
-          <td style="text-align: right"><strong>494.492</strong></td>
-      </tr>
-      <tr>
-          <td><code>1k</code></td>
-          <td style="text-align: right">8</td>
-          <td style="text-align: right">343.176</td>
-          <td style="text-align: right"><strong>186.279</strong></td>
-          <td style="text-align: right"><strong>1.84×</strong></td>
-          <td style="text-align: right">715.225</td>
-          <td style="text-align: right"><strong>916.405</strong></td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td style="text-align: right">1</td>
-          <td style="text-align: right">261.095</td>
-          <td style="text-align: right"><strong>187.077</strong></td>
-          <td style="text-align: right"><strong>1.40×</strong></td>
-          <td style="text-align: right">120.054</td>
-          <td style="text-align: right"><strong>129.224</strong></td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td style="text-align: right">4</td>
-          <td style="text-align: right">581.520</td>
-          <td style="text-align: right"><strong>219.726</strong></td>
-          <td style="text-align: right"><strong>2.65×</strong></td>
-          <td style="text-align: right">326.686</td>
-          <td style="text-align: right"><strong>443.715</strong></td>
-      </tr>
-      <tr>
-          <td><code>2k</code></td>
-          <td style="text-align: right">8</td>
-          <td style="text-align: right">613.996</td>
-          <td style="text-align: right"><strong>379.328</strong></td>
-          <td style="text-align: right"><strong>1.62×</strong></td>
-          <td style="text-align: right">537.856</td>
-          <td style="text-align: right"><strong>749.450</strong></td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">1</td>
-          <td style="text-align: right">440.770</td>
-          <td style="text-align: right"><strong>308.062</strong></td>
-          <td style="text-align: right"><strong>1.43×</strong></td>
-          <td style="text-align: right">88.808</td>
-          <td style="text-align: right"><strong>104.528</strong></td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">4</td>
-          <td style="text-align: right">808.650</td>
-          <td style="text-align: right"><strong>342.357</strong></td>
-          <td style="text-align: right"><strong>2.36×</strong></td>
-          <td style="text-align: right">204.756</td>
-          <td style="text-align: right"><strong>302.606</strong></td>
-      </tr>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">8</td>
-          <td style="text-align: right">1,690.166</td>
-          <td style="text-align: right"><strong>442.003</strong></td>
-          <td style="text-align: right"><strong>3.82×</strong></td>
-          <td style="text-align: right">255.080</td>
-          <td style="text-align: right"><strong>531.323</strong></td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">1</td>
-          <td style="text-align: right">798.743</td>
-          <td style="text-align: right"><strong>553.685</strong></td>
-          <td style="text-align: right"><strong>1.44×</strong></td>
-          <td style="text-align: right">68.562</td>
-          <td style="text-align: right"><strong>80.768</strong></td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">4</td>
-          <td style="text-align: right">1,572.574</td>
-          <td style="text-align: right"><strong>605.871</strong></td>
-          <td style="text-align: right"><strong>2.60×</strong></td>
-          <td style="text-align: right">134.224</td>
-          <td style="text-align: right"><strong>226.206</strong></td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">8</td>
-          <td style="text-align: right">4,182.324</td>
-          <td style="text-align: right"><strong>1,207.904</strong></td>
-          <td style="text-align: right"><strong>3.46×</strong></td>
-          <td style="text-align: right">144.753</td>
-          <td style="text-align: right"><strong>360.029</strong></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Context</th>
+					<th style="text-align: right">Concurrency</th>
+					<th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right"><em>TTFT</em> reduction</th>
+					<th style="text-align: right">TCP output (tok/s)</th>
+					<th style="text-align: right">RDMA output (tok/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>1k</code></td>
+					<td style="text-align: right">1</td>
+					<td style="text-align: right">157.290</td>
+					<td style="text-align: right"><strong>125.393</strong></td>
+					<td style="text-align: right"><strong>1.25×</strong></td>
+					<td style="text-align: right">135.864</td>
+					<td style="text-align: right"><strong>140.079</strong></td>
+			</tr>
+			<tr>
+					<td><code>1k</code></td>
+					<td style="text-align: right">4</td>
+					<td style="text-align: right">234.481</td>
+					<td style="text-align: right"><strong>176.407</strong></td>
+					<td style="text-align: right"><strong>1.33×</strong></td>
+					<td style="text-align: right">420.666</td>
+					<td style="text-align: right"><strong>494.492</strong></td>
+			</tr>
+			<tr>
+					<td><code>1k</code></td>
+					<td style="text-align: right">8</td>
+					<td style="text-align: right">343.176</td>
+					<td style="text-align: right"><strong>186.279</strong></td>
+					<td style="text-align: right"><strong>1.84×</strong></td>
+					<td style="text-align: right">715.225</td>
+					<td style="text-align: right"><strong>916.405</strong></td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td style="text-align: right">1</td>
+					<td style="text-align: right">261.095</td>
+					<td style="text-align: right"><strong>187.077</strong></td>
+					<td style="text-align: right"><strong>1.40×</strong></td>
+					<td style="text-align: right">120.054</td>
+					<td style="text-align: right"><strong>129.224</strong></td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td style="text-align: right">4</td>
+					<td style="text-align: right">581.520</td>
+					<td style="text-align: right"><strong>219.726</strong></td>
+					<td style="text-align: right"><strong>2.65×</strong></td>
+					<td style="text-align: right">326.686</td>
+					<td style="text-align: right"><strong>443.715</strong></td>
+			</tr>
+			<tr>
+					<td><code>2k</code></td>
+					<td style="text-align: right">8</td>
+					<td style="text-align: right">613.996</td>
+					<td style="text-align: right"><strong>379.328</strong></td>
+					<td style="text-align: right"><strong>1.62×</strong></td>
+					<td style="text-align: right">537.856</td>
+					<td style="text-align: right"><strong>749.450</strong></td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">1</td>
+					<td style="text-align: right">440.770</td>
+					<td style="text-align: right"><strong>308.062</strong></td>
+					<td style="text-align: right"><strong>1.43×</strong></td>
+					<td style="text-align: right">88.808</td>
+					<td style="text-align: right"><strong>104.528</strong></td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">4</td>
+					<td style="text-align: right">808.650</td>
+					<td style="text-align: right"><strong>342.357</strong></td>
+					<td style="text-align: right"><strong>2.36×</strong></td>
+					<td style="text-align: right">204.756</td>
+					<td style="text-align: right"><strong>302.606</strong></td>
+			</tr>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">8</td>
+					<td style="text-align: right">1,690.166</td>
+					<td style="text-align: right"><strong>442.003</strong></td>
+					<td style="text-align: right"><strong>3.82×</strong></td>
+					<td style="text-align: right">255.080</td>
+					<td style="text-align: right"><strong>531.323</strong></td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">1</td>
+					<td style="text-align: right">798.743</td>
+					<td style="text-align: right"><strong>553.685</strong></td>
+					<td style="text-align: right"><strong>1.44×</strong></td>
+					<td style="text-align: right">68.562</td>
+					<td style="text-align: right"><strong>80.768</strong></td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">4</td>
+					<td style="text-align: right">1,572.574</td>
+					<td style="text-align: right"><strong>605.871</strong></td>
+					<td style="text-align: right"><strong>2.60×</strong></td>
+					<td style="text-align: right">134.224</td>
+					<td style="text-align: right"><strong>226.206</strong></td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">8</td>
+					<td style="text-align: right">4,182.324</td>
+					<td style="text-align: right"><strong>1,207.904</strong></td>
+					<td style="text-align: right"><strong>3.46×</strong></td>
+					<td style="text-align: right">144.753</td>
+					<td style="text-align: right"><strong>360.029</strong></td>
+			</tr>
+	</tbody>
 </table>
 <p>Against the 1-GPU aggregated baseline at concurrency 8, RDMA <em>EPD</em> had <strong>4.46×</strong> lower <em>TTFT</em> p50
 and <strong>2.29×</strong> higher output at <code>4k</code>, and <strong>3.28×</strong> lower <em>TTFT</em> p50 and <strong>2.51×</strong> higher output at
 <code>8k</code> (still 3 GPUs versus 1 GPU).</p>
 <table>
-  <thead>
-      <tr>
-          <th>Context, concurrency 8</th>
-          <th style="text-align: right">Aggregated <em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right">RDMA EPD <em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right">Aggregated output (tok/s)</th>
-          <th style="text-align: right">RDMA EPD output (tok/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>4k</code></td>
-          <td style="text-align: right">1,972.504</td>
-          <td style="text-align: right"><strong>442.003</strong></td>
-          <td style="text-align: right">231.845</td>
-          <td style="text-align: right"><strong>531.323</strong></td>
-      </tr>
-      <tr>
-          <td><code>8k</code></td>
-          <td style="text-align: right">3,963.085</td>
-          <td style="text-align: right"><strong>1,207.904</strong></td>
-          <td style="text-align: right">143.211</td>
-          <td style="text-align: right"><strong>360.029</strong></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Context, concurrency 8</th>
+					<th style="text-align: right">Aggregated <em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right">RDMA EPD <em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right">Aggregated output (tok/s)</th>
+					<th style="text-align: right">RDMA EPD output (tok/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>4k</code></td>
+					<td style="text-align: right">1,972.504</td>
+					<td style="text-align: right"><strong>442.003</strong></td>
+					<td style="text-align: right">231.845</td>
+					<td style="text-align: right"><strong>531.323</strong></td>
+			</tr>
+			<tr>
+					<td><code>8k</code></td>
+					<td style="text-align: right">3,963.085</td>
+					<td style="text-align: right"><strong>1,207.904</strong></td>
+					<td style="text-align: right">143.211</td>
+					<td style="text-align: right"><strong>360.029</strong></td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="mixed-traffic">Mixed traffic</h3>
 <p>Both streams shared a 3.677 s mixed window on RDMA versus 5.217 s on TCP. RDMA lowered median
 <em>TTFT</em> <strong>3.00×</strong> on <code>concurrent_decode_1k</code> (output <strong>1.94×</strong> higher; <em>ITL</em> p99 <strong>9.894 ms</strong> versus
 296.566 ms aggregated) and <strong>2.02×</strong> on <code>heavy_vision_4k</code> (output <strong>1.42×</strong> higher).</p>
 <table>
-  <thead>
-      <tr>
-          <th>Stream</th>
-          <th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right">TCP <em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">RDMA <em>ITL</em> p99 (ms)</th>
-          <th style="text-align: right">TCP output (tok/s)</th>
-          <th style="text-align: right">RDMA output (tok/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>concurrent_decode_1k</code></td>
-          <td style="text-align: right">647.387</td>
-          <td style="text-align: right"><strong>215.522</strong></td>
-          <td style="text-align: right">16.130</td>
-          <td style="text-align: right"><strong>9.894</strong></td>
-          <td style="text-align: right">241.119</td>
-          <td style="text-align: right"><strong>466.705</strong></td>
-      </tr>
-      <tr>
-          <td><code>heavy_vision_4k</code></td>
-          <td style="text-align: right">959.134</td>
-          <td style="text-align: right"><strong>474.237</strong></td>
-          <td style="text-align: right">16.845</td>
-          <td style="text-align: right"><strong>10.119</strong></td>
-          <td style="text-align: right">147.201</td>
-          <td style="text-align: right"><strong>208.875</strong></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Stream</th>
+					<th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right">TCP <em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">RDMA <em>ITL</em> p99 (ms)</th>
+					<th style="text-align: right">TCP output (tok/s)</th>
+					<th style="text-align: right">RDMA output (tok/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>concurrent_decode_1k</code></td>
+					<td style="text-align: right">647.387</td>
+					<td style="text-align: right"><strong>215.522</strong></td>
+					<td style="text-align: right">16.130</td>
+					<td style="text-align: right"><strong>9.894</strong></td>
+					<td style="text-align: right">241.119</td>
+					<td style="text-align: right"><strong>466.705</strong></td>
+			</tr>
+			<tr>
+					<td><code>heavy_vision_4k</code></td>
+					<td style="text-align: right">959.134</td>
+					<td style="text-align: right"><strong>474.237</strong></td>
+					<td style="text-align: right">16.845</td>
+					<td style="text-align: right"><strong>10.119</strong></td>
+					<td style="text-align: right">147.201</td>
+					<td style="text-align: right"><strong>208.875</strong></td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="encoder-cache-reuse">Encoder-cache reuse</h3>
 <p>RDMA kept the repeated-image gain and lowered median <em>TTFT</em> in both cells. The captures still do
 not isolate encoder-cache hits from prefix caching, batching or GPU count.</p>
 <table>
-  <thead>
-      <tr>
-          <th style="text-align: right">Concurrency</th>
-          <th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
-          <th style="text-align: right">TCP output (tok/s)</th>
-          <th style="text-align: right">RDMA output (tok/s)</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td style="text-align: right">4</td>
-          <td style="text-align: right">298.825</td>
-          <td style="text-align: right"><strong>246.151</strong></td>
-          <td style="text-align: right">367.278</td>
-          <td style="text-align: right"><strong>390.899</strong></td>
-      </tr>
-      <tr>
-          <td style="text-align: right">8</td>
-          <td style="text-align: right">371.850</td>
-          <td style="text-align: right"><strong>286.294</strong></td>
-          <td style="text-align: right">536.280</td>
-          <td style="text-align: right"><strong>700.762</strong></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th style="text-align: right">Concurrency</th>
+					<th style="text-align: right">TCP <em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right">RDMA <em>TTFT</em> p50 (ms)</th>
+					<th style="text-align: right">TCP output (tok/s)</th>
+					<th style="text-align: right">RDMA output (tok/s)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td style="text-align: right">4</td>
+					<td style="text-align: right">298.825</td>
+					<td style="text-align: right"><strong>246.151</strong></td>
+					<td style="text-align: right">367.278</td>
+					<td style="text-align: right"><strong>390.899</strong></td>
+			</tr>
+			<tr>
+					<td style="text-align: right">8</td>
+					<td style="text-align: right">371.850</td>
+					<td style="text-align: right"><strong>286.294</strong></td>
+					<td style="text-align: right">536.280</td>
+					<td style="text-align: right"><strong>700.762</strong></td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="rdma-trade-offs">RDMA trade-offs</h3>
 <p>RDMA reversed the <code>8k</code>, concurrency-8 <em>TTFT</em> penalty while requiring InfiniBand interfaces on both

@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>External DP · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1236,11 +1236,11 @@ behind <code>vllm-router</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-external-dp</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-ai/DeepSeek-V2-Lite-Chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
@@ -1286,40 +1286,40 @@ runs one distributed launch across <code>size</code> member <code>Pod</code>s
 (<a href="#sglang-rank-configuration">SGLang rank configuration</a>
 ).</p>
 <table>
-  <thead>
-      <tr>
-          <th>Configuration</th>
-          <th>Collective</th>
-          <th>HTTP ingress</th>
-          <th>Resize contract</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Monolithic <em>TP</em></td>
-          <td>One engine group, one master</td>
-          <td>Master only</td>
-          <td>Replaces replicas</td>
-      </tr>
-      <tr>
-          <td><em>Elastic EP</em></td>
-          <td>Ray <em>Internal LB</em>, one instance</td>
-          <td>Master only</td>
-          <td>Online <code>elastic.dataParallelWidth</code> scale-up</td>
-      </tr>
-      <tr>
-          <td><em>vLLM External DP</em></td>
-          <td>Fixed ranks (<code>--data-parallel-rank</code>)</td>
-          <td>Every rank, Router-balanced</td>
-          <td>Fixed; world-size edits recreate</td>
-      </tr>
-      <tr>
-          <td><em>SGLang External DP</em></td>
-          <td>Distributed launch over <code>size</code> members</td>
-          <td>Every member, Router-balanced</td>
-          <td>Fixed; replica edits recreate groups</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Configuration</th>
+					<th>Collective</th>
+					<th>HTTP ingress</th>
+					<th>Resize contract</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Monolithic <em>TP</em></td>
+					<td>One engine group, one master</td>
+					<td>Master only</td>
+					<td>Replaces replicas</td>
+			</tr>
+			<tr>
+					<td><em>Elastic EP</em></td>
+					<td>Ray <em>Internal LB</em>, one instance</td>
+					<td>Master only</td>
+					<td>Online <code>elastic.dataParallelWidth</code> scale-up</td>
+			</tr>
+			<tr>
+					<td><em>vLLM External DP</em></td>
+					<td>Fixed ranks (<code>--data-parallel-rank</code>)</td>
+					<td>Every rank, Router-balanced</td>
+					<td>Fixed; world-size edits recreate</td>
+			</tr>
+			<tr>
+					<td><em>SGLang External DP</em></td>
+					<td>Distributed launch over <code>size</code> members</td>
+					<td>Every member, Router-balanced</td>
+					<td>Fixed; replica edits recreate groups</td>
+			</tr>
+	</tbody>
 </table>
 <ul>
 <li><strong>Choose <em>External DP</em></strong> for fixed <em>MoE</em> groups needing per-rank HTTP ingress or lower
@@ -1335,11 +1335,11 @@ member. With <code>SGLANG_RUST_SERVER=1</code>, each member serves HTTP on its b
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-sglang-external-dp</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-8B</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
@@ -1381,30 +1381,30 @@ capacity equals one group, and withdrawal is group-atomic until every member re-
 <h3 id="sglang-mode-requirements">SGLang mode requirements</h3>
 <p>An SGLang role derives <code>External</code> only when all four conditions hold:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Condition</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>--attn-dp-size</code> (or <code>--attention-data-parallel-size</code>) &gt;= 2</td>
-          <td>Declares multiple attention groups</td>
-      </tr>
-      <tr>
-          <td><code>--nnodes</code> &gt;= 2</td>
-          <td>Places groups across multiple member <code>Pod</code>s</td>
-      </tr>
-      <tr>
-          <td><code>SGLANG_RUST_SERVER</code> set to a true value in <em><code>env</code></em></td>
-          <td>Exposes an HTTP listener on every member</td>
-      </tr>
-      <tr>
-          <td><em><code>roles[].kind</code></em> is <code>Server</code></td>
-          <td><em>Prefill</em> and <em>Decode</em> stay routed through their own stages</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Condition</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--attn-dp-size</code> (or <code>--attention-data-parallel-size</code>) &gt;= 2</td>
+					<td>Declares multiple attention groups</td>
+			</tr>
+			<tr>
+					<td><code>--nnodes</code> &gt;= 2</td>
+					<td>Places groups across multiple member <code>Pod</code>s</td>
+			</tr>
+			<tr>
+					<td><code>SGLANG_RUST_SERVER</code> set to a true value in <em><code>env</code></em></td>
+					<td>Exposes an HTTP listener on every member</td>
+			</tr>
+			<tr>
+					<td><em><code>roles[].kind</code></em> is <code>Server</code></td>
+					<td><em>Prefill</em> and <em>Decode</em> stay routed through their own stages</td>
+			</tr>
+	</tbody>
 </table>
 <p>Single-<code>Pod</code> attention-DP or the Python frontend remains <code>Internal</code> (leader-served).</p>
 <h3 id="load-balancing-modes">Load balancing modes</h3>
@@ -1413,30 +1413,30 @@ and reports <em><code>status.roles[].parallelism.loadBalance</code></em> (<code>
 <code>MultiPort</code> or <code>Unknown</code>) beside declared degrees (<em><code>dataParallel</code></em>, <em><code>dataParallelLocal</code></em>,
 <em><code>expertParallel</code></em>):</p>
 <table>
-  <thead>
-      <tr>
-          <th>Argument (vLLM spelling)</th>
-          <th>Vote</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>--data-parallel-external-lb</code></td>
-          <td><code>External</code></td>
-      </tr>
-      <tr>
-          <td><code>--data-parallel-rank</code></td>
-          <td><code>External</code></td>
-      </tr>
-      <tr>
-          <td><code>--data-parallel-hybrid-lb</code></td>
-          <td><code>Hybrid</code></td>
-      </tr>
-      <tr>
-          <td><code>--data-parallel-multi-port-external-lb</code></td>
-          <td><code>MultiPort</code> (refused on managed roles)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Argument (vLLM spelling)</th>
+					<th>Vote</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--data-parallel-external-lb</code></td>
+					<td><code>External</code></td>
+			</tr>
+			<tr>
+					<td><code>--data-parallel-rank</code></td>
+					<td><code>External</code></td>
+			</tr>
+			<tr>
+					<td><code>--data-parallel-hybrid-lb</code></td>
+					<td><code>Hybrid</code></td>
+			</tr>
+			<tr>
+					<td><code>--data-parallel-multi-port-external-lb</code></td>
+					<td><code>MultiPort</code> (refused on managed roles)</td>
+			</tr>
+	</tbody>
 </table>
 <p>Without an explicit flag, degree-based derivation runs only when <code>--data-parallel-start-rank</code> is set
 and <code>--headless</code> is absent (<code>--data-parallel-size-local &lt; --data-parallel-size</code> yields <code>External</code>
@@ -1450,38 +1450,38 @@ and <code>GPUSTACK_REPLICA_LEADER_ADDRESS</code> (leader DNS on headless <code>S
 the operator never infers parallel flags from <em><code>size</code></em> or GPU count.</p>
 <p>With vLLM, <code>--data-parallel-rank</code> implies these defaults without extra flags:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Omitted argument</th>
-          <th>Engine default</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>--data-parallel-external-lb</code></td>
-          <td>Implied by <code>--data-parallel-rank</code> (<em>external load balancing (External LB)</em>)</td>
-      </tr>
-      <tr>
-          <td><code>--data-parallel-size-local 1</code></td>
-          <td>One local <em>DP</em> rank per member under <em>External LB</em></td>
-      </tr>
-      <tr>
-          <td><code>--api-server-count 1</code></td>
-          <td>One API server per rank</td>
-      </tr>
-      <tr>
-          <td><code>--data-parallel-backend mp</code></td>
-          <td>Default <em>DP</em> backend (<code>mp</code> selects execution, not load balancing)</td>
-      </tr>
-      <tr>
-          <td><code>--distributed-executor-backend mp</code></td>
-          <td>Local <em>TP</em> stays inside one <code>Pod</code></td>
-      </tr>
-      <tr>
-          <td><code>--data-parallel-rpc-port</code></td>
-          <td>Default RPC port across all ranks</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Omitted argument</th>
+					<th>Engine default</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>--data-parallel-external-lb</code></td>
+					<td>Implied by <code>--data-parallel-rank</code> (<em>external load balancing (External LB)</em>)</td>
+			</tr>
+			<tr>
+					<td><code>--data-parallel-size-local 1</code></td>
+					<td>One local <em>DP</em> rank per member under <em>External LB</em></td>
+			</tr>
+			<tr>
+					<td><code>--api-server-count 1</code></td>
+					<td>One API server per rank</td>
+			</tr>
+			<tr>
+					<td><code>--data-parallel-backend mp</code></td>
+					<td>Default <em>DP</em> backend (<code>mp</code> selects execution, not load balancing)</td>
+			</tr>
+			<tr>
+					<td><code>--distributed-executor-backend mp</code></td>
+					<td>Local <em>TP</em> stays inside one <code>Pod</code></td>
+			</tr>
+			<tr>
+					<td><code>--data-parallel-rpc-port</code></td>
+					<td>Default RPC port across all ranks</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="port-allocation">Port allocation</h2>
 <p>Set <strong><code>1024 &lt;= VLLM_PORT &lt; 32768</code></strong> (such as <code>19500</code>) on every vLLM rank, keeping candidate ports
@@ -1494,22 +1494,22 @@ the leader&rsquo;s candidate list during the <em>MoE</em> handshake. Fixed multi
 without broadcasting the retry port to peers.</p>
 <h3 id="port-conflicts">Port conflicts</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Conflict</th>
-          <th>Behavior</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Symmetric during allocation</td>
-          <td>All ranks skip an occupied base (for example <code>19500</code> → <code>19501</code>–<code>19505</code>) and stay aligned</td>
-      </tr>
-      <tr>
-          <td>Asymmetric after probing</td>
-          <td>Only leader <code>m0</code> hits <code>EADDRINUSE</code> and advances ports while <code>m1</code>–<code>m3</code> stall on the old port</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Conflict</th>
+					<th>Behavior</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Symmetric during allocation</td>
+					<td>All ranks skip an occupied base (for example <code>19500</code> → <code>19501</code>–<code>19505</code>) and stay aligned</td>
+			</tr>
+			<tr>
+					<td>Asymmetric after probing</td>
+					<td>Only leader <code>m0</code> hits <code>EADDRINUSE</code> and advances ports while <code>m1</code>–<code>m3</code> stall on the old port</td>
+			</tr>
+	</tbody>
 </table>
 <p>In the captured failure, an outbound connection took leader ephemeral port <code>36558</code>; <code>m0</code> moved to
 <code>36557</code> while peers hung on <code>36558</code>. With <code>VLLM_PORT=19500</code>, the group converged on <code>19502</code>
@@ -1562,28 +1562,28 @@ errors.</p>
 <p>Over TCP at concurrency 64, <em>External DP</em> lowered <em>time to first token (TTFT)</em> p50 against single-<code>Pod</code>
 wide <em>TP</em> = 8, while wide <em>TP</em> kept <strong>2.27×–6.99×</strong> higher output throughput across all 12 cells:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Prompt/output target</th>
-          <th style="text-align: right">Wide TP (ms)</th>
-          <th style="text-align: right">DP4 TP2 (ms)</th>
-          <th style="text-align: right">Median reduction</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>1024/256</code></td>
-          <td style="text-align: right">4,798.411</td>
-          <td style="text-align: right"><strong>1,863.100</strong></td>
-          <td style="text-align: right"><strong>2.58×</strong></td>
-      </tr>
-      <tr>
-          <td><code>4096/128</code></td>
-          <td style="text-align: right">3,814.139</td>
-          <td style="text-align: right"><strong>3,094.017</strong></td>
-          <td style="text-align: right"><strong>1.23×</strong></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Prompt/output target</th>
+					<th style="text-align: right">Wide TP (ms)</th>
+					<th style="text-align: right">DP4 TP2 (ms)</th>
+					<th style="text-align: right">Median reduction</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>1024/256</code></td>
+					<td style="text-align: right">4,798.411</td>
+					<td style="text-align: right"><strong>1,863.100</strong></td>
+					<td style="text-align: right"><strong>2.58×</strong></td>
+			</tr>
+			<tr>
+					<td><code>4096/128</code></td>
+					<td style="text-align: right">3,814.139</td>
+					<td style="text-align: right"><strong>3,094.017</strong></td>
+					<td style="text-align: right"><strong>1.23×</strong></td>
+			</tr>
+	</tbody>
 </table>
 <p>With ConnectX-7 InfiniBand <em>RDMA</em> (<code>resources.interface: &quot;2&quot;</code>), <em>External DP</em> cut median <em>TTFT</em>
 <strong>6.26×–8.47×</strong> and raised output <strong>3.85×–7.01×</strong> over TCP, overtaking wide <em>TP</em> output at

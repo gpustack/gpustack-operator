@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Vendor Prerequisites · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1214,63 +1214,63 @@ section.</p>
 image mode are in <a href="/gpustack-operator/main/docs/operate/installation-modes/">Installation Modes</a>
 .</p>
 <table>
-  <thead>
-      <tr>
-          <th>Dependency</th>
-          <th>Role</th>
-          <th>Configuration</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Node Feature Discovery (NFD)</td>
-          <td>Labels <code>Node</code>s and publishes hardware features.</td>
-          <td>Run one NFD master per cluster. See <a href="#single-nfd-per-cluster">Single NFD per cluster</a>
+	<thead>
+			<tr>
+					<th>Dependency</th>
+					<th>Role</th>
+					<th>Configuration</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Node Feature Discovery (NFD)</td>
+					<td>Labels <code>Node</code>s and publishes hardware features.</td>
+					<td>Run one NFD master per cluster. See <a href="#single-nfd-per-cluster">Single NFD per cluster</a>
 .</td>
-      </tr>
-      <tr>
-          <td>Kueue</td>
-          <td>Manages workload quota and gang admission.</td>
-          <td>Bundled in the chart; see <a href="/gpustack-operator/main/docs/operate/installation-modes/">Installation Modes</a>
+			</tr>
+			<tr>
+					<td>Kueue</td>
+					<td>Manages workload quota and gang admission.</td>
+					<td>Bundled in the chart; see <a href="/gpustack-operator/main/docs/operate/installation-modes/">Installation Modes</a>
 .</td>
-      </tr>
-      <tr>
-          <td>Topograph</td>
-          <td>Publishes topology domains from a provider.</td>
-          <td>Optional and disabled by default. See <a href="/gpustack-operator/main/docs/modules/topology/operations/">Topology-Aware Scheduling Operations</a>
+			</tr>
+			<tr>
+					<td>Topograph</td>
+					<td>Publishes topology domains from a provider.</td>
+					<td>Optional and disabled by default. See <a href="/gpustack-operator/main/docs/modules/topology/operations/">Topology-Aware Scheduling Operations</a>
 .</td>
-      </tr>
-      <tr>
-          <td>Mooncake</td>
-          <td>Provides KV cache storage and transfer transport.</td>
-          <td>Optional. Match engine, client, store, and transport in <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
+			</tr>
+			<tr>
+					<td>Mooncake</td>
+					<td>Provides KV cache storage and transfer transport.</td>
+					<td>Optional. Match engine, client, store, and transport in <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
 .</td>
-      </tr>
-      <tr>
-          <td>ModelExpress</td>
-          <td>Coordinates NVIDIA peer weight transfer and cache sharing.</td>
-          <td>Optional; the operator creates a per-deployment metadata service. See <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/#nvidia-modelexpress">ModelExpress</a>
+			</tr>
+			<tr>
+					<td>ModelExpress</td>
+					<td>Coordinates NVIDIA peer weight transfer and cache sharing.</td>
+					<td>Optional; the operator creates a per-deployment metadata service. See <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/#nvidia-modelexpress">ModelExpress</a>
 .</td>
-      </tr>
-      <tr>
-          <td>CSI drivers</td>
-          <td>Mount NFS or S3 volumes, or mount cached weights.</td>
-          <td>NFS and S3 ship as bundled subcharts; node model delivery uses Model Manager CSI (<a href="/gpustack-operator/main/docs/modules/model-delivery/operations/">Model Store Operations</a>
+			</tr>
+			<tr>
+					<td>CSI drivers</td>
+					<td>Mount NFS or S3 volumes, or mount cached weights.</td>
+					<td>NFS and S3 ship as bundled subcharts; node model delivery uses Model Manager CSI (<a href="/gpustack-operator/main/docs/modules/model-delivery/operations/">Model Store Operations</a>
 ).</td>
-      </tr>
-      <tr>
-          <td>Serving engines</td>
-          <td>Run inference containers.</td>
-          <td>Select a compatible runner image from <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
+			</tr>
+			<tr>
+					<td>Serving engines</td>
+					<td>Run inference containers.</td>
+					<td>Select a compatible runner image from <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
 .</td>
-      </tr>
-      <tr>
-          <td>Vendor drivers and toolkits</td>
-          <td>Expose accelerators to node workloads.</td>
-          <td>Install host prerequisites from <a href="#vendor-setup-requirements">Vendor setup requirements</a>
+			</tr>
+			<tr>
+					<td>Vendor drivers and toolkits</td>
+					<td>Expose accelerators to node workloads.</td>
+					<td>Install host prerequisites from <a href="#vendor-setup-requirements">Vendor setup requirements</a>
 .</td>
-      </tr>
-  </tbody>
+			</tr>
+	</tbody>
 </table>
 <h2 id="vendor-setup-requirements">Vendor setup requirements</h2>
 <h3 id="amd">AMD</h3>
@@ -1294,26 +1294,26 @@ and Kernel Module Management (when drivers are pre-installed) in Helm values:</p
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">amd.com/v1alpha1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">DeviceConfig</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">DeviceConfig</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">default</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">kube-amd-gpu</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">driver</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable: true  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">metricsExporter</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable: true  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">devicePlugin</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableDevicePlugin: false  # disable</span><span class="p">:</span><span class="w"> </span><span class="l">conflicts with GPUStack amd.com/gpu plugin</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableNodeLabeller: false  # disable</span><span class="p">:</span><span class="w"> </span><span class="l">GPUStack publishes capacity labels</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableDevicePlugin</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: conflicts with GPUStack amd.com/gpu plugin</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableNodeLabeller</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: GPUStack publishes capacity labels</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">draDriver</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable: true  # optional</span><span class="p">:</span><span class="w"> </span><span class="l">mutually exclusive with devicePlugin on one DeviceConfig</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># optional: mutually exclusive with devicePlugin on one DeviceConfig</span></span></span></code></pre></div>
 </div>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">node-feature-discovery</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled: false  # disable</span><span class="p">:</span><span class="w"> </span><span class="l">run one NFD per cluster</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kmm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: run one NFD per cluster</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kmm</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable when ROCm driver is pre-installed on the host</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">watch</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span></span></span></code></pre></div>
 </div>
@@ -1324,14 +1324,14 @@ and Kernel Module Management (when drivers are pre-installed) in Helm values:</p
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm repo add rocm https://rocm.github.io/gpu-operator
 </span></span><span class="line"><span class="cl">helm repo update
 </span></span><span class="line"><span class="cl">helm install amd-gpu-operator rocm/gpu-operator-charts <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --namespace kube-amd-gpu --create-namespace <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --version<span class="o">=</span>v1.5.1 <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set node-feature-discovery.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set kmm.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set kmm.watch<span class="o">=</span><span class="nb">false</span>
+</span></span></span><span class="line"><span class="cl">  --namespace kube-amd-gpu --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --version<span class="o">=</span>v1.5.1 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set node-feature-discovery.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set kmm.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set kmm.watch<span class="o">=</span><span class="nb">false</span>
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl">kubectl -n kube-amd-gpu patch deviceconfig &lt;name&gt; --type merge -p <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="s1">&#39;{&#34;spec&#34;:{&#34;devicePlugin&#34;:{&#34;enableDevicePlugin&#34;:false,&#34;enableNodeLabeller&#34;:false},&#34;metricsExporter&#34;:{&#34;enable&#34;:true}}}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  <span class="s1">&#39;{&#34;spec&#34;:{&#34;devicePlugin&#34;:{&#34;enableDevicePlugin&#34;:false,&#34;enableNodeLabeller&#34;:false},&#34;metricsExporter&#34;:{&#34;enable&#34;:true}}}&#39;</span></span></span></code></pre></div>
 </div>
 <p>The patch applies this change to the existing <code>DeviceConfig</code>:</p>
 <div class="code-block">
@@ -1345,11 +1345,11 @@ and Kernel Module Management (when drivers are pre-installed) in Helm values:</p
 </span></span><span class="line"><span class="cl">   devicePlugin:
 </span></span><span class="line"><span class="cl"><span class="gd">-    enableDevicePlugin: true
 </span></span></span><span class="line"><span class="cl"><span class="gd">-    enableNodeLabeller: true
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    enableDevicePlugin: false
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enableDevicePlugin: false
 </span></span></span><span class="line"><span class="cl"><span class="gi">+    enableNodeLabeller: false
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>   metricsExporter:
+</span></span></span><span class="line"><span class="cl">   metricsExporter:
 </span></span><span class="line"><span class="cl"><span class="gd">-    enable: false
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    enable: true
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enable: true
 </span></span></span></code></pre></div>
 </div>
 <p><strong>Already installed</strong> — both plugins advertise <code>amd.com/gpu</code>. Stop the vendor plugin before
@@ -1433,24 +1433,24 @@ object name:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;existing-api-version&gt;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">DeviceConfig</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">DeviceConfig</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">device-config</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">kube-system</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">metricsExporter</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable: true  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">dcgm</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable: true  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">devicePlugin</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableDevicePlugin: false  # disable</span><span class="p">:</span><span class="w"> </span><span class="l">conflicts with GPUStack hygon.com/dcu plugin</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableNodeLabeller: false  # disable</span><span class="p">:</span><span class="w"> </span><span class="l">DCU-Label-Node conflicts with GPUStack labels</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableDevicePlugin</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: conflicts with GPUStack hygon.com/dcu plugin</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableNodeLabeller</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: DCU-Label-Node conflicts with GPUStack labels</span></span></span></code></pre></div>
 </div>
 <p><strong>Install it</strong> — after installing the operator from Hygon&rsquo;s portal, patch its <code>DeviceConfig</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n kube-system patch deviceconfig &lt;name&gt; --type merge -p <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="s1">&#39;{&#34;spec&#34;:{&#34;devicePlugin&#34;:{&#34;enableDevicePlugin&#34;:false,&#34;enableNodeLabeller&#34;:false},&#34;metricsExporter&#34;:{&#34;enable&#34;:true},&#34;dcgm&#34;:{&#34;enable&#34;:true}}}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  <span class="s1">&#39;{&#34;spec&#34;:{&#34;devicePlugin&#34;:{&#34;enableDevicePlugin&#34;:false,&#34;enableNodeLabeller&#34;:false},&#34;metricsExporter&#34;:{&#34;enable&#34;:true},&#34;dcgm&#34;:{&#34;enable&#34;:true}}}&#39;</span></span></span></code></pre></div>
 </div>
 <p>Read <code>apiVersion</code> and <code>metadata.name</code> from <code>kubectl get deviceconfig -n kube-system -o yaml</code>:</p>
 <div class="code-block">
@@ -1463,15 +1463,15 @@ object name:</p>
 </span></span><span class="line"><span class="cl"> spec:
 </span></span><span class="line"><span class="cl">   devicePlugin:
 </span></span><span class="line"><span class="cl"><span class="gd">-    enableDevicePlugin: &lt;current-value&gt;
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    enableDevicePlugin: false
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span><span class="gd">-    enableNodeLabeller: &lt;current-value&gt;
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    enableNodeLabeller: false
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>   metricsExporter:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enableDevicePlugin: false
+</span></span></span><span class="line"><span class="cl"><span class="gd">-    enableNodeLabeller: &lt;current-value&gt;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enableNodeLabeller: false
+</span></span></span><span class="line"><span class="cl">   metricsExporter:
 </span></span><span class="line"><span class="cl"><span class="gd">-    enable: &lt;current-value&gt;
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    enable: true
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>   dcgm:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enable: true
+</span></span></span><span class="line"><span class="cl">   dcgm:
 </span></span><span class="line"><span class="cl"><span class="gd">-    enable: &lt;current-value&gt;
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    enable: true
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enable: true
 </span></span></span></code></pre></div>
 </div>
 <p><strong>Already installed</strong> — both plugins advertise <code>hygon.com/dcu</code>. Stop the vendor plugin first:</p>
@@ -1497,26 +1497,26 @@ own <code>RuntimeClass</code>.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">ixDriver</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled: false  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="l">; keep off when driver is pre-installed</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">ixExporter</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled: true  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">ixDevicePlugin</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled: false  # disable</span><span class="p">:</span><span class="w"> </span><span class="l">conflicts with GPUStack iluvatar.com/gpu plugin</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">ixfd</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled: false  # disable</span><span class="p">:</span><span class="w"> </span><span class="l">bundles upstream NFD</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># default: false; keep off when driver is pre-installed</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">ixExporter</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">ixDevicePlugin</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: conflicts with GPUStack iluvatar.com/gpu plugin</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">ixfd</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: bundles upstream NFD</span></span></span></code></pre></div>
 </div>
 <p><strong>Install it</strong> — install the OCI chart with the competing components disabled:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm install --wait ix-gpu-operator <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  oci://registry.iluvatar.com.cn:10443/k8s/ix-gpu-operator --version 1.0.0 <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --create-namespace --namespace ix-gpu-operator <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --insecure-skip-tls-verify <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set global.repository<span class="o">=</span><span class="s2">&#34;registry.iluvatar.com.cn/k8s&#34;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set global.version<span class="o">=</span>4.4.0 <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set ixDriver.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set ixDevicePlugin.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set ixfd.enabled<span class="o">=</span>false</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  oci://registry.iluvatar.com.cn:10443/k8s/ix-gpu-operator --version 1.0.0 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --create-namespace --namespace ix-gpu-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --insecure-skip-tls-verify <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set global.repository<span class="o">=</span><span class="s2">&#34;registry.iluvatar.com.cn/k8s&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set global.version<span class="o">=</span>4.4.0 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set ixDriver.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set ixDevicePlugin.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set ixfd.enabled<span class="o">=</span>false</span></span></code></pre></div>
 </div>
 <p><strong>Already installed</strong> — both plugins advertise <code>iluvatar.com/gpu</code>. Stop ix-Device-Plugin first:</p>
 <ol>
@@ -1542,62 +1542,62 @@ and card DRM nodes directly, so no container toolkit is required.</p>
 <p><strong>Vendor GPU Operator</strong> — MetaX GPU Operator marks <code>gpu-device</code> and <code>gpu-label</code> mandatory in every
 mode, including <code>minimalMode</code>:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Component</th>
-          <th>Action</th>
-          <th>Mechanism</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Kernel driver and MXMACA SDK</td>
-          <td>Keep on host</td>
-          <td><code>--set minimalMode=true</code> leaves both to the host</td>
-      </tr>
-      <tr>
-          <td><code>mx-exporter</code></td>
-          <td>Optional</td>
-          <td>Optional under <code>minimalMode</code></td>
-      </tr>
-      <tr>
-          <td><code>controller-exporter</code></td>
-          <td>Optional</td>
-          <td>Optional under <code>minimalMode</code></td>
-      </tr>
-      <tr>
-          <td><code>gpu-device</code> (device plugin)</td>
-          <td><strong>Cannot disable</strong></td>
-          <td>Mandatory in every vendor install mode</td>
-      </tr>
-      <tr>
-          <td><code>gpu-label</code> (NFD-equivalent)</td>
-          <td><strong>Cannot disable</strong></td>
-          <td>Mandatory in every vendor install mode</td>
-      </tr>
-      <tr>
-          <td><code>gpu-scheduler</code></td>
-          <td>Disable</td>
-          <td>Leave undeployed</td>
-      </tr>
-      <tr>
-          <td><code>topo-discovery</code></td>
-          <td>Disable</td>
-          <td>Leave undeployed</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Component</th>
+					<th>Action</th>
+					<th>Mechanism</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Kernel driver and MXMACA SDK</td>
+					<td>Keep on host</td>
+					<td><code>--set minimalMode=true</code> leaves both to the host</td>
+			</tr>
+			<tr>
+					<td><code>mx-exporter</code></td>
+					<td>Optional</td>
+					<td>Optional under <code>minimalMode</code></td>
+			</tr>
+			<tr>
+					<td><code>controller-exporter</code></td>
+					<td>Optional</td>
+					<td>Optional under <code>minimalMode</code></td>
+			</tr>
+			<tr>
+					<td><code>gpu-device</code> (device plugin)</td>
+					<td><strong>Cannot disable</strong></td>
+					<td>Mandatory in every vendor install mode</td>
+			</tr>
+			<tr>
+					<td><code>gpu-label</code> (NFD-equivalent)</td>
+					<td><strong>Cannot disable</strong></td>
+					<td>Mandatory in every vendor install mode</td>
+			</tr>
+			<tr>
+					<td><code>gpu-scheduler</code></td>
+					<td>Disable</td>
+					<td>Leave undeployed</td>
+			</tr>
+			<tr>
+					<td><code>topo-discovery</code></td>
+					<td>Disable</td>
+					<td>Leave undeployed</td>
+			</tr>
+	</tbody>
 </table>
 <p><strong>Install it</strong> — <code>minimalMode</code> is fixed at install time and only fits nodes that GPUStack does <strong>not</strong>
 manage:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm install oci://DOMAIN/PROJECT/metax-operator <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --version VERSION <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --create-namespace -n metax-operator <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --generate-name <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --wait <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set <span class="nv">registry</span><span class="o">=</span>DOMAIN/PROJECT <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set <span class="nv">minimalMode</span><span class="o">=</span>true</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  --version VERSION <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --create-namespace -n metax-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --generate-name <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --wait <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set <span class="nv">registry</span><span class="o">=</span>DOMAIN/PROJECT <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set <span class="nv">minimalMode</span><span class="o">=</span>true</span></span></code></pre></div>
 </div>
 <p><strong>Already installed</strong> — because <code>gpu-device</code> cannot be disabled and advertises <code>metax-tech.com/gpu</code>,
 the vendor operator and GPUStack cannot share a node:</p>
@@ -1625,19 +1625,19 @@ containing only the device plugin and exporter):</p>
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">mtGpuClusterPolicyClusterpolicy</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">driverToolkit</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled: true  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containerToolkit</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled: true  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">dcgm</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">dcgmExporter</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nfd</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled: false  # disable</span><span class="p">:</span><span class="w"> </span><span class="l">run one NFD per cluster</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: run one NFD per cluster</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">gpuScheduler</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled: false  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># default: false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">gpuWebhook</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled: false  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># default: false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kured</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeProblemDetector</span><span class="p">:</span><span class="w">
@@ -1652,10 +1652,10 @@ device plugin removed:</p>
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm install --wait mt-gpu-operator mt-gpu-operator
 </span></span><span class="line"><span class="cl">helm install --wait mt-gpu-operator-custom-resources mt-gpu-operator-custom-resources <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set mtGpuClusterPolicyClusterpolicy.nfd.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set mtGpuClusterPolicyClusterpolicy.kured.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set mtGpuClusterPolicyClusterpolicy.nodeProblemDetector.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set mtGpuClusterPolicyClusterpolicy.aiOps.enabled<span class="o">=</span>false</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  --set mtGpuClusterPolicyClusterpolicy.nfd.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set mtGpuClusterPolicyClusterpolicy.kured.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set mtGpuClusterPolicyClusterpolicy.nodeProblemDetector.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set mtGpuClusterPolicyClusterpolicy.aiOps.enabled<span class="o">=</span>false</span></span></code></pre></div>
 </div>
 <p><strong>Already installed</strong> — both plugins advertise <code>mthreads.com/gpu</code>. Stop the vendor plugin before
 installing GPUStack:</p>
@@ -1691,21 +1691,21 @@ disable components that conflict with GPUStack:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">driver</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled: true  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">toolkit</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled: true  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">dcgmExporter</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled: true  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">devicePlugin</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled: false  # disable</span><span class="p">:</span><span class="w"> </span><span class="l">conflicts with GPUStack nvidia.com/gpu plugin</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">gfd</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled: true  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">nfd</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">toolkit</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">dcgmExporter</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">devicePlugin</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: conflicts with GPUStack nvidia.com/gpu plugin</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">gfd</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">nfd</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable, or keep and disable GPUStack bundled NFD</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">migManager</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled: false  # disable</span><span class="p">:</span><span class="w"> </span><span class="l">conflicts with Allocate-time MIG actuation</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">cdi</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled: false  # default</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="l">from v25.10; disable on MIG nodes</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="nt">migManager</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: conflicts with Allocate-time MIG actuation</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">cdi</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># default: true from v25.10; disable on MIG nodes</span></span></span></code></pre></div>
 </div>
 <p>For the single-profile exception where fleet-wide MIG Manager can stay enabled, see
 <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#fleet-wide-mig-manager">Fleet-wide MIG Manager</a>
@@ -1718,12 +1718,12 @@ while <code>ClusterPolicy</code> still reports <code>ready</code>.</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
 </span></span><span class="line"><span class="cl">helm repo update
 </span></span><span class="line"><span class="cl">helm install --wait --generate-name <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -n gpu-operator --create-namespace <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  nvidia/gpu-operator --version<span class="o">=</span>v26.3.3 <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set devicePlugin.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set nfd.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set migManager.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set cdi.enabled<span class="o">=</span>false</span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -n gpu-operator --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl">  nvidia/gpu-operator --version<span class="o">=</span>v26.3.3 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set devicePlugin.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set nfd.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set migManager.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set cdi.enabled<span class="o">=</span>false</span></span></code></pre></div>
 </div>
 <p><strong>Already installed</strong> — run one <code>helm upgrade</code> preserving existing values plus the switches below (do
 not delete <code>DaemonSet</code>s manually, or <code>ClusterPolicy</code> recreates them):</p>
@@ -1769,61 +1769,61 @@ HGGCRT v3 (backward compatible with v2), and verify with <code>ppu-smi</code> an
 <p>Whether a host needs a vendor container toolkit depends on what GPUStack&rsquo;s allocator returns to
 kubelet:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Manufacturer</th>
-          <th>Allocator injection</th>
-          <th>Toolkit required</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>AMD</td>
-          <td><code>/dev</code> nodes (<code>/dev/kfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
-          <td>No</td>
-      </tr>
-      <tr>
-          <td>Ascend</td>
-          <td><code>ASCEND_VISIBLE_DEVICES</code></td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>Cambricon</td>
-          <td><code>/dev</code> nodes (<code>/dev/cambricon_dev*</code> and control nodes) plus <code>CAMBRICON_VISIBLE_DEVICES</code></td>
-          <td>No</td>
-      </tr>
-      <tr>
-          <td>Hygon</td>
-          <td><code>/dev</code> nodes (<code>/dev/kfd</code>, <code>/dev/mkfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
-          <td>No</td>
-      </tr>
-      <tr>
-          <td>Iluvatar</td>
-          <td><code>IX_VISIBLE_DEVICES</code></td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>MetaX</td>
-          <td><code>/dev</code> nodes (<code>/dev/mxcd</code>, <code>/dev/mxnd</code>, <code>/dev/mxgd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
-          <td>No</td>
-      </tr>
-      <tr>
-          <td>Moore Threads</td>
-          <td><code>MTHREADS_VISIBLE_DEVICES</code></td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>NVIDIA</td>
-          <td><code>NVIDIA_VISIBLE_DEVICES</code> by default, or CDI annotations (<a href="#nvidia">NVIDIA</a>
+	<thead>
+			<tr>
+					<th>Manufacturer</th>
+					<th>Allocator injection</th>
+					<th>Toolkit required</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>AMD</td>
+					<td><code>/dev</code> nodes (<code>/dev/kfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
+					<td>No</td>
+			</tr>
+			<tr>
+					<td>Ascend</td>
+					<td><code>ASCEND_VISIBLE_DEVICES</code></td>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>Cambricon</td>
+					<td><code>/dev</code> nodes (<code>/dev/cambricon_dev*</code> and control nodes) plus <code>CAMBRICON_VISIBLE_DEVICES</code></td>
+					<td>No</td>
+			</tr>
+			<tr>
+					<td>Hygon</td>
+					<td><code>/dev</code> nodes (<code>/dev/kfd</code>, <code>/dev/mkfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
+					<td>No</td>
+			</tr>
+			<tr>
+					<td>Iluvatar</td>
+					<td><code>IX_VISIBLE_DEVICES</code></td>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>MetaX</td>
+					<td><code>/dev</code> nodes (<code>/dev/mxcd</code>, <code>/dev/mxnd</code>, <code>/dev/mxgd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
+					<td>No</td>
+			</tr>
+			<tr>
+					<td>Moore Threads</td>
+					<td><code>MTHREADS_VISIBLE_DEVICES</code></td>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>NVIDIA</td>
+					<td><code>NVIDIA_VISIBLE_DEVICES</code> by default, or CDI annotations (<a href="#nvidia">NVIDIA</a>
 )</td>
-          <td>Yes</td>
-      </tr>
-      <tr>
-          <td>T-Head</td>
-          <td><code>/dev</code> nodes (<code>/dev/alixpu</code>, <code>/dev/alixpu_ctl</code>, <code>/dev/alixpu_ppu&lt;N&gt;</code>)</td>
-          <td>No</td>
-      </tr>
-  </tbody>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>T-Head</td>
+					<td><code>/dev</code> nodes (<code>/dev/alixpu</code>, <code>/dev/alixpu_ctl</code>, <code>/dev/alixpu_ppu&lt;N&gt;</code>)</td>
+					<td>No</td>
+			</tr>
+	</tbody>
 </table>
 <blockquote>
 <p><strong>Why</strong> — <code>runc</code> mounts returned <code>/dev</code> nodes directly, whereas an environment variable requires a

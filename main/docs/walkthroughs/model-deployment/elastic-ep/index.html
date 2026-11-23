@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Elastic EP Walkthrough · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1222,34 +1222,34 @@ CPU-only Ray head coordinates membership without claiming GPUs.</p>
 <p>Keep <em><code>replicas: 1</code></em>, <em><code>size: 1</code></em>, and <code>accelerator: &quot;2&quot;</code> (<em>TP</em> = 2), and scale <em>data parallelism (DP)</em>
 width <code>2 → 4</code> (<em>EP</em> world size <code>4 → 8</code>) via <code>runtimeControl.parameters[&quot;elastic.dataParallelWidth&quot;]</code>:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Object</th>
-          <th>Scope</th>
-          <th>Creator</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>ModelArtifact</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Resolves <code>deepseek-v2-lite-chat</code> weights via node model delivery</td>
-      </tr>
-      <tr>
-          <td><code>AcceleratorType</code></td>
-          <td>cluster</td>
-          <td>operator</td>
-          <td>Whole-GPU H100 pool requested by each two-GPU Ray member</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Elastic vLLM collective resized live through <code>elastic.dataParallelWidth</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Object</th>
+					<th>Scope</th>
+					<th>Creator</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ModelArtifact</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Resolves <code>deepseek-v2-lite-chat</code> weights via node model delivery</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td>cluster</td>
+					<td>operator</td>
+					<td>Whole-GPU H100 pool requested by each two-GPU Ray member</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Elastic vLLM collective resized live through <code>elastic.dataParallelWidth</code></td>
+			</tr>
+	</tbody>
 </table>
 <p>During the live <em>DP</em> width 2 → 4 expansion, <strong>439/439 client requests completed with zero errors</strong>. In
 the steady-state benchmark at concurrency 64, width 4 cut <em>time to first token (TTFT)</em> p50 by
@@ -1259,38 +1259,38 @@ throughput at every concurrency, and raising concurrency-1 <em>inter-token laten
 .</p>
 <h3 id="environment">Environment</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Item</th>
-          <th>Value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Cluster</td>
-          <td>Kubernetes v1.35.7; 1 CPU node and 1 GPU node (<code>gpu-node-0</code>)</td>
-      </tr>
-      <tr>
-          <td>Hardware</td>
-          <td>8 × NVIDIA H100 80 GB HBM3 SXM5 (900 GB/s physical NVLink)</td>
-      </tr>
-      <tr>
-          <td>Operator and runner</td>
-          <td>GPUStack Operator v0.9.1; <code>gpustack/runner:cuda13.0-vllm0.30.0</code></td>
-      </tr>
-      <tr>
-          <td>Model</td>
-          <td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code> (<code>ModelArtifact</code> <code>deepseek-v2-lite-chat</code>)</td>
-      </tr>
-      <tr>
-          <td>Pool</td>
-          <td>Captured on custom <code>InstanceType</code> <code>bench-gpu</code>; reusable manifest uses <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
-      </tr>
-      <tr>
-          <td>Allocation</td>
-          <td>Initial: 2 GPU members × 2 GPUs (4 GPUs) + 1 CPU Ray head; expanded: 4 GPU members × 2 GPUs (8 GPUs)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Cluster</td>
+					<td>Kubernetes v1.35.7; 1 CPU node and 1 GPU node (<code>gpu-node-0</code>)</td>
+			</tr>
+			<tr>
+					<td>Hardware</td>
+					<td>8 × NVIDIA H100 80 GB HBM3 SXM5 (900 GB/s physical NVLink)</td>
+			</tr>
+			<tr>
+					<td>Operator and runner</td>
+					<td>GPUStack Operator v0.9.1; <code>gpustack/runner:cuda13.0-vllm0.30.0</code></td>
+			</tr>
+			<tr>
+					<td>Model</td>
+					<td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code> (<code>ModelArtifact</code> <code>deepseek-v2-lite-chat</code>)</td>
+			</tr>
+			<tr>
+					<td>Pool</td>
+					<td>Captured on custom <code>InstanceType</code> <code>bench-gpu</code>; reusable manifest uses <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
+			</tr>
+			<tr>
+					<td>Allocation</td>
+					<td>Initial: 2 GPU members × 2 GPUs (4 GPUs) + 1 CPU Ray head; expanded: 4 GPU members × 2 GPUs (8 GPUs)</td>
+			</tr>
+	</tbody>
 </table>
 <p>Each GPU <code>Pod</code> ran with private IPC, private <code>/dev/shm</code>, <em><code>hostIPC</code></em> disabled, and no <em>remote direct
 memory access (RDMA)</em> interface. Intra-<code>Pod</code> <em>TP</em> = 2 used NVLink, while <strong>cross-<code>Pod</code> <em>EP</em>
@@ -1306,11 +1306,11 @@ additional two-GPU members.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">b2-elastic-ep</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
@@ -1400,10 +1400,10 @@ and run a streaming completion check:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">curl --fail-with-body --no-buffer --max-time <span class="m">60</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  http://127.0.0.1:8000/v1/chat/completions <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;messages&#34;:[{&#34;role&#34;:&#34;user&#34;,&#34;content&#34;:&#34;Explain GPU scheduling briefly.&#34;}],&#34;max_tokens&#34;:64,&#34;temperature&#34;:0,&#34;stream&#34;:true,&#34;stream_options&#34;:{&#34;include_usage&#34;:true}}&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o baseline-stream.txt
+</span></span></span><span class="line"><span class="cl">  http://127.0.0.1:8000/v1/chat/completions <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;messages&#34;:[{&#34;role&#34;:&#34;user&#34;,&#34;content&#34;:&#34;Explain GPU scheduling briefly.&#34;}],&#34;max_tokens&#34;:64,&#34;temperature&#34;:0,&#34;stream&#34;:true,&#34;stream_options&#34;:{&#34;include_usage&#34;:true}}&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -o baseline-stream.txt
 </span></span><span class="line"><span class="cl">grep -q <span class="s1">&#39;data: \[DONE\]&#39;</span> baseline-stream.txt <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">&#34;baseline stream OK&#34;</span></span></span></code></pre></div>
 </div>
 <p>Confirm non-empty completion tokens and <code>data: [DONE]</code> before expanding.</p>
@@ -1412,7 +1412,7 @@ and run a streaming completion check:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench patch modeldeployment b2-elastic-ep --type<span class="o">=</span>json <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;test&#34;,&#34;path&#34;:&#34;/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth&#34;,&#34;value&#34;:&#34;2&#34;},{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth&#34;,&#34;value&#34;:&#34;4&#34;}]&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;test&#34;,&#34;path&#34;:&#34;/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth&#34;,&#34;value&#34;:&#34;2&#34;},{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth&#34;,&#34;value&#34;:&#34;4&#34;}]&#39;</span></span></span></code></pre></div>
 </div>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1427,7 +1427,7 @@ and run a streaming completion check:</p>
 </span></span><span class="line"><span class="cl">       runtimeControl:
 </span></span><span class="line"><span class="cl">         parameters:
 </span></span><span class="line"><span class="cl"><span class="gd">-          elastic.dataParallelWidth: &#34;2&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+          elastic.dataParallelWidth: &#34;4&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+          elastic.dataParallelWidth: &#34;4&#34;
 </span></span></span></code></pre></div>
 </div>
 <p>Confirm native runtime width <code>4</code> for the current deployment <code>uid</code> and <code>generation</code> (four running <code>Pod</code>s
@@ -1479,52 +1479,52 @@ original <code>Pod</code> UIDs with zero container restarts:</p>
 </span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></div>
 </div>
 <table>
-  <thead>
-      <tr>
-          <th>Captured <code>Pod</code></th>
-          <th>Role</th>
-          <th>Ready</th>
-          <th>UID across resize</th>
-          <th style="text-align: right">Restarts</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>b2-elastic-ep-b2-elastic-ep-elastic-head-95n5k</code></td>
-          <td>CPU Ray head</td>
-          <td>1/1</td>
-          <td>Retained</td>
-          <td style="text-align: right">0</td>
-      </tr>
-      <tr>
-          <td><code>b2-elastic-ep-server-tsc8r</code></td>
-          <td>Serving master (<code>pod-ordinal=0</code>)</td>
-          <td>1/1</td>
-          <td>Retained</td>
-          <td style="text-align: right">0</td>
-      </tr>
-      <tr>
-          <td><code>b2-elastic-ep-server-vzdtc</code></td>
-          <td>Baseline GPU member</td>
-          <td>1/1</td>
-          <td>Retained</td>
-          <td style="text-align: right">0</td>
-      </tr>
-      <tr>
-          <td><code>b2-elastic-ep-server-6nvwx</code></td>
-          <td>Added GPU member</td>
-          <td>1/1</td>
-          <td>New</td>
-          <td style="text-align: right">0</td>
-      </tr>
-      <tr>
-          <td><code>b2-elastic-ep-server-z22ml</code></td>
-          <td>Added GPU member</td>
-          <td>1/1</td>
-          <td>New</td>
-          <td style="text-align: right">0</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Captured <code>Pod</code></th>
+					<th>Role</th>
+					<th>Ready</th>
+					<th>UID across resize</th>
+					<th style="text-align: right">Restarts</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>b2-elastic-ep-b2-elastic-ep-elastic-head-95n5k</code></td>
+					<td>CPU Ray head</td>
+					<td>1/1</td>
+					<td>Retained</td>
+					<td style="text-align: right">0</td>
+			</tr>
+			<tr>
+					<td><code>b2-elastic-ep-server-tsc8r</code></td>
+					<td>Serving master (<code>pod-ordinal=0</code>)</td>
+					<td>1/1</td>
+					<td>Retained</td>
+					<td style="text-align: right">0</td>
+			</tr>
+			<tr>
+					<td><code>b2-elastic-ep-server-vzdtc</code></td>
+					<td>Baseline GPU member</td>
+					<td>1/1</td>
+					<td>Retained</td>
+					<td style="text-align: right">0</td>
+			</tr>
+			<tr>
+					<td><code>b2-elastic-ep-server-6nvwx</code></td>
+					<td>Added GPU member</td>
+					<td>1/1</td>
+					<td>New</td>
+					<td style="text-align: right">0</td>
+			</tr>
+			<tr>
+					<td><code>b2-elastic-ep-server-z22ml</code></td>
+					<td>Added GPU member</td>
+					<td>1/1</td>
+					<td>New</td>
+					<td style="text-align: right">0</td>
+			</tr>
+	</tbody>
 </table>
 <p>Traffic and probe behavior during expansion:</p>
 <ul>
@@ -1561,41 +1561,41 @@ latency and throughput trade-offs.</li>
 </ul>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Added GPU members stay <code>Pending</code></td>
-          <td>Member <code>Pod</code> phase <code>Pending</code></td>
-          <td>Inspect <code>kubectl -n gpustack-bench get workloads,events</code> and <code>Devices</code> capacity; width <code>4</code> at <em>TP</em> = 2 requires 8 free GPUs.</td>
-      </tr>
-      <tr>
-          <td>Four GPU members run, <code>effective</code> width still <code>&lt; 4</code></td>
-          <td><code>observation.json</code> shows <code>effective.Known=false</code> or <code>Value=2</code></td>
-          <td>Wait for Ray initialization (~3 min on H100) and inspect master container logs (<code>kubectl -n gpustack-bench logs &lt;master-pod&gt; -c main --tail=200</code>).</td>
-      </tr>
-      <tr>
-          <td><code>ElasticResize=False/ScaleRefused</code></td>
-          <td>Engine rejected resize request</td>
-          <td>Read the condition message on <code>ModelDeployment</code> and check <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/#resize-hold-conditions">Resize hold conditions</a>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Added GPU members stay <code>Pending</code></td>
+					<td>Member <code>Pod</code> phase <code>Pending</code></td>
+					<td>Inspect <code>kubectl -n gpustack-bench get workloads,events</code> and <code>Devices</code> capacity; width <code>4</code> at <em>TP</em> = 2 requires 8 free GPUs.</td>
+			</tr>
+			<tr>
+					<td>Four GPU members run, <code>effective</code> width still <code>&lt; 4</code></td>
+					<td><code>observation.json</code> shows <code>effective.Known=false</code> or <code>Value=2</code></td>
+					<td>Wait for Ray initialization (~3 min on H100) and inspect master container logs (<code>kubectl -n gpustack-bench logs &lt;master-pod&gt; -c main --tail=200</code>).</td>
+			</tr>
+			<tr>
+					<td><code>ElasticResize=False/ScaleRefused</code></td>
+					<td>Engine rejected resize request</td>
+					<td>Read the condition message on <code>ModelDeployment</code> and check <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/#resize-hold-conditions">Resize hold conditions</a>
 .</td>
-      </tr>
-      <tr>
-          <td><code>ElasticResize=Unknown/WorldUnprovable</code></td>
-          <td>In-flight resize awaiting engine proof</td>
-          <td>Keep observing without patching <code>elastic.dataParallelWidth</code> again; never resend an unanswered resize manually.</td>
-      </tr>
-      <tr>
-          <td>Streaming requests stall</td>
-          <td>No tokens returned on <code>:8000</code></td>
-          <td>Check master and Ray worker logs, GPU visibility, <code>/dev/shm</code> usage, and host RAM; capture logs before deleting the deployment.</td>
-      </tr>
-  </tbody>
+			</tr>
+			<tr>
+					<td><code>ElasticResize=Unknown/WorldUnprovable</code></td>
+					<td>In-flight resize awaiting engine proof</td>
+					<td>Keep observing without patching <code>elastic.dataParallelWidth</code> again; never resend an unanswered resize manually.</td>
+			</tr>
+			<tr>
+					<td>Streaming requests stall</td>
+					<td>No tokens returned on <code>:8000</code></td>
+					<td>Check master and Ray worker logs, GPU visibility, <code>/dev/shm</code> usage, and host RAM; capture logs before deleting the deployment.</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

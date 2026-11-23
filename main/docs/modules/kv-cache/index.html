@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>KV Cache · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1255,26 +1255,26 @@ then configure <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/">poo
 <h2 id="troubleshooting">Troubleshooting</h2>
 <p>If a workload cannot attach or write to the cache, inspect the backend, pool, and binding status:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Condition</th>
-          <th>Reason</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>MembersMounted=False</code></td>
-          <td><code>AmbiguousMemberIdentity</code></td>
-          <td>Place host-network member groups on separate <code>Node</code>s via <em><code>nodeSelector</code></em>.</td>
-      </tr>
-      <tr>
-          <td>Engine writes fail with <code>RPC_FAIL (-900)</code></td>
-          <td>Store and client minor versions differ</td>
-          <td>Align store and engine versions in <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#version-compatibility">Version compatibility</a>
+	<thead>
+			<tr>
+					<th>Condition</th>
+					<th>Reason</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>MembersMounted=False</code></td>
+					<td><code>AmbiguousMemberIdentity</code></td>
+					<td>Place host-network member groups on separate <code>Node</code>s via <em><code>nodeSelector</code></em>.</td>
+			</tr>
+			<tr>
+					<td>Engine writes fail with <code>RPC_FAIL (-900)</code></td>
+					<td>Store and client minor versions differ</td>
+					<td>Align store and engine versions in <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#version-compatibility">Version compatibility</a>
 .</td>
-      </tr>
-  </tbody>
+			</tr>
+	</tbody>
 </table>
 <p>Use <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#refused-engine-launch">Refused engine launch</a>
  for admission refusals,

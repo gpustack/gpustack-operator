@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Online Runtime Control · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1232,11 +1232,11 @@ flowchart LR
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-tuned</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-72B-Instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
@@ -1274,122 +1274,122 @@ at <code>/var/lib/gpustack/operator/lib/engine-sentinel</code>.</li>
 prerequisites and declared <em><code>extraArgs</code></em> boot ceilings. All values are strings; decimal keys accept
 Kubernetes decimal quantities and reject binary suffixes.</p>
 <table>
-  <thead>
-      <tr>
-          <th>Parameter</th>
-          <th>Type</th>
-          <th>Valid range</th>
-          <th>Engine support</th>
-          <th>Boot ceiling</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>scheduling.maxActiveRequests</code></td>
-          <td>Integer</td>
-          <td><code>&gt;= 1</code></td>
-          <td><code>vLLM</code> (NVIDIA, Ascend), <code>SGLang</code></td>
-          <td><code>&lt;= --max-num-seqs</code> (vLLM) or <code>--max-running-requests</code> (SGLang) when declared</td>
-      </tr>
-      <tr>
-          <td><code>scheduling.maxBatchedTokens</code></td>
-          <td>Integer</td>
-          <td><code>&gt;= 1</code></td>
-          <td><code>vLLM</code> (NVIDIA, Ascend), <code>SGLang</code></td>
-          <td><code>&lt;= --max-num-batched-tokens</code> (vLLM) or <code>--chunked-prefill-size</code> (SGLang) when declared</td>
-      </tr>
-      <tr>
-          <td><code>scheduling.longPrefillTokenThreshold</code></td>
-          <td>Integer</td>
-          <td><code>&gt;= 0</code></td>
-          <td><code>vLLM</code> (NVIDIA, Ascend)</td>
-          <td><code>&lt;=</code> effective <code>maxBatchedTokens</code> when declared</td>
-      </tr>
-      <tr>
-          <td><code>scheduling.prefillMaxRequests</code></td>
-          <td>Integer</td>
-          <td><code>&gt;= 1</code></td>
-          <td><code>SGLang</code></td>
-          <td><code>&lt;=</code> effective <code>maxActiveRequests</code> when declared</td>
-      </tr>
-      <tr>
-          <td><code>scheduling.scheduleConservativeness</code></td>
-          <td>Decimal</td>
-          <td><code>[0.1, 2.0]</code></td>
-          <td><code>SGLang</code></td>
-          <td>None</td>
-      </tr>
-      <tr>
-          <td><code>scheduling.prefillDecodeInterval</code></td>
-          <td>Integer</td>
-          <td><code>&gt;= 0</code> (<code>0</code> disables deferral)</td>
-          <td><code>SGLang</code></td>
-          <td>None</td>
-      </tr>
-      <tr>
-          <td><code>scheduling.cacheAwareWindow</code></td>
-          <td>Integer</td>
-          <td><code>&gt;= 0</code></td>
-          <td><code>vLLM</code> (NVIDIA, Ascend)</td>
-          <td>None</td>
-      </tr>
-      <tr>
-          <td><code>scheduling.cacheAwareThreshold</code></td>
-          <td>Decimal</td>
-          <td><code>[0.0, 1.0]</code></td>
-          <td><code>vLLM</code> (NVIDIA, Ascend)</td>
-          <td>None</td>
-      </tr>
-      <tr>
-          <td><code>scheduling.ppMaxMicroBatchSize</code></td>
-          <td>Integer</td>
-          <td><code>&gt;= 1</code> (<code>&lt;= effectiveMaxActiveRequests / ppSize</code>)</td>
-          <td><code>SGLang</code></td>
-          <td>Requires <code>--pp-size</code> or <code>--pipeline-parallel-size &gt; 1</code></td>
-      </tr>
-      <tr>
-          <td><code>scheduling.maxInflightKVLoads</code></td>
-          <td>Integer</td>
-          <td><code>&gt;= 1</code></td>
-          <td><code>vLLM</code> (NVIDIA, Ascend)</td>
-          <td>Requires active KV connector (<code>kvCache</code>, <code>kvTransfer</code>, routed pair, or <code>--kv-transfer-config</code>)</td>
-      </tr>
-      <tr>
-          <td><code>scheduling.maxAsyncKVLoadsPerStep</code></td>
-          <td>Integer</td>
-          <td><code>&gt;= 1</code></td>
-          <td><code>vLLM</code> (NVIDIA, Ascend)</td>
-          <td>Requires active KV connector (<code>kvCache</code>, <code>kvTransfer</code>, routed pair, or <code>--kv-transfer-config</code>)</td>
-      </tr>
-      <tr>
-          <td><code>speculative.acceptThresholdSingle</code></td>
-          <td>Decimal</td>
-          <td><code>[0.0, 1.0]</code></td>
-          <td><code>SGLang</code></td>
-          <td>None</td>
-      </tr>
-      <tr>
-          <td><code>speculative.acceptThresholdAcc</code></td>
-          <td>Decimal</td>
-          <td><code>[0.0, 1.0]</code></td>
-          <td><code>SGLang</code></td>
-          <td>None</td>
-      </tr>
-      <tr>
-          <td><code>speculative.draftBudgetFraction</code></td>
-          <td>Decimal</td>
-          <td><code>(0.0, 1.0]</code> (strictly <code>&gt; 0.0</code>, up to <code>1.0</code>)</td>
-          <td><code>SGLang</code></td>
-          <td>None</td>
-      </tr>
-      <tr>
-          <td><code>elastic.dataParallelWidth</code></td>
-          <td>Integer</td>
-          <td><code>[2, 64]</code></td>
-          <td><code>vLLM</code> (NVIDIA, Ascend)</td>
-          <td><code>&lt;= --elastic-ep-max-dp-size</code> when declared; immutable presence, non-decreasing, <code>replicas: 1</code>, <code>size: 1</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Parameter</th>
+					<th>Type</th>
+					<th>Valid range</th>
+					<th>Engine support</th>
+					<th>Boot ceiling</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>scheduling.maxActiveRequests</code></td>
+					<td>Integer</td>
+					<td><code>&gt;= 1</code></td>
+					<td><code>vLLM</code> (NVIDIA, Ascend), <code>SGLang</code></td>
+					<td><code>&lt;= --max-num-seqs</code> (vLLM) or <code>--max-running-requests</code> (SGLang) when declared</td>
+			</tr>
+			<tr>
+					<td><code>scheduling.maxBatchedTokens</code></td>
+					<td>Integer</td>
+					<td><code>&gt;= 1</code></td>
+					<td><code>vLLM</code> (NVIDIA, Ascend), <code>SGLang</code></td>
+					<td><code>&lt;= --max-num-batched-tokens</code> (vLLM) or <code>--chunked-prefill-size</code> (SGLang) when declared</td>
+			</tr>
+			<tr>
+					<td><code>scheduling.longPrefillTokenThreshold</code></td>
+					<td>Integer</td>
+					<td><code>&gt;= 0</code></td>
+					<td><code>vLLM</code> (NVIDIA, Ascend)</td>
+					<td><code>&lt;=</code> effective <code>maxBatchedTokens</code> when declared</td>
+			</tr>
+			<tr>
+					<td><code>scheduling.prefillMaxRequests</code></td>
+					<td>Integer</td>
+					<td><code>&gt;= 1</code></td>
+					<td><code>SGLang</code></td>
+					<td><code>&lt;=</code> effective <code>maxActiveRequests</code> when declared</td>
+			</tr>
+			<tr>
+					<td><code>scheduling.scheduleConservativeness</code></td>
+					<td>Decimal</td>
+					<td><code>[0.1, 2.0]</code></td>
+					<td><code>SGLang</code></td>
+					<td>None</td>
+			</tr>
+			<tr>
+					<td><code>scheduling.prefillDecodeInterval</code></td>
+					<td>Integer</td>
+					<td><code>&gt;= 0</code> (<code>0</code> disables deferral)</td>
+					<td><code>SGLang</code></td>
+					<td>None</td>
+			</tr>
+			<tr>
+					<td><code>scheduling.cacheAwareWindow</code></td>
+					<td>Integer</td>
+					<td><code>&gt;= 0</code></td>
+					<td><code>vLLM</code> (NVIDIA, Ascend)</td>
+					<td>None</td>
+			</tr>
+			<tr>
+					<td><code>scheduling.cacheAwareThreshold</code></td>
+					<td>Decimal</td>
+					<td><code>[0.0, 1.0]</code></td>
+					<td><code>vLLM</code> (NVIDIA, Ascend)</td>
+					<td>None</td>
+			</tr>
+			<tr>
+					<td><code>scheduling.ppMaxMicroBatchSize</code></td>
+					<td>Integer</td>
+					<td><code>&gt;= 1</code> (<code>&lt;= effectiveMaxActiveRequests / ppSize</code>)</td>
+					<td><code>SGLang</code></td>
+					<td>Requires <code>--pp-size</code> or <code>--pipeline-parallel-size &gt; 1</code></td>
+			</tr>
+			<tr>
+					<td><code>scheduling.maxInflightKVLoads</code></td>
+					<td>Integer</td>
+					<td><code>&gt;= 1</code></td>
+					<td><code>vLLM</code> (NVIDIA, Ascend)</td>
+					<td>Requires active KV connector (<code>kvCache</code>, <code>kvTransfer</code>, routed pair, or <code>--kv-transfer-config</code>)</td>
+			</tr>
+			<tr>
+					<td><code>scheduling.maxAsyncKVLoadsPerStep</code></td>
+					<td>Integer</td>
+					<td><code>&gt;= 1</code></td>
+					<td><code>vLLM</code> (NVIDIA, Ascend)</td>
+					<td>Requires active KV connector (<code>kvCache</code>, <code>kvTransfer</code>, routed pair, or <code>--kv-transfer-config</code>)</td>
+			</tr>
+			<tr>
+					<td><code>speculative.acceptThresholdSingle</code></td>
+					<td>Decimal</td>
+					<td><code>[0.0, 1.0]</code></td>
+					<td><code>SGLang</code></td>
+					<td>None</td>
+			</tr>
+			<tr>
+					<td><code>speculative.acceptThresholdAcc</code></td>
+					<td>Decimal</td>
+					<td><code>[0.0, 1.0]</code></td>
+					<td><code>SGLang</code></td>
+					<td>None</td>
+			</tr>
+			<tr>
+					<td><code>speculative.draftBudgetFraction</code></td>
+					<td>Decimal</td>
+					<td><code>(0.0, 1.0]</code> (strictly <code>&gt; 0.0</code>, up to <code>1.0</code>)</td>
+					<td><code>SGLang</code></td>
+					<td>None</td>
+			</tr>
+			<tr>
+					<td><code>elastic.dataParallelWidth</code></td>
+					<td>Integer</td>
+					<td><code>[2, 64]</code></td>
+					<td><code>vLLM</code> (NVIDIA, Ascend)</td>
+					<td><code>&lt;= --elastic-ep-max-dp-size</code> when declared; immutable presence, non-decreasing, <code>replicas: 1</code>, <code>size: 1</code></td>
+			</tr>
+	</tbody>
 </table>
 <p>In vLLM, <code>scheduling.maxActiveRequests</code> updates <code>scheduler.max_num_active_reqs</code> (not
 <code>max_num_running_reqs</code>); in SGLang, it updates a live admission gate. Removing keys or clearing
@@ -1454,70 +1454,70 @@ with <code>Blocked=True</code> (<code>RolePaused</code>).</p>
 <h2 id="pause-and-retirement">Pause and retirement</h2>
 <p>Role pause, replica retirement and <code>Pod</code> deletion drain follow separate lifecycles:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Mode</th>
-          <th>Trigger</th>
-          <th>Capacity and quota</th>
-          <th>Signal and recovery</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><strong>Paused</strong></td>
-          <td><em><code>roles[].pause: true</code></em></td>
-          <td>Keeps <code>Pod</code>s, weights and Kueue <code>Workload</code> quota</td>
-          <td><code>RuntimeControlSynced=True</code>, <code>paused: true</code>, <code>/ready=503</code>, <code>/live=200</code>, scaler <code>RolePaused</code>; set <code>pause: false</code> to resume</td>
-      </tr>
-      <tr>
-          <td><strong>Retiring</strong></td>
-          <td><em><code>replicas</code></em> decrease, surplus shed or dropped role</td>
-          <td>Holds <code>Pod</code>s and <code>Workload</code> until drained, then deletes both</td>
-          <td><em><code>status.retirement.state</code></em> steps to <code>Deleting</code>; re-declaring the ordinal before <code>Deleting</code> cancels (<code>RetirementAdopted</code>)</td>
-      </tr>
-      <tr>
-          <td><strong><code>Pod</code> drain</strong></td>
-          <td>Rollout, eviction or post-retirement delete</td>
-          <td>Holds devices up to <em><code>terminationGracePeriodSeconds</code></em> (<code>G</code>, default <code>30 s</code>)</td>
-          <td><code>preStop</code> drains in-flight work before <code>SIGTERM</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Mode</th>
+					<th>Trigger</th>
+					<th>Capacity and quota</th>
+					<th>Signal and recovery</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><strong>Paused</strong></td>
+					<td><em><code>roles[].pause: true</code></em></td>
+					<td>Keeps <code>Pod</code>s, weights and Kueue <code>Workload</code> quota</td>
+					<td><code>RuntimeControlSynced=True</code>, <code>paused: true</code>, <code>/ready=503</code>, <code>/live=200</code>, scaler <code>RolePaused</code>; set <code>pause: false</code> to resume</td>
+			</tr>
+			<tr>
+					<td><strong>Retiring</strong></td>
+					<td><em><code>replicas</code></em> decrease, surplus shed or dropped role</td>
+					<td>Holds <code>Pod</code>s and <code>Workload</code> until drained, then deletes both</td>
+					<td><em><code>status.retirement.state</code></em> steps to <code>Deleting</code>; re-declaring the ordinal before <code>Deleting</code> cancels (<code>RetirementAdopted</code>)</td>
+			</tr>
+			<tr>
+					<td><strong><code>Pod</code> drain</strong></td>
+					<td>Rollout, eviction or post-retirement delete</td>
+					<td>Holds devices up to <em><code>terminationGracePeriodSeconds</code></em> (<code>G</code>, default <code>30 s</code>)</td>
+					<td><code>preStop</code> drains in-flight work before <code>SIGTERM</code></td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="retirement-budgets">Retirement budgets</h3>
 <p>At most one retirement runs per deployment (<em><code>status.retirement</code></em>); unscheduled or unadmitted
 replicas delete immediately without running the protocol:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Retirement step</th>
-          <th>Budget</th>
-          <th>Behavior</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>Withdrawing</code></td>
-          <td><code>30 s</code></td>
-          <td>Revokes <code>endpoint-eligible</code> and awaits Router withdrawal (requires <em><code>spec.router</code></em>)</td>
-      </tr>
-      <tr>
-          <td><code>Draining</code></td>
-          <td><code>240 s</code></td>
-          <td>Waits <code>60 s</code> on disaggregated (<em>PD</em> / <em>External DP</em>) replicas, then requires two idle <code>pods/exec</code> <code>/metrics</code> reads</td>
-      </tr>
-      <tr>
-          <td><code>Settling</code></td>
-          <td><code>30 s</code></td>
-          <td>Deletes UID-preconditioned <code>Pod</code>s and <code>Workload</code> (<code>300 s</code> total operation cap)</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Retirement step</th>
+					<th>Budget</th>
+					<th>Behavior</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Withdrawing</code></td>
+					<td><code>30 s</code></td>
+					<td>Revokes <code>endpoint-eligible</code> and awaits Router withdrawal (requires <em><code>spec.router</code></em>)</td>
+			</tr>
+			<tr>
+					<td><code>Draining</code></td>
+					<td><code>240 s</code></td>
+					<td>Waits <code>60 s</code> on disaggregated (<em>PD</em> / <em>External DP</em>) replicas, then requires two idle <code>pods/exec</code> <code>/metrics</code> reads</td>
+			</tr>
+			<tr>
+					<td><code>Settling</code></td>
+					<td><code>30 s</code></td>
+					<td>Deletes UID-preconditioned <code>Pod</code>s and <code>Workload</code> (<code>300 s</code> total operation cap)</td>
+			</tr>
+	</tbody>
 </table>
 <p>Exceeding any budget before <code>Deleting</code> sets <code>state: Aborted</code> and keeps the <code>Pod</code>s and quota.
 Inspect active or stalled retirement:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n &lt;namespace&gt; get modeldeployment &lt;name&gt; -o json <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;{retirement: .status.retirement, roles: [.status.roles[] | {name, ready, desired, runtimeControl}]}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  <span class="p">|</span> jq <span class="s1">&#39;{retirement: .status.retirement, roles: [.status.roles[] | {name, ready, desired, runtimeControl}]}&#39;</span></span></span></code></pre></div>
 </div>
 <h3 id="drain-window-and-grace">Drain window and grace</h3>
 <p>On <code>Pod</code> deletion, <code>preStop</code> serves normally for <code>0</code>–<code>5 s</code> so late-routed traffic lands, polls
@@ -1540,10 +1540,10 @@ router to converge:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n team-a patch modeldeployment qwen-tuned --type<span class="o">=</span>json <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/runtimeControl/parameters/scheduling.maxActiveRequests&#34;,&#34;value&#34;:&#34;24&#34;}]&#39;</span>
+</span></span></span><span class="line"><span class="cl">  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/runtimeControl/parameters/scheduling.maxActiveRequests&#34;,&#34;value&#34;:&#34;24&#34;}]&#39;</span>
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl">kubectl -n team-a patch modeldeployment qwen-tuned --type<span class="o">=</span>json <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/pause&#34;,&#34;value&#34;:true}]&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/pause&#34;,&#34;value&#34;:true}]&#39;</span></span></span></code></pre></div>
 </div>
 <h3 id="step-3-verify-runtime-settings">Step 3: Verify runtime settings</h3>
 <p>Inspect <code>RuntimeControlSynced</code>, <em><code>status.roles[].runtimeControl</code></em> and scaler <code>Blocked</code> conditions:</p>
@@ -1553,65 +1553,65 @@ router to converge:</p>
 </span></span><span class="line"><span class="cl">kubectl -n team-a get modeldeploymentscaler -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.metadata.name}{&#34;\t&#34;}{.status.conditions[?(@.type==&#34;Blocked&#34;)]}{&#34;\n&#34;}{end}&#39;</span></span></span></code></pre></div>
 </div>
 <table>
-  <thead>
-      <tr>
-          <th>Condition</th>
-          <th>Reason</th>
-          <th>Meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>True</code></td>
-          <td><code>Synced</code></td>
-          <td>All answering <code>Pod</code>s match desired <code>runtimeControl</code> and <code>pause</code></td>
-      </tr>
-      <tr>
-          <td><code>True</code></td>
-          <td><code>NotConfigured</code></td>
-          <td>No role sets <code>runtimeControl</code> or <code>pause</code> and prior state is restored</td>
-      </tr>
-      <tr>
-          <td><code>Unknown</code></td>
-          <td><code>WaitingForRouterIsolation</code></td>
-          <td>Router <code>Deployment</code> has not converged on Envoy allowlist</td>
-      </tr>
-      <tr>
-          <td><code>Unknown</code></td>
-          <td><code>Draining</code></td>
-          <td>Eligible endpoints are draining before pause</td>
-      </tr>
-      <tr>
-          <td><code>Unknown</code></td>
-          <td><code>Reconciling</code></td>
-          <td>Replay, pause toggle or <code>/gpustack/v1/ack</code> in progress</td>
-      </tr>
-      <tr>
-          <td><code>Unknown</code></td>
-          <td><code>EndpointUnreachable</code></td>
-          <td>One or more answering <code>Pod</code>s unreachable</td>
-      </tr>
-      <tr>
-          <td><code>False</code></td>
-          <td><code>UnsupportedEngineVersion</code></td>
-          <td>Engine rejected fields in <code>unsupportedFields</code></td>
-      </tr>
-      <tr>
-          <td><code>False</code></td>
-          <td><code>DrainFailed</code></td>
-          <td>Pre-pause incarnation drain failed</td>
-      </tr>
-      <tr>
-          <td><code>False</code></td>
-          <td><code>AmbiguousOperation</code></td>
-          <td>Mutating <code>POST</code> timed out; readback did not settle</td>
-      </tr>
-      <tr>
-          <td><code>False</code></td>
-          <td><code>ReconcileFailed</code></td>
-          <td>Engine returned a validation or apply error</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Condition</th>
+					<th>Reason</th>
+					<th>Meaning</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>True</code></td>
+					<td><code>Synced</code></td>
+					<td>All answering <code>Pod</code>s match desired <code>runtimeControl</code> and <code>pause</code></td>
+			</tr>
+			<tr>
+					<td><code>True</code></td>
+					<td><code>NotConfigured</code></td>
+					<td>No role sets <code>runtimeControl</code> or <code>pause</code> and prior state is restored</td>
+			</tr>
+			<tr>
+					<td><code>Unknown</code></td>
+					<td><code>WaitingForRouterIsolation</code></td>
+					<td>Router <code>Deployment</code> has not converged on Envoy allowlist</td>
+			</tr>
+			<tr>
+					<td><code>Unknown</code></td>
+					<td><code>Draining</code></td>
+					<td>Eligible endpoints are draining before pause</td>
+			</tr>
+			<tr>
+					<td><code>Unknown</code></td>
+					<td><code>Reconciling</code></td>
+					<td>Replay, pause toggle or <code>/gpustack/v1/ack</code> in progress</td>
+			</tr>
+			<tr>
+					<td><code>Unknown</code></td>
+					<td><code>EndpointUnreachable</code></td>
+					<td>One or more answering <code>Pod</code>s unreachable</td>
+			</tr>
+			<tr>
+					<td><code>False</code></td>
+					<td><code>UnsupportedEngineVersion</code></td>
+					<td>Engine rejected fields in <code>unsupportedFields</code></td>
+			</tr>
+			<tr>
+					<td><code>False</code></td>
+					<td><code>DrainFailed</code></td>
+					<td>Pre-pause incarnation drain failed</td>
+			</tr>
+			<tr>
+					<td><code>False</code></td>
+					<td><code>AmbiguousOperation</code></td>
+					<td>Mutating <code>POST</code> timed out; readback did not settle</td>
+			</tr>
+			<tr>
+					<td><code>False</code></td>
+					<td><code>ReconcileFailed</code></td>
+					<td>Engine returned a validation or apply error</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="limitations">Limitations</h2>
 <ul>
@@ -1626,55 +1626,55 @@ probes.</li>
 </ul>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Owner</th>
-          <th>Action</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>WaitingForRouterIsolation</code> persists</td>
-          <td><code>&lt;deployment&gt;-router</code> <code>Deployment</code></td>
-          <td>Inspect router <code>Pod</code>s and events for Envoy sidecar or image failures.</td>
-      </tr>
-      <tr>
-          <td><code>UnsupportedEngineVersion</code> reported</td>
-          <td><code>ModelDeployment</code> / engine image</td>
-          <td>Read <em><code>status.roles[*].runtimeControl.unsupportedFields</code></em> and remove unsupported keys or upgrade the engine image.</td>
-      </tr>
-      <tr>
-          <td><code>AmbiguousOperation</code> reported</td>
-          <td>Worker <code>Pod</code></td>
-          <td>Inspect worker <code>Pod</code> logs and <code>/gpustack/v1/runtime_config</code> state before retrying.</td>
-      </tr>
-      <tr>
-          <td><code>Pod</code> stays unready after restart</td>
-          <td>Worker <code>Pod</code> / operator worker</td>
-          <td>Check <code>/gpustack/v1/ready</code> response and operator worker logs for replay or <code>/ack</code> errors.</td>
-      </tr>
-      <tr>
-          <td><code>RolePaused</code> blocks scaler</td>
-          <td><code>ModelDeployment</code></td>
-          <td>Set <em><code>spec.roles[*].pause: false</code></em> and wait for <code>RuntimeControlSynced=True</code>.</td>
-      </tr>
-      <tr>
-          <td>Retirement <code>Aborted</code> at <code>30 s</code></td>
-          <td><code>ModelDeployment</code></td>
-          <td>Add <em><code>spec.router</code></em> for active scale-down (unrouted <code>Service</code> withdrawal cannot be proved), or scale down before admission.</td>
-      </tr>
-      <tr>
-          <td>Disaggregated retirement stays <code>Draining</code></td>
-          <td><code>ModelDeployment</code> / member <code>Pod</code>s</td>
-          <td>Wait out the normal <code>60 s</code> handoff grace, inspect <em><code>status.retirement.reason</code></em> and <code>/metrics</code>, or raise <em><code>replicas</code></em> before <code>Deleting</code> (<code>RetirementAdopted</code>).</td>
-      </tr>
-      <tr>
-          <td>Admission rejects <code>loraAdapters</code></td>
-          <td><code>ModelDeployment</code></td>
-          <td>Omit <em><code>spec.model.loraAdapters</code></em> until <code>ModelArtifact</code> LoRA support ships.</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Owner</th>
+					<th>Action</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>WaitingForRouterIsolation</code> persists</td>
+					<td><code>&lt;deployment&gt;-router</code> <code>Deployment</code></td>
+					<td>Inspect router <code>Pod</code>s and events for Envoy sidecar or image failures.</td>
+			</tr>
+			<tr>
+					<td><code>UnsupportedEngineVersion</code> reported</td>
+					<td><code>ModelDeployment</code> / engine image</td>
+					<td>Read <em><code>status.roles[*].runtimeControl.unsupportedFields</code></em> and remove unsupported keys or upgrade the engine image.</td>
+			</tr>
+			<tr>
+					<td><code>AmbiguousOperation</code> reported</td>
+					<td>Worker <code>Pod</code></td>
+					<td>Inspect worker <code>Pod</code> logs and <code>/gpustack/v1/runtime_config</code> state before retrying.</td>
+			</tr>
+			<tr>
+					<td><code>Pod</code> stays unready after restart</td>
+					<td>Worker <code>Pod</code> / operator worker</td>
+					<td>Check <code>/gpustack/v1/ready</code> response and operator worker logs for replay or <code>/ack</code> errors.</td>
+			</tr>
+			<tr>
+					<td><code>RolePaused</code> blocks scaler</td>
+					<td><code>ModelDeployment</code></td>
+					<td>Set <em><code>spec.roles[*].pause: false</code></em> and wait for <code>RuntimeControlSynced=True</code>.</td>
+			</tr>
+			<tr>
+					<td>Retirement <code>Aborted</code> at <code>30 s</code></td>
+					<td><code>ModelDeployment</code></td>
+					<td>Add <em><code>spec.router</code></em> for active scale-down (unrouted <code>Service</code> withdrawal cannot be proved), or scale down before admission.</td>
+			</tr>
+			<tr>
+					<td>Disaggregated retirement stays <code>Draining</code></td>
+					<td><code>ModelDeployment</code> / member <code>Pod</code>s</td>
+					<td>Wait out the normal <code>60 s</code> handoff grace, inspect <em><code>status.retirement.reason</code></em> and <code>/metrics</code>, or raise <em><code>replicas</code></em> before <code>Deleting</code> (<code>RetirementAdopted</code>).</td>
+			</tr>
+			<tr>
+					<td>Admission rejects <code>loraAdapters</code></td>
+					<td><code>ModelDeployment</code></td>
+					<td>Omit <em><code>spec.model.loraAdapters</code></em> until <code>ModelArtifact</code> LoRA support ships.</td>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

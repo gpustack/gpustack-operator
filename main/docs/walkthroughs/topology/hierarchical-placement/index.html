@@ -20,7 +20,7 @@
   </script>
   
   
-  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
   <meta name="robots" content="noindex, follow">
   <title>Hierarchical Placement Walkthrough · GPUStack Operator</title>
   
@@ -34,7 +34,7 @@
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     
-    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
@@ -1217,61 +1217,61 @@ failure domain, and observe how moving a node between racks differs from changin
 read-only <code>TopologySource</code>, then switch to a versioned <code>ConfigMap</code> rack snapshot and move a node
 without draining queues:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Object</th>
-          <th>Scope</th>
-          <th>Creator</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>TopologySource</code></td>
-          <td>cluster</td>
-          <td>administrator</td>
-          <td>Declares ordered hierarchy levels and where node domain values come from</td>
-      </tr>
-      <tr>
-          <td><code>ConfigMap</code></td>
-          <td>namespace</td>
-          <td>administrator</td>
-          <td>Versioned rack inventory snapshot consumed in Steps 3–5</td>
-      </tr>
-      <tr>
-          <td><code>ModelDeployment</code></td>
-          <td>namespace</td>
-          <td>user</td>
-          <td>Requests domain packing via <em><code>roles[].topology.requiredLevel</code></em></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Object</th>
+					<th>Scope</th>
+					<th>Creator</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>TopologySource</code></td>
+					<td>cluster</td>
+					<td>administrator</td>
+					<td>Declares ordered hierarchy levels and where node domain values come from</td>
+			</tr>
+			<tr>
+					<td><code>ConfigMap</code></td>
+					<td>namespace</td>
+					<td>administrator</td>
+					<td>Versioned rack inventory snapshot consumed in Steps 3–5</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Requests domain packing via <em><code>roles[].topology.requiredLevel</code></em></td>
+			</tr>
+	</tbody>
 </table>
 <h3 id="environment">Environment</h3>
 <table>
-  <thead>
-      <tr>
-          <th>Item</th>
-          <th>Value</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Cluster</td>
-          <td>Kubernetes with GPUStack installed (illustrative configuration examples)</td>
-      </tr>
-      <tr>
-          <td>Nodes</td>
-          <td>Worker <code>Node</code>s carrying <code>topology.kubernetes.io/region</code> and <code>zone</code> in Steps 1–2; <code>ConfigMap</code> snapshot in Steps 3–5</td>
-      </tr>
-      <tr>
-          <td><code>AcceleratorType</code></td>
-          <td><code>gpustack--nvidia-a10g-linux-amd64</code> (substitute an <code>Active</code> pool from <code>kubectl get acctype</code>)</td>
-      </tr>
-      <tr>
-          <td>Model and engine</td>
-          <td><code>Qwen/Qwen2.5-7B-Instruct</code> on vLLM <code>gpustack/runner:cuda13.0-vllm0.29.0</code></td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Cluster</td>
+					<td>Kubernetes with GPUStack installed (illustrative configuration examples)</td>
+			</tr>
+			<tr>
+					<td>Nodes</td>
+					<td>Worker <code>Node</code>s carrying <code>topology.kubernetes.io/region</code> and <code>zone</code> in Steps 1–2; <code>ConfigMap</code> snapshot in Steps 3–5</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td><code>gpustack--nvidia-a10g-linux-amd64</code> (substitute an <code>Active</code> pool from <code>kubectl get acctype</code>)</td>
+			</tr>
+			<tr>
+					<td>Model and engine</td>
+					<td><code>Qwen/Qwen2.5-7B-Instruct</code> on vLLM <code>gpustack/runner:cuda13.0-vllm0.29.0</code></td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="zone-placement">Zone placement</h2>
 <h3 id="step-1-discover-cloud-zones">Step 1: Discover cloud zones</h3>
@@ -1287,10 +1287,10 @@ worker nodes:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cloud-zones</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">node-role.kubernetes.io/worker</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">
@@ -1303,7 +1303,7 @@ worker nodes:</p>
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f cloud-zones.yaml
 </span></span><span class="line"><span class="cl">kubectl get topologysource cloud-zones <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}{&#34;\n&#34;}{end}&#39;</span>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}{&#34;\n&#34;}{end}&#39;</span>
 </span></span><span class="line"><span class="cl">kubectl get topologies.kueue.x-k8s.io</span></span></code></pre></div>
 </div>
 <p>Example output (illustrative):</p>
@@ -1348,7 +1348,7 @@ condition reason in <a href="#troubleshooting">Troubleshooting</a>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n team-a get pods -l app.kubernetes.io/instance<span class="o">=</span>qwen-distributed <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.metadata.name}{&#34;\t&#34;}{.spec.nodeName}{&#34;\n&#34;}{end}&#39;</span> <span class="p">|</span>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.metadata.name}{&#34;\t&#34;}{.spec.nodeName}{&#34;\n&#34;}{end}&#39;</span> <span class="p">|</span>
 </span></span><span class="line"><span class="cl">  <span class="k">while</span> <span class="nb">read</span> -r pod node<span class="p">;</span> <span class="k">do</span>
 </span></span><span class="line"><span class="cl">    <span class="nv">zone</span><span class="o">=</span><span class="k">$(</span>kubectl get node <span class="s2">&#34;</span><span class="nv">$node</span><span class="s2">&#34;</span> -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.metadata.labels.topology\.kubernetes\.io/zone}&#39;</span><span class="k">)</span>
 </span></span><span class="line"><span class="cl">    <span class="nb">printf</span> <span class="s2">&#34;%s\t%s\t%s\n&#34;</span> <span class="s2">&#34;</span><span class="nv">$pod</span><span class="s2">&#34;</span> <span class="s2">&#34;</span><span class="nv">$node</span><span class="s2">&#34;</span> <span class="s2">&#34;</span><span class="nv">$zone</span><span class="s2">&#34;</span>
@@ -1371,11 +1371,11 @@ a three-level <code>ConfigMap</code> rack snapshot:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ConfigMap</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ConfigMap</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">topology-inventory</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-system</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">data</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">data</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">snapshot.yaml</span><span class="p">:</span><span class="w"> </span><span class="p">|</span><span class="sd">
 </span></span></span><span class="line"><span class="cl"><span class="sd">    apiVersion: worker.gpustack.ai/v1alpha1
 </span></span></span><span class="line"><span class="cl"><span class="sd">    kind: TopologySourceConfiguration
@@ -1389,12 +1389,12 @@ a three-level <code>ConfigMap</code> rack snapshot:</p>
 </span></span></span><span class="line"><span class="cl"><span class="sd">        topology.gpustack.ai/region: region-a
 </span></span></span><span class="line"><span class="cl"><span class="sd">        topology.gpustack.ai/zone: zone-a
 </span></span></span><span class="line"><span class="cl"><span class="sd">        topology.gpustack.ai/rack: rack-02</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">data-center</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w"> </span>{}<span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">levels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.gpustack.ai/region</span><span class="w">
@@ -1413,7 +1413,7 @@ a three-level <code>ConfigMap</code> rack snapshot:</p>
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f topology-inventory.yaml
 </span></span><span class="line"><span class="cl">kubectl get topologysource data-center <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}{&#34;\n&#34;}{end}&#39;</span>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}{&#34;\n&#34;}{end}&#39;</span>
 </span></span><span class="line"><span class="cl">kubectl get node worker-a -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.metadata.labels.topology\.gpustack\.ai/rack}{&#34;\n&#34;}&#39;</span></span></span></code></pre></div>
 </div>
 <p>Example output (illustrative):</p>
@@ -1441,7 +1441,7 @@ rather than editing NFD <code>NodeFeature</code> objects directly; see
 </span></span><span class="line"><span class="cl">     - name: server
 </span></span><span class="line"><span class="cl">       topology:
 </span></span><span class="line"><span class="cl"><span class="gd">-        requiredLevel: topology.kubernetes.io/zone
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+        requiredLevel: topology.gpustack.ai/rack
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        requiredLevel: topology.gpustack.ai/rack
 </span></span></span></code></pre></div>
 </div>
 <p>Verify that the rolled replica schedules all <code>size</code> <code>Pod</code>s on <code>Node</code>s sharing one
@@ -1461,8 +1461,8 @@ rather than editing NFD <code>NodeFeature</code> objects directly; see
 </span></span><span class="line"><span class="cl">     apiVersion: worker.gpustack.ai/v1alpha1
 </span></span><span class="line"><span class="cl">     kind: TopologySourceConfiguration
 </span></span><span class="line"><span class="cl"><span class="gd">-    revision: inventory-42
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    revision: inventory-43
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>     nodes:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    revision: inventory-43
+</span></span></span><span class="line"><span class="cl">     nodes:
 </span></span><span class="line"><span class="cl">       worker-a:
 </span></span><span class="line"><span class="cl">         topology.gpustack.ai/region: region-a
 </span></span><span class="line"><span class="cl">         topology.gpustack.ai/zone: zone-a
@@ -1471,7 +1471,7 @@ rather than editing NFD <code>NodeFeature</code> objects directly; see
 </span></span><span class="line"><span class="cl">         topology.gpustack.ai/region: region-a
 </span></span><span class="line"><span class="cl">         topology.gpustack.ai/zone: zone-a
 </span></span><span class="line"><span class="cl"><span class="gd">-        topology.gpustack.ai/rack: rack-02
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+        topology.gpustack.ai/rack: rack-03
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        topology.gpustack.ai/rack: rack-03
 </span></span></span></code></pre></div>
 </div>
 <p>Confirm that <code>worker-b</code> updates its rack label while keeping the same <code>topology.gpustack.ai/profile</code>
@@ -1479,7 +1479,7 @@ hash:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get node worker-b <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.metadata.labels.topology\.gpustack\.ai/rack}{&#34;\t&#34;}{.metadata.labels.topology\.gpustack\.ai/profile}{&#34;\n&#34;}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl">  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.metadata.labels.topology\.gpustack\.ai/rack}{&#34;\t&#34;}{.metadata.labels.topology\.gpustack\.ai/profile}{&#34;\n&#34;}&#39;</span></span></span></code></pre></div>
 </div>
 <p>Because <code>spec.levels</code> did not change, the profile hash stays identical and no <code>HoldAndDrain</code> queue
 migration occurs. Editing <code>spec.levels</code> changes the profile hash and drains queues; see
@@ -1496,41 +1496,41 @@ hostname-only profile (<a href="/gpustack-operator/main/docs/modules/topology/op
 </ul>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
-  <thead>
-      <tr>
-          <th>Symptom</th>
-          <th>Signal</th>
-          <th>Resolution</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>TopologySource</code> <code>Ready=False</code></td>
-          <td><code>Reason: InvalidHierarchy</code> or <code>SnapshotInvalid</code></td>
-          <td>A child value maps to multiple parent values, or snapshot YAML is invalid. Fix the <code>ConfigMap</code> snapshot or node labels so levels form a strict tree.</td>
-      </tr>
-      <tr>
-          <td><code>TopologySource</code> <code>Ready=False</code></td>
-          <td><code>Reason: OwnershipConflict</code></td>
-          <td>Two writable <code>TopologySource</code>s match the same <code>Node</code>. Make their <em><code>spec.nodeSelector</code></em> sets disjoint.</td>
-      </tr>
-      <tr>
-          <td><code>TopologySource</code> <code>Valid=False</code></td>
-          <td><code>Reason: ConfigMapReadFailed</code></td>
-          <td>Confirm <em><code>configMapRef.name</code></em>, <em><code>namespace</code></em>, and <em><code>key</code></em> exist and are readable by the worker.</td>
-      </tr>
-      <tr>
-          <td><code>Node</code> falls back to hostname profile</td>
-          <td>Selected by zero or multiple Ready sources</td>
-          <td>Inspect <em><code>spec.nodeSelector</code></em> across <code>kubectl get topologysources -o yaml</code> so exactly one Ready source matches the <code>Node</code>.</td>
-      </tr>
-      <tr>
-          <td>Multi-role replica reserves one <code>Workload</code> while <code>Pod</code>s wait</td>
-          <td>Joint admission gang hold</td>
-          <td>One role fits its domain while a peer role (<em>Prefill</em> or <em>Decode</em>) awaits domain capacity; check <code>Workload</code> conditions across all roles (<a href="/gpustack-operator/main/docs/modules/topology/operations/#diagnose-pending-workloads">Diagnose Pending workloads</a>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>TopologySource</code> <code>Ready=False</code></td>
+					<td><code>Reason: InvalidHierarchy</code> or <code>SnapshotInvalid</code></td>
+					<td>A child value maps to multiple parent values, or snapshot YAML is invalid. Fix the <code>ConfigMap</code> snapshot or node labels so levels form a strict tree.</td>
+			</tr>
+			<tr>
+					<td><code>TopologySource</code> <code>Ready=False</code></td>
+					<td><code>Reason: OwnershipConflict</code></td>
+					<td>Two writable <code>TopologySource</code>s match the same <code>Node</code>. Make their <em><code>spec.nodeSelector</code></em> sets disjoint.</td>
+			</tr>
+			<tr>
+					<td><code>TopologySource</code> <code>Valid=False</code></td>
+					<td><code>Reason: ConfigMapReadFailed</code></td>
+					<td>Confirm <em><code>configMapRef.name</code></em>, <em><code>namespace</code></em>, and <em><code>key</code></em> exist and are readable by the worker.</td>
+			</tr>
+			<tr>
+					<td><code>Node</code> falls back to hostname profile</td>
+					<td>Selected by zero or multiple Ready sources</td>
+					<td>Inspect <em><code>spec.nodeSelector</code></em> across <code>kubectl get topologysources -o yaml</code> so exactly one Ready source matches the <code>Node</code>.</td>
+			</tr>
+			<tr>
+					<td>Multi-role replica reserves one <code>Workload</code> while <code>Pod</code>s wait</td>
+					<td>Joint admission gang hold</td>
+					<td>One role fits its domain while a peer role (<em>Prefill</em> or <em>Decode</em>) awaits domain capacity; check <code>Workload</code> conditions across all roles (<a href="/gpustack-operator/main/docs/modules/topology/operations/#diagnose-pending-workloads">Diagnose Pending workloads</a>
 ).</td>
-      </tr>
-  </tbody>
+			</tr>
+	</tbody>
 </table>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
