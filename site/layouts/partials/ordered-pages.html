@@ -1,5 +1,5 @@
 {{- $parentKey := partial "page-key.html" . -}}
-{{- $order := index site.Data.navigation.order $parentKey | default slice -}}
+{{- $order := index hugo.Data.navigation.order $parentKey | default slice -}}
 {{- $pages := .Pages -}}
 {{- $result := slice -}}
 {{- $included := slice -}}

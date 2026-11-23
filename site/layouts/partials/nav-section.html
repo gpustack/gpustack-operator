@@ -1,7 +1,7 @@
 {{ $page := .page }}
 {{ $current := .current }}
 {{ $active := hasPrefix $current.RelPermalink $page.RelPermalink }}
-{{ $childrenMap := site.Data.navigation.children | default dict }}
+{{ $childrenMap := hugo.Data.navigation.children | default dict }}
 {{ $pagesBySlug := dict }}
 {{ range $page.Pages }}
   {{ $slug := path.Base (strings.TrimSuffix "/" .RelPermalink) }}
@@ -25,7 +25,7 @@
   <summary title="{{ partial "page-title.html" $page }}">{{ .name }}</summary>
   <div class="nav-children">
     {{ if $page.Content }}
-      {{ $overviewLabels := site.Data.navigation.overview_labels | default dict }}
+      {{ $overviewLabels := hugo.Data.navigation.overview_labels | default dict }}
       {{ $overviewLabel := index $overviewLabels (partial "page-key.html" $page) | default "Overview" }}
       <a title="{{ partial "page-title.html" $page }}" href="{{ $page.RelPermalink }}" {{ if eq $current.RelPermalink $page.RelPermalink }}aria-current="page"{{ end }}>{{ $overviewLabel }}</a>
     {{ end }}
