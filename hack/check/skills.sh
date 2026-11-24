@@ -31,6 +31,11 @@
 # in declaration order and the first matching path wins, so sorting that array would silently
 # repoint files at a different prompt.
 #
+# E2E CASE CONTIGUITY AND INDEX SYNC. The E2E suites keep numbered scripts under cases/ and a
+# matching `## Cases` table in SKILL.md. Numbering gaps, non-1 starts, non-executable scripts,
+# stale table rows, unindexed scripts, or out-of-order rows silently break discovery and audit
+# tooling, so both disk contiguity (1..N) and 1-to-1 SKILL.md table alignment are enforced here.
+#
 # EXIT: 0 nothing found, 1 findings reported, 2 the check could not run (its own diagnostic).
 
 set -o pipefail
@@ -228,6 +233,133 @@ if [[ "${mirrored}" != "${excludes}" ]]; then
   diff <(printf '%s\n' "${excludes}") <(printf '%s\n' "${mirrored}") |
     sed 's/^/check\/skills:   /' >&2
 fi
+
+# --- E2E case contiguity and SKILL.md index sync ---------------------------------------------
+
+# check_contiguous_cases <skill-name> <prefix> <required>
+# Verifies that .agents/skills/<skill-name>/cases/<prefix>-*.sh are strictly contiguous 1..N,
+# executable, and mirrored 1-to-1 in ascending order in SKILL.md's `## Cases` table.
+check_contiguous_cases() {
+  local skill_name="$1"
+  local prefix="$2"
+  local required="$3"
+  local skill_dir="${SKILLS_DIR}/${skill_name}"
+  local skill_md="${skill_dir}/SKILL.md"
+  local cases_dir="${skill_dir}/cases"
+  local rel_md=".agents/skills/${skill_name}/SKILL.md"
+  local rel_cases=".agents/skills/${skill_name}/cases"
+
+  if [[ "${required}" != "true" && ! -d "${cases_dir}" ]]; then
+    return 0
+  fi
+
+  [[ -f "${skill_md}" ]] || cannot_run "missing ${skill_md}"
+  if [[ ! -d "${cases_dir}" ]]; then
+    report "${rel_cases}: cases directory is missing"
+    return 0
+  fi
+
+  local valid_re="^${prefix}-([1-9][0-9]*)\.sh$"
+  local f base
+  local disk_nums=()
+  local any_files=0
+
+  for f in "${cases_dir}/${prefix}-"*.sh; do
+    [[ -e "${f}" ]] || continue
+    any_files=1
+    base="$(basename "${f}")"
+    if [[ "${base}" =~ ${valid_re} ]]; then
+      disk_nums+=("${BASH_REMATCH[1]}")
+    else
+      report "${rel_cases}/${base}: invalid ${prefix} filename (expected ${prefix}-<N>.sh with positive integer N and no leading zero)"
+    fi
+    if [[ ! -x "${f}" ]]; then
+      report "${rel_cases}/${base}: script is not executable (chmod +x)"
+    fi
+  done
+
+  if [[ ${any_files} -eq 0 || ${#disk_nums[@]} -eq 0 ]]; then
+    report "${rel_cases}: no valid ${prefix}-<N>.sh scripts found"
+    return 0
+  fi
+
+  local sorted_nums=""
+  sorted_nums="$(printf '%s\n' "${disk_nums[@]}" | sort -n)"
+
+  local first_num="" prev_num="" cur_num="" g
+  local disk_list=""
+  while IFS= read -r cur_num; do
+    [[ -n "${cur_num}" ]] || continue
+    if [[ -z "${first_num}" ]]; then
+      first_num="${cur_num}"
+      if [[ "${first_num}" -ne 1 ]]; then
+        report "${rel_cases}: ${prefix} numbering starts at ${prefix}-${first_num}.sh, expected ${prefix}-1.sh"
+      fi
+    elif [[ $((cur_num - prev_num)) -gt 1 ]]; then
+      g=$((prev_num + 1))
+      while [[ ${g} -lt ${cur_num} ]]; do
+        report "${rel_cases}: numbering gap -- missing ${prefix}-${g}.sh"
+        g=$((g + 1))
+      done
+    fi
+    prev_num="${cur_num}"
+    if [[ -n "${disk_list}" ]]; then
+      disk_list="${disk_list}"$'\n'"${prefix}-${cur_num}.sh"
+    else
+      disk_list="${prefix}-${cur_num}.sh"
+    fi
+  done <<<"${sorted_nums}"
+
+  local table_entries=""
+  table_entries="$(awk -v pfx="${prefix}" '
+    /^## Cases([[:space:]]|$)/ { inside = 1; next }
+    inside && /^## /           { exit }
+    inside && $0 ~ "^\\|[[:space:]]*`cases/" pfx "-[^`]+\\.sh`[[:space:]]*\\|" {
+      line = $0
+      sub("^\\|[[:space:]]*`cases/", "", line)
+      sub("`[[:space:]]*\\|.*$", "", line)
+      print line
+    }
+  ' "${skill_md}")"
+
+  if [[ -z "${table_entries}" ]]; then
+    report "${rel_md}: no 'cases/${prefix}-<N>.sh' rows found under '## Cases'"
+    return 0
+  fi
+
+  local entry seen_entries="" prev_table_num=0 table_num
+  while IFS= read -r entry; do
+    [[ -n "${entry}" ]] || continue
+    if ! [[ "${entry}" =~ ${valid_re} ]]; then
+      report "${rel_md}: invalid table row 'cases/${entry}' (expected cases/${prefix}-<N>.sh)"
+      continue
+    fi
+    table_num="${BASH_REMATCH[1]}"
+    if [[ "${seen_entries}" == *"|${entry}|"* ]]; then
+      report "${rel_md}: duplicate table row 'cases/${entry}'"
+    else
+      seen_entries="${seen_entries}|${entry}|"
+    fi
+    if [[ "${prev_table_num}" -gt 0 && "${table_num}" -lt "${prev_table_num}" ]]; then
+      report "${rel_md}: out-of-order table row 'cases/${entry}' appears after 'cases/${prefix}-${prev_table_num}.sh'"
+    fi
+    prev_table_num="${table_num}"
+    if ! grep -qxF -- "${entry}" <<<"${disk_list}"; then
+      report "${rel_md}: stale table row 'cases/${entry}' (file does not exist under ${rel_cases})"
+    fi
+  done <<<"${table_entries}"
+
+  local disk_entry
+  while IFS= read -r disk_entry; do
+    [[ -n "${disk_entry}" ]] || continue
+    if ! grep -qxF -- "${disk_entry}" <<<"${table_entries}"; then
+      report "${rel_md}: missing table row for '${rel_cases}/${disk_entry}'"
+    fi
+  done <<<"${disk_list}"
+}
+
+check_contiguous_cases "gpustack-operator-e2e" "case" "true"
+check_contiguous_cases "gpustack-operator-e2e-chaos" "chaos" "false"
 
 [[ ${findings} -eq 0 ]] || exit 1
 exit 0

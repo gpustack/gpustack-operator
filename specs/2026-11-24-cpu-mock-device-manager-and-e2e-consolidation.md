@@ -336,7 +336,7 @@ type Allocator interface {
       Acceptance: Replaces all 90 legacy `case-*.sh` files with `case-1.sh .. case-37.sh` from `cases/next/`, removes `cases/next/`, updates `SKILL.md` (exact `1..37` table with accurate `Needs` column and zero retired absorbed-number lists), `_env-audit.sh`, `run-partition-block.sh`, `run-rdma-block.sh`, `_*-lib.sh`, `references/*.md`, and cross-references in `_e2e-lib/` and `gpustack-operator-benchmark/`.
       Verify: `bash .agents/skills/gpustack-operator-e2e/cases/_env-audit.sh gpustack-system && make lint agents-shell && make lint docs`
 
-- [ ] **T11 · Add automated E2E case contiguity and `SKILL.md` index sync gate**
+- [x] **T11 · Add automated E2E case contiguity and `SKILL.md` index sync gate**
       Blocked by: T10
       Owns: `hack/check/skills.sh`, `hack/check/skills-selftest.sh`
       Gate: review
