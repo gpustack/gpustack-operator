@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"gpustack.ai/gpustack/pkg/devicemanager/allocator"
+	allocatormock "gpustack.ai/gpustack/pkg/devicemanager/allocator/mock"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector"
 	"gpustack.ai/gpustack/pkg/devicemanager/exporter"
 	"gpustack.ai/gpustack/pkg/manager"
@@ -59,10 +60,12 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	o.DetectorOptions.AddFlags(fs)
 
 	// Allocator.
-	o.AllocatorOptions.AddFlags(fs)
+	o.AllocatorOptions.AddFlags(fs, allocator.WithoutMockDevicesOptions())
 }
 
 func (o *Options) Validate(ctx context.Context) error {
+	o.AllocatorOptions.MockDevicesFile = o.DetectorOptions.MockDevicesFile
+
 	// Server.
 	if err := o.ServerOptions.Validate(ctx); err != nil {
 		return err
@@ -87,6 +90,8 @@ func (o *Options) Validate(ctx context.Context) error {
 }
 
 func (o *Options) Complete(ctx context.Context) (*Config, error) {
+	o.AllocatorOptions.MockDevicesFile = o.DetectorOptions.MockDevicesFile
+
 	// Server.
 	srvConfig, err := o.ServerOptions.Complete(ctx)
 	if err != nil {
@@ -109,6 +114,14 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 	alcConfig, err := o.AllocatorOptions.Complete(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	if detConfig.MockSpecStore != nil {
+		partStore := allocatormock.NewPartitionStore()
+		detConfig.MockPartitionProvider = partStore
+		alcConfig.MockDevicesFile = detConfig.MockDevicesFile
+		alcConfig.MockSpecStore = detConfig.MockSpecStore
+		alcConfig.MockPartitionStore = partStore
 	}
 
 	// Create a channel for sharing detected manufacturers between detector and allocator.

@@ -1,26 +1,39 @@
 package detector
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	yaml "gopkg.in/yaml.v3"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
+	allocatormock "gpustack.ai/gpustack/pkg/devicemanager/allocator/mock"
+	"gpustack.ai/gpustack/pkg/devicemanager/kuberess"
+	"gpustack.ai/gpustack/pkg/devicemanager/mockspec"
+	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
+	kubefake "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/fake"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemname"
+	"gpustack.ai/gpustack/pkg/utils/varx"
 )
 
 // TestAcceleratableDevicesSelectorLabels pins that the Devices selector labels are derived from the
@@ -1104,4 +1117,521 @@ func TestStartDetectsAgainAfterAFailedPass(t *testing.T) {
 			t.Fatalf("round %d never came: the loop settled on a substituted result", round)
 		}
 	}
+}
+
+func writeTempMockSpec(t *testing.T, content string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "mock-devices.yaml")
+	require.NoError(t, os.WriteFile(p, []byte(content), 0o600))
+	return p
+}
+
+func atomicRewriteMockSpec(t *testing.T, path, content string) {
+	t.Helper()
+	tmp := path + ".next"
+	require.NoError(t, os.WriteFile(tmp, []byte(content), 0o600))
+	require.NoError(t, os.Rename(tmp, path))
+}
+
+func configureFakeLoopbackClient(t *testing.T, node *core.Node, extra ...workercore.Devices) *kubefake.Clientset {
+	t.Helper()
+	require.Nil(t, system.LoopbackKubeClient.Get())
+	cli := kubefake.NewSimpleClientset(node)
+	for i := range extra {
+		_, err := cli.WorkerV1alpha1().Devices().Create(context.Background(), &extra[i], meta.CreateOptions{})
+		require.NoError(t, err)
+	}
+	system.LoopbackKubeClient.Configure(cli)
+	t.Cleanup(func() {
+		system.LoopbackKubeClient = varx.Once[kubernetes.Interface]{}
+	})
+	return cli
+}
+
+func TestOptions_MockDevicesFile(t *testing.T) {
+	validSpec := writeTempMockSpec(t, "preset: nvidia-h100\ncount: 2\n")
+	invalidSpec := writeTempMockSpec(t, "preset: unknown-preset\n")
+	missingSpec := filepath.Join(t.TempDir(), "missing.yaml")
+
+	cases := []struct {
+		name        string
+		envVal      string
+		args        []string
+		wantErr     string
+		wantMockSet bool
+		wantPath    string
+	}{
+		{
+			name:        "default disabled when env and flag are unset",
+			wantMockSet: false,
+		},
+		{
+			name:        "env var activates mock mode when flag is omitted",
+			envVal:      validSpec,
+			wantMockSet: true,
+			wantPath:    validSpec,
+		},
+		{
+			name:        "cli flag overrides invalid env var",
+			envVal:      missingSpec,
+			args:        []string{"--mock-devices-file=" + validSpec},
+			wantMockSet: true,
+			wantPath:    validSpec,
+		},
+		{
+			name:        "explicit empty cli flag disables mock mode set in env",
+			envVal:      validSpec,
+			args:        []string{"--mock-devices-file="},
+			wantMockSet: false,
+		},
+		{
+			name:    "missing mock file fails validation",
+			args:    []string{"--mock-devices-file=" + missingSpec},
+			wantErr: "--mock-devices-file",
+		},
+		{
+			name:    "invalid mock schema fails validation",
+			args:    []string{"--mock-devices-file=" + invalidSpec},
+			wantErr: "--mock-devices-file",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(MockDevicesFileEnv, tc.envVal)
+			opts := NewOptions()
+			fs := pflag.NewFlagSet("detector-test", pflag.ContinueOnError)
+			opts.AddFlags(fs)
+			require.NoError(t, fs.Parse(tc.args))
+
+			err := opts.Validate(context.Background())
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+
+			cfg, err := opts.Complete(context.Background())
+			require.NoError(t, err)
+			if !tc.wantMockSet {
+				assert.Empty(t, cfg.MockDevicesFile)
+				assert.Nil(t, cfg.MockSpecStore)
+				det, applyErr := cfg.Apply(context.Background())
+				require.NoError(t, applyErr)
+				assert.Nil(t, det.mockSpecStore)
+				return
+			}
+
+			assert.Equal(t, tc.wantPath, cfg.MockDevicesFile)
+			require.NotNil(t, cfg.MockSpecStore)
+			assert.Equal(t, tc.wantPath, cfg.MockSpecStore.Path())
+		})
+	}
+}
+
+func TestReportDevices_MockAnnotationBoundary(t *testing.T) {
+	const nodeName = "node-mock-boundary"
+	node := &core.Node{
+		ObjectMeta: meta.ObjectMeta{
+			Name: nodeName,
+			UID:  types.UID("uid-" + nodeName),
+			Labels: map[string]string{
+				core.LabelOSStable:   "linux",
+				core.LabelArchStable: "amd64",
+			},
+		},
+	}
+	specPath := writeTempMockSpec(t, "preset: nvidia-h100\ncount: 1\n")
+
+	cases := []struct {
+		name             string
+		mockEnabled      bool
+		existing         *workercore.Devices
+		wantMockAnno     bool
+		wantPreservedKey string
+		wantPreservedVal string
+	}{
+		{
+			name:         "default disabled creates Devices without mock annotation",
+			mockEnabled:  false,
+			wantMockAnno: false,
+		},
+		{
+			name:        "default disabled updates existing Devices without stamping mock annotation",
+			mockEnabled: false,
+			existing: &workercore.Devices{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{"example.com/keep": "yes"},
+				},
+			},
+			wantMockAnno:     false,
+			wantPreservedKey: "example.com/keep",
+			wantPreservedVal: "yes",
+		},
+		{
+			name:         "mock enabled creates Devices with mock annotation true",
+			mockEnabled:  true,
+			wantMockAnno: true,
+		},
+		{
+			name:        "mock enabled updates existing Devices stamping mock annotation and preserving others",
+			mockEnabled: true,
+			existing: &workercore.Devices{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{"example.com/keep": "yes"},
+				},
+			},
+			wantMockAnno:     true,
+			wantPreservedKey: "example.com/keep",
+			wantPreservedVal: "yes",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KUBERNETES_NODE_NAME", nodeName)
+			var extra []workercore.Devices
+			if tc.existing != nil {
+				extra = append(extra, *tc.existing.DeepCopy())
+			}
+			cli := configureFakeLoopbackClient(t, node, extra...)
+
+			var d *Detector
+			if tc.mockEnabled {
+				var err error
+				d, err = New(&Config{
+					Manufacturers:   sets.New("nvidia"),
+					MonitorPeriod:   time.Hour,
+					MockDevicesFile: specPath,
+				})
+				require.NoError(t, err)
+			} else {
+				d = &Detector{
+					manufacturers:           sets.New("nvidia"),
+					detectors:               []device.Detector{newScriptedDetector("nvidia", []scriptedPass{{groups: groupsFixture("nvidia", "gpu-0")}}, nil)},
+					reportedInterfacesKnown: true,
+				}
+			}
+
+			grps, _ := d.DetectAccelerator(context.Background())
+			require.NoError(t, d.reportDevices(context.Background(), grps))
+
+			stored, err := cli.WorkerV1alpha1().Devices().Get(context.Background(), nodeName, meta.GetOptions{})
+			require.NoError(t, err)
+			if tc.wantMockAnno {
+				assert.Equal(t, "true", stored.Annotations[MockDevicesAnnotationKey])
+				// Verify second unchanged alignment skips API write.
+				alignment := devicesAlignment{
+					expected:       stored.DeepCopy(),
+					node:           node,
+					labels:         stored.Labels,
+					annotations:    map[string]string{MockDevicesAnnotationKey: "true"},
+					manufacturers:  sets.New("nvidia"),
+					syncInterfaces: true,
+				}
+				_, skip, applyErr := alignment.apply(stored.DeepCopy())
+				require.NoError(t, applyErr)
+				assert.True(t, skip, "unchanged mock annotation must not trigger another write")
+			} else {
+				assert.NotContains(t, stored.Annotations, MockDevicesAnnotationKey)
+			}
+			if tc.wantPreservedKey != "" {
+				assert.Equal(t, tc.wantPreservedVal, stored.Annotations[tc.wantPreservedKey])
+			}
+		})
+	}
+}
+
+func TestStart_MockDetectorLoopAndHotReload(t *testing.T) {
+	const nodeName = "node-mock-loop"
+	t.Setenv("KUBERNETES_NODE_NAME", nodeName)
+
+	node := &core.Node{
+		ObjectMeta: meta.ObjectMeta{
+			Name: nodeName,
+			UID:  types.UID("uid-" + nodeName),
+			Labels: map[string]string{
+				core.LabelOSStable:   "linux",
+				core.LabelArchStable: "amd64",
+			},
+		},
+	}
+	cli := configureFakeLoopbackClient(t, node)
+
+	initialYAML := `
+manufacturers:
+  nvidia:
+    preset: nvidia-h100
+    count: 2
+interfaces:
+  - name: eth-rdma0
+    bus: pci
+    pciBusId: "0000:10:00.0"
+    numaAffinity: "0"
+    mtu: 9000
+    up: true
+    rdma: true
+    rdmaDevice: mlx5_0
+    link:
+      state: OK
+rdmaDevices:
+  - name: mlx5_0
+    driver: mlx5_core
+    pciBusId: "0000:10:00.0"
+    numaAffinity: "0"
+    ports:
+      - number: 1
+        netDevs: ["eth-rdma0"]
+        linkLayer: InfiniBand
+        state: ACTIVE
+        physicalState: LinkUp
+`
+	specPath := writeTempMockSpec(t, initialYAML)
+
+	publishedCh := make(chan sets.Set[string], 16)
+	d, err := New(&Config{
+		Manufacturers:           sets.New("nvidia"),
+		MonitorPeriod:           15 * time.Millisecond,
+		MockDevicesFile:         specPath,
+		DetectedManufacturersCh: publishedCh,
+	})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = d.Start(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	// 1. Initial healthy detection, NodeFeature + Devices creation, RDMA + Monitor snapshots.
+	select {
+	case published := <-publishedCh:
+		assert.Equal(t, sets.New("nvidia"), published)
+	case <-time.After(detectorTimeout):
+		t.Fatal("timed out waiting for initial mock manufacturer publication")
+	}
+
+	require.Eventually(t, func() bool {
+		devs, getErr := cli.WorkerV1alpha1().Devices().Get(ctx, nodeName, meta.GetOptions{})
+		return getErr == nil && len(devs.Spec.Groups) == 1 && len(devs.Spec.Groups[0].Accelerators) == 2 &&
+			d.MonitorSnapshot() != nil
+	}, detectorTimeout, 10*time.Millisecond)
+
+	nf, err := cli.NfdV1alpha1().NodeFeatures(kuberess.SystemNamespaceName).Get(
+		ctx, nodeName+"-gpustack-device-manager", meta.GetOptions{},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "true", nf.Spec.Labels[nodefeature.NodeRDMACapableLabelKey])
+
+	devs, err := cli.WorkerV1alpha1().Devices().Get(ctx, nodeName, meta.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "true", devs.Annotations[MockDevicesAnnotationKey])
+	require.Len(t, devs.Spec.Interfaces, 1)
+	assert.Equal(t, "eth-rdma0", devs.Spec.Interfaces[0].Name)
+
+	rdmaSnap := d.RDMAInterfaceSnapshot()
+	require.NotNil(t, rdmaSnap)
+	assert.True(t, rdmaSnap.Complete)
+	require.Len(t, rdmaSnap.Devices, 1)
+	assert.Equal(t, "mlx5_0", rdmaSnap.Devices[0].Name)
+
+	card0ID := devs.Spec.Groups[0].Accelerators[0].ID
+	card1ID := devs.Spec.Groups[0].Accelerators[1].ID
+
+	// 2. Hot-reload: card 0 becomes unqueryable while card 1 stays ok.
+	// Card 0 must be retained in-place with Status.Unhealthy=true and sibling card 1 keeps Index=1.
+	atomicRewriteMockSpec(t, specPath, `
+manufacturers:
+  nvidia:
+    preset: nvidia-h100
+    count: 2
+    cardOverrides:
+      0:
+        queryState: unqueryable
+`)
+	require.Eventually(t, func() bool {
+		cur, getErr := cli.WorkerV1alpha1().Devices().Get(ctx, nodeName, meta.GetOptions{})
+		if getErr != nil || len(cur.Spec.Groups) != 1 || len(cur.Spec.Groups[0].Accelerators) != 2 {
+			return false
+		}
+		acc := cur.Spec.Groups[0].Accelerators
+		return acc[0].ID == card0ID && acc[0].Index == 0 && acc[0].Status.Unhealthy &&
+			acc[1].ID == card1ID && acc[1].Index == 1 && !acc[1].Status.Unhealthy &&
+			len(cur.Spec.Interfaces) == 0
+	}, detectorTimeout, 10*time.Millisecond)
+
+	// 3. Hot-reload: totalFailure=true preserves lastDetected and keeps nvidia published.
+	for len(publishedCh) > 0 {
+		<-publishedCh
+	}
+	atomicRewriteMockSpec(t, specPath, `
+manufacturers:
+  nvidia:
+    preset: nvidia-h100
+    count: 2
+    fault:
+      totalFailure: true
+`)
+	// Wait for at least two fresh detect rounds under totalFailure and confirm Devices is preserved.
+	for range 2 {
+		select {
+		case published := <-publishedCh:
+			assert.True(t, published.Has("nvidia"), "totalFailure must preserve lastDetected manufacturer")
+		case <-time.After(detectorTimeout):
+			t.Fatal("timed out waiting for re-detect pass during totalFailure")
+		}
+	}
+	devsDuringFailure, err := cli.WorkerV1alpha1().Devices().Get(ctx, nodeName, meta.GetOptions{})
+	require.NoError(t, err)
+	require.Len(t, devsDuringFailure.Spec.Groups, 1)
+	assert.Len(t, devsDuringFailure.Spec.Groups[0].Accelerators, 2)
+
+	// 4. Hot-reload: recovery clears Unhealthy on card 0.
+	atomicRewriteMockSpec(t, specPath, `
+manufacturers:
+  nvidia:
+    preset: nvidia-h100
+    count: 2
+`)
+	require.Eventually(t, func() bool {
+		cur, getErr := cli.WorkerV1alpha1().Devices().Get(ctx, nodeName, meta.GetOptions{})
+		if getErr != nil || len(cur.Spec.Groups) != 1 || len(cur.Spec.Groups[0].Accelerators) != 2 {
+			return false
+		}
+		acc := cur.Spec.Groups[0].Accelerators
+		return !acc[0].Status.Unhealthy && !acc[1].Status.Unhealthy
+	}, detectorTimeout, 10*time.Millisecond)
+
+	// 5. Hot-reload: clean shrink to 1 card prunes card 1.
+	atomicRewriteMockSpec(t, specPath, `
+manufacturers:
+  nvidia:
+    preset: nvidia-h100
+    count: 1
+`)
+	require.Eventually(t, func() bool {
+		cur, getErr := cli.WorkerV1alpha1().Devices().Get(ctx, nodeName, meta.GetOptions{})
+		return getErr == nil && len(cur.Spec.Groups) == 1 &&
+			len(cur.Spec.Groups[0].Accelerators) == 1 &&
+			cur.Spec.Groups[0].Accelerators[0].ID == card0ID
+	}, detectorTimeout, 10*time.Millisecond)
+}
+
+func TestMockDetector_LivePartitionProviderIntegration(t *testing.T) {
+	const nodeName = "node-mock-mig"
+	t.Setenv("KUBERNETES_NODE_NAME", nodeName)
+
+	specPath := writeTempMockSpec(t, "preset: nvidia-h100-mig\ncount: 1\n")
+	specStore, err := mockspec.NewStore(specPath)
+	require.NoError(t, err)
+	partStore := allocatormock.NewPartitionStore()
+
+	d, err := New(&Config{
+		Manufacturers:         sets.New("nvidia"),
+		MonitorPeriod:         time.Hour,
+		MockSpecStore:         specStore,
+		MockPartitionProvider: partStore,
+	})
+	require.NoError(t, err)
+
+	grps, unmeasured := d.DetectAccelerator(context.Background())
+	require.Empty(t, unmeasured)
+	require.Len(t, grps, 1)
+	require.Len(t, grps[0].Accelerators, 1)
+	grp := &grps[0]
+	acc := &grp.Accelerators[0]
+	require.NotEmpty(t, acc.Status.PhysicalSliced.Profiles)
+	prof := acc.Status.PhysicalSliced.Profiles[0]
+
+	// Reserve a live virtual partition via PartitionStore (simulating Allocator.ActuatePhysicalSliced).
+	vp, rebound, err := partStore.Reserve("nvidia", "pod-uid-1", "main", grp, acc, prof.Name)
+	require.NoError(t, err)
+	assert.False(t, rebound)
+
+	pod := podFixture("pod-uid-1", "ctr-1", "nvidia", []workercore.AcceleratorAllocation{{
+		ID:                          acc.ID,
+		Mode:                        workercore.DeviceAllocationModePartitioned,
+		AllocatedPhysicalID:         vp.ID,
+		AllocatedPhysicalProfile:    vp.Profile,
+		AllocatedPhysicalPlacements: []workercore.AcceleratorPlacement{vp.Placement},
+	}})
+	d.podLister = func(context.Context) ([]core.Pod, error) {
+		return []core.Pod{*pod}, nil
+	}
+
+	metricsGrps, monUnmeasured := d.MonitorAccelerator(context.Background())
+	require.Empty(t, monUnmeasured)
+	section := d.collectSlices(context.Background(), metricsGrps)
+	require.NotNil(t, section)
+	require.Len(t, section.Partitions, 1)
+	assert.Equal(t, vp.ID, section.Partitions[0].ID)
+	require.NotNil(t, section.Partitions[0].MemoryUsedMiB)
+	assert.Equal(t, uint64(0), *section.Partitions[0].MemoryUsedMiB)
+}
+
+func TestDetectAndMonitorCLI_MockDevicesFile(t *testing.T) {
+	specPath := writeTempMockSpec(t, `
+presets:
+  - preset: nvidia-h100
+    count: 2
+  - preset: amd-mi300x
+    count: 1
+`)
+	missingPath := filepath.Join(t.TempDir(), "missing.yaml")
+
+	t.Run("detect CLI command outputs valid DevicesGroupList YAML via flag", func(t *testing.T) {
+		t.Setenv(MockDevicesFileEnv, "")
+		cmd := NewDetectCommand()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&bytes.Buffer{})
+		cmd.SetArgs([]string{"--mock-devices-file", specPath})
+
+		require.NoError(t, cmd.Execute())
+
+		var groups device.DevicesGroupList
+		require.NoError(t, yaml.Unmarshal(out.Bytes(), &groups))
+		require.Len(t, groups, 2)
+		assert.Equal(t, "amd", groups[0].Manufacturer)
+		assert.Len(t, groups[0].Accelerators, 1)
+		assert.Equal(t, "nvidia", groups[1].Manufacturer)
+		assert.Len(t, groups[1].Accelerators, 2)
+	})
+
+	t.Run("monitor CLI command outputs valid MetricsGroupList YAML via env var", func(t *testing.T) {
+		t.Setenv(MockDevicesFileEnv, specPath)
+		cmd := NewMonitorCommand()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&bytes.Buffer{})
+		cmd.SetArgs([]string{"--manufacturer=nvidia"})
+
+		require.NoError(t, cmd.Execute())
+
+		var metrics device.MetricsGroupList
+		require.NoError(t, yaml.Unmarshal(out.Bytes(), &metrics))
+		require.Len(t, metrics, 1)
+		assert.Equal(t, "nvidia", metrics[0].Manufacturer)
+		assert.Len(t, metrics[0].Accelerators, 2)
+	})
+
+	t.Run("detect CLI command fails fast on missing mock file", func(t *testing.T) {
+		t.Setenv(MockDevicesFileEnv, "")
+		cmd := NewDetectCommand()
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		cmd.SetArgs([]string{"--mock-devices-file", missingPath})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "--mock-devices-file")
+	})
 }

@@ -291,7 +291,7 @@ type Allocator interface {
       Acceptance: Implements `device.Allocator` wrapping real `pkg/deviceplugin.ResourceServer` across `exclusive`, `shared`, `sliced`, `partitioned`, and `visibility` (plus optional mock `rdma`); injects safe diagnostic env vars and vendor `*_VISIBLE_DEVICES` with zero `/dev/*` mounts and zero `ld.so.preload` shims; maintains an in-memory virtual partition store with `deviceplugin.RunReclaimLoop` for concurrent multi-profile creation, visibility co-allocation, and dead-Pod reclamation.
       Verify: `go test -count=1 ./pkg/devicemanager/allocator/mock/...`
 
-- [ ] **T4 · Plumb `--mock-devices-file` / `GPUSTACK_MOCK_DEVICES_FILE` into `device-manager` and document setting**
+- [x] **T4 · Plumb `--mock-devices-file` / `GPUSTACK_MOCK_DEVICES_FILE` into `device-manager` and document setting**
       Blocked by: T2, T3
       Owns: `pkg/devicemanager/option.go`, `pkg/devicemanager/config.go`, `pkg/devicemanager/cmd.go`, `pkg/devicemanager/detector/option.go`, `pkg/devicemanager/detector/config.go`, `pkg/devicemanager/detector/detector.go`, `pkg/devicemanager/detector/detector_test.go`, `pkg/devicemanager/allocator/option.go`, `pkg/devicemanager/allocator/config.go`, `pkg/devicemanager/allocator/allocator.go`, `pkg/devicemanager/allocator/allocator_test.go`, `docs/reference/settings.md`
       Gate: review

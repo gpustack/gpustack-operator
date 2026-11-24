@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	yaml "gopkg.in/yaml.v3"
 
 	"gpustack.ai/gpustack/pkg/devicemanager/detector"
 	"gpustack.ai/gpustack/pkg/devicemanager/preflight"
@@ -69,38 +68,7 @@ func newServeCommand() *cobra.Command {
 }
 
 func newDetectCommand() *cobra.Command {
-	o := detector.NewOptions()
-
-	c := &cobra.Command{
-		Use:   "detect",
-		Short: "detect local devices once.",
-		PreRunE: func(c *cobra.Command, args []string) error {
-			return o.Validate(c.Context())
-		},
-		RunE: func(c *cobra.Command, args []string) error {
-			ctx := c.Context()
-
-			cfg, err := o.Complete(ctx)
-			if err != nil {
-				return fmt.Errorf("complete config: %w", err)
-			}
-			d, err := cfg.Apply(ctx)
-			if err != nil {
-				return fmt.Errorf("apply config: %w", err)
-			}
-
-			enc := yaml.NewEncoder(os.Stdout)
-			enc.SetIndent(4)
-			// The manufacturers this pass could not detect are logged by it, and a one-shot detect
-			// has no next pass to come back on.
-			grpList, _ := d.DetectAccelerator(ctx)
-			return enc.Encode(grpList)
-		},
-	}
-
-	o.AddFlags(c.Flags(), detector.WithoutMonitorOptions())
-
-	return c
+	return detector.NewDetectCommand()
 }
 
 // newPreflightCommand is a sibling of detect, not a flag on it. Detecting is a pure read that is
@@ -171,36 +139,5 @@ func newPreflightCommand() *cobra.Command {
 }
 
 func newMonitorCommand() *cobra.Command {
-	o := detector.NewOptions()
-
-	c := &cobra.Command{
-		Use:   "monitor",
-		Short: "monitor local devices once.",
-		PreRunE: func(c *cobra.Command, args []string) error {
-			return o.Validate(c.Context())
-		},
-		RunE: func(c *cobra.Command, args []string) error {
-			ctx := c.Context()
-
-			cfg, err := o.Complete(ctx)
-			if err != nil {
-				return fmt.Errorf("complete config: %w", err)
-			}
-			d, err := cfg.Apply(ctx)
-			if err != nil {
-				return fmt.Errorf("apply config: %w", err)
-			}
-
-			enc := yaml.NewEncoder(os.Stdout)
-			enc.SetIndent(4)
-			// The manufacturers this pass could not measure are logged by it, and a one-shot
-			// monitor has no next pass to keep them out of.
-			grpList, _ := d.MonitorAccelerator(ctx)
-			return enc.Encode(grpList)
-		},
-	}
-
-	o.AddFlags(c.Flags(), detector.WithoutMonitorOptions())
-
-	return c
+	return detector.NewMonitorCommand()
 }

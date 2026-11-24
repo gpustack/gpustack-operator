@@ -22,7 +22,9 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
+	detectormock "gpustack.ai/gpustack/pkg/devicemanager/detector/mock"
 	"gpustack.ai/gpustack/pkg/devicemanager/kuberess"
+	"gpustack.ai/gpustack/pkg/devicemanager/mockspec"
 	"gpustack.ai/gpustack/pkg/devicemanager/procattr"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
@@ -37,6 +39,9 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/waitx"
 )
 
+// MockDevicesAnnotationKey marks a node's Devices object as populated by CPU-only mock mode.
+const MockDevicesAnnotationKey = "device.gpustack.ai/mock"
+
 var logger = klog.Background().WithName("detector")
 
 type Detector struct {
@@ -47,6 +52,8 @@ type Detector struct {
 	monitorPeriod           time.Duration
 	monitorSnapshot         datax.Snapshot[MonitorSnapshot]
 	detectedManufacturersCh chan<- sets.Set[string]
+	mockSpecStore           *mockspec.Store
+	mockNodeName            string
 
 	// lastDetected is the newest groups each manufacturer's detect pass reported, kept so a pass that
 	// FAILS can report what was last detected instead of nothing. Only the detect loop reads or
@@ -124,15 +131,48 @@ func New(c *Config) (*Detector, error) {
 	isWsl := stringx.ContainSubstrings(osx.GetRelease(), "microsoft", "wsl")
 	noPCICheck := c.NoPCICheck || isWsl
 
-	manufacturers := getAllowedManufacturers(c.Manufacturers)
-
-	creators := getAllowedDetectorCreators(manufacturers)
-	createOpts := device.DetectorOptions{
-		Logger: logger.V(3),
+	specStore := c.MockSpecStore
+	if specStore == nil && c.MockDevicesFile != "" {
+		var err error
+		specStore, err = mockspec.NewStore(c.MockDevicesFile, mockspec.WithLogger(logger.WithName("mockspec")))
+		if err != nil {
+			return nil, err
+		}
 	}
-	detectors := make([]device.Detector, 0, len(creators))
-	for i := range creators {
-		detectors = append(detectors, creators[i](createOpts))
+
+	var (
+		manufacturers sets.Set[string]
+		detectors     []device.Detector
+		mockNodeName  string
+	)
+	if specStore != nil {
+		klog.Warningf("!!! mock device mode is active (mock-devices-file=%q); real hardware detection and device injection are bypassed !!!",
+			specStore.Path())
+		noPCICheck = true
+		known := sets.New(nodefeature.GetKnownAcceleratableManufacturers()...)
+		requested := c.Manufacturers
+		if requested == nil {
+			requested = known
+		}
+		manufacturers = known.Intersection(requested)
+		mockNodeName = osx.Getenv("KUBERNETES_NODE_NAME")
+		mockOpts := []detectormock.Option{
+			detectormock.WithLogger(logger.V(3)),
+		}
+		if c.MockPartitionProvider != nil {
+			mockOpts = append(mockOpts, detectormock.WithPartitionProvider(c.MockPartitionProvider))
+		}
+		detectors = detectormock.NewDetectors(sets.List(manufacturers), mockNodeName, specStore, mockOpts...)
+	} else {
+		manufacturers = getAllowedManufacturers(c.Manufacturers)
+		creators := getAllowedDetectorCreators(manufacturers)
+		createOpts := device.DetectorOptions{
+			Logger: logger.V(3),
+		}
+		detectors = make([]device.Detector, 0, len(creators))
+		for i := range creators {
+			detectors = append(detectors, creators[i](createOpts))
+		}
 	}
 
 	d := &Detector{
@@ -142,6 +182,8 @@ func New(c *Config) (*Detector, error) {
 		detectors:               detectors,
 		monitorPeriod:           c.MonitorPeriod,
 		detectedManufacturersCh: c.DetectedManufacturersCh,
+		mockSpecStore:           specStore,
+		mockNodeName:            mockNodeName,
 	}
 	d.podLister = d.listNodePods
 	// The device manager runs with hostPID, so its own /proc lists the host's processes — the
@@ -267,9 +309,29 @@ type _DeviceKey struct {
 // endpoints forty times over for an answer that almost never differs.
 const detectEveryNMonitorRounds = 40
 
+func (d *Detector) readInterfaces() ([]workercore.DeviceInterface, error) {
+	if d.mockSpecStore != nil {
+		nodeName := cmp.Or(d.mockNodeName, osx.Getenv("KUBERNETES_NODE_NAME"))
+		ifaces, configured, err := detectormock.DetectInterfaces(nodeName, d.mockSpecStore)
+		if configured {
+			return ifaces, err
+		}
+		return nil, nil
+	}
+	return DetectInterfaces()
+}
+
 func (d *Detector) readRDMAInterfaces() ([]device.RDMADevice, error) {
 	if d.rdmaInterfaceReader != nil {
 		return d.rdmaInterfaceReader()
+	}
+	if d.mockSpecStore != nil {
+		nodeName := cmp.Or(d.mockNodeName, osx.Getenv("KUBERNETES_NODE_NAME"))
+		devs, configured, err := detectormock.DetectRDMADevices(nodeName, d.mockSpecStore)
+		if configured {
+			return devs, err
+		}
+		return []device.RDMADevice{}, nil
 	}
 	return DetectRDMAInterfaces()
 }
@@ -453,7 +515,7 @@ func (d *Detector) Start(ctx context.Context) error {
 			// What is compared is the subset that can affect that gate, not the whole record: see
 			// interfacesChanged. Taking the round on any change at all made every Pod start rerun
 			// the driver detection below, because a Pod brings a `veth` with it.
-			detected, detectedErr := DetectInterfaces()
+			detected, detectedErr := d.readInterfaces()
 			if interfacesChanged(d.reportedInterfaces, d.reportedInterfacesKnown, detected, detectedErr) {
 				logger.Info("network interfaces changed, going to detect again")
 				return waitx.ErrStopRetrying
@@ -605,7 +667,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	// first pass there is nothing to preserve, so the object is created without interfaces and
 	// this log line is the only account of why; it is logged at Error precisely because that is
 	// the one level no verbosity setting can hide.
-	eInterfaces, eInterfacesErr := DetectInterfaces()
+	eInterfaces, eInterfacesErr := d.readInterfaces()
 	if eInterfacesErr != nil {
 		logger.Error(eInterfacesErr, "could not enumerate network interfaces",
 			"node", ndName,
@@ -705,10 +767,17 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	// freshly onboarded node's Devices unstamped. gpustack.ai/managed is synced separately
 	// by NodeDevicesReconciler.
 	devsLabels := acceleratableDevicesSelectorLabels(nd, aNf.Spec.Labels)
+	var devsAnnotations map[string]string
+	if d.mockSpecStore != nil {
+		devsAnnotations = map[string]string{
+			MockDevicesAnnotationKey: "true",
+		}
+	}
 	eDevs := &workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{
-			Name:   ndName,
-			Labels: devsLabels,
+			Name:        ndName,
+			Labels:      devsLabels,
+			Annotations: devsAnnotations,
 		},
 		Spec: workercore.DevicesSpec{
 			Groups:     eGroups,
@@ -725,6 +794,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		expected:       eDevs,
 		node:           nd,
 		labels:         devsLabels,
+		annotations:    devsAnnotations,
 		manufacturers:  d.manufacturers,
 		syncInterfaces: eInterfacesErr == nil,
 		now:            now,
@@ -932,6 +1002,9 @@ type devicesAlignment struct {
 	node *core.Node
 	// labels are the accelerator flavors' selector labels to stamp.
 	labels map[string]string
+	// annotations are the detector-owned annotations to stamp when present (such as mock mode),
+	// leaving unrelated annotations untouched.
+	annotations map[string]string
 	// manufacturers bounds which device groups this pass is allowed to speak for.
 	manufacturers sets.Set[string]
 	// syncInterfaces is false when this pass could not enumerate the network interfaces at all.
@@ -980,6 +1053,17 @@ func (a devicesAlignment) apply(actual *workercore.Devices) (*workercore.Devices
 	for k, v := range a.labels {
 		if actual.Labels[k] != v {
 			actual.Labels[k] = v
+			skip = false
+		}
+	}
+
+	// Update detector-owned annotations while preserving any unrelated annotations.
+	if len(a.annotations) > 0 && actual.Annotations == nil {
+		actual.Annotations = make(map[string]string, len(a.annotations))
+	}
+	for k, v := range a.annotations {
+		if actual.Annotations[k] != v {
+			actual.Annotations[k] = v
 			skip = false
 		}
 	}
