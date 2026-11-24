@@ -616,3 +616,64 @@ func TestEvaluateDeviceUnhealthy(t *testing.T) {
 		})
 	}
 }
+
+func TestSnapshotLiveDetectedExcludesWithheldDivergentProfiles(t *testing.T) {
+	shared := device.AcceleratorPhysicalSlicedProfile{Name: "2g.20gb", MemoryMib: 20480, Count: 2}
+	grpList := device.DevicesGroupList{
+		{
+			ID:           "ppu-zw810e",
+			Manufacturer: Manufacturer,
+			Name:         "PPU-ZW810E",
+			Memory:       98304,
+			Accelerators: []device.Accelerator{
+				{
+					ID:    "GPU-0",
+					Index: 0,
+					Status: device.AcceleratorStatus{
+						PhysicalSliced: device.AcceleratorPhysicalSliced{
+							Count: 4,
+							Profiles: []device.AcceleratorPhysicalSlicedProfile{
+								shared,
+								{Name: "1g.10gb", MemoryMib: 10240, Count: 4},
+							},
+						},
+					},
+				},
+				{
+					ID:    "GPU-1",
+					Index: 1,
+					Status: device.AcceleratorStatus{
+						PhysicalSliced: device.AcceleratorPhysicalSliced{
+							Count: 4,
+							Profiles: []device.AcceleratorPhysicalSlicedProfile{
+								shared,
+								{Name: "1g.10gb", MemoryMib: 12288, Count: 4},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	rejected := rejectDivergentGroupProfiles(&grpList[0])
+	require.Len(t, rejected, 1)
+
+	det := &thead{
+		cachedDetected:  make(map[int]cachedAccelerator),
+		cachedMonitored: make(map[int]cachedMetrics),
+	}
+	liveSlots := map[int]struct{}{0: {}, 1: {}}
+	det.commitDetectedCache(snapshotLiveDetected(grpList, liveSlots), map[int]cachedMetrics{}, map[int]struct{}{})
+
+	var nextGrpList device.DevicesGroupList
+	det.restoreCachedDetected(1, map[int]struct{}{}, &nextGrpList)
+	require.Len(t, nextGrpList, 1)
+	require.Len(t, nextGrpList[0].Accelerators, 1)
+
+	restored := nextGrpList[0].Accelerators[0]
+	assert.Equal(t, "GPU-1", restored.ID)
+	assert.True(t, restored.Status.Unhealthy)
+	assert.Equal(t, int32(2), restored.Status.PhysicalSliced.Count)
+	assert.Equal(t, []device.AcceleratorPhysicalSlicedProfile{shared}, restored.Status.PhysicalSliced.Profiles)
+}

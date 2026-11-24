@@ -128,7 +128,7 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 
 	grpList := device.DevicesGroupList{}
 	queriedCount := 0
-	nextDetected := make(map[int]cachedAccelerator, cnt)
+	liveSlots := make(map[int]struct{}, cnt)
 	nextMonitored := make(map[int]cachedMetrics, cnt)
 	unqueryableSlots := make(map[int]struct{})
 	var lastUnqueryableErr error
@@ -300,14 +300,9 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			Status:          status,
 		}
 		grpList[grpIndex].Accelerators = append(grpList[grpIndex].Accelerators, accel)
+		liveSlots[i] = struct{}{}
 		queriedCount++
 
-		grpHeader := grpList[grpIndex]
-		grpHeader.Accelerators = nil
-		nextDetected[i] = cachedAccelerator{
-			group: *grpHeader.DeepCopy(),
-			accel: *accel.DeepCopy(),
-		}
 		nextMonitored[i] = cachedMetrics{
 			id:     uuid,
 			memory: memory,
@@ -321,8 +316,6 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		return nil, nil
 	}
 
-	in.updateDetectedCache(nextDetected, nextMonitored, unqueryableSlots)
-
 	// Withhold any profile the cards of one group disagree about, before the aggregation below merges
 	// profiles by name and would publish a reading that describes neither card.
 	for i := range grpList {
@@ -330,6 +323,8 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			in.logger.Info("withheld a partition profile from a group", "reason", reason)
 		}
 	}
+
+	in.updateDetectedCache(snapshotLiveDetected(grpList, liveSlots), nextMonitored, unqueryableSlots)
 
 	device.SetGroupSlicedDetails(grpList)
 
@@ -513,6 +508,27 @@ func (in *hygon) clearCache() {
 
 	in.cachedDetected = nil
 	in.cachedMonitored = nil
+}
+
+func snapshotLiveDetected(
+	grpList device.DevicesGroupList, liveSlots map[int]struct{},
+) map[int]cachedAccelerator {
+	nextDetected := make(map[int]cachedAccelerator, len(liveSlots))
+	for _, grp := range grpList {
+		grpHeader := grp
+		grpHeader.Accelerators = nil
+		for _, accel := range grp.Accelerators {
+			slot := int(accel.Index)
+			if _, isLive := liveSlots[slot]; !isLive {
+				continue
+			}
+			nextDetected[slot] = cachedAccelerator{
+				group: *grpHeader.DeepCopy(),
+				accel: *accel.DeepCopy(),
+			}
+		}
+	}
+	return nextDetected
 }
 
 func (in *hygon) updateDetectedCache(

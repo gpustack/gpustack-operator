@@ -107,7 +107,7 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 	rtVer, _ := in.hgml.SystemGetHggcDriverVersion()
 
 	grpList := device.DevicesGroupList{}
-	nextDetected := make(map[int]cachedAccelerator, cnt)
+	liveSlots := make(map[int]struct{}, cnt)
 	nextMonitored := make(map[int]cachedMetrics, cnt)
 	unqueryableSlots := make(map[int]struct{})
 	queriedCount := 0
@@ -284,10 +284,7 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			Status:          status,
 		}
 		grpList[grpIndex].Accelerators = append(grpList[grpIndex].Accelerators, accel)
-		nextDetected[i] = cachedAccelerator{
-			group: cloneGroupMetadata(grpList[grpIndex]),
-			accel: *accel.DeepCopy(),
-		}
+		liveSlots[i] = struct{}{}
 		nextMonitored[i] = cachedMetrics{
 			id:     uuid,
 			memory: memory,
@@ -303,8 +300,6 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		return nil, nil
 	}
 
-	in.commitDetectedCache(nextDetected, nextMonitored, unqueryableSlots)
-
 	// Accelerators of one group must agree on what a profile name means before the aggregation
 	// below merges them by name, so any name they disagree on is withheld from the whole group.
 	for i := range grpList {
@@ -313,6 +308,8 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				"group", grpList[i].ID, "reason", reason)
 		}
 	}
+
+	in.commitDetectedCache(snapshotLiveDetected(grpList, liveSlots), nextMonitored, unqueryableSlots)
 
 	device.SetGroupSlicedDetails(grpList)
 
@@ -486,6 +483,25 @@ func (in *thead) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 func cloneGroupMetadata(grp device.DevicesGroup) device.DevicesGroup {
 	grp.Accelerators = nil
 	return *grp.DeepCopy()
+}
+
+func snapshotLiveDetected(
+	grpList device.DevicesGroupList, liveSlots map[int]struct{},
+) map[int]cachedAccelerator {
+	nextDetected := make(map[int]cachedAccelerator, len(liveSlots))
+	for _, grp := range grpList {
+		for _, accel := range grp.Accelerators {
+			slot := int(accel.Index)
+			if _, isLive := liveSlots[slot]; !isLive {
+				continue
+			}
+			nextDetected[slot] = cachedAccelerator{
+				group: cloneGroupMetadata(grp),
+				accel: *accel.DeepCopy(),
+			}
+		}
+	}
+	return nextDetected
 }
 
 func (in *thead) getCachedDetected(slot int) (cachedAccelerator, bool) {
