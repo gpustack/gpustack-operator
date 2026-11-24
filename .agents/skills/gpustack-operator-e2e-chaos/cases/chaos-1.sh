@@ -247,15 +247,30 @@ mock_dm_apply_spec "$NS" "$MOCK_DM_CM" "$MOCK_DM_KEY" "$STORM_SPEC"
 topo_ok=1
 for ((idx = 0; idx < NODE_COUNT; idx++)); do
   node="${MOCK_DM_NODES[$idx]}"
-  if ! mock_dm_wait_devices "$NS" "$node" \
-    '(.metadata.annotations["device.gpustack.ai/mock"] == "true") and (([.spec.groups[].accelerators[]] | length) >= 2)' 90; then
+  if [[ "$NODE_COUNT" -eq 1 && "$HAS_NV" -eq 1 ]]; then
+    want_dev_jq='(.metadata.annotations["device.gpustack.ai/mock"] == "true")
+      and (([.spec.groups[] | select(.manufacturer == "nvidia") | .accelerators[]] | length) == 12)
+      and any(.spec.groups[] | select(.manufacturer == "nvidia") | .accelerators[]; .id == "GPU-c1-mig-912151ec-e9f1-fc26")'
+  elif [[ $((idx % 4)) -eq 0 ]]; then
+    want_dev_jq="(.metadata.annotations[\"device.gpustack.ai/mock\"] == \"true\") and (([.spec.groups[] | select(.manufacturer == \"${PRIMARY_MFR}\") | .accelerators[]] | length) == 8)"
+  elif [[ $((idx % 4)) -eq 1 && "$HAS_NV" -eq 1 ]]; then
+    want_dev_jq='(.metadata.annotations["device.gpustack.ai/mock"] == "true") and (([.spec.groups[] | select(.manufacturer == "nvidia") | .accelerators[] | select((.status.physicalSliced.profiles // []) | length > 0)] | length) == 2)'
+  else
+    want_dev_jq='(.metadata.annotations["device.gpustack.ai/mock"] == "true") and (([.spec.groups[].accelerators[]] | length) == 4)'
+  fi
+  if ! mock_dm_wait_devices "$NS" "$node" "$want_dev_jq" 90; then
     topo_ok=0
     break
   fi
 done
 
 NODE0="${MOCK_DM_NODES[0]}"
-mock_dm_wait_node_allocatable "$NODE0" "((.[\"${PRIMARY_RES}\"] // \"0\" | tonumber) >= 2)" 90 || true
+want_node0_excl=8
+[[ "$NODE_COUNT" -eq 1 && "$HAS_NV" -eq 1 ]] && want_node0_excl=11
+mock_dm_wait_node_allocatable "$NODE0" "((.[\"${PRIMARY_RES}\"] // \"0\" | tonumber) >= ${want_node0_excl})" 90 || true
+if [[ "$NODE_COUNT" -eq 1 && "$HAS_NV" -eq 1 ]]; then
+  mock_dm_wait_node_allocatable "$NODE0" '(.["nvidia.com/gpu.partitioned.mig-1g.10gb"] == "7") and (.["nvidia.com/gpu.partitioned.mig-2g.20gb"] == "3")' 90 || true
+fi
 
 PRIMARY_GID="$(kubectl get devices.worker.gpustack.ai "$NODE0" -o json 2>/dev/null \
   | jq -r --arg m "$PRIMARY_MFR" '[.spec.groups[] | select(.manufacturer == $m) | .id][0] // ""')"
@@ -382,8 +397,22 @@ submit_storm_pod() {
     }' | kubectl apply -f - >/dev/null
 }
 
-# Submit multi-role P/D and 3-role EPD ModelDeployments when a usable AcceleratorType exists for PRIMARY_MFR.
-AT_PD="$(md_usable_type_for "$PRIMARY_MFR")"
+# Submit multi-role P/D and 3-role EPD ModelDeployments against the primary storm AcceleratorType.
+AT_PD=""
+for _ in $(seq 1 25); do
+  AT_PD="$(kubectl get acceleratortypes.worker.gpustack.ai -o json 2>/dev/null | jq -r \
+    --arg primary "$IT_PRIMARY" --arg mfr "$PRIMARY_MFR" "${JQ_QNUM}"'
+    [(.items // [])[]
+     | select((.metadata.deletionTimestamp // "") == ""
+         and (.status.phase // "") == "Active"
+         and (.status.detail.manufacturer // "") == $mfr
+         and ((.status.accelerator.remaining | qnum) >= 5))
+     | {name: .metadata.name, pref: (if .metadata.name == $primary then 0 else 1 end)}]
+    | sort_by(.pref, .name) | .[0].name // ""
+  ' 2>/dev/null || true)"
+  [[ -n "$AT_PD" ]] && break
+  sleep 3
+done
 PD_SUBMITTED=0
 EPD_SUBMITTED=0
 EPD_APPLY_ERR=""
@@ -602,12 +631,12 @@ for d in devs:
         gid = g.get("id", "")
         for a in g.get("accelerators", []) or []:
             cid = a.get("id", "")
-            mode = (a.get("mode") or "")
-            alloc = a.get("allocated", 0) or 0
-            if mode in ("Exclusive", "Shared", "Sliced") and alloc > 1600000:
-                errs.append(f"{node}/{cid}: allocated={alloc}>1600000 in {mode}")
-            if (gid, cid) in spec_part_cards and mode in ("Exclusive", "Shared", "Sliced"):
-                errs.append(f"{node}/{cid}: partitioned card claimed in {mode}")
+            mode = a.get("mode", 0) or 0
+            rem = a.get("remaining", 0) or 0
+            if mode in (1, 2, 3, "Exclusive", "Shared", "Sliced") and rem < 0:
+                errs.append(f"{node}/{cid}: remaining={rem}<0 in mode={mode}")
+            if (gid, cid) in spec_part_cards and mode in (1, 2, 3, "Exclusive", "Shared", "Sliced"):
+                errs.append(f"{node}/{cid}: partitioned card claimed in mode={mode}")
 
 # Cross-check live Running/Pending allocated annotations across Pods.
 card_modes = {}
@@ -632,14 +661,14 @@ for p in pods:
             for a in g.get("accelerators") or []:
                 aid = a.get("id", "")
                 key = f"{node}/{gid}/{aid}"
-                m = a.get("mode") or ""
+                m = a.get("mode")
                 if not m:
                     continue
                 prev = card_modes.setdefault(key, set())
                 prev.add(m)
                 if len(prev) > 1:
-                    errs.append(f"{key}: conflicting Pod modes {sorted(prev)}")
-                if m == "Exclusive":
+                    errs.append(f"{key}: conflicting Pod modes {sorted(str(x) for x in prev)}")
+                if m in (1, "Exclusive"):
                     owners = excl_owners.setdefault(key, set())
                     owners.add(pname)
                     if len(owners) > 1:

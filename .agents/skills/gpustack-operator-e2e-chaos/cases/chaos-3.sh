@@ -397,7 +397,7 @@ for p in pods:
         for g in ((cbody.get("devices") or {}).get("groups") or []):
             gid = g.get("id", "")
             for a in g.get("accelerators") or []:
-                m = a.get("mode") or ""
+                m = a.get("mode")
                 if not m:
                     continue
                 aid = a.get("id", "")
@@ -405,16 +405,16 @@ for p in pods:
                 s = card_modes.setdefault(k, set())
                 s.add(m)
                 if len(s) > 1:
-                    errs.append(f"{k}:modes={sorted(s)}")
+                    errs.append(f"{k}:modes={sorted(str(x) for x in s)}")
 
 for d in devs:
     n = d.get("metadata", {}).get("name", "")
     for g in (d.get("status") or {}).get("groups") or []:
         for a in g.get("accelerators") or []:
             aid = a.get("id", "")
-            alloc = a.get("allocated") or 0
-            if (a.get("mode") or "") in ("Exclusive", "Shared", "Sliced") and alloc > 1600000:
-                errs.append(f"{n}/{aid}:alloc={alloc}>1600000")
+            rem = a.get("remaining") or 0
+            if (a.get("mode") or 0) in (1, 2, 3, "Exclusive", "Shared", "Sliced") and rem < 0:
+                errs.append(f"{n}/{aid}:rem={rem}<0")
 
 print("; ".join(errs[:3]))
 ' 2>&1)"; then
@@ -461,14 +461,14 @@ for p in pods:
         for g in ((cbody.get("devices") or {}).get("groups") or []):
             gid = g.get("id", "")
             for a in g.get("accelerators") or []:
-                m = a.get("mode") or ""
+                m = a.get("mode")
                 if m:
                     aid = a.get("id", "")
                     k = f"{node}/{gid}/{aid}"
                     s = card_modes.setdefault(k, set())
                     s.add(m)
                     if len(s) > 1:
-                        errs.append(f"{k}:{sorted(s)}")
+                        errs.append(f"{k}:{sorted(str(x) for x in s)}")
 print("; ".join(errs[:3]))
 ' 2>&1)"; then
   post_collision="python3 post-release collision check failed: ${post_collision:0:180}"

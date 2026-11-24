@@ -24,7 +24,7 @@
 #                     on instances/metrics.
 #                Phase 2 (Carved-card-only slice process pass & accelerated exporter labels):
 #                  When a node offers >=2 logically sliceable cards of a process-capable
-#                  manufacturer (Mock or Real DM), deploying one whole-card Instance and one 50%
+#                  manufacturer (Mock or Real DM), deploying one whole-card Instance and one 10%
 #                  sliced Instance on that node proves:
 #                  1. Prometheus gpustack_instance_accelerator_* series carry id, index,
 #                     instance_name, instance_uid, manufacturer, mode, namespace, and node;
@@ -37,7 +37,7 @@
 #              device-manager Pod runs on the node; Phase 2 auto-skips when no node offers >=2
 #              logically sliceable cards with a Running device-manager Pod (real or mock).
 # Inputs:      One CPU Instance (e2e-c6-metrics) in Phase 1, plus one whole-card Instance
-#              (e2e-c6-scope-whole) and one 50% sliced Instance (e2e-c6-scope-sliced) in Phase 2.
+#              (e2e-c6-scope-whole) and one 10% sliced Instance (e2e-c6-scope-sliced) in Phase 2.
 # Expected:    Every applicable check records PASS; absent hardware/exporter legs record SKIP.
 # Cleanup:     EXIT trap deletes all test Instances. Idempotent; runs on pass AND fail.
 set -uo pipefail
@@ -59,7 +59,7 @@ LOAD_CMD="${E2E_WHOLE_LOAD_COMMAND:-}"
 INST_CPU=e2e-c6-metrics
 INST_WHOLE=e2e-c6-scope-whole
 INST_SLICED=e2e-c6-scope-sliced
-SLICEPCT=50
+SLICEPCT=10
 
 # Manufacturers whose real or mock detector implements AcceleratorProcessDetector.
 PROCESS_MANUFACTURERS="nvidia amd ascend cambricon iluvatar metax mthreads hygon thead"

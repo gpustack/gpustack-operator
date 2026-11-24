@@ -156,12 +156,12 @@ cleanup() {
 
   for it in $(kubectl get instancetypes.worker.gpustack.ai -l "${DERIVED_LABEL}=true" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
     if ! printf '%s' "$BEFORE_ITS_JSON" | jq -e --arg name "$it" '.items | any(.metadata.name == $name)' >/dev/null 2>&1; then
-      kubectl delete instancetype "$it" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+      kubectl delete instancetype "$it" --ignore-not-found --timeout=60s >/dev/null 2>&1 || true
     fi
   done
   for at in $(kubectl get acceleratortypes.worker.gpustack.ai -l "${DERIVED_LABEL}=true" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
     if ! printf '%s' "$BEFORE_ATS_JSON" | jq -e --arg name "$at" '.items | any(.metadata.name == $name)' >/dev/null 2>&1; then
-      kubectl delete acceleratortype "$at" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+      kubectl delete acceleratortype "$at" --ignore-not-found --timeout=60s >/dev/null 2>&1 || true
     fi
   done
 }
@@ -1009,18 +1009,38 @@ clear_test_pods
 # ===================================================================================================
 echo
 echo "[case-3] === Phase B5: accelerated CPU-manufacturer awareness ==="
-mock_dm_apply_spec "$NS" "$MOCK_DM_CM" "$MOCK_DM_KEY" "$SPEC_B3"
-mock_dm_wait_devices "$NS" "$NODE_A" '([.spec.groups[] | select(.manufacturer == "nvidia") | .accelerators[]] | length == 2)' 90
+# Use nvidia-gb10 (small unitResources tier: 8 CPU / 32Gi RAM -> 4Gi RAM request per card) so a
+# 2-card aware Instance fits cleanly on both 16-30Gi developer Kind/K3s hosts and full clusters.
+SPEC_B5="$(cat <<EOF
+default:
+  preset: amd-mi300x
+  count: 1
+nodes:
+  ${NODE_A}:
+    preset: nvidia-gb10
+    count: 2
+EOF
+)"
+mock_dm_apply_spec "$NS" "$MOCK_DM_CM" "$MOCK_DM_KEY" "$SPEC_B5"
+mock_dm_wait_devices "$NS" "$NODE_A" \
+  '([.spec.groups[] | select(.manufacturer == "nvidia" and .id == "gb10") | .accelerators[]] | length == 2)' 90
+mock_dm_wait_node_allocatable "$NODE_A" '.["nvidia.com/gpu"] == "2"' 90 || true
 
-ARF="$(kubectl get resourceflavors.kueue.x-k8s.io -o json 2>/dev/null | jq -r \
-  --arg akey "$AKEY_NV" '
-  [.items[]
-   | select(.metadata.annotations["note.gpustack.ai/acceleratable"] == "true"
-       and .metadata.annotations["note.gpustack.ai/acceleratorGroup"] == $akey)
-   | .metadata.name] | sort | .[0] // ""')"
+AKEY_NV_B5="nvidia-gb10"
+ARF=""
+for _ in $(seq 1 25); do
+  ARF="$(kubectl get resourceflavors.kueue.x-k8s.io -o json 2>/dev/null | jq -r \
+    --arg akey "$AKEY_NV_B5" '
+    [.items[]
+     | select(.metadata.annotations["note.gpustack.ai/acceleratable"] == "true"
+         and .metadata.annotations["note.gpustack.ai/acceleratorGroup"] == $akey)
+     | .metadata.name] | sort | .[0] // ""')"
+  [ -n "$ARF" ] && break
+  sleep 3
+done
 
 if [ -z "$ARF" ]; then
-  record FAIL "aware accelerated InstanceType materializes" "no ResourceFlavor found for ${AKEY_NV}"
+  record FAIL "aware accelerated InstanceType materializes" "no ResourceFlavor found for ${AKEY_NV_B5}"
 else
   GKEY="$(kubectl get resourceflavor "$ARF" -o jsonpath='{.metadata.annotations.note\.gpustack\.ai/generalGroup}' 2>/dev/null)"
   PRODUCT="$(kubectl get resourceflavor "$ARF" -o jsonpath='{.metadata.annotations.note\.gpustack\.ai/product}' 2>/dev/null)"
@@ -1028,7 +1048,7 @@ else
   CORES="$(kubectl get resourceflavor "$ARF" -o jsonpath='{.metadata.annotations.note\.gpustack\.ai/cores}' 2>/dev/null)"
   RF_OS="$(kubectl get resourceflavor "$ARF" -o jsonpath='{.metadata.labels.kubernetes\.io/os}' 2>/dev/null)"
   RF_ARCH="$(kubectl get resourceflavor "$ARF" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}' 2>/dev/null)"
-  AWARE_IT="gpustack--${GKEY}--${AKEY_NV}-${RF_OS}-${RF_ARCH}"
+  AWARE_IT="gpustack--${GKEY}--${AKEY_NV_B5}-${RF_OS}-${RF_ARCH}"
 
   setting_set "$AWARE_KEY" true
   AWARE_BOUNCED=1
@@ -1041,7 +1061,7 @@ else
   fi
 
   it_info="$(kubectl get instancetype "$AWARE_IT" -o json 2>/dev/null | jq -r \
-    --arg ag "$AKEY_NV" --arg gg "$GKEY" --arg prod "$PRODUCT" --arg mem "$MEMORY" --arg cores "$CORES" '
+    --arg ag "$AKEY_NV_B5" --arg gg "$GKEY" --arg prod "$PRODUCT" --arg mem "$MEMORY" --arg cores "$CORES" '
     ((.spec.acceleratorGroup // "") == $ag and (.spec.generalGroup // "") == $gg) as $id_ok |
     ((.status.detail.product // "") == $prod and (.status.detail.memory // "") == $mem and ((.status.detail.cores // "" | tostring) == $cores)) as $gpu_ok |
     (((.status.detail.cpu // {}) | length) > 0) as $cpu_ok |
@@ -1049,7 +1069,7 @@ else
   ' 2>/dev/null)"
   IFS='|' read -r id_ok gpu_ok cpu_ok <<<"$it_info"
   if [ "$id_ok" = "true" ]; then
-    record PASS "aware type splits by CPU" "${AWARE_IT}: ${AKEY_NV} + ${GKEY}"
+    record PASS "aware type splits by CPU" "${AWARE_IT}: ${AKEY_NV_B5} + ${GKEY}"
   else
     record FAIL "aware type splits by CPU" "${AWARE_IT} mismatch"
   fi

@@ -238,8 +238,15 @@ EOF
 
 mock_dm_apply_spec "$NS" "$MOCK_DM_CM" "$MOCK_DM_KEY" "$(render_c4_spec 4)"
 
-mock_dm_wait_devices "$NS" "$NODE_A" \
-  "(.metadata.annotations[\"device.gpustack.ai/mock\"] == \"true\") and (([.spec.groups[] | select(.manufacturer == \"${MFR}\") | .accelerators[]] | length) == 4)" "$CHAOS_TIMEOUT"
+if [[ "$HAS_NV_MIG" -eq 1 ]]; then
+  mock_dm_wait_devices "$NS" "$NODE_A" \
+    '(.metadata.annotations["device.gpustack.ai/mock"] == "true")
+     and (([.spec.groups[] | select(.manufacturer == "nvidia") | .accelerators[]] | length) == 4)
+     and any(.spec.groups[] | select(.manufacturer == "nvidia") | .accelerators[]; .id == "GPU-c4-mig-912151ec-e9f1-fc26")' "$CHAOS_TIMEOUT"
+else
+  mock_dm_wait_devices "$NS" "$NODE_A" \
+    "(.metadata.annotations[\"device.gpustack.ai/mock\"] == \"true\") and (([.spec.groups[] | select(.manufacturer == \"${MFR}\") | .accelerators[]] | length) == 4)" "$CHAOS_TIMEOUT"
+fi
 if [[ "$NODE_B" != "$NODE_A" ]]; then
   mock_dm_wait_devices "$NS" "$NODE_B" \
     "(.metadata.annotations[\"device.gpustack.ai/mock\"] == \"true\") and (([.spec.groups[] | select(.manufacturer == \"${MFR}\") | .accelerators[]] | length) == 4)" "$CHAOS_TIMEOUT"
@@ -401,7 +408,7 @@ dev_mock_repopulated=0
 if mock_dm_wait_devices "$NS" "$NODE_A" \
   '(.metadata.annotations["device.gpustack.ai/mock"] == "true")
    and ((.status.groups // []) | length > 0)
-   and any(.status.groups[].accelerators[]; (.allocated // 0) > 0 or ((.allocatedProfiles // []) | length > 0))' 90; then
+   and any(.status.groups[].accelerators[]; (.mode // 0) != 0 or ((.remaining // 1600000) < 1600000) or ((.allocatedProfiles // []) | length > 0))' 90; then
   dev_mock_repopulated=1
 fi
 
@@ -536,7 +543,7 @@ for _ in $(seq 1 35); do
   rem_wls="$(kubectl -n "$TEST_NS" get workloads.kueue.x-k8s.io --no-headers 2>/dev/null | wc -l | tr -d ' ')"
   leaked_parts="$(kubectl get devices.worker.gpustack.ai "$NODE_A" -o json 2>/dev/null | jq -r '
     [.status.groups[]? | .accelerators[]?
-     | select((.allocated // 0) > 0 or any((.allocatedProfiles // [])[]; (.count // 0) > 0))]
+     | select((.mode // 0) != 0 or ((.remaining // 1600000) < 1600000) or any((.allocatedProfiles // [])[]; (.count // 0) > 0))]
     | length
   ' 2>/dev/null || echo 1)"
   if [[ "${rem_inst:-1}" -eq 0 && "${rem_pods:-1}" -eq 0 && "${rem_wls:-1}" -eq 0 && "${leaked_parts:-1}" -eq 0 ]]; then

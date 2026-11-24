@@ -253,13 +253,14 @@ mock_dm_wait_it() {
   local timeout_secs="${2:-90}"
   local elapsed=0 it_json="" at_json="" combined=""
 
+  local empty_list='{"items":[]}'
   while [ "$elapsed" -lt "$timeout_secs" ]; do
     it_json="$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null)" || it_json=""
-    at_json="$(kubectl get acceleratortypes.worker.gpustack.ai -o json 2>/dev/null)" || at_json='{"items":[]}'
+    at_json="$(kubectl get acceleratortypes.worker.gpustack.ai -o json 2>/dev/null)" || at_json="$empty_list"
     if [ -n "$it_json" ]; then
       combined="$(jq -cn \
         --argjson it "$it_json" \
-        --argjson at "${at_json:-{\"items\":[]}}" \
+        --argjson at "${at_json:-$empty_list}" \
         '$it + {instanceTypes: ($it.items // []), acceleratorTypes: ($at.items // [])}' 2>/dev/null)" || combined=""
       if [ -n "$combined" ] && printf '%s' "$combined" | jq -e "$jq_expr" >/dev/null 2>&1; then
         return 0

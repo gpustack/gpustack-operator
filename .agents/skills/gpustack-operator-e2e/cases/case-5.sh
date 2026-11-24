@@ -249,7 +249,7 @@ if [ "$r_sp1" -eq 1 ] && [ "$r_sp2" -eq 1 ]; then
   mfr_sp1="$(exec_ctr_env "e2e-c5-spread-1" main GPUSTACK_MOCK_MANUFACTURER)"
   u_sp2="$(exec_ctr_env "e2e-c5-spread-2" main NVIDIA_VISIBLE_DEVICES)"
   over_sp="$(kubectl get devices.worker.gpustack.ai "$TARGET_NODE" -o json 2>/dev/null | jq -r '
-    [.status.groups[]? | select(.manufacturer == "nvidia") | .accelerators[]? | select((.allocated // 0) > 1600000)] | length
+    [.status.groups[]? | select(.manufacturer == "nvidia") | .accelerators[]? | select((.remaining // 0) < 0)] | length
   ' 2>/dev/null)"
 
   if [ -n "$u_sp1" ] && [ "$u_sp1" = "$m_sp1" ] && [ "$mode_sp1" = "sliced" ] && [ "$mfr_sp1" = "nvidia" ]; then
@@ -293,7 +293,7 @@ if [ "$r_pk1" -eq 1 ] && [ "$r_pk2" -eq 1 ]; then
   if wait_pod_running "e2e-c5-pack-30" 40; then
     join_card="$(exec_ctr_env "e2e-c5-pack-30" main NVIDIA_VISIBLE_DEVICES)"
     over_pk="$(kubectl get devices.worker.gpustack.ai "$TARGET_NODE" -o json 2>/dev/null | jq -r '
-      [.status.groups[]? | select(.manufacturer == "nvidia") | .accelerators[]? | select((.allocated // 0) > 1600000)] | length
+      [.status.groups[]? | select(.manufacturer == "nvidia") | .accelerators[]? | select((.remaining // 0) < 0)] | length
     ' 2>/dev/null)"
     if [ "$host_card" != "$block_card" ] && [ "$join_card" = "$host_card" ] && [ "${over_pk:-1}" -eq 0 ]; then
       record PASS "fitting slice packs onto partly-used card rather than opening freed card" \
