@@ -1,11 +1,18 @@
 package hgml
 
 import (
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gpustack.ai/gpustack/binding"
 )
 
 // The whole reason a v3 read has to be cross-checked is that the two struct versions are the same
@@ -190,4 +197,77 @@ func TestEntryPointRefused(t *testing.T) {
 			assert.Equal(t, c.want, entryPointRefused(c.ret))
 		})
 	}
+}
+
+type fakeHGMLLibrary struct {
+	lookedUp []string
+	symbols  map[string]error
+}
+
+func (f *fakeHGMLLibrary) Load() error   { return nil }
+func (f *fakeHGMLLibrary) Unload() error { return nil }
+func (f *fakeHGMLLibrary) Path() string  { return "fake.so" }
+func (f *fakeHGMLLibrary) Lookup(sym string) error {
+	f.lookedUp = append(f.lookedUp, sym)
+	if err, ok := f.symbols[sym]; ok {
+		return err
+	}
+	return errors.New("symbol not found")
+}
+
+func TestDevice_GetNameLookup(t *testing.T) {
+	if soPath := os.Getenv("GPUSTACK_TEST_HGML_NAME_SO"); soPath != "" {
+		so := binding.NewLibrary([]string{soPath})
+		require.NoError(t, so.Load())
+		dev := Device{so: so}
+		name, ret := dev.GetName()
+		assert.Equal(t, SUCCESS, ret)
+		assert.Equal(t, "T-Head PPU-ZW810E", name)
+		return
+	}
+
+	t.Run("missing hgmlDeviceGetName returns ERROR_FUNCTION_NOT_FOUND even when minor symbol exists", func(t *testing.T) {
+		lib := &fakeHGMLLibrary{
+			symbols: map[string]error{
+				"hgmlDeviceGetMinorNumber": nil,
+			},
+		}
+		dev := Device{so: lib}
+		name, ret := dev.GetName()
+		assert.Empty(t, name)
+		assert.Equal(t, ERROR_FUNCTION_NOT_FOUND, ret)
+		assert.Equal(t, []string{"hgmlDeviceGetName"}, lib.lookedUp)
+	})
+
+	t.Run("resolves hgmlDeviceGetName without requiring hgmlDeviceGetMinorNumber", func(t *testing.T) {
+		dir := t.TempDir()
+		srcPath := filepath.Join(dir, "fixture.c")
+		soPath := filepath.Join(dir, "libhgml_name_test.so")
+		const src = `
+#include <string.h>
+int hgmlDeviceGetName(void *device, char *name, unsigned int length) {
+	const char *val = "T-Head PPU-ZW810E";
+	if (name && length > 0) {
+		strncpy(name, val, length - 1);
+		name[length - 1] = '\0';
+	}
+	return 0;
+}
+`
+		require.NoError(t, os.WriteFile(srcPath, []byte(src), 0o600))
+		args := []string{}
+		if runtime.GOOS == "darwin" {
+			args = append(args, "-dynamiclib")
+		} else {
+			args = append(args, "-shared", "-fPIC")
+		}
+		args = append(args, srcPath, "-o", soPath)
+		out, err := exec.Command("cc", args...).CombinedOutput()
+		require.NoError(t, err, "%s", out)
+
+		cmd := exec.Command(os.Args[0], "-test.run=^TestDevice_GetNameLookup$")
+		cmd.Env = append(os.Environ(), "GPUSTACK_TEST_HGML_NAME_SO="+soPath)
+		out, err = cmd.CombinedOutput()
+		require.NoError(t, err, "%s", out)
+	})
 }
