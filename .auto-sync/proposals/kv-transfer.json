@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "stage": "tag_promotion",
-  "summary": "Stage B tag promotion: host preflight pre-staged the published gpustack/* tags and this pass verifies them against kv-transfer-preflight-report.json and image-manifests.json (crane digests confirmed). ModelExpress setting image promoted to the published gpustack/mirrored-modelexpress-server:v0.8.0 across value.go, value_test.go, model_deployment_transfer_test.go, docs/reference/settings.md and docs/modules/model-delivery/remote.md; modelTransfer.images promoted to the published gpustack/model-transfer:v0.1.1-cuda12.9, v0.1.1-rocm7.2 (amd64-published) and v0.1.1-cann9.2-a5 in deploy/gpustack-operator/chart/{values.yaml,values.schema.json,README.md.gotmpl,README.md}. kv-cache-backend-image stays held at gpustack/mirrored-mooncake:0.3.13.post1-cpu per .auto-sync/setting-image-holds.json even though 0.3.14-cpu is published. Stage A recipes stay untouched (has_stage_a false): Mooncake 0.3.14 admitted in all four release guards plus the 0.3.14 arm of the cann context_manager.cpp block, NIXL 1.5.2 with NIXL_ROCM_REF v1.5.2 (pyproject version 1.5.2) and NIXL_ROCM_UCX_REF v1.22.0, and HIXL held at gpustack/runner VLLM_HIXL_COMMIT 60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a with 001_channel_generation.patch byte-identical to runner's.",
+  "stage": "recipe_sync",
+  "summary": "Stage A recipe sync: only ucx-rocm drifted, so pack/model-transfer/Dockerfile bumps NIXL_ROCM_UCX_REF from v1.22.0 to the stable openucx/ucx release tag v1.23.0 (non-prerelease, numeric SemVer upgrade verified as ucx_rocm.target_ref in kv-transfer-preflight-report.json). All other recipe pins stay put: NIXL_VERSION 1.5.2 with NIXL_ROCM_VERSION 1.5.2 and NIXL_ROCM_REF v1.5.2 aligned to the staged nixl-rocm pyproject.toml [project].version 1.5.2, HIXL_COMMIT held at gpustack/runner VLLM_HIXL_COMMIT 60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a with patches/hixl/001_channel_generation.patch byte-identical to runner's channel-generation patch, Mooncake MOONCAKE_VERSION 0.3.14 already admitted by all four release guards plus the explicit 0.3.14 arm of the fifth context_manager.cpp block, and MODELEXPRESS_VERSION v0.8.0 matching the staged Cargo.toml [workspace.package].version 0.8.0 (no bump, no docker buildx builder rerun). stage_b_flags are all false and stage: recipe_sync with image_published: false, so pkg/worker/settings/value.go, value_test.go, model_deployment_transfer_test.go, docs/reference/settings.md, docs/modules/model-delivery/remote.md and deploy/gpustack-operator/chart/** are untouched, and kv-cache-backend-image remains held at gpustack/mirrored-mooncake:0.3.13.post1-cpu per .auto-sync/setting-image-holds.json even though 0.3.14-cpu is published.",
   "versions": {
     "mooncake": "0.3.14",
     "nixl-pypi": "1.5.2",
     "nixl-rocm": "v1.5.2",
-    "ucx-rocm": "v1.22.0",
+    "ucx-rocm": "v1.23.0",
     "hixl": "60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a",
-    "modelexpress": "v0.8.0+stage-b",
-    "gpustack-runner": "aligned+stage-b"
+    "modelexpress": "v0.8.0",
+    "gpustack-runner": "aligned"
   },
   "subscriptions": [
     "mooncake",
