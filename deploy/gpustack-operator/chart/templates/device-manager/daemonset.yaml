@@ -4,6 +4,172 @@
 {{- $imagePullPolicy := include "gpustack-operator.imagePullPolicy" (dict "root" $root "overrides" $root.Values.deviceManager.image) }}
 {{- $name := include "gpustack-operator.deviceManager.fullname" . }}
 {{- $securePort := .Values.deviceManager.securePort }}
+{{- if .Values.deviceManager.mock.enabled }}
+{{- $mock := $root.Values.deviceManager.mock }}
+{{- $mockConfigMap := required "deviceManager.mock.configMapName is required when deviceManager.mock.enabled is true" $mock.configMapName }}
+{{- $mockKey := $mock.configMapKey | default "devices.yaml" }}
+{{- $mockManufacturers := $mock.manufacturers | default list }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ $name }}-mock
+  namespace: {{ include "gpustack-operator.namespace" $root }}
+  labels:
+    {{- include "gpustack-operator.deviceManager.labels" $root | nindent 4 }}
+    gpustack.ai/manufacturer: mock
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "gpustack-operator.deviceManager.selectorLabels" $root | nindent 6 }}
+      gpustack.ai/manufacturer: mock
+  template:
+    metadata:
+      labels:
+        {{- include "gpustack-operator.deviceManager.labels" $root | nindent 8 }}
+        gpustack.ai/manufacturer: mock
+    spec:
+      {{- with $root.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ if kindIs "string" . }}{{ . }}{{ else }}{{ .name }}{{ end }}
+        {{- end }}
+      {{- end }}
+      {{- $nodeSelector := merge (deepCopy ($mock.nodeSelector | default dict)) (deepCopy ($root.Values.global.nodeSelector | default dict)) }}
+      {{- with $nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ $name }}
+      priorityClassName: system-cluster-critical
+      {{- with $root.Values.deviceManager.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: main
+          image: {{ $image | quote }}
+          imagePullPolicy: {{ $imagePullPolicy }}
+          args:
+            - gpustack-operator
+            - device-manager
+            - serve
+            - -v=2
+            - --secure-port={{ $securePort }}
+            - --mock-devices-file=/etc/gpustack/mock/{{ $mockKey }}
+            {{- if $mockManufacturers }}
+            - --manufacturer={{ join "," $mockManufacturers }}
+            {{- end }}
+            {{- with $root.Values.deviceManager.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml $root.Values.deviceManager.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {}
+            privileged: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: false
+          env:
+            # User-supplied env first, so a misconfiguration can never shadow the
+            # managed downward-API and manufacturer variables below (last value wins).
+            {{- range $key, $value := $root.Values.deviceManager.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: KUBERNETES_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: KUBERNETES_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KUBERNETES_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KUBERNETES_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: KUBERNETES_SERVICE_NAME
+              value: {{ $name | quote }}
+            - name: GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS
+              value: {{ $root.Values.ledgerReleaseTerminatedPods | quote }}
+            {{- range $manu := (keys $root.Values.global.manufacturers | sortAlpha) }}
+            {{- with (include "gpustack-operator.manufacturer.env"
+                  (dict "name" $manu "identity" (index $root.Values.global.manufacturers $manu)) | trim) }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- end }}
+          ports:
+            - name: https
+              containerPort: {{ $securePort }}
+          startupProbe:
+            failureThreshold: 10
+            periodSeconds: 5
+            httpGet:
+              port: https
+              path: /readyz
+              scheme: HTTPS
+          readinessProbe:
+            failureThreshold: 3
+            timeoutSeconds: 5
+            periodSeconds: 5
+            httpGet:
+              port: https
+              path: /readyz
+              scheme: HTTPS
+          livenessProbe:
+            failureThreshold: 10
+            timeoutSeconds: 5
+            periodSeconds: 10
+            httpGet:
+              port: https
+              path: /livez
+              scheme: HTTPS
+          volumeMounts:
+            # Mount the ConfigMap directory without subPath so Kubernetes atomic
+            # symlink swaps hot-reload the mock specification live.
+            - name: mock-devices
+              mountPath: /etc/gpustack/mock
+              readOnly: true
+            - name: tmp-dir
+              mountPath: /tmp
+            - name: gpustack-data-dir
+              mountPath: /var/lib/gpustack
+            - name: kubelet-device-plugins-dir
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: kubelet-pod-resources-dir
+              mountPath: /var/lib/kubelet/pod-resources
+              readOnly: true
+      volumes:
+        - name: mock-devices
+          configMap:
+            name: {{ $mockConfigMap }}
+        - name: tmp-dir
+          emptyDir: {}
+        - name: gpustack-data-dir
+          hostPath:
+            path: /var/lib/gpustack
+            type: DirectoryOrCreate
+        - name: kubelet-device-plugins-dir
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+            type: DirectoryOrCreate
+        - name: kubelet-pod-resources-dir
+          hostPath:
+            path: /var/lib/kubelet/pod-resources
+            type: DirectoryOrCreate
+{{- else }}
 {{- range $manu := (keys .Values.global.manufacturers | sortAlpha) }}
 {{- $identity := index $root.Values.global.manufacturers $manu }}
 ---
@@ -428,5 +594,6 @@ spec:
             path: /usr/local/PPU_SDK
             type: DirectoryOrCreate
         {{- end }}
+{{- end }}
 {{- end }}
 {{- end }}

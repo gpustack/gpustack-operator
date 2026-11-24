@@ -298,7 +298,7 @@ type Allocator interface {
       Acceptance: Mock mode is disabled by default (zero behavior change when unset); when configured, `detect`/`monitor`/`serve` bypass real vendor detectors/allocators and PCI/sysfs scans, log a startup warning, stamp `device.gpustack.ai/mock: "true"` on `Devices`, work on macOS (`detect`/`monitor`) and Linux (`serve`), and document `GPUSTACK_MOCK_DEVICES_FILE` in `docs/reference/settings.md`.
       Verify: `go test -count=1 ./pkg/devicemanager/... && make lint docs`
 
-- [ ] **T5 · Add opt-in Helm chart `deviceManager.mock` values and DaemonSet rendering**
+- [x] **T5 · Add opt-in Helm chart `deviceManager.mock` values and DaemonSet rendering**
       Blocked by: T4
       Owns: `deploy/gpustack-operator/chart/**`
       Gate: review

@@ -576,6 +576,51 @@
           "title": "image",
           "type": "object"
         },
+        "mock": {
+          "properties": {
+            "configMapKey": {
+              "default": "devices.yaml",
+              "description": "Key inside `deviceManager.mock.configMapName` holding the mock devices YAML/JSON file.\nMounted read-only via a directory mount at `/etc/gpustack/mock` (without `subPath`, so\nKubernetes ConfigMap updates hot-reload atomically) and passed to\n`--mock-devices-file=/etc/gpustack/mock/\u003cconfigMapKey\u003e`.",
+              "title": "configMapKey",
+              "type": "string"
+            },
+            "configMapName": {
+              "default": "",
+              "description": "Name of the ConfigMap in the operator release namespace containing the mock hardware\nspecification file. Required when `deviceManager.mock.enabled` is true.",
+              "title": "configMapName",
+              "type": "string"
+            },
+            "enabled": {
+              "default": false,
+              "description": "Deploy a single CPU-only mock device-manager DaemonSet instead of per-PCI-vendor\nhardware DaemonSets. Strictly disabled by default; enable only on CPU-only test clusters\n(such as Kind or k3s) to exercise the full device-manager, worker, Kueue, and kubelet\nDevicePlugin chain without physical accelerators or vendor drivers.",
+              "title": "enabled",
+              "type": "boolean"
+            },
+            "manufacturers": {
+              "description": "Optional list of manufacturer names passed via `--manufacturer=\u003ccsv\u003e`. When empty,\n`--manufacturer` is omitted so the mock DaemonSet serves all known manufacturers\ndeclared in the mock specification.",
+              "items": {
+                "type": "string"
+              },
+              "title": "manufacturers",
+              "type": "array"
+            },
+            "nodeSelector": {
+              "description": "Node selector for the mock device-manager DaemonSet, merged over `global.nodeSelector`\nwithout any NFD PCI vendor label requirement.",
+              "required": [],
+              "title": "nodeSelector",
+              "type": "object"
+            },
+            "omitRuntimeClass": {
+              "default": true,
+              "description": "When true and `deviceManager.mock.enabled` is true, omit `runtimeClassName` on the\nmock DaemonSet and skip rendering vendor `RuntimeClass` objects so CPU-only kubelets\nwithout GPU container runtimes can run mock workload Pods.",
+              "title": "omitRuntimeClass",
+              "type": "boolean"
+            }
+          },
+          "required": [],
+          "title": "mock",
+          "type": "object"
+        },
         "networkPolicy": {
           "description": "Restrict who may reach the device-manager's secure port.\n\nThat port serves `/metrics`, which lists every Instance running on the node — names,\nnamespaces, declared sizes, live usage and accelerator IDs — to anything that can reach it,\nand it is unauthenticated. Enabling this is recommended on a multi-tenant cluster.",
           "properties": {
