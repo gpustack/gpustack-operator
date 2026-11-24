@@ -373,7 +373,7 @@ else
 fi
 
 # Check zero cross-mode card collision across all Pods and Devices.status.
-collision_err="$(ANNO="$ANNO" PODS_JSON="$(kubectl -n "$TEST_NS" get pods -o json 2>/dev/null)" \
+if ! collision_err="$(ANNO="$ANNO" PODS_JSON="$(kubectl -n "$TEST_NS" get pods -o json 2>/dev/null)" \
   DEVS_JSON="$(kubectl get devices.worker.gpustack.ai -o json 2>/dev/null)" python3 -c '
 import json, os
 
@@ -400,7 +400,8 @@ for p in pods:
                 m = a.get("mode") or ""
                 if not m:
                     continue
-                k = f"{node}/{gid}/{a.get(\"id\", \"\")}"
+                aid = a.get("id", "")
+                k = f"{node}/{gid}/{aid}"
                 s = card_modes.setdefault(k, set())
                 s.add(m)
                 if len(s) > 1:
@@ -410,11 +411,15 @@ for d in devs:
     n = d.get("metadata", {}).get("name", "")
     for g in (d.get("status") or {}).get("groups") or []:
         for a in g.get("accelerators") or []:
-            if (a.get("mode") or "") in ("Exclusive", "Shared", "Sliced") and (a.get("allocated") or 0) > 1600000:
-                errs.append(f"{n}/{a.get(\"id\")}:alloc={a.get(\"allocated\")}>1600000")
+            aid = a.get("id", "")
+            alloc = a.get("allocated") or 0
+            if (a.get("mode") or "") in ("Exclusive", "Shared", "Sliced") and alloc > 1600000:
+                errs.append(f"{n}/{aid}:alloc={alloc}>1600000")
 
 print("; ".join(errs[:3]))
-' 2>/dev/null || true)"
+' 2>&1)"; then
+  collision_err="python3 cross-mode collision check failed: ${collision_err:0:180}"
+fi
 
 if [[ -z "$collision_err" ]]; then
   record PASS "zero cross-mode card collision across EX/SH/SL/PT" \
@@ -436,7 +441,7 @@ rel_sh=0; wait_c3_running "$P_RACE_SH" 90 && rel_sh=1
 rel_sl60=0; wait_c3_running "$P_RACE_SL60" 90 && rel_sl60=1
 
 # Re-check cross-mode collision after EX, SH, and 60% SL land on the 3 freed cards!
-post_collision="$(ANNO="$ANNO" PODS_JSON="$(kubectl -n "$TEST_NS" get pods -o json 2>/dev/null)" python3 -c '
+if ! post_collision="$(ANNO="$ANNO" PODS_JSON="$(kubectl -n "$TEST_NS" get pods -o json 2>/dev/null)" python3 -c '
 import json, os
 pods = json.loads(os.environ["PODS_JSON"]).get("items", [])
 anno_key = os.environ["ANNO"]
@@ -451,16 +456,20 @@ for p in pods:
         continue
     for cbody in json.loads(raw).values():
         for g in ((cbody.get("devices") or {}).get("groups") or []):
+            gid = g.get("id", "")
             for a in g.get("accelerators") or []:
                 m = a.get("mode") or ""
                 if m:
-                    k = f"{node}/{g.get(\"id\", \"\")}/{a.get(\"id\", \"\")}"
+                    aid = a.get("id", "")
+                    k = f"{node}/{gid}/{aid}"
                     s = card_modes.setdefault(k, set())
                     s.add(m)
                     if len(s) > 1:
                         errs.append(f"{k}:{sorted(s)}")
 print("; ".join(errs[:3]))
-' 2>/dev/null || true)"
+' 2>&1)"; then
+  post_collision="python3 post-release collision check failed: ${post_collision:0:180}"
+fi
 
 if [[ "$rel_ex" -eq 1 && "$rel_sh" -eq 1 && "$rel_sl60" -eq 1 && -z "$post_collision" ]]; then
   record PASS "blocker release promptly admits held EX/SH/60%-SL workloads" \

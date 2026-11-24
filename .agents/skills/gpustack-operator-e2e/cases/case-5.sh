@@ -609,8 +609,10 @@ if [ "$ok_3g" -eq 1 ] && [ "$ok_2g" -eq 1 ] && [ "$ok_1g" -eq 1 ]; then
 
   # Live-ledger capacity update: mig-7g.80gb allocatable must be 0 and Devices.status tracks allocatedProfiles.
   ledger_live_jq='any(.status.groups[]? | select(.manufacturer == "nvidia") | .accelerators[]?;
-    (.allocatedProfiles["3g.40gb"] == 1) and (.allocatedProfiles["2g.20gb"] == 1) and (.allocatedProfiles["1g.10gb"] == 1)
-    and ((.remainingProfiles["7g.80gb"] // 0) == 0))'
+    any((.allocatedProfiles // [])[]; .name == "3g.40gb" and (.count // 0) == 1)
+    and any((.allocatedProfiles // [])[]; .name == "2g.20gb" and (.count // 0) == 1)
+    and any((.allocatedProfiles // [])[]; .name == "1g.10gb" and (.count // 0) == 1)
+    and all((.remainingProfiles // [])[]; .name != "7g.80gb" or (.count // 0) == 0))'
   if mock_dm_wait_devices "$NS" "$TARGET_NODE" "$ledger_live_jq" 45 \
     && mock_dm_wait_node_allocatable "$TARGET_NODE" '.["nvidia.com/gpu.partitioned.mig-7g.80gb"] == "0"' 45; then
     record PASS "live ledger updates Devices.status.allocatedProfiles and drops mig-7g.80gb to 0" \
@@ -647,7 +649,7 @@ fi
 clear_test_pods
 
 reclaimed_jq='all(.status.groups[]? | select(.manufacturer == "nvidia") | .accelerators[]?;
-  ((.allocatedProfiles // {}) | length == 0) and ((.remaining // 0) == 1600000))'
+  ((.allocatedProfiles // []) | length == 0) and ((.remaining // 0) == 1600000))'
 if mock_dm_wait_devices "$NS" "$TARGET_NODE" "$reclaimed_jq" 60 \
   && mock_dm_wait_node_allocatable "$TARGET_NODE" '(.["nvidia.com/gpu.partitioned.mig-7g.80gb"] == "1") and (.["nvidia.com/gpu.partitioned"] == "7")' 60; then
   # Confirm PartitionStore truly reclaimed the in-memory slots by placing 7g.80gb spanning [0, 8)!

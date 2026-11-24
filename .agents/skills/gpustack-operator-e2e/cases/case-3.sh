@@ -550,8 +550,8 @@ if [ -n "$IT_NV" ]; then
     m_mfr="$(exec_env "$P_EX" GPUSTACK_MOCK_MANUFACTURER)"
     m_devs="$(exec_env "$P_EX" GPUSTACK_MOCK_ALLOCATED_DEVICES)"
     v_devs="$(exec_env "$P_EX" NVIDIA_VISIBLE_DEVICES)"
-    no_preload="$(kubectl -n default exec "$P_EX" -c main -- sh -c '[ ! -s /etc/ld.so.preload ] && ls /dev/nvidia* >/dev/null 2>&1; echo $?' 2>/dev/null || true)"
-    if [ "$m_mode" = "exclusive" ] && [ "$m_mfr" = "nvidia" ] && [ -n "$m_devs" ] && [ "$m_devs" = "$v_devs" ] && [ "$no_preload" != "0" ]; then
+    no_preload="$(kubectl -n default exec "$P_EX" -c main -- sh -c '[ ! -s /etc/ld.so.preload ] && ! ls /dev/nvidia* >/dev/null 2>&1 && echo ok' 2>/dev/null || true)"
+    if [ "$m_mode" = "exclusive" ] && [ "$m_mfr" = "nvidia" ] && [ -n "$m_devs" ] && [ "$m_devs" = "$v_devs" ] && [ "$no_preload" = "ok" ]; then
       record PASS "Mock Allocator .exclusive CPU Pod runs with diagnostic env & zero host devices" \
         "mode=${m_mode} NVIDIA_VISIBLE_DEVICES=${v_devs}"
     else
@@ -594,15 +594,16 @@ if [ -n "$IT_NV" ]; then
     m_mode="$(exec_env "$P_SH" GPUSTACK_MOCK_ALLOCATION_MODE)"
     m_devs="$(exec_env "$P_SH" GPUSTACK_MOCK_ALLOCATED_DEVICES)"
     v_devs="$(exec_env "$P_SH" NVIDIA_VISIBLE_DEVICES)"
-    if [ "$m_mode" = "shared" ] && [ -n "$m_devs" ] && [ "$m_devs" = "$v_devs" ]; then
-      record PASS "Mock Allocator .shared CPU Pod runs with diagnostic env" \
+    no_preload="$(kubectl -n default exec "$P_SH" -c main -- sh -c '[ ! -s /etc/ld.so.preload ] && ! ls /dev/nvidia* >/dev/null 2>&1 && echo ok' 2>/dev/null || true)"
+    if [ "$m_mode" = "shared" ] && [ -n "$m_devs" ] && [ "$m_devs" = "$v_devs" ] && [ "$no_preload" = "ok" ]; then
+      record PASS "Mock Allocator .shared CPU Pod runs with diagnostic env & zero host devices" \
         "mode=${m_mode} NVIDIA_VISIBLE_DEVICES=${v_devs}"
     else
-      record FAIL "Mock Allocator .shared CPU Pod runs with diagnostic env" \
-        "mode='${m_mode}' mock='${m_devs}' vis='${v_devs}'"
+      record FAIL "Mock Allocator .shared CPU Pod runs with diagnostic env & zero host devices" \
+        "mode='${m_mode}' mock='${m_devs}' vis='${v_devs}' devCheck='${no_preload}'"
     fi
   else
-    record FAIL "Mock Allocator .shared CPU Pod runs with diagnostic env" "${P_SH} phase=$(pod_phase "$P_SH")"
+    record FAIL "Mock Allocator .shared CPU Pod runs with diagnostic env & zero host devices" "${P_SH} phase=$(pod_phase "$P_SH")"
   fi
   delete_pod_and_workload "$P_SH"
 
@@ -613,15 +614,16 @@ if [ -n "$IT_NV" ]; then
     m_mode="$(exec_env "$P_SL" GPUSTACK_MOCK_ALLOCATION_MODE)"
     m_devs="$(exec_env "$P_SL" GPUSTACK_MOCK_ALLOCATED_DEVICES)"
     v_devs="$(exec_env "$P_SL" NVIDIA_VISIBLE_DEVICES)"
-    if [ "$m_mode" = "sliced" ] && [ -n "$m_devs" ] && [ "$m_devs" = "$v_devs" ]; then
-      record PASS "Mock Allocator .sliced CPU Pod runs with diagnostic env" \
+    no_preload="$(kubectl -n default exec "$P_SL" -c main -- sh -c '[ ! -s /etc/ld.so.preload ] && ! ls /dev/nvidia* >/dev/null 2>&1 && echo ok' 2>/dev/null || true)"
+    if [ "$m_mode" = "sliced" ] && [ -n "$m_devs" ] && [ "$m_devs" = "$v_devs" ] && [ "$no_preload" = "ok" ]; then
+      record PASS "Mock Allocator .sliced CPU Pod runs with diagnostic env & zero host devices" \
         "mode=${m_mode} NVIDIA_VISIBLE_DEVICES=${v_devs}"
     else
-      record FAIL "Mock Allocator .sliced CPU Pod runs with diagnostic env" \
-        "mode='${m_mode}' mock='${m_devs}' vis='${v_devs}'"
+      record FAIL "Mock Allocator .sliced CPU Pod runs with diagnostic env & zero host devices" \
+        "mode='${m_mode}' mock='${m_devs}' vis='${v_devs}' devCheck='${no_preload}'"
     fi
   else
-    record FAIL "Mock Allocator .sliced CPU Pod runs with diagnostic env" "${P_SL} phase=$(pod_phase "$P_SL")"
+    record FAIL "Mock Allocator .sliced CPU Pod runs with diagnostic env & zero host devices" "${P_SL} phase=$(pod_phase "$P_SL")"
   fi
   clear_test_pods
 fi

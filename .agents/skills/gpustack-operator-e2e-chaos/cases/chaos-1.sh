@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # CHAOS 1 — Scale heterogeneous scheduling & Kueue admission storm: concurrent mixed EX/SH/SL/PT
-#           CPU mock bursts plus multi-role P/D ModelDeployment across mock worker nodes
+#           CPU mock bursts plus multi-role P/D and 3-role EPD ModelDeployments across mock nodes
 #           (MUTATING, self-recovering; AUTO-SKIPS when Mock Device Manager is not active)
 #
 #   chaos-1.sh [NS]
@@ -11,8 +11,9 @@
 #              all active CPU-mock worker nodes (scaling naturally from 2-4 local Kind nodes to
 #              8-32+ remote Kind/k3s nodes) and verify:
 #                1. Concurrent mixed exclusive, shared, sliced (25% & 50%), partitioned (virtual
-#                   MIG), and multi-role Prefill/Decode ModelDeployment workloads admit and reach
-#                   Running cleanly without admission livelock;
+#                   MIG), multi-role Prefill/Decode, and 3-role Encode/Prefill/Decode (EPD)
+#                   ModelDeployment workloads compose Workloads/PodSets and admit cleanly without
+#                   admission livelock;
 #                2. Zero double-booking on Devices.status (no card simultaneously claimed in
 #                   conflicting modes, no two exclusive Pods sharing a card, and no card exceeding
 #                   its 1600000 credit budget);
@@ -25,7 +26,7 @@
 #              (deviceManager.mock.enabled=true). AUTO-SKIPS cleanly with SKIP rows and exit 0
 #              when Mock Device Manager is not active.
 # Inputs:      MOCKED hardware inventory via hot-reloaded Mock Device Manager ConfigMap; REAL
-#              Kueue Workloads, Pods, and multi-role P/D ModelDeployment in an isolated
+#              Kueue Workloads, Pods, and multi-role P/D + EPD ModelDeployments in an isolated
 #              chaos-c1-<ts> namespace. Scales with CHAOS_CONCURRENCY, CHAOS_BURST_SIZE,
 #              CHAOS_TIMEOUT, and E2E_MOCK_IMAGE.
 # Expected:    All storm invariants (admission progress, zero double-booking, zero negative
@@ -56,6 +57,7 @@ CHAOS_TIMEOUT="${CHAOS_TIMEOUT:-180}"
 ANNO="device.gpustack.ai/accelerator.allocated"
 TEST_NS="chaos-c${CHAOS_ID}-$(date +%s)-$$"
 MD_NAME="chaos-c1-pd"
+MD_EPD_NAME="chaos-c1-epd"
 
 ORIG_CM_FILE="$(mktemp)"
 CM_SNAPSHOT_OK=0
@@ -74,9 +76,10 @@ cleanup() {
   echo
   echo "[chaos-1] cleanup: draining ${TEST_NS} and restoring original mock ConfigMap"
   if [[ "$NS_CREATED" -eq 1 ]]; then
-    kubectl -n "$TEST_NS" delete modeldeployments.worker.gpustack.ai "$MD_NAME" \
+    kubectl -n "$TEST_NS" delete modeldeployments.worker.gpustack.ai "$MD_NAME" "$MD_EPD_NAME" \
       --ignore-not-found --wait=false >/dev/null 2>&1 || true
     md_force_release "$TEST_NS" "$MD_NAME" >/dev/null 2>&1 || true
+    md_force_release "$TEST_NS" "$MD_EPD_NAME" >/dev/null 2>&1 || true
     kubectl -n "$TEST_NS" delete pods --all --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true
     kubectl -n "$TEST_NS" delete workloads.kueue.x-k8s.io --all --ignore-not-found --wait=false >/dev/null 2>&1 || true
     kubectl delete namespace "$TEST_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -99,6 +102,7 @@ if ! mock_dm_detect_env "$NS"; then
   skip_msg="mock device-manager DaemonSet (gpustack.ai/manufacturer=mock) is not active on this cluster"
   record SKIP "heterogeneous multi-node mock storm topology" "$skip_msg"
   record SKIP "concurrent mixed EX/SH/SL/PT & P/D burst admission" "$skip_msg"
+  record SKIP "three-role EPD ModelDeployment Workload/PodSet admission" "$skip_msg"
   record SKIP "zero double-booking and credit budget bounds on Devices.status" "$skip_msg"
   record SKIP "zero negative Remaining credits across Devices and InstanceTypes" "$skip_msg"
   record SKIP "zero UnexpectedAdmissionError events during storm" "$skip_msg"
@@ -369,9 +373,19 @@ submit_storm_pod() {
     }' | kubectl apply -f - >/dev/null
 }
 
-# Submit a multi-role P/D ModelDeployment when a usable AcceleratorType exists for PRIMARY_MFR.
+# Submit multi-role P/D and 3-role EPD ModelDeployments when a usable AcceleratorType exists for PRIMARY_MFR.
 AT_PD="$(md_usable_type_for "$PRIMARY_MFR")"
 PD_SUBMITTED=0
+EPD_SUBMITTED=0
+EPD_APPLY_ERR=""
+EPD_ENGINE="vLLM"
+EPD_ROUTER="vllm-router"
+if [[ "$PRIMARY_MFR" == "ascend" ]]; then
+  # Ascend vLLM EPD requires a shared RWX PVC; SGLang + llm-d-router runs the network encoder-urls leg without PVC.
+  EPD_ENGINE="SGLang"
+  EPD_ROUTER="llm-d-router"
+fi
+
 if [[ -n "$AT_PD" ]]; then
   if cat <<EOF | kubectl apply -f - >/dev/null 2>&1
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -401,6 +415,54 @@ spec:
 EOF
   then
     PD_SUBMITTED=1
+  fi
+
+  at_slice_count="$(kubectl get acceleratortypes.worker.gpustack.ai "$AT_PD" \
+    -o jsonpath='{.status.detail.slicedDetail.logical.count}' 2>/dev/null || echo 0)"
+  epd_res_block=""
+  if [[ "${at_slice_count:-0}" -gt 0 ]]; then
+    epd_res_block="$(printf '      resources:\n        accelerator: "1"\n        acceleratorSlicedMemoryPercentage: 25')"
+  fi
+
+  if epd_out="$(cat <<EOF | kubectl apply -f - 2>&1
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: ${MD_EPD_NAME}
+  namespace: ${TEST_NS}
+spec:
+  engine:
+    name: ${EPD_ENGINE}
+    image: ${MOCK_IMAGE}
+  model:
+    name: Qwen/Qwen2.5-0.5B-Instruct
+  router:
+    name: ${EPD_ROUTER}
+    image: ${MOCK_IMAGE}
+  roles:
+    - name: encode
+      kind: Encode
+      acceleratorType: ${AT_PD}
+      replicas: 1
+      image: ${MOCK_IMAGE}
+${epd_res_block}
+    - name: prefill
+      kind: Prefill
+      acceleratorType: ${AT_PD}
+      replicas: 1
+      image: ${MOCK_IMAGE}
+${epd_res_block}
+    - name: decode
+      kind: Decode
+      acceleratorType: ${AT_PD}
+      replicas: 1
+      image: ${MOCK_IMAGE}
+${epd_res_block}
+EOF
+  )"; then
+    EPD_SUBMITTED=1
+  else
+    EPD_APPLY_ERR="$(printf '%s' "$epd_out" | tr '\n' ' ' | tr -s ' ')"
   fi
 fi
 
@@ -469,6 +531,10 @@ WANT_MIN_RUNNING=$(( CHAOS_BURST_SIZE / 2 ))
 
 peak_running=0
 pd_running=0
+epd_admitted_ok=0
+epd_pod_roles=""
+epd_wl_podsets=""
+epd_admitted_roles=""
 double_book_err=""
 neg_rem_err=""
 saw_four_view_drop=0
@@ -476,10 +542,12 @@ saw_four_view_drop=0
 deadline=$((SECONDS + CHAOS_TIMEOUT))
 while [[ "$SECONDS" -lt "$deadline" ]]; do
   pods_json="$(kubectl -n "$TEST_NS" get pods -o json 2>/dev/null || echo '{"items":[]}')"
+  wls_json="$(kubectl -n "$TEST_NS" get workloads.kueue.x-k8s.io -o json 2>/dev/null || echo '{"items":[]}')"
   devs_json="$(kubectl get devices.worker.gpustack.ai -o json 2>/dev/null || echo '{"items":[]}')"
   its_json="$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null || echo '{"items":[]}')"
 
-  cur_running="$(printf '%s' "$pods_json" | jq -r '[.items[] | select(.status.phase == "Running")] | length' 2>/dev/null || echo 0)"
+  cur_running="$(printf '%s' "$pods_json" | jq -r --arg epd "$MD_EPD_NAME" \
+    '[.items[] | select((.metadata.labels["app.kubernetes.io/instance"] // "") != $epd and .status.phase == "Running")] | length' 2>/dev/null || echo 0)"
   [[ "${cur_running:-0}" -gt "$peak_running" ]] && peak_running="$cur_running"
 
   if [[ "$PD_SUBMITTED" -eq 1 ]]; then
@@ -488,8 +556,30 @@ while [[ "$SECONDS" -lt "$deadline" ]]; do
     [[ "${cur_pd:-0}" -gt "$pd_running" ]] && pd_running="$cur_pd"
   fi
 
+  if [[ "$EPD_SUBMITTED" -eq 1 && "$epd_admitted_ok" -eq 0 ]]; then
+    epd_state="$(jq -rn --arg md "$MD_EPD_NAME" --argjson pods "$pods_json" --argjson wls "$wls_json" '
+      [($pods.items // [])[]
+        | select(.metadata.labels["app.kubernetes.io/instance"] == $md
+            and ((.metadata.labels["app.kubernetes.io/component"] // "") | IN("encode", "prefill", "decode")))] as $epods
+      | ($epods | map(.metadata.labels["app.kubernetes.io/component"]) | unique | sort | join(",")) as $roles
+      | ($epods | map(.metadata.uid)) as $uids
+      | [($wls.items // [])[]
+          | select(any((.metadata.ownerReferences // [])[]; .uid as $u | $uids | index($u)))] as $ewls
+      | ($ewls | map((.spec.podSets // [])[] | "\(.name)=\(.count)") | sort | join(",")) as $podsets
+      | ($ewls | map(select(any((.status.conditions // [])[]; .type == "Admitted" and .status == "True"))
+          | (.status.admission.podSetAssignments // [])[] | .name) | sort | join(",")) as $admitted
+      | "\($roles)|\($podsets)|\($admitted)"
+    ' 2>/dev/null || true)"
+    if [[ -n "$epd_state" ]]; then
+      IFS='|' read -r epd_pod_roles epd_wl_podsets epd_admitted_roles <<<"$epd_state"
+      if [[ "$epd_wl_podsets" == "decode=1,encode=1,prefill=1" && "$epd_admitted_roles" == "decode,encode,prefill" ]]; then
+        epd_admitted_ok=1
+      fi
+    fi
+  fi
+
   # Check Devices.status + Pod allocation annotations for double-booking or over-budget cards.
-  cur_db="$(ANNO="$ANNO" PODS_JSON="$pods_json" DEVS_JSON="$devs_json" python3 -c '
+  if ! cur_db="$(ANNO="$ANNO" PODS_JSON="$pods_json" DEVS_JSON="$devs_json" python3 -c '
 import json, os
 
 pods = json.loads(os.environ["PODS_JSON"]).get("items", [])
@@ -538,7 +628,8 @@ for p in pods:
         for g in ((cbody.get("devices") or {}).get("groups") or []):
             gid = g.get("id", "")
             for a in g.get("accelerators") or []:
-                key = f"{node}/{gid}/{a.get(\"id\", \"\")}"
+                aid = a.get("id", "")
+                key = f"{node}/{gid}/{aid}"
                 m = a.get("mode") or ""
                 if not m:
                     continue
@@ -553,11 +644,14 @@ for p in pods:
                         errs.append(f"{key}: multiple Exclusive Pods {sorted(owners)}")
 
 print("; ".join(errs[:3]))
-' 2>/dev/null || true)"
-  [[ -n "$cur_db" ]] && double_book_err="$cur_db"
+' 2>&1)"; then
+    double_book_err="python3 double-booking check failed: ${cur_db:0:180}"
+  elif [[ -n "$cur_db" ]]; then
+    double_book_err="$cur_db"
+  fi
 
   # Check for negative Remaining across Devices.status and InstanceType four-view statuses.
-  cur_neg="$(jq -rn --argjson devs "$devs_json" --argjson its "$its_json" '
+  if ! cur_neg="$(jq -rn --argjson devs "$devs_json" --argjson its "$its_json" '
     (
       [($devs.items // [])[] | .metadata.name as $n
        | (.status.groups // [])[] | (.accelerators // [])[]
@@ -574,8 +668,11 @@ print("; ".join(errs[:3]))
        | select(.[1] < 0 or .[1] > .[2])
        | "\($it)/\(.[0]):rem=\(.[1])/cap=\(.[2])"]
     ) | .[0:3] | join("; ")
-  ' 2>/dev/null || true)"
-  [[ -n "$cur_neg" ]] && neg_rem_err="$cur_neg"
+  ' 2>&1)"; then
+    neg_rem_err="jq negative-remaining check failed: ${cur_neg:0:180}"
+  elif [[ -n "$cur_neg" ]]; then
+    neg_rem_err="$cur_neg"
+  fi
 
   # Observe whether at least one accelerated InstanceType decremented remaining while workloads run.
   drop_hit="$(jq -rn --argjson its "$its_json" '
@@ -591,7 +688,8 @@ print("; ".join(errs[:3]))
   [[ "$drop_hit" == "true" ]] && saw_four_view_drop=1
 
   if [[ "$peak_running" -ge "$WANT_MIN_RUNNING" && "$saw_four_view_drop" -eq 1 ]]; then
-    if [[ "$PD_SUBMITTED" -eq 0 || "$pd_running" -ge 2 ]]; then
+    if [[ "$PD_SUBMITTED" -eq 0 || "$pd_running" -ge 2 ]] \
+      && [[ "$EPD_SUBMITTED" -eq 0 || "$epd_admitted_ok" -eq 1 ]]; then
       break
     fi
   fi
@@ -612,6 +710,20 @@ if [[ "$peak_running" -ge "$WANT_MIN_RUNNING" ]] && [[ "$PD_SUBMITTED" -eq 0 || 
 else
   record FAIL "concurrent mixed EX/SH/SL/PT & P/D burst admission" \
     "peakRunning=${peak_running} (want >=${WANT_MIN_RUNNING}) pdRunning=${pd_running} (submitted=${PD_SUBMITTED})"
+fi
+
+if [[ -z "$AT_PD" ]]; then
+  record SKIP "three-role EPD ModelDeployment Workload/PodSet admission" \
+    "no usable AcceleratorType for ${PRIMARY_MFR}"
+elif [[ "$EPD_SUBMITTED" -eq 0 ]]; then
+  record FAIL "three-role EPD ModelDeployment Workload/PodSet admission" \
+    "apply failed: ${EPD_APPLY_ERR:0:180}"
+elif [[ "$epd_admitted_ok" -eq 1 ]]; then
+  record PASS "three-role EPD ModelDeployment Workload/PodSet admission" \
+    "${MD_EPD_NAME} (${EPD_ENGINE}+${EPD_ROUTER}): podSets=[${epd_wl_podsets}] admitted=[${epd_admitted_roles}]"
+else
+  record FAIL "three-role EPD ModelDeployment Workload/PodSet admission" \
+    "${MD_EPD_NAME}: roles=[${epd_pod_roles:-<none>}] podSets=[${epd_wl_podsets:-<none>}] admitted=[${epd_admitted_roles:-<none>}]"
 fi
 
 if [[ -z "$double_book_err" ]]; then
@@ -637,9 +749,10 @@ fi
 # ===================================================================================================
 # Step 4 — Drain all storm workloads and verify full four-view capacity restoration to baseline
 # ===================================================================================================
-kubectl -n "$TEST_NS" delete modeldeployments.worker.gpustack.ai "$MD_NAME" \
+kubectl -n "$TEST_NS" delete modeldeployments.worker.gpustack.ai "$MD_NAME" "$MD_EPD_NAME" \
   --ignore-not-found --wait=false >/dev/null 2>&1 || true
 md_force_release "$TEST_NS" "$MD_NAME" >/dev/null 2>&1 || true
+md_force_release "$TEST_NS" "$MD_EPD_NAME" >/dev/null 2>&1 || true
 kubectl -n "$TEST_NS" delete pods --all --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true
 kubectl -n "$TEST_NS" delete workloads.kueue.x-k8s.io --all --ignore-not-found --wait=false >/dev/null 2>&1 || true
 
