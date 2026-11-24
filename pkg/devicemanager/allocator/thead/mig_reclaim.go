@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
@@ -124,9 +125,9 @@ func newReclaimer(
 // file itself is retired once its Pod — read from its path — is gone, which is what lets the
 // accelerator converge instead of leaking a partition for the node's lifetime.
 //
-// Both reads fail closed: neither the marker scan's driver view nor the live-claim set may be
-// substituted by an empty one, so a failure of either skips the whole pass rather than acting on a
-// view it cannot trust.
+// Live-claim reads fail closed (skip the pass) so a mis-attributed marker never destroys a live
+// partition. Node-wide partition enumeration runs after per-pod reclaim and corrupt-marker pruning,
+// so a listing failure skips only the orphan sweep while preserving per-card orphan miss tracking.
 func (r *reclaimer) reconcile(livePodUIDs []string) {
 	live := sets.New[string](livePodUIDs...)
 
@@ -137,15 +138,6 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 	claims, cerr := r.liveClaims()
 	if cerr != nil {
 		r.logger.Error(cerr, "reclaim: read live pod claims, skipping this pass")
-		return
-	}
-
-	// The live instance list backs the orphan sweep; without it fail closed (skip the pass) rather
-	// than act on an unvalidated view — a partition read as absent would have its marker removed as
-	// "already gone" and a marker-less one would leak past the collector.
-	instances, lerr := r.driver.ListInstances()
-	if lerr != nil {
-		r.logger.Error(lerr, "reclaim: list partitions, skipping this pass")
 		return
 	}
 
@@ -176,6 +168,8 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 	}
 
 	// Per-pod liveness decision + debounce: a dead pod's markers are reclaimed after the bound.
+	// This runs before node-wide ListInstances() because destroyPod re-reads each card under its
+	// own lock via CardInstances, so an enumeration error cannot stall healthy cards.
 	for uid, entries := range byPod {
 		touched.Insert(uid)
 		if live.Has(uid) {
@@ -196,6 +190,16 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 	// observed by the next pass's scan, which is deliberate — the accelerator is released once the
 	// file is provably gone, never on the strength of having just tried to remove it.
 	r.pruneCorruptMarkers(corrupt, live, touched)
+
+	// Orphan collection needs a node-wide partition listing. If enumeration fails, skip only the
+	// orphan sweep and preserve per-card orphan miss counters until enumeration recovers.
+	instances, lerr := r.driver.ListInstances()
+	if lerr != nil {
+		r.logger.Error(lerr, "reclaim: list partitions, skipping orphan sweep")
+		pruneStaleCounters(r.misses, touched, true)
+		pruneStaleCounters(r.inUse, touched, true)
+		return
+	}
 
 	// Orphan collection: a marker-less GPU instance is destroyed only on a fully drained accelerator.
 	orphansByCard := make(map[string][]migInstance)
@@ -226,16 +230,57 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 		r.destroyOrphans(key, card, orphans)
 	}
 
-	for k := range r.misses {
-		if !touched.Has(k) {
-			delete(r.misses, k)
+	pruneStaleCounters(r.misses, touched, false)
+	pruneStaleCounters(r.inUse, touched, false)
+}
+
+// pruneStaleCounters removes keys not seen in this pass, optionally preserving per-card orphan
+// counters when node-wide enumeration was skipped.
+func pruneStaleCounters(counters map[string]int, touched sets.Set[string], preserveCardOrphans bool) {
+	for k := range counters {
+		if touched.Has(k) {
+			continue
 		}
-	}
-	for k := range r.inUse {
-		if !touched.Has(k) {
-			delete(r.inUse, k)
+		if preserveCardOrphans && strings.HasPrefix(k, cardMissPrefix) {
+			continue
 		}
+		delete(counters, k)
 	}
+}
+
+// listInstancesAcrossCards walks 0..count-1 cards, skipping cards that fail with a card-specific
+// unqueryable error while failing immediately on non-card-specific errors or when no card could
+// be queried.
+func listInstancesAcrossCards(
+	count int,
+	queryCard func(index int) ([]migLiveInstance, error),
+	isUnqueryable func(error) bool,
+	onSkip func(index int, err error),
+) ([]migLiveInstance, error) {
+	var (
+		out                []migLiveInstance
+		queriedCards       int
+		lastUnqueryableErr error
+	)
+	for i := 0; i < count; i++ {
+		live, err := queryCard(i)
+		if err != nil {
+			if isUnqueryable(err) {
+				if onSkip != nil {
+					onSkip(i, err)
+				}
+				lastUnqueryableErr = err
+				continue
+			}
+			return nil, err
+		}
+		queriedCards++
+		out = append(out, live...)
+	}
+	if count > 0 && queriedCards == 0 && lastUnqueryableErr != nil {
+		return nil, lastUnqueryableErr
+	}
+	return out, nil
 }
 
 // destroyPod tears down one dead pod's partitions: the markers are grouped by accelerator and each

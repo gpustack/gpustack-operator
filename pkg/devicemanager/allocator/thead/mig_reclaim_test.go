@@ -1,6 +1,7 @@
 package thead
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -264,11 +265,10 @@ func TestReclaim(t *testing.T) {
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				seedMarkedInstance(t, drv, podsDir, "pod-dead", testPPUUUID0, 1, migPlacement{0, 2})
 			},
-			// The 4th enumeration is the destroy's re-read under the accelerator lock: three pass snapshots
-			// precede it, and the third of them still matched the marker. Replacing the partition here
-			// models an out-of-band destroy plus id reuse inside exactly that window.
+			// The reclaimMaxMisses-th enumeration is the destroy's re-read under the accelerator lock
+			// because per-pod reclaim runs before that pass's node-wide ListInstances.
 			listHook: func(_ *testing.T, drv *fakeMigDriver, _ string, call int) {
-				if call != reclaimMaxMisses+1 {
+				if call != reclaimMaxMisses {
 					return
 				}
 				drv.live[testPPUUUID0] = []migInstance{{
@@ -794,9 +794,9 @@ func TestReclaimRacesAllocationOnSameCard(t *testing.T) {
 		parked             atomic.Bool
 		createdWhileParked atomic.Int32
 	)
-	// The armed pass makes two enumerations: the pass's own lock-free one, then the destroy's re-read
-	// inside the accelerator lock. Parking on the second is what puts the reclaim provably inside the
-	// critical section the allocation must wait for.
+	// The armed pass makes two enumerations: the destroy's re-read inside the accelerator lock
+	// first, then the pass's node-wide orphan listing. Parking on the first puts the reclaim
+	// provably inside the critical section the allocation must wait for.
 	driver := &hookedMigDriver{
 		fakeMigDriver: drv,
 		onList: func() {
@@ -804,7 +804,7 @@ func TestReclaimRacesAllocationOnSameCard(t *testing.T) {
 				return
 			}
 			listsWhenArmed++
-			if listsWhenArmed == 2 {
+			if listsWhenArmed == 1 {
 				parked.Store(true)
 				close(enter)
 				<-release
@@ -905,6 +905,292 @@ func TestReclaimCorruptMarkerOfDeadPodConverges(t *testing.T) {
 
 			r.reconcile(nil)
 			assert.Equal(t, []uint32{1}, destroyedGiIDs(drv), "the shadowed partition is collected once the card drains")
+		})
+	}
+}
+
+// splitListErrorMigDriver wraps fakeMigDriver so tests can fail node-wide ListInstances or
+// individual CardInstances independently, or omit a lost card from ListInstances.
+type splitListErrorMigDriver struct {
+	*fakeMigDriver
+	listOnlyErr  error
+	cardErrByKey map[string]error
+	omitCards    map[string]bool
+}
+
+func (s *splitListErrorMigDriver) ListInstances() ([]migLiveInstance, error) {
+	if s.listOnlyErr != nil {
+		return nil, s.listOnlyErr
+	}
+	all, err := s.fakeMigDriver.ListInstances()
+	if err != nil {
+		return nil, err
+	}
+	if len(s.omitCards) == 0 {
+		return all, nil
+	}
+	filtered := make([]migLiveInstance, 0, len(all))
+	for _, li := range all {
+		if s.omitCards[li.Card] {
+			continue
+		}
+		filtered = append(filtered, li)
+	}
+	return filtered, nil
+}
+
+func (s *splitListErrorMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
+	if err := s.cardErrByKey[cardUUID]; err != nil {
+		return nil, err
+	}
+	return s.fakeMigDriver.CardInstances(cardUUID)
+}
+
+func TestReclaimListInstancesErrorStillReclaimsDeadPods(t *testing.T) {
+	cases := []struct {
+		name              string
+		cardErrByKey      map[string]error
+		seedSecondCardPod bool
+		seedCorruptDead   bool
+		wantDestroyed     []uint32
+		wantCard0Gone     bool
+		wantCard1Kept     bool
+		wantCorruptGone   bool
+	}{
+		{
+			name:            "reclaims dead pod and prunes corrupt marker while preserving orphan counters",
+			seedCorruptDead: true,
+			wantDestroyed:   []uint32{1},
+			wantCard0Gone:   true,
+			wantCorruptGone: true,
+		},
+		{
+			name:              "reclaims healthy card while keeping unreadable card marker",
+			cardErrByKey:      map[string]error{testPPUUUID1: errors.New("gpu is lost")},
+			seedSecondCardPod: true,
+			wantDestroyed:     []uint32{1},
+			wantCard0Gone:     true,
+			wantCard1Kept:     true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			podsDir := t.TempDir()
+			base := newFakeMigDriver()
+			base.seedCard(testPPUUUID0)
+			base.seedCard(testPPUUUID1)
+			seedMarkedInstance(t, base, podsDir, "pod-dead-healthy", testPPUUUID0, 1, migPlacement{0, 2})
+			if c.seedSecondCardPod {
+				seedMarkedInstance(t, base, podsDir, "pod-dead-lost", testPPUUUID1, 2, migPlacement{0, 2})
+			}
+			var corruptPath string
+			if c.seedCorruptDead {
+				corruptPath = writeCorruptMarker(
+					t, corruptDir(podsDir, corruptFixture{pod: "pod-corrupt-dead"}), markerFileName(testPPUUUID1),
+				)
+			}
+
+			drv := &splitListErrorMigDriver{
+				fakeMigDriver: base,
+				listOnlyErr:   errors.New("node-wide list failed"),
+				cardErrByKey:  c.cardErrByKey,
+			}
+			r := newReclaimer(drv, podsDir, logr.Discard(), noClaims)
+
+			// Seed pre-existing orphan miss/in-use tracking and a stale pod key.
+			orphanKey := cardMissPrefix + testPPUUUID0
+			r.misses[orphanKey] = reclaimMaxMisses - 1
+			r.inUse[orphanKey] = 2
+			r.misses["pod-stale-gone"] = 2
+			r.inUse["pod-stale-gone"] = 1
+
+			for range reclaimMaxMisses {
+				r.reconcile(nil)
+			}
+
+			assert.ElementsMatch(t, c.wantDestroyed, destroyedGiIDs(base))
+			if c.wantCard0Gone {
+				assert.NoFileExists(t, markerPath(podsDir, "pod-dead-healthy", "c", testPPUUUID0))
+			}
+			if c.wantCard1Kept {
+				_, err := parseMarker(markerPath(podsDir, "pod-dead-lost", "c", testPPUUUID1))
+				assert.NoError(t, err, "dead pod marker on unreadable card should be kept")
+			}
+			if c.wantCorruptGone {
+				assert.NoFileExists(t, corruptPath, "dead pod corrupt marker should be retired")
+			}
+
+			assert.Equal(t, reclaimMaxMisses-1, r.misses[orphanKey],
+				"orphan miss counter must be preserved when ListInstances fails")
+			assert.Equal(t, 2, r.inUse[orphanKey],
+				"orphan in-use counter must be preserved when ListInstances fails")
+			_, hasStaleMiss := r.misses["pod-stale-gone"]
+			assert.False(t, hasStaleMiss, "stale dead pod miss key should be pruned")
+			_, hasStaleInUse := r.inUse["pod-stale-gone"]
+			assert.False(t, hasStaleInUse, "stale dead pod in-use key should be pruned")
+		})
+	}
+}
+
+func TestReclaimPartialListInstancesProceedsOnHealthyCards(t *testing.T) {
+	cases := []struct {
+		name          string
+		setup         func(t *testing.T, base *fakeMigDriver, podsDir string)
+		live          []string
+		wantDestroyed []uint32
+		wantKeptCard1 bool
+	}{
+		{
+			name: "reclaims orphan on healthy card without touching live pod marker on lost card",
+			setup: func(t *testing.T, base *fakeMigDriver, podsDir string) {
+				seedInstances(base, migSeed{card: testPPUUUID0, giID: 1, slot: migPlacement{0, 2}})
+				seedMarkedInstance(t, base, podsDir, "pod-on-lost", testPPUUUID1, 2, migPlacement{0, 2})
+			},
+			live:          []string{"pod-on-lost"},
+			wantDestroyed: []uint32{1},
+			wantKeptCard1: true,
+		},
+		{
+			name: "reclaims orphan on healthy card without touching omitted orphan on lost card",
+			setup: func(_ *testing.T, base *fakeMigDriver, _ string) {
+				seedInstances(base,
+					migSeed{card: testPPUUUID0, giID: 1, slot: migPlacement{0, 2}},
+					migSeed{card: testPPUUUID1, giID: 2, slot: migPlacement{0, 2}},
+				)
+			},
+			wantDestroyed: []uint32{1},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			podsDir := t.TempDir()
+			base := newFakeMigDriver()
+			base.seedCard(testPPUUUID0)
+			base.seedCard(testPPUUUID1)
+			c.setup(t, base, podsDir)
+
+			drv := &splitListErrorMigDriver{
+				fakeMigDriver: base,
+				omitCards:     map[string]bool{testPPUUUID1: true},
+			}
+			r := newReclaimer(drv, podsDir, logr.Discard(), noClaims)
+
+			for range reclaimMaxMisses {
+				r.reconcile(c.live)
+			}
+
+			assert.ElementsMatch(t, c.wantDestroyed, destroyedGiIDs(base))
+			if c.wantKeptCard1 {
+				_, err := parseMarker(markerPath(podsDir, "pod-on-lost", "c", testPPUUUID1))
+				assert.NoError(t, err, "marker on lost card must remain untouched")
+			}
+		})
+	}
+}
+
+func TestListInstancesAcrossCards(t *testing.T) {
+	errLost := errors.New("gpu is lost")
+	errReset := errors.New("reset required")
+	errNoPerm := errors.New("no permission")
+	isUnqueryable := func(err error) bool {
+		return errors.Is(err, errLost) || errors.Is(err, errReset)
+	}
+
+	inst0 := migLiveInstance{Card: testPPUUUID0, Inst: migInstance{GiID: 1}}
+	inst2 := migLiveInstance{Card: testPPUUUID1, Inst: migInstance{GiID: 2}}
+
+	cases := []struct {
+		name    string
+		count   int
+		results []struct {
+			insts []migLiveInstance
+			err   error
+		}
+		want        []migLiveInstance
+		wantSkipped []int
+		wantErr     error
+	}{
+		{
+			name:  "zero cards returns empty without error",
+			count: 0,
+		},
+		{
+			name:  "skips single unqueryable card and returns healthy cards",
+			count: 3,
+			results: []struct {
+				insts []migLiveInstance
+				err   error
+			}{
+				{insts: []migLiveInstance{inst0}},
+				{err: errLost},
+				{insts: []migLiveInstance{inst2}},
+			},
+			want:        []migLiveInstance{inst0, inst2},
+			wantSkipped: []int{1},
+		},
+		{
+			name:  "healthy card with zero instances counts as queried when sibling is lost",
+			count: 2,
+			results: []struct {
+				insts []migLiveInstance
+				err   error
+			}{
+				{insts: nil},
+				{err: errLost},
+			},
+			wantSkipped: []int{1},
+		},
+		{
+			name:  "all cards unqueryable returns last error",
+			count: 2,
+			results: []struct {
+				insts []migLiveInstance
+				err   error
+			}{
+				{err: errLost},
+				{err: errReset},
+			},
+			wantSkipped: []int{0, 1},
+			wantErr:     errReset,
+		},
+		{
+			name:  "non-card-specific error fails immediately",
+			count: 3,
+			results: []struct {
+				insts []migLiveInstance
+				err   error
+			}{
+				{insts: []migLiveInstance{inst0}},
+				{err: errNoPerm},
+				{insts: []migLiveInstance{inst2}},
+			},
+			wantErr: errNoPerm,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var skipped []int
+			got, err := listInstancesAcrossCards(
+				c.count,
+				func(i int) ([]migLiveInstance, error) {
+					return c.results[i].insts, c.results[i].err
+				},
+				isUnqueryable,
+				func(i int, _ error) {
+					skipped = append(skipped, i)
+				},
+			)
+			if c.wantErr != nil {
+				require.ErrorIs(t, err, c.wantErr)
+				assert.Nil(t, got)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, c.want, got)
+			}
+			assert.Equal(t, c.wantSkipped, skipped)
 		})
 	}
 }

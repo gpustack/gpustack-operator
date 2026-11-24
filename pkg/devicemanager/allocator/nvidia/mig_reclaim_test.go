@@ -661,11 +661,10 @@ func TestReclaim_IDReusedAfterThePassSnapshotIsNotDestroyed(t *testing.T) {
 	drv := newFakeMigDriver()
 	seedMarkedInstance(t, drv, "pod-dead", testGPUUUID0, 1)
 
-	// The reclaimMaxMisses-th pass is the one that destroys. Its own snapshot is enumeration number
-	// reclaimMaxMisses, and the re-read under the accelerator lock is the one after it — so replacing the
-	// instance there lands strictly between the two.
+	// The reclaimMaxMisses-th pass is the one that destroys. The re-read under the accelerator lock
+	// runs before that pass's node-wide ListInstances, so it is enumeration number reclaimMaxMisses.
 	drv.listHook = func(d *fakeMigDriver, call int) {
-		if call != reclaimMaxMisses+1 {
+		if call != reclaimMaxMisses {
 			return
 		}
 		d.live[testGPUUUID0] = []migInstance{{
@@ -695,7 +694,7 @@ func TestReclaim_FailsClosedWhenTheLockedRereadFails(t *testing.T) {
 	// Fail only the re-read under the lock, so the pass gets as far as deciding to destroy.
 	drv.listHook = func(d *fakeMigDriver, call int) {
 		d.listErr = nil
-		if call == reclaimMaxMisses+1 {
+		if call == reclaimMaxMisses {
 			d.listErr = errors.New("nvml enumeration failed")
 		}
 	}
@@ -994,6 +993,297 @@ func TestReclaim_SameSlotRebuildNotDestroyedUnderStaleMarker(t *testing.T) {
 			require.NoError(t, err, "the successor's marker is intact")
 			_, err = parseMarker(markerPath("pod-dead", "c", testGPUUUID0))
 			require.Error(t, err, "the superseded marker is dropped, so the decision is not retaken every pass")
+		})
+	}
+}
+
+// splitListErrorMigDriver wraps fakeMigDriver so tests can fail node-wide ListInstances or
+// individual CardInstances independently, or omit a lost card from ListInstances.
+type splitListErrorMigDriver struct {
+	*fakeMigDriver
+	listOnlyErr  error
+	cardErrByKey map[string]error
+	omitCards    map[string]bool
+}
+
+func (s *splitListErrorMigDriver) ListInstances() ([]migLiveInstance, error) {
+	if s.listOnlyErr != nil {
+		return nil, s.listOnlyErr
+	}
+	all, err := s.fakeMigDriver.ListInstances()
+	if err != nil {
+		return nil, err
+	}
+	if len(s.omitCards) == 0 {
+		return all, nil
+	}
+	filtered := make([]migLiveInstance, 0, len(all))
+	for _, li := range all {
+		if s.omitCards[li.Card] {
+			continue
+		}
+		filtered = append(filtered, li)
+	}
+	return filtered, nil
+}
+
+func (s *splitListErrorMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
+	if err := s.cardErrByKey[cardUUID]; err != nil {
+		return nil, err
+	}
+	return s.fakeMigDriver.CardInstances(cardUUID)
+}
+
+func TestReclaim_ListInstancesErrorStillReclaimsDeadPods(t *testing.T) {
+	cases := []struct {
+		name              string
+		cardErrByKey      map[string]error
+		seedSecondCardPod bool
+		seedCorruptDead   bool
+		wantDestroyed     []uint32
+		wantCard0Gone     bool
+		wantCard1Kept     bool
+		wantCorruptGone   bool
+	}{
+		{
+			name:            "reclaims dead pod and prunes corrupt marker while preserving orphan counters",
+			seedCorruptDead: true,
+			wantDestroyed:   []uint32{1},
+			wantCard0Gone:   true,
+			wantCorruptGone: true,
+		},
+		{
+			name:              "reclaims healthy card while keeping unreadable card marker",
+			cardErrByKey:      map[string]error{testGPUUUID1: errors.New("gpu is lost")},
+			seedSecondCardPod: true,
+			wantDestroyed:     []uint32{1},
+			wantCard0Gone:     true,
+			wantCard1Kept:     true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			base := newFakeMigDriver()
+			seedMarkedInstance(t, base, "pod-dead-healthy", testGPUUUID0, 1)
+			if c.seedSecondCardPod {
+				seedMarkedInstance(t, base, "pod-dead-lost", testGPUUUID1, 2)
+			}
+			var corruptPath string
+			if c.seedCorruptDead {
+				corruptPath = writeCorruptMarker(
+					t, deviceplugin.PodWorkDir("pod-corrupt-dead", "c"), markerFileName(testGPUUUID1),
+				)
+			}
+
+			drv := &splitListErrorMigDriver{
+				fakeMigDriver: base,
+				listOnlyErr:   errors.New("node-wide list failed"),
+				cardErrByKey:  c.cardErrByKey,
+			}
+			r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
+
+			// Seed pre-existing orphan miss/in-use tracking and a stale pod key.
+			orphanKey := cardMissPrefix + testGPUUUID0
+			r.misses[orphanKey] = reclaimMaxMisses - 1
+			r.inUse[orphanKey] = 2
+			r.misses["pod-stale-gone"] = 2
+			r.inUse["pod-stale-gone"] = 1
+
+			for i := 0; i < reclaimMaxMisses; i++ {
+				r.reconcile(nil)
+			}
+
+			destroyed := make([]uint32, 0, len(base.destroyed))
+			for _, inst := range base.destroyed {
+				destroyed = append(destroyed, inst.GiID)
+			}
+			assert.ElementsMatch(t, c.wantDestroyed, destroyed)
+
+			if c.wantCard0Gone {
+				_, err := parseMarker(markerPath("pod-dead-healthy", "c", testGPUUUID0))
+				assert.Error(t, err, "dead pod marker on healthy card should be removed")
+			}
+			if c.wantCard1Kept {
+				_, err := parseMarker(markerPath("pod-dead-lost", "c", testGPUUUID1))
+				assert.NoError(t, err, "dead pod marker on unreadable card should be kept")
+			}
+			if c.wantCorruptGone {
+				assert.NoFileExists(t, corruptPath, "dead pod corrupt marker should be retired")
+			}
+
+			assert.Equal(t, reclaimMaxMisses-1, r.misses[orphanKey],
+				"orphan miss counter must be preserved when ListInstances fails")
+			assert.Equal(t, 2, r.inUse[orphanKey],
+				"orphan in-use counter must be preserved when ListInstances fails")
+			_, hasStaleMiss := r.misses["pod-stale-gone"]
+			assert.False(t, hasStaleMiss, "stale dead pod miss key should be pruned")
+			_, hasStaleInUse := r.inUse["pod-stale-gone"]
+			assert.False(t, hasStaleInUse, "stale dead pod in-use key should be pruned")
+		})
+	}
+}
+
+func TestReclaim_PartialListInstancesProceedsOnHealthyCards(t *testing.T) {
+	cases := []struct {
+		name          string
+		setup         func(t *testing.T, base *fakeMigDriver)
+		live          []string
+		wantDestroyed []uint32
+		wantKeptCard1 bool
+	}{
+		{
+			name: "reclaims orphan on healthy card without touching live pod marker on lost card",
+			setup: func(t *testing.T, base *fakeMigDriver) {
+				seedInstances(base, []migSeed{{card: testGPUUUID0, giID: 1}})
+				seedMarkedInstance(t, base, "pod-on-lost", testGPUUUID1, 2)
+			},
+			live:          []string{"pod-on-lost"},
+			wantDestroyed: []uint32{1},
+			wantKeptCard1: true,
+		},
+		{
+			name: "reclaims orphan on healthy card without touching omitted orphan on lost card",
+			setup: func(_ *testing.T, base *fakeMigDriver) {
+				seedInstances(base, []migSeed{
+					{card: testGPUUUID0, giID: 1},
+					{card: testGPUUUID1, giID: 2},
+				})
+			},
+			wantDestroyed: []uint32{1},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			base := newFakeMigDriver()
+			c.setup(t, base)
+			drv := &splitListErrorMigDriver{
+				fakeMigDriver: base,
+				omitCards:     map[string]bool{testGPUUUID1: true},
+			}
+			r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
+
+			for i := 0; i < reclaimMaxMisses; i++ {
+				r.reconcile(c.live)
+			}
+
+			destroyed := make([]uint32, 0, len(base.destroyed))
+			for _, inst := range base.destroyed {
+				destroyed = append(destroyed, inst.GiID)
+			}
+			assert.ElementsMatch(t, c.wantDestroyed, destroyed)
+			if c.wantKeptCard1 {
+				_, err := parseMarker(markerPath("pod-on-lost", "c", testGPUUUID1))
+				assert.NoError(t, err, "marker on lost card must remain untouched")
+			}
+		})
+	}
+}
+
+func TestListInstancesAcrossCards(t *testing.T) {
+	errLost := errors.New("gpu is lost")
+	errReset := errors.New("reset required")
+	errNoPerm := errors.New("no permission")
+	isUnqueryable := func(err error) bool {
+		return errors.Is(err, errLost) || errors.Is(err, errReset)
+	}
+
+	inst0 := migLiveInstance{Card: testGPUUUID0, Inst: migInstance{GiID: 1}}
+	inst2 := migLiveInstance{Card: testGPUUUID1, Inst: migInstance{GiID: 2}}
+
+	cases := []struct {
+		name    string
+		count   int
+		results []struct {
+			insts []migLiveInstance
+			err   error
+		}
+		want        []migLiveInstance
+		wantSkipped []int
+		wantErr     error
+	}{
+		{
+			name:  "zero cards returns empty without error",
+			count: 0,
+		},
+		{
+			name:  "skips single unqueryable card and returns healthy cards",
+			count: 3,
+			results: []struct {
+				insts []migLiveInstance
+				err   error
+			}{
+				{insts: []migLiveInstance{inst0}},
+				{err: errLost},
+				{insts: []migLiveInstance{inst2}},
+			},
+			want:        []migLiveInstance{inst0, inst2},
+			wantSkipped: []int{1},
+		},
+		{
+			name:  "healthy card with zero instances counts as queried when sibling is lost",
+			count: 2,
+			results: []struct {
+				insts []migLiveInstance
+				err   error
+			}{
+				{insts: nil},
+				{err: errLost},
+			},
+			wantSkipped: []int{1},
+		},
+		{
+			name:  "all cards unqueryable returns last error",
+			count: 2,
+			results: []struct {
+				insts []migLiveInstance
+				err   error
+			}{
+				{err: errLost},
+				{err: errReset},
+			},
+			wantSkipped: []int{0, 1},
+			wantErr:     errReset,
+		},
+		{
+			name:  "non-card-specific error fails immediately",
+			count: 3,
+			results: []struct {
+				insts []migLiveInstance
+				err   error
+			}{
+				{insts: []migLiveInstance{inst0}},
+				{err: errNoPerm},
+				{insts: []migLiveInstance{inst2}},
+			},
+			wantErr: errNoPerm,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var skipped []int
+			got, err := listInstancesAcrossCards(
+				c.count,
+				func(i int) ([]migLiveInstance, error) {
+					return c.results[i].insts, c.results[i].err
+				},
+				isUnqueryable,
+				func(i int, _ error) {
+					skipped = append(skipped, i)
+				},
+			)
+			if c.wantErr != nil {
+				require.ErrorIs(t, err, c.wantErr)
+				assert.Nil(t, got)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, c.want, got)
+			}
+			assert.Equal(t, c.wantSkipped, skipped)
 		})
 	}
 }

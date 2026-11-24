@@ -4,10 +4,12 @@ package hygon
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	klog "k8s.io/klog/v2"
 
@@ -24,22 +26,54 @@ var migSliceWidths = []uint32{1, 2, 3, 4}
 // Go's plugin package, cannot host this allocator's vendor bindings; the darwin build compiles
 // against the stub in mig_driver_other.go instead.
 func newMigDriver() migDriver {
-	l := dmi.New()
-	return &dmiMigDriver{lib: l, initRet: l.Init(klog.Background())}
+	return &dmiMigDriver{lib: dmi.New()}
 }
 
 // dmiMigDriver drives the vendor Multi-Instance binding over the partition lifecycle.
-//
-// Every enumeration reports either a state it can prove whole or an error. It never degrades to
-// partial state on a failed query: a live partition that reads as absent has its ownership record
-// removed as "already gone", its placement handed out a second time, and a record-less one leaks
-// past the orphan collector.
 type dmiMigDriver struct {
 	lib *dmi.DMI
-	// initRet captures the library's initialization result, so every operation reports one
-	// actionable root cause when the library could not be loaded instead of failing obscurely
-	// deeper in a call that cannot possibly work.
+
+	// initMu guards lazy, retry-on-failure library initialization across concurrent callers.
+	initMu      sync.Mutex
+	initialized bool
+	// initRet holds the last initialization result (also used by unit-test fixtures with nil lib).
 	initRet dmi.Return
+	// initFn overrides lib.Init in unit tests.
+	initFn func() dmi.Return
+}
+
+// ready initializes DMI on demand and retries failed attempts under initMu so a driver that
+// becomes available after startup recovers without restarting the process.
+func (d *dmiMigDriver) ready() error {
+	d.initMu.Lock()
+	defer d.initMu.Unlock()
+
+	if d.initialized {
+		return nil
+	}
+	if d.initFn == nil && d.lib == nil {
+		ret := d.initRet
+		if ret.IsSuccess() {
+			ret = dmi.ERROR_UNINITIALIZED
+		}
+		return fmt.Errorf(
+			"hygon multi-instance library unavailable (%w); the node cannot serve partitions", ret,
+		)
+	}
+	var ret dmi.Return
+	if d.initFn != nil {
+		ret = d.initFn()
+	} else {
+		ret = d.lib.Init(klog.Background())
+	}
+	d.initRet = ret
+	if !ret.IsSuccess() && ret != dmi.ERROR_ALREADY_INITIALIZED {
+		return fmt.Errorf(
+			"hygon multi-instance library unavailable (%w); the node cannot serve partitions", ret,
+		)
+	}
+	d.initialized = true
+	return nil
 }
 
 // device resolves one accelerator's Multi-Instance handle from its PCI address.
@@ -48,10 +82,8 @@ type dmiMigDriver struct {
 // with an empty string, so a caller holding an identity from anywhere else reaches the card here or
 // not at all.
 func (d *dmiMigDriver) device(pciBusID string) (dmi.Device, error) {
-	if !d.initRet.IsSuccess() {
-		return dmi.Device{}, fmt.Errorf(
-			"hygon multi-instance library unavailable (%w); the node cannot serve partitions", d.initRet,
-		)
+	if err := d.ready(); err != nil {
+		return dmi.Device{}, err
 	}
 	dev, ret := d.lib.GetDeviceHandleByPciBusId(pciBusID)
 	if !ret.IsSuccess() {
@@ -431,12 +463,67 @@ func migDestroyError(pciBusID, what string, ret dmi.Return) error {
 	return fmt.Errorf("card %s: destroy %s: %w", pciBusID, what, ret)
 }
 
-// ListInstances implements migDriver.
+// isUnqueryableReturn reports whether a DMI return code indicates a single card hardware fault
+// where sibling cards can still be queried safely.
+func isUnqueryableReturn(ret dmi.Return) bool {
+	switch ret {
+	case dmi.ERROR_GPU_IS_LOST,
+		dmi.ERROR_UNKNOWN,
+		dmi.ERROR_RESET_REQUIRED,
+		dmi.ERROR_INSUFFICIENT_POWER,
+		dmi.ERROR_IRQ_ISSUE:
+		return true
+	default:
+		return false
+	}
+}
+
+func isUnqueryableError(err error) bool {
+	var ret dmi.Return
+	return errors.As(err, &ret) && isUnqueryableReturn(ret)
+}
+
+// listInstancesAcrossCards walks 0..count-1 cards, skipping cards that fail with a card-specific
+// unqueryable error while failing immediately on non-card-specific errors or when no card could
+// be queried.
+func listInstancesAcrossCards(
+	count int,
+	queryCard func(index int) ([]migLiveInstance, error),
+	isUnqueryable func(error) bool,
+	onSkip func(index int, err error),
+) ([]migLiveInstance, error) {
+	var (
+		out                []migLiveInstance
+		queriedCards       int
+		lastUnqueryableErr error
+	)
+	for i := 0; i < count; i++ {
+		live, err := queryCard(i)
+		if err != nil {
+			if isUnqueryable(err) {
+				if onSkip != nil {
+					onSkip(i, err)
+				}
+				lastUnqueryableErr = err
+				continue
+			}
+			return nil, err
+		}
+		queriedCards++
+		out = append(out, live...)
+	}
+	if count > 0 && queriedCards == 0 && lastUnqueryableErr != nil {
+		return nil, lastUnqueryableErr
+	}
+	return out, nil
+}
+
+// ListInstances implements migDriver. Cards failing with a card-specific unqueryable error are
+// skipped and logged so healthy cards proceed; non-card-specific errors or failure of all cards
+// fail the enumeration.
 func (d *dmiMigDriver) ListInstances() ([]migLiveInstance, error) {
-	if !d.initRet.IsSuccess() {
-		return nil, fmt.Errorf(
-			"hygon multi-instance library unavailable (%w); the node cannot serve partitions", d.initRet,
-		)
+	if err := d.ready(); err != nil {
+		return nil, err
 	}
 
 	count, ret := d.lib.GetDeviceCount()
@@ -444,25 +531,33 @@ func (d *dmiMigDriver) ListInstances() ([]migLiveInstance, error) {
 		return nil, fmt.Errorf("count cards: %w", ret)
 	}
 
-	var out []migLiveInstance
-	for i := uint32(0); i < count; i++ {
-		pciBusID, err := migCardPciBusID(i)
-		if err != nil {
-			return nil, err
-		}
-		dev, ret := d.lib.GetDeviceHandleByIndex(i)
-		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("card %d: resolve handle: %w", i, ret)
-		}
-		live, err := d.liveInstances(dev, pciBusID)
-		if err != nil {
-			return nil, err
-		}
-		for _, inst := range live {
-			out = append(out, migLiveInstance{PciBusID: pciBusID, Instance: inst})
-		}
-	}
-	return out, nil
+	return listInstancesAcrossCards(
+		int(count),
+		func(i int) ([]migLiveInstance, error) {
+			idx := uint32(i)
+			dev, ret := d.lib.GetDeviceHandleByIndex(idx)
+			if !ret.IsSuccess() {
+				return nil, fmt.Errorf("card %d: resolve handle: %w", idx, ret)
+			}
+			pciBusID, err := migCardPciBusID(idx)
+			if err != nil {
+				return nil, err
+			}
+			live, err := d.liveInstances(dev, pciBusID)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]migLiveInstance, 0, len(live))
+			for _, inst := range live {
+				out = append(out, migLiveInstance{PciBusID: pciBusID, Instance: inst})
+			}
+			return out, nil
+		},
+		isUnqueryableError,
+		func(i int, err error) {
+			klog.Background().Error(err, "mig: skipping unqueryable card during partition listing", "index", i)
+		},
+	)
 }
 
 // migCardPciBusID reads the PCI address the vendor records for a device index.

@@ -1,9 +1,12 @@
 package nvidia
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+
+	klog "k8s.io/klog/v2"
 
 	"gpustack.ai/gpustack/binding/nvml"
 )
@@ -13,10 +16,8 @@ import (
 // Go's plugin package) aborts at dyld load on the unresolved NVML symbols, so the darwin build
 // uses the stub in mig_driver_other.go instead.
 func newMigDriver() migDriver {
-	l := nvml.New()
 	return &nvmlMigDriver{
-		lib:      l,
-		initRet:  l.Init(),
+		lib:      nvml.New(),
 		profiles: make(map[string][]nvml.GpuInstanceProfileInfo_v3),
 	}
 }
@@ -27,9 +28,10 @@ func newMigDriver() migDriver {
 // fake driver.
 type nvmlMigDriver struct {
 	lib *nvml.NVML
-	// initRet captures nvmlInit's result so the first device() call reports a single,
-	// actionable root cause when the library failed to load/initialize.
-	initRet nvml.Return
+
+	// initMu guards lazy, retry-on-failure NVML initialization across concurrent callers.
+	initMu      sync.Mutex
+	initialized bool
 
 	// profiles caches each accelerator's MIG profile catalog under profilesMu. The catalog is a
 	// property of the accelerator and of its MIG mode, and both are fixed for this process's life: a
@@ -43,6 +45,26 @@ type nvmlMigDriver struct {
 	// servers.
 	profilesMu sync.Mutex
 	profiles   map[string][]nvml.GpuInstanceProfileInfo_v3
+}
+
+// ready initializes NVML on demand and retries failed attempts under initMu so a driver that
+// becomes available after startup recovers without restarting the process.
+func (d *nvmlMigDriver) ready() error {
+	d.initMu.Lock()
+	defer d.initMu.Unlock()
+
+	if d.initialized {
+		return nil
+	}
+	if d.lib == nil {
+		return fmt.Errorf("nvml init failed: %w", nvml.ERROR_UNINITIALIZED)
+	}
+	ret := d.lib.Init()
+	if !ret.IsSuccess() && ret != nvml.ERROR_ALREADY_INITIALIZED {
+		return fmt.Errorf("nvml init failed: %w", ret)
+	}
+	d.initialized = true
+	return nil
 }
 
 // cardProfileCatalogue returns the accelerator's MIG profile catalog, probing NVML only the first
@@ -167,8 +189,8 @@ func (d *nvmlMigDriver) InstanceProcesses(cardUUID string, inst migInstance) (in
 }
 
 func (d *nvmlMigDriver) device(cardUUID string) (nvml.Device, error) {
-	if !d.initRet.IsSuccess() {
-		return nvml.Device{}, fmt.Errorf("nvml init failed: %w", d.initRet)
+	if err := d.ready(); err != nil {
+		return nvml.Device{}, err
 	}
 	dev, ret := d.lib.DeviceGetHandleByUUID(cardUUID)
 	if !ret.IsSuccess() {
@@ -429,45 +451,64 @@ func (d *nvmlMigDriver) CreateInstance(
 	}, nil
 }
 
-// ListInstances enumerates every live GPU instance on every MIG-capable accelerator, resolving each
-// one's MIG-device UUID, so reclaim's orphan GC can find a marker-less GI on a drained accelerator.
-// It mirrors CardState's Live loop but across all accelerators and without the per-profile possible
-// placements (orphan destroy needs only the ids + compute slices, not a slot to fill).
-//
-// An accelerator the driver answers has no MIG devices holds no partition and contributes nothing;
-// an accelerator whose handle, identity, profiles, mig devices or instances could not be READ fails
-// the whole enumeration. The difference matters because of what the callers do with absence:
-// reclaim reads a missing GPU instance as one already gone and removes its ownership marker, and
-// reads an accelerator contributing nothing as a drained accelerator whose orphans it may collect.
-// A list quietly short of one accelerator's partitions therefore destroys or double-books exactly
-// what it could not see.
+// isUnqueryableReturn reports whether an NVML return code indicates a single card hardware fault
+// where sibling cards can still be queried safely.
+func isUnqueryableReturn(ret nvml.Return) bool {
+	switch ret {
+	case nvml.ERROR_GPU_IS_LOST,
+		nvml.ERROR_UNKNOWN,
+		nvml.ERROR_RESET_REQUIRED,
+		nvml.ERROR_INSUFFICIENT_POWER,
+		nvml.ERROR_IRQ_ISSUE:
+		return true
+	default:
+		return false
+	}
+}
+
+func isUnqueryableError(err error) bool {
+	var ret nvml.Return
+	return errors.As(err, &ret) && isUnqueryableReturn(ret)
+}
+
+// ListInstances enumerates every live GPU instance on every queryable MIG-capable accelerator,
+// resolving each one's MIG-device UUID so reclaim's orphan GC can find marker-less GIs on drained
+// healthy accelerators. Cards failing with a card-specific unqueryable error are skipped and logged
+// so healthy cards proceed; non-card-specific errors or failure of all cards fail the enumeration.
 func (d *nvmlMigDriver) ListInstances() ([]migLiveInstance, error) {
-	if !d.initRet.IsSuccess() {
-		return nil, fmt.Errorf("nvml init failed: %w", d.initRet)
+	if err := d.ready(); err != nil {
+		return nil, err
 	}
 	count, ret := d.lib.DeviceGetCount()
 	if !ret.IsSuccess() {
 		return nil, fmt.Errorf("get device count: %w", ret)
 	}
-	var out []migLiveInstance
-	for i := 0; i < count; i++ {
-		dev, ret := d.lib.DeviceGetHandleByIndex(i)
-		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("get device handle at index %d: %w", i, ret)
-		}
-		cardUUID, ret := dev.GetUUID()
-		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("get card uuid at device index %d: %w", i, ret)
-		}
-		live, err := d.cardInstances(dev, cardUUID)
-		if err != nil {
-			return nil, err
-		}
-		for j := range live {
-			out = append(out, migLiveInstance{Card: cardUUID, Inst: live[j]})
-		}
-	}
-	return out, nil
+	return listInstancesAcrossCards(
+		count,
+		func(i int) ([]migLiveInstance, error) {
+			dev, ret := d.lib.DeviceGetHandleByIndex(i)
+			if !ret.IsSuccess() {
+				return nil, fmt.Errorf("get device handle at index %d: %w", i, ret)
+			}
+			cardUUID, ret := dev.GetUUID()
+			if !ret.IsSuccess() {
+				return nil, fmt.Errorf("get card uuid at device index %d: %w", i, ret)
+			}
+			live, err := d.cardInstances(dev, cardUUID)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]migLiveInstance, 0, len(live))
+			for j := range live {
+				out = append(out, migLiveInstance{Card: cardUUID, Inst: live[j]})
+			}
+			return out, nil
+		},
+		isUnqueryableError,
+		func(i int, err error) {
+			klog.Background().Error(err, "mig: skipping unqueryable card during instance listing", "index", i)
+		},
+	)
 }
 
 // DestroyInstance tears down the MIG instance the caller snapshotted, under the accelerator lock
