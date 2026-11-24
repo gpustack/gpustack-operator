@@ -285,7 +285,7 @@ type Allocator interface {
       Acceptance: Implements `device.Detector`, `device.AcceleratorProcessDetector`, `device.AcceleratorPartitionDetector`, and mock node interface/RDMA readers with zero CGO; enforces init/count/fatal/all-cards-failed error propagation, per-slot in-place unhealthy retention (`Status.Unhealthy: true` and `Unhealthy: true` in monitor), sibling `Index` preservation, recovery, and clean shrink cache pruning on both macOS and Linux.
       Verify: `go test -count=1 ./pkg/devicemanager/detector/mock/...`
 
-- [ ] **T3 · CPU-only Mock `Allocator` with virtual partition ledger and reclaim**
+- [x] **T3 · CPU-only Mock `Allocator` with virtual partition ledger and reclaim**
       Blocked by: T1
       Owns: `pkg/devicemanager/allocator/mock/**`
       Acceptance: Implements `device.Allocator` wrapping real `pkg/deviceplugin.ResourceServer` across `exclusive`, `shared`, `sliced`, `partitioned`, and `visibility` (plus optional mock `rdma`); injects safe diagnostic env vars and vendor `*_VISIBLE_DEVICES` with zero `/dev/*` mounts and zero `ld.so.preload` shims; maintains an in-memory virtual partition store with `deviceplugin.RunReclaimLoop` for concurrent multi-profile creation, visibility co-allocation, and dead-Pod reclamation.
