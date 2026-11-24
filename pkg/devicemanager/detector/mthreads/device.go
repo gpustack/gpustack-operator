@@ -26,11 +26,24 @@ func init() {
 	_PciVendor = p[len(p)-1]
 }
 
+type cachedAccelerator struct {
+	group device.DevicesGroup
+	accel device.Accelerator
+}
+
+type cachedMetrics struct {
+	id     string
+	memory uint64
+}
+
 type mthreads struct {
-	initMu      sync.Mutex
-	initialized bool
-	mtml        *mtml.MTML
-	logger      klog.Logger
+	initMu          sync.Mutex
+	initialized     bool
+	cacheMu         sync.Mutex
+	cachedDetected  map[int]cachedAccelerator
+	cachedMonitored map[int]cachedMetrics
+	mtml            *mtml.MTML
+	logger          klog.Logger
 }
 
 // New creates a new mthreads device interface and initializes the MTML library.
@@ -58,6 +71,7 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 
 	pciDevs := binding.GetPCIDevices([]string{_PciVendor}, nil)
 	if !noPciCheck && len(pciDevs) == 0 {
+		in.clearCache()
 		in.logger.Info("no mthreads pci devices found")
 		return nil, nil
 	}
@@ -80,6 +94,7 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 		return nil, nil
 	}
 	if cnt == 0 {
+		in.clearCache()
 		in.logger.Info("no mthreads devices found")
 		return nil, nil
 	}
@@ -87,13 +102,25 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 	drVer, _ := in.mtml.SystemGetDriverVersion()
 
 	grpList := device.DevicesGroupList{}
+	nextDetected := make(map[int]cachedAccelerator, cnt)
+	nextMonitored := make(map[int]cachedMetrics, cnt)
+	unqueryableSlots := make(map[int]struct{})
+	queriedCount := 0
 	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
 
+		onQueryErr := func(op string, ret mtml.Return) error {
+			if err := handleCardQueryError(logger, i, op, ret, &lastUnqueryableErr); err != nil {
+				return err
+			}
+			in.retainCachedDetected(i, unqueryableSlots, &grpList)
+			return nil
+		}
+
 		dev, ret := in.mtml.InitDeviceByIndex(i)
 		if !ret.IsSuccess() {
-			if err := handleCardQueryError(logger, i, "get device handle", ret, &lastUnqueryableErr); err != nil {
+			if err := onQueryErr("get device handle", ret); err != nil {
 				return nil, err
 			}
 			continue
@@ -106,7 +133,7 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 
 			prop, ret := dev.GetProperty()
 			if !ret.IsSuccess() {
-				return handleCardQueryError(logger, i, "get device property", ret, &lastUnqueryableErr)
+				return onQueryErr("get device property", ret)
 			}
 			if mtml.VirtRole(prop.VirtCap) == mtml.VIRT_ROLE_GUEST_VIRTDEVICE {
 				logger.Info("skipping virtual device")
@@ -115,14 +142,14 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 
 			uuid, ret := dev.GetUUID()
 			if !ret.IsSuccess() {
-				return handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr)
+				return onQueryErr("get device UUID", ret)
 			}
 
 			var pciBusId string
 			{
 				pciInfo, ret := dev.GetPciInfo()
 				if !ret.IsSuccess() {
-					return handleCardQueryError(logger, i, "get device PCI info", ret, &lastUnqueryableErr)
+					return onQueryErr("get device PCI info", ret)
 				}
 				pciBusId = pciInfo.GetBusId()
 			}
@@ -130,7 +157,7 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 
 			name, ret := dev.GetName()
 			if !ret.IsSuccess() {
-				return handleCardQueryError(logger, i, "get device name", ret, &lastUnqueryableErr)
+				return onQueryErr("get device name", ret)
 			}
 
 			var (
@@ -140,7 +167,7 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 			{
 				memHandler, ret := dev.InitMemory()
 				if !ret.IsSuccess() {
-					return handleCardQueryError(logger, i, "initialize memory handler", ret, &lastUnqueryableErr)
+					return onQueryErr("initialize memory handler", ret)
 				}
 				defer func() {
 					_ = memHandler.Free()
@@ -148,7 +175,7 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 
 				memTotal, ret := memHandler.GetTotal()
 				if !ret.IsSuccess() {
-					return handleCardQueryError(logger, i, "get device memory total", ret, &lastUnqueryableErr)
+					return onQueryErr("get device memory total", ret)
 				}
 				memory = device.ConvertBytesToMiB(memTotal)
 				memoryUnhealthy = isDeviceUnhealthy(memHandler)
@@ -186,29 +213,41 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 				}
 			}
 
-			grpList[grpIndex].Accelerators = append(
-				grpList[grpIndex].Accelerators,
-				device.Accelerator{
-					ID:              uuid,
-					Index:           uint32(i),
-					PhysicalIndexes: physicalIndexes,
-					Topology:        topo,
-					Status:          status,
-				},
-			)
+			accel := device.Accelerator{
+				ID:              uuid,
+				Index:           uint32(i),
+				PhysicalIndexes: physicalIndexes,
+				Topology:        topo,
+				Status:          status,
+			}
+			grpList[grpIndex].Accelerators = append(grpList[grpIndex].Accelerators, accel)
+
+			grpCopy := *grpList[grpIndex].DeepCopy()
+			grpCopy.Accelerators = nil
+			nextDetected[i] = cachedAccelerator{
+				group: grpCopy,
+				accel: *accel.DeepCopy(),
+			}
+			nextMonitored[i] = cachedMetrics{
+				id:     uuid,
+				memory: memory,
+			}
+			queriedCount++
 			return nil
 		}(); err != nil {
 			return nil, err
 		}
 	}
 
-	if len(grpList) == 0 {
+	if queriedCount == 0 {
 		if lastUnqueryableErr != nil {
 			return nil, lastUnqueryableErr
 		}
+		in.clearCache()
 		return nil, nil
 	}
 
+	in.updateDetectedCache(nextDetected, nextMonitored, unqueryableSlots)
 	device.SetGroupSlicedDetails(grpList)
 
 	return grpList, nil
@@ -225,6 +264,7 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 
 	pciDevs := binding.GetPCIDevices([]string{_PciVendor}, nil)
 	if !noPciCheck && len(pciDevs) == 0 {
+		in.clearCache()
 		in.logger.Info("no mthreads pci devices found")
 		return nil, nil
 	}
@@ -247,6 +287,7 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 		return nil, nil
 	}
 	if cnt == 0 {
+		in.clearCache()
 		in.logger.Info("no mthreads devices found")
 		return nil, nil
 	}
@@ -256,13 +297,24 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 		Timestamp:    time.Now(),
 		Accelerators: make([]device.AcceleratorMetrics, 0, cnt),
 	}
+	nextMonitored := make(map[int]cachedMetrics, cnt)
+	unqueryableSlots := make(map[int]struct{})
+	queriedCount := 0
 	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
 
+		onQueryErr := func(op string, ret mtml.Return) error {
+			if err := handleCardQueryError(logger, i, op, ret, &lastUnqueryableErr); err != nil {
+				return err
+			}
+			in.retainCachedMonitored(i, unqueryableSlots, &metricsGrp)
+			return nil
+		}
+
 		dev, ret := in.mtml.InitDeviceByIndex(i)
 		if !ret.IsSuccess() {
-			if err := handleCardQueryError(logger, i, "get device handle", ret, &lastUnqueryableErr); err != nil {
+			if err := onQueryErr("get device handle", ret); err != nil {
 				return nil, err
 			}
 			continue
@@ -275,7 +327,7 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 
 			prop, ret := dev.GetProperty()
 			if !ret.IsSuccess() {
-				return handleCardQueryError(logger, i, "get device property", ret, &lastUnqueryableErr)
+				return onQueryErr("get device property", ret)
 			}
 			if mtml.VirtRole(prop.VirtCap) == mtml.VIRT_ROLE_GUEST_VIRTDEVICE {
 				logger.Info("skipping virtual device")
@@ -284,7 +336,7 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 
 			uuid, ret := dev.GetUUID()
 			if !ret.IsSuccess() {
-				return handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr)
+				return onQueryErr("get device UUID", ret)
 			}
 
 			var (
@@ -296,7 +348,7 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 			{
 				memHandler, ret := dev.InitMemory()
 				if !ret.IsSuccess() {
-					return handleCardQueryError(logger, i, "initialize memory handler", ret, &lastUnqueryableErr)
+					return onQueryErr("initialize memory handler", ret)
 				}
 				defer func() {
 					_ = memHandler.Free()
@@ -304,7 +356,7 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 
 				memTotal, ret := memHandler.GetTotal()
 				if !ret.IsSuccess() {
-					return handleCardQueryError(logger, i, "get device memory total", ret, &lastUnqueryableErr)
+					return onQueryErr("get device memory total", ret)
 				}
 				memory = device.ConvertBytesToMiB(memTotal)
 
@@ -363,20 +415,148 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 					Unhealthy:         memoryUnhealthy,
 				},
 			)
+			nextMonitored[i] = cachedMetrics{
+				id:     uuid,
+				memory: memory,
+			}
+			queriedCount++
 			return nil
 		}(); err != nil {
 			return nil, err
 		}
 	}
 
-	if len(metricsGrp.Accelerators) == 0 {
+	if queriedCount == 0 {
 		if lastUnqueryableErr != nil {
 			return nil, lastUnqueryableErr
 		}
+		in.clearCache()
 		return nil, nil
 	}
 
+	in.updateMonitoredCache(nextMonitored, unqueryableSlots)
+
 	return device.MetricsGroupList{metricsGrp}, nil
+}
+
+func (in *mthreads) getCachedDetected(slot int) (cachedAccelerator, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedDetected[slot]
+	if !ok {
+		return cachedAccelerator{}, false
+	}
+	grpCopy := *cached.group.DeepCopy()
+	grpCopy.Accelerators = nil
+	return cachedAccelerator{
+		group: grpCopy,
+		accel: *cached.accel.DeepCopy(),
+	}, true
+}
+
+func (in *mthreads) getCachedMonitored(slot int) (cachedMetrics, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedMonitored[slot]
+	return cached, ok
+}
+
+func (in *mthreads) retainCachedDetected(
+	slot int, unqueryableSlots map[int]struct{}, grpList *device.DevicesGroupList,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	cached, ok := in.getCachedDetected(slot)
+	if !ok {
+		return
+	}
+
+	cached.accel.Status.Unhealthy = true
+
+	grpIndex := slices.IndexFunc(*grpList, func(grp device.DevicesGroup) bool {
+		return grp.Name == cached.group.Name && grp.Memory == cached.group.Memory
+	})
+	if grpIndex == -1 {
+		*grpList = append(*grpList, cached.group)
+		grpIndex = len(*grpList) - 1
+	}
+	(*grpList)[grpIndex].Accelerators = append((*grpList)[grpIndex].Accelerators, cached.accel)
+}
+
+func (in *mthreads) retainCachedMonitored(
+	slot int, unqueryableSlots map[int]struct{}, metricsGrp *device.MetricsGroup,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	cached, ok := in.getCachedMonitored(slot)
+	if !ok {
+		return
+	}
+
+	metricsGrp.Accelerators = append(
+		metricsGrp.Accelerators,
+		device.AcceleratorMetrics{
+			ID:        cached.id,
+			Memory:    cached.memory,
+			Unhealthy: true,
+		},
+	)
+}
+
+func (in *mthreads) clearCache() {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	in.cachedDetected = nil
+	in.cachedMonitored = nil
+}
+
+func (in *mthreads) updateDetectedCache(
+	nextDetected map[int]cachedAccelerator,
+	nextMonitored map[int]cachedMetrics,
+	unqueryableSlots map[int]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	for slot := range unqueryableSlots {
+		if _, ok := nextDetected[slot]; !ok {
+			if prev, ok := in.cachedDetected[slot]; ok {
+				nextDetected[slot] = prev
+			}
+		}
+		if _, ok := nextMonitored[slot]; !ok {
+			if prev, ok := in.cachedMonitored[slot]; ok {
+				nextMonitored[slot] = prev
+			}
+		}
+	}
+	in.cachedDetected = nextDetected
+	in.cachedMonitored = nextMonitored
+}
+
+func (in *mthreads) updateMonitoredCache(
+	nextMonitored map[int]cachedMetrics,
+	unqueryableSlots map[int]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	for slot := range unqueryableSlots {
+		if _, ok := nextMonitored[slot]; !ok {
+			if prev, ok := in.cachedMonitored[slot]; ok {
+				nextMonitored[slot] = prev
+			}
+		}
+	}
+	in.cachedMonitored = nextMonitored
+
+	for slot := range in.cachedDetected {
+		if _, ok := nextMonitored[slot]; ok {
+			continue
+		}
+		delete(in.cachedDetected, slot)
+	}
 }
 
 func isDeviceUnhealthy(memHandler mtml.MemoryHandler) bool {

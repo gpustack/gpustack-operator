@@ -667,6 +667,204 @@ func TestUnqueryableCardAndErrorHandling(t *testing.T) {
 	})
 }
 
+// TestRetainDroppedKnownCards verifies that a previously detected NVIDIA card that later
+// becomes unqueryable is retained in place as unhealthy across repeated passes, recovers when
+// live queries succeed again, returns an error when all cards become unqueryable, and is pruned
+// after a clean device count shrink.
+func TestRetainDroppedKnownCards(t *testing.T) {
+	if scenario := os.Getenv("GPUSTACK_TEST_NVML_RETAIN_SCENARIO"); scenario != "" {
+		d := New(device.DetectorOptions{})
+		switch scenario {
+		case "drop_repeat_recover":
+			// Pass 1: 3 healthy cards detected live (also seeds monitor cache).
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			for i := 0; i < 3; i++ {
+				assert.Equal(t, "GPU-"+strconv.Itoa(i), groups[0].Accelerators[i].ID)
+				assert.Equal(t, uint32(i), groups[0].Accelerators[i].Index)
+				assert.Equal(t, []uint32{uint32(i)}, groups[0].Accelerators[i].PhysicalIndexes)
+				assert.False(t, groups[0].Accelerators[i].Status.Unhealthy)
+			}
+
+			// Pass 2: card 1 becomes unqueryable; Monitor runs first before ever succeeding live.
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_STAGE", "handle")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_ERR", strconv.Itoa(int(nvml.ERROR_GPU_IS_LOST)))
+
+			for pass := 2; pass <= 3; pass++ {
+				metrics, err := d.MonitorAccelerator(true)
+				require.NoError(t, err, "pass %d monitor", pass)
+				require.Len(t, metrics, 1)
+				require.Len(t, metrics[0].Accelerators, 3)
+				assert.Equal(t, "GPU-0", metrics[0].Accelerators[0].ID)
+				assert.False(t, metrics[0].Accelerators[0].Unhealthy)
+				assert.Equal(t, "GPU-1", metrics[0].Accelerators[1].ID)
+				assert.Equal(t, uint64(81920), metrics[0].Accelerators[1].Memory)
+				assert.True(t, metrics[0].Accelerators[1].Unhealthy)
+				assert.Equal(t, "GPU-2", metrics[0].Accelerators[2].ID)
+				assert.False(t, metrics[0].Accelerators[2].Unhealthy)
+
+				groups, err = d.DetectAccelerator(true)
+				require.NoError(t, err, "pass %d detect", pass)
+				require.Len(t, groups, 1)
+				require.Len(t, groups[0].Accelerators, 3)
+				assert.Equal(t, "GPU-0", groups[0].Accelerators[0].ID)
+				assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+				assert.Equal(t, []uint32{0}, groups[0].Accelerators[0].PhysicalIndexes)
+				assert.False(t, groups[0].Accelerators[0].Status.Unhealthy)
+				assert.Equal(t, "GPU-1", groups[0].Accelerators[1].ID)
+				assert.Equal(t, uint32(1), groups[0].Accelerators[1].Index)
+				assert.Equal(t, []uint32{1}, groups[0].Accelerators[1].PhysicalIndexes)
+				assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+				assert.Equal(t, "GPU-2", groups[0].Accelerators[2].ID)
+				assert.Equal(t, uint32(2), groups[0].Accelerators[2].Index)
+				assert.Equal(t, []uint32{2}, groups[0].Accelerators[2].PhysicalIndexes)
+				assert.False(t, groups[0].Accelerators[2].Status.Unhealthy)
+			}
+
+			// Pass 4: card 1 recovers.
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_STAGE", "")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_INDEX", "")
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			for i := 0; i < 3; i++ {
+				assert.False(t, groups[0].Accelerators[i].Status.Unhealthy)
+			}
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 3)
+			for i := 0; i < 3; i++ {
+				assert.False(t, metrics[0].Accelerators[i].Unhealthy)
+			}
+
+		case "all_unqueryable_after_cache":
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+
+			// All cards become unqueryable: must return error without mutating cache.
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_STAGE", "handle")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_INDEX", "all")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_ERR", strconv.Itoa(int(nvml.ERROR_GPU_IS_LOST)))
+
+			groups, err = d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			metrics, err = d.MonitorAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, metrics)
+
+			// Partial recovery: card 0 recovers while card 1 stays lost; cache is intact.
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_INDEX", "1")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.False(t, groups[0].Accelerators[0].Status.Unhealthy)
+			assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+
+		case "clean_shrink_prunes_cache":
+			// Pass 1: 3 healthy cards.
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+
+			// Pass 2: clean shrink to 2 cards with no errors.
+			t.Setenv("GPUSTACK_TEST_NVML_COUNT", "2")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+
+			// Pass 3: count returns to 3 with slot 2 immediately unqueryable; slot 2 was pruned.
+			t.Setenv("GPUSTACK_TEST_NVML_COUNT", "3")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_STAGE", "handle")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_INDEX", "2")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_ERR", strconv.Itoa(int(nvml.ERROR_GPU_IS_LOST)))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.Equal(t, "GPU-0", groups[0].Accelerators[0].ID)
+			assert.Equal(t, "GPU-1", groups[0].Accelerators[1].ID)
+
+			metrics, err = d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+
+			// Pass 4: clean shrink to 0 clears cache.
+			t.Setenv("GPUSTACK_TEST_NVML_COUNT", "0")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_STAGE", "")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			assert.Nil(t, groups)
+
+			t.Setenv("GPUSTACK_TEST_NVML_COUNT", "2")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_STAGE", "handle")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_INDEX", "1")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 1)
+			assert.Equal(t, "GPU-0", groups[0].Accelerators[0].ID)
+
+		default:
+			t.Fatalf("unknown scenario %q", scenario)
+		}
+		return
+	}
+
+	dir := compileNVMLFixture(t)
+
+	testCases := []struct {
+		name     string
+		scenario string
+		count    string
+	}{
+		{name: "drop repeat and recover", scenario: "drop_repeat_recover", count: "3"},
+		{name: "all cards unqueryable after cache", scenario: "all_unqueryable_after_cache", count: "2"},
+		{name: "clean shrink prunes cache", scenario: "clean_shrink_prunes_cache", count: "3"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestRetainDroppedKnownCards$", "-test.count=1")
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(),
+				"GPUSTACK_TEST_NVML_RETAIN_SCENARIO="+tc.scenario,
+				"GPUSTACK_TEST_NVML_COUNT="+tc.count,
+				"GPUSTACK_TEST_NVML_TOTAL_MIB=81920",
+				"LD_LIBRARY_PATH="+dir,
+				"DYLD_LIBRARY_PATH="+dir,
+			)
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+		})
+	}
+}
+
 func TestIsUnqueryableDeviceError(t *testing.T) {
 	testCases := []struct {
 		name string

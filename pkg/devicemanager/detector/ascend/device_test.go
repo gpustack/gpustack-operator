@@ -559,9 +559,10 @@ int dcmi_get_card_list(int *card_num, int *card_list, int list_len) {
     const char *err_env = fixture_env("GPUSTACK_TEST_DCMI_COUNT_ERR");
     if (err_env[0] != '\0')
         return atoi(err_env);
-    int cards = atoi(fixture_env("GPUSTACK_TEST_DCMI_CARDS"));
-    if (cards <= 0)
-        cards = 1;
+    const char *cards_env = fixture_env("GPUSTACK_TEST_DCMI_CARDS");
+    int cards = cards_env[0] == '\0' ? 1 : atoi(cards_env);
+    if (cards < 0)
+        cards = 0;
     if (cards > list_len)
         cards = list_len;
     *card_num = cards;
@@ -572,7 +573,9 @@ int dcmi_get_card_list(int *card_num, int *card_list, int list_len) {
 }
 
 int dcmi_get_device_num_in_card(int card_id, int *device_num) {
-    (void)card_id;
+    int ret = maybe_fail_device("card_dev_num", card_id);
+    if (ret != 0)
+        return ret;
     int per_card = atoi(fixture_env("GPUSTACK_TEST_DCMI_DEVS_PER_CARD"));
     if (per_card <= 0)
         per_card = 1;
@@ -804,6 +807,266 @@ func TestUnqueryableCardAndErrorHandling(t *testing.T) {
 			"GPUSTACK_TEST_DCMI_INIT_ERR="+strconv.Itoa(int(dcmi.ERROR_INNER_ERR)),
 		)
 	})
+}
+
+// TestRetainDroppedKnownCards verifies Ascend cache retention for unqueryable devices and
+// whole-card GetDeviceNumInCard failures, repeated lost passes, recovery, all-unqueryable errors,
+// and clean shrink / non-NPU cache pruning.
+func TestRetainDroppedKnownCards(t *testing.T) {
+	if scenario := os.Getenv("GPUSTACK_TEST_DCMI_RETAIN_SCENARIO"); scenario != "" {
+		d := New(device.DetectorOptions{Logger: klog.Background()})
+		switch scenario {
+		case "drop_repeat_recover":
+			// Pass 1: 2 cards x 1 dev healthy (also seeds monitor cache).
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			id0 := groups[0].Accelerators[0].ID
+			id1 := groups[0].Accelerators[1].ID
+			assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+			assert.Equal(t, []uint32{0, 0, 0}, groups[0].Accelerators[0].PhysicalIndexes)
+			assert.False(t, groups[0].Accelerators[0].Status.Unhealthy)
+			assert.Equal(t, uint32(1), groups[0].Accelerators[1].Index)
+			assert.Equal(t, []uint32{1, 1, 0}, groups[0].Accelerators[1].PhysicalIndexes)
+			assert.False(t, groups[0].Accelerators[1].Status.Unhealthy)
+
+			// Pass 2 & 3: card 1 becomes unqueryable; Monitor runs first before ever succeeding live.
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_STAGE", "die")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_PHY", "1")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_ERR", strconv.Itoa(int(dcmi.ERROR_DEVICE_NOT_EXIST)))
+
+			for pass := 2; pass <= 3; pass++ {
+				metrics, err := d.MonitorAccelerator(true)
+				require.NoError(t, err, "pass %d monitor", pass)
+				require.Len(t, metrics, 1)
+				require.Len(t, metrics[0].Accelerators, 2)
+				assert.Equal(t, id0, metrics[0].Accelerators[0].ID)
+				assert.False(t, metrics[0].Accelerators[0].Unhealthy)
+				assert.Equal(t, id1, metrics[0].Accelerators[1].ID)
+				assert.Equal(t, uint64(65536), metrics[0].Accelerators[1].Memory)
+				assert.True(t, metrics[0].Accelerators[1].Unhealthy)
+
+				groups, err = d.DetectAccelerator(true)
+				require.NoError(t, err, "pass %d detect", pass)
+				require.Len(t, groups, 1)
+				require.Len(t, groups[0].Accelerators, 2)
+				assert.Equal(t, id0, groups[0].Accelerators[0].ID)
+				assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+				assert.Equal(t, []uint32{0, 0, 0}, groups[0].Accelerators[0].PhysicalIndexes)
+				assert.False(t, groups[0].Accelerators[0].Status.Unhealthy)
+				assert.Equal(t, id1, groups[0].Accelerators[1].ID)
+				assert.Equal(t, uint32(1), groups[0].Accelerators[1].Index)
+				assert.Equal(t, []uint32{1, 1, 0}, groups[0].Accelerators[1].PhysicalIndexes)
+				assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+			}
+
+			// Pass 4: card 1 recovers.
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_STAGE", "")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_PHY", "")
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.False(t, groups[0].Accelerators[0].Status.Unhealthy)
+			assert.False(t, groups[0].Accelerators[1].Status.Unhealthy)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+			assert.False(t, metrics[0].Accelerators[0].Unhealthy)
+			assert.False(t, metrics[0].Accelerators[1].Unhealthy)
+
+		case "card_dev_num_unqueryable":
+			// Pass 1: 2 cards x 2 devs healthy (4 devices total).
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 4)
+			wantIDs := make([]string, 4)
+			for i := 0; i < 4; i++ {
+				wantIDs[i] = groups[0].Accelerators[i].ID
+			}
+
+			// Pass 2 & 3: GetDeviceNumInCard(1) fails with unqueryable error; both devices on card 1
+			// are restored in ascending dev order as unhealthy.
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_STAGE", "card_dev_num")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_PHY", "1")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_ERR", strconv.Itoa(int(dcmi.ERROR_DEVICE_NOT_EXIST)))
+
+			for pass := 2; pass <= 3; pass++ {
+				metrics, err := d.MonitorAccelerator(true)
+				require.NoError(t, err, "pass %d monitor", pass)
+				require.Len(t, metrics, 1)
+				require.Len(t, metrics[0].Accelerators, 4)
+				for i := 0; i < 4; i++ {
+					assert.Equal(t, wantIDs[i], metrics[0].Accelerators[i].ID)
+					assert.Equal(t, i >= 2, metrics[0].Accelerators[i].Unhealthy)
+				}
+
+				groups, err = d.DetectAccelerator(true)
+				require.NoError(t, err, "pass %d detect", pass)
+				require.Len(t, groups, 1)
+				require.Len(t, groups[0].Accelerators, 4)
+				for i := 0; i < 4; i++ {
+					assert.Equal(t, wantIDs[i], groups[0].Accelerators[i].ID)
+					assert.Equal(t, uint32(i), groups[0].Accelerators[i].Index)
+					assert.Equal(t, []uint32{uint32(i), uint32(i / 2), uint32(i % 2)}, groups[0].Accelerators[i].PhysicalIndexes)
+					assert.Equal(t, i >= 2, groups[0].Accelerators[i].Status.Unhealthy)
+				}
+			}
+
+			// Pass 4: card 1 recovers.
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_STAGE", "")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_PHY", "")
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 4)
+			for i := 0; i < 4; i++ {
+				assert.False(t, groups[0].Accelerators[i].Status.Unhealthy)
+			}
+
+		case "all_unqueryable_after_cache":
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_STAGE", "die")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_PHY", "all")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_ERR", strconv.Itoa(int(dcmi.ERROR_DEVICE_NOT_EXIST)))
+
+			groups, err = d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			metrics, err = d.MonitorAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, metrics)
+
+			// Partial recovery confirms all-unqueryable pass did not mutate cache.
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_PHY", "1")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.False(t, groups[0].Accelerators[0].Status.Unhealthy)
+			assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+
+		case "clean_shrink_prunes_cache":
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+
+			// Clean shrink to 2 cards with no errors.
+			t.Setenv("GPUSTACK_TEST_DCMI_CARDS", "2")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+
+			// Card count returns to 3 with card 2 unqueryable; pruned card 2 is not resurrected.
+			t.Setenv("GPUSTACK_TEST_DCMI_CARDS", "3")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_STAGE", "die")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_PHY", "2")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_ERR", strconv.Itoa(int(dcmi.ERROR_DEVICE_NOT_EXIST)))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+			assert.Equal(t, uint32(1), groups[0].Accelerators[1].Index)
+
+			metrics, err = d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+
+			// Intentional non-NPU skip clears cache too.
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_STAGE", "")
+			t.Setenv("GPUSTACK_TEST_DCMI_NON_NPU", "true")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			assert.Nil(t, groups)
+
+			t.Setenv("GPUSTACK_TEST_DCMI_NON_NPU", "false")
+			t.Setenv("GPUSTACK_TEST_DCMI_CARDS", "2")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_STAGE", "die")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_PHY", "1")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 1)
+			assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+
+			// Clean shrink to 0 cards clears cache.
+			t.Setenv("GPUSTACK_TEST_DCMI_CARDS", "0")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_STAGE", "")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			assert.Nil(t, groups)
+
+			t.Setenv("GPUSTACK_TEST_DCMI_CARDS", "2")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_STAGE", "die")
+			t.Setenv("GPUSTACK_TEST_DCMI_FAIL_PHY", "1")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 1)
+			assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+
+		default:
+			t.Fatalf("unknown scenario %q", scenario)
+		}
+		return
+	}
+
+	dir := compileDCMIFixture(t)
+
+	testCases := []struct {
+		name        string
+		scenario    string
+		cards       string
+		devsPerCard string
+	}{
+		{name: "drop repeat and recover", scenario: "drop_repeat_recover", cards: "2", devsPerCard: "1"},
+		{name: "GetDeviceNumInCard unqueryable restores card devices", scenario: "card_dev_num_unqueryable", cards: "2", devsPerCard: "2"},
+		{name: "all cards unqueryable after cache", scenario: "all_unqueryable_after_cache", cards: "2", devsPerCard: "1"},
+		{name: "clean shrink and non-NPU prune cache", scenario: "clean_shrink_prunes_cache", cards: "3", devsPerCard: "1"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestRetainDroppedKnownCards$", "-test.count=1")
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(),
+				"CANN_HOME="+dir,
+				"GPUSTACK_TEST_DCMI_RETAIN_SCENARIO="+tc.scenario,
+				"GPUSTACK_TEST_DCMI_CARDS="+tc.cards,
+				"GPUSTACK_TEST_DCMI_DEVS_PER_CARD="+tc.devsPerCard,
+				"LD_LIBRARY_PATH="+filepath.Join(dir, "driver", "lib64", "driver"),
+				"DYLD_LIBRARY_PATH="+filepath.Join(dir, "driver", "lib64", "driver"),
+			)
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+		})
+	}
 }
 
 func TestClassifyInitOrCountError(t *testing.T) {

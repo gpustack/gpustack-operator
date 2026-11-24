@@ -32,6 +32,16 @@ func init() {
 	_PciVendor = p[len(p)-1]
 }
 
+type cachedAccelerator struct {
+	group device.DevicesGroup
+	accel device.Accelerator
+}
+
+type cachedMetrics struct {
+	id     string
+	memory uint64
+}
+
 type hygon struct {
 	initMu     sync.Mutex
 	amdgpuInit bool
@@ -43,6 +53,10 @@ type hygon struct {
 	hsa        *hsa.HSA
 	dmi        *dmi.DMI
 	logger     klog.Logger
+
+	cacheMu         sync.Mutex
+	cachedDetected  map[int]cachedAccelerator
+	cachedMonitored map[int]cachedMetrics
 }
 
 // New creates a new hygon device interface and initializes the RSMI library.
@@ -95,6 +109,7 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		return nil, nil
 	}
 	if cnt == 0 {
+		in.clearCache()
 		in.logger.Info("no hygon devices found")
 		return nil, nil
 	}
@@ -112,6 +127,10 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 	rtVer, _ := in.rsmi.GetROCMVersion()
 
 	grpList := device.DevicesGroupList{}
+	queriedCount := 0
+	nextDetected := make(map[int]cachedAccelerator, cnt)
+	nextMonitored := make(map[int]cachedMetrics, cnt)
+	unqueryableSlots := make(map[int]struct{})
 	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
@@ -123,6 +142,7 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			if err := handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.retainUnqueryableDetected(&grpList, unqueryableSlots, i)
 			continue
 		}
 
@@ -133,6 +153,7 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				if err := handleCardQueryError(logger, i, "get device PCI ID", ret, &lastUnqueryableErr); err != nil {
 					return nil, err
 				}
+				in.retainUnqueryableDetected(&grpList, unqueryableSlots, i)
 				continue
 			}
 		}
@@ -152,6 +173,7 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				if err := handleCardQueryError(logger, i, "get device memory total", ret, &lastUnqueryableErr); err != nil {
 					return nil, err
 				}
+				in.retainUnqueryableDetected(&grpList, unqueryableSlots, i)
 				continue
 			}
 			memory = device.ConvertBytesToMiB(memTotal)
@@ -270,24 +292,36 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			}
 		}
 
-		grpList[grpIndex].Accelerators = append(
-			grpList[grpIndex].Accelerators,
-			device.Accelerator{
-				ID:              uuid,
-				Index:           uint32(i),
-				PhysicalIndexes: physicalIndexes,
-				Topology:        topo,
-				Status:          status,
-			},
-		)
+		accel := device.Accelerator{
+			ID:              uuid,
+			Index:           uint32(i),
+			PhysicalIndexes: physicalIndexes,
+			Topology:        topo,
+			Status:          status,
+		}
+		grpList[grpIndex].Accelerators = append(grpList[grpIndex].Accelerators, accel)
+		queriedCount++
+
+		grpHeader := grpList[grpIndex]
+		grpHeader.Accelerators = nil
+		nextDetected[i] = cachedAccelerator{
+			group: *grpHeader.DeepCopy(),
+			accel: *accel.DeepCopy(),
+		}
+		nextMonitored[i] = cachedMetrics{
+			id:     uuid,
+			memory: memory,
+		}
 	}
 
-	if len(grpList) == 0 {
+	if queriedCount == 0 {
 		if lastUnqueryableErr != nil {
 			return nil, lastUnqueryableErr
 		}
 		return nil, nil
 	}
+
+	in.updateDetectedCache(nextDetected, nextMonitored, unqueryableSlots)
 
 	// Withhold any profile the cards of one group disagree about, before the aggregation below merges
 	// profiles by name and would publish a reading that describes neither card.
@@ -335,6 +369,7 @@ func (in *hygon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 		return nil, nil
 	}
 	if cnt == 0 {
+		in.clearCache()
 		in.logger.Info("no hygon devices found")
 		return nil, nil
 	}
@@ -344,6 +379,9 @@ func (in *hygon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 		Timestamp:    time.Now(),
 		Accelerators: make([]device.AcceleratorMetrics, 0, cnt),
 	}
+	queriedCount := 0
+	nextMonitored := make(map[int]cachedMetrics, cnt)
+	unqueryableSlots := make(map[int]struct{})
 	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
@@ -355,6 +393,7 @@ func (in *hygon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 			if err := handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.retainUnqueryableMonitored(&metricsGrp, unqueryableSlots, i)
 			continue
 		}
 
@@ -370,6 +409,7 @@ func (in *hygon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 				if err := handleCardQueryError(logger, i, "get device memory total", ret, &lastUnqueryableErr); err != nil {
 					return nil, err
 				}
+				in.retainUnqueryableMonitored(&metricsGrp, unqueryableSlots, i)
 				continue
 			}
 			memory = device.ConvertBytesToMiB(memTotal)
@@ -424,16 +464,142 @@ func (in *hygon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 				Unhealthy:         memoryUnhealthy,
 			},
 		)
+		queriedCount++
+		nextMonitored[i] = cachedMetrics{
+			id:     uuid,
+			memory: memory,
+		}
 	}
 
-	if len(metricsGrp.Accelerators) == 0 {
+	if queriedCount == 0 {
 		if lastUnqueryableErr != nil {
 			return nil, lastUnqueryableErr
 		}
 		return nil, nil
 	}
 
+	in.updateMonitoredCache(nextMonitored, unqueryableSlots)
+
 	return device.MetricsGroupList{metricsGrp}, nil
+}
+
+func (in *hygon) getCachedDetected(slot int) (cachedAccelerator, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedDetected[slot]
+	if !ok {
+		return cachedAccelerator{}, false
+	}
+	grp := *cached.group.DeepCopy()
+	grp.Accelerators = nil
+	return cachedAccelerator{
+		group: grp,
+		accel: *cached.accel.DeepCopy(),
+	}, true
+}
+
+func (in *hygon) getCachedMonitored(slot int) (cachedMetrics, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedMonitored[slot]
+	return cached, ok
+}
+
+func (in *hygon) clearCache() {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	in.cachedDetected = nil
+	in.cachedMonitored = nil
+}
+
+func (in *hygon) updateDetectedCache(
+	nextDetected map[int]cachedAccelerator,
+	nextMonitored map[int]cachedMetrics,
+	unqueryableSlots map[int]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	for slot := range unqueryableSlots {
+		if _, exists := nextDetected[slot]; !exists {
+			if prev, ok := in.cachedDetected[slot]; ok {
+				nextDetected[slot] = prev
+			}
+		}
+		if _, exists := nextMonitored[slot]; !exists {
+			if prev, ok := in.cachedMonitored[slot]; ok {
+				nextMonitored[slot] = prev
+			}
+		}
+	}
+	in.cachedDetected = nextDetected
+	in.cachedMonitored = nextMonitored
+}
+
+func (in *hygon) updateMonitoredCache(
+	nextMonitored map[int]cachedMetrics,
+	unqueryableSlots map[int]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	for slot := range unqueryableSlots {
+		if _, exists := nextMonitored[slot]; !exists {
+			if prev, ok := in.cachedMonitored[slot]; ok {
+				nextMonitored[slot] = prev
+			}
+		}
+	}
+	in.cachedMonitored = nextMonitored
+
+	for slot := range in.cachedDetected {
+		if _, ok := nextMonitored[slot]; ok {
+			continue
+		}
+		delete(in.cachedDetected, slot)
+	}
+}
+
+func (in *hygon) retainUnqueryableDetected(
+	grpList *device.DevicesGroupList,
+	unqueryableSlots map[int]struct{},
+	slot int,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	cached, ok := in.getCachedDetected(slot)
+	if !ok {
+		return
+	}
+	cached.accel.Status.Unhealthy = true
+
+	grpIndex := slices.IndexFunc(*grpList, func(grp device.DevicesGroup) bool {
+		return grp.Name == cached.group.Name && grp.Memory == cached.group.Memory
+	})
+	if grpIndex == -1 {
+		*grpList = append(*grpList, cached.group)
+		grpIndex = len(*grpList) - 1
+	}
+	(*grpList)[grpIndex].Accelerators = append((*grpList)[grpIndex].Accelerators, cached.accel)
+}
+
+func (in *hygon) retainUnqueryableMonitored(
+	metricsGrp *device.MetricsGroup,
+	unqueryableSlots map[int]struct{},
+	slot int,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	cached, ok := in.getCachedMonitored(slot)
+	if !ok {
+		return
+	}
+	metricsGrp.Accelerators = append(metricsGrp.Accelerators, device.AcceleratorMetrics{
+		ID:        cached.id,
+		Memory:    cached.memory,
+		Unhealthy: true,
+	})
 }
 
 func isDeviceUnhealthy(dev rsmi.Device) bool {

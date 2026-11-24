@@ -143,7 +143,12 @@ MtmlReturn mtmlDeviceGetProperty(const MtmlDevice *dev, MtmlDeviceProperty *prop
     if (strcmp(fixture_env("GPUSTACK_TEST_MTML_ALL_GUEST_VF"), "true") == 0) {
         prop->virtCap = MTML_VIRT_ROLE_GUEST_VIRTDEVICE;
     } else {
-        prop->virtCap = MTML_VIRT_ROLE_NONE;
+        const char *vf_idx = fixture_env("GPUSTACK_TEST_MTML_GUEST_VF_INDEX");
+        if (vf_idx[0] != '\0' && (unsigned int)strtoul(vf_idx, NULL, 10) == idx) {
+            prop->virtCap = MTML_VIRT_ROLE_GUEST_VIRTDEVICE;
+        } else {
+            prop->virtCap = MTML_VIRT_ROLE_NONE;
+        }
     }
     return MTML_SUCCESS;
 }
@@ -285,6 +290,158 @@ func TestUnqueryableCardAndErrorHandling(t *testing.T) {
 			require.Len(t, groups, 1)
 			require.Len(t, groups[0].Accelerators, 1)
 			assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+		case "retain_unhealthy_and_recover":
+			// Pass 1: 3 healthy cards populate both detect and monitor caches.
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			for i, accel := range groups[0].Accelerators {
+				assert.Equal(t, uint32(i), accel.Index)
+				assert.False(t, accel.Status.Unhealthy)
+			}
+
+			// Pass 2 & 3: card 1 becomes unqueryable; Monitor runs first to verify Detect seeded its cache.
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_FAIL_STAGE", "property"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_FAIL_INDEX", "1"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_FAIL_ERR", strconv.Itoa(int(mtml.ERROR_DRIVER_FAILURE))))
+
+			for pass := 2; pass <= 3; pass++ {
+				metrics, err := d.MonitorAccelerator(true)
+				require.NoError(t, err)
+				require.Len(t, metrics, 1)
+				require.Len(t, metrics[0].Accelerators, 3)
+				assert.Equal(t, "MTT-0", metrics[0].Accelerators[0].ID)
+				assert.False(t, metrics[0].Accelerators[0].Unhealthy)
+				assert.Equal(t, "MTT-1", metrics[0].Accelerators[1].ID)
+				assert.Equal(t, uint64(49152), metrics[0].Accelerators[1].Memory)
+				assert.True(t, metrics[0].Accelerators[1].Unhealthy)
+				assert.Equal(t, "MTT-2", metrics[0].Accelerators[2].ID)
+				assert.False(t, metrics[0].Accelerators[2].Unhealthy)
+
+				groups, err = d.DetectAccelerator(true)
+				require.NoError(t, err)
+				require.Len(t, groups, 1)
+				require.Len(t, groups[0].Accelerators, 3)
+				assert.Equal(t, "MTT-0", groups[0].Accelerators[0].ID)
+				assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+				assert.False(t, groups[0].Accelerators[0].Status.Unhealthy)
+				assert.Equal(t, "MTT-1", groups[0].Accelerators[1].ID)
+				assert.Equal(t, uint32(1), groups[0].Accelerators[1].Index)
+				assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+				assert.Equal(t, "MTT-2", groups[0].Accelerators[2].ID)
+				assert.Equal(t, uint32(2), groups[0].Accelerators[2].Index)
+				assert.False(t, groups[0].Accelerators[2].Status.Unhealthy)
+			}
+
+			// Pass 4: card 1 recovers and reports healthy again.
+			require.NoError(t, os.Unsetenv("GPUSTACK_TEST_MTML_FAIL_STAGE"))
+			require.NoError(t, os.Unsetenv("GPUSTACK_TEST_MTML_FAIL_INDEX"))
+			require.NoError(t, os.Unsetenv("GPUSTACK_TEST_MTML_FAIL_ERR"))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			for i, accel := range groups[0].Accelerators {
+				assert.Equal(t, uint32(i), accel.Index)
+				assert.False(t, accel.Status.Unhealthy)
+			}
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 3)
+			for _, m := range metrics[0].Accelerators {
+				assert.False(t, m.Unhealthy)
+			}
+		case "all_unqueryable_after_cache":
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_FAIL_STAGE", "memory"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_FAIL_INDEX", "all"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_FAIL_ERR", strconv.Itoa(int(mtml.ERROR_DRIVER_FAILURE))))
+
+			groups, err = d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, metrics)
+
+			// Cache must remain intact after all-unqueryable failure.
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_FAIL_INDEX", "1"))
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			assert.Equal(t, "MTT-1", groups[0].Accelerators[1].ID)
+			assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+		case "clean_shrink_and_vf_prune_cache":
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+
+			// Intentional guest VF skip of slot 1 prunes it from cache.
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_GUEST_VF_INDEX", "1"))
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.Equal(t, "MTT-0", groups[0].Accelerators[0].ID)
+			assert.Equal(t, "MTT-2", groups[0].Accelerators[1].ID)
+
+			// Clean shrink 3 -> 2 with zero errors prunes slot 2.
+			require.NoError(t, os.Unsetenv("GPUSTACK_TEST_MTML_GUEST_VF_INDEX"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_COUNT", "2"))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+
+			// If slot 2 later fails unqueryable, it must not be resurrected from stale cache.
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_COUNT", "3"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_FAIL_STAGE", "property"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_FAIL_INDEX", "2"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_FAIL_ERR", strconv.Itoa(int(mtml.ERROR_DRIVER_FAILURE))))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			metrics, err = d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+
+			// All guest VF devices clears cache completely.
+			require.NoError(t, os.Unsetenv("GPUSTACK_TEST_MTML_FAIL_STAGE"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_COUNT", "2"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_ALL_GUEST_VF", "true"))
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			assert.Nil(t, groups)
+
+			require.NoError(t, os.Unsetenv("GPUSTACK_TEST_MTML_ALL_GUEST_VF"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_FAIL_STAGE", "property"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_MTML_FAIL_INDEX", "1"))
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 1)
+			assert.Equal(t, "MTT-0", groups[0].Accelerators[0].ID)
 		default:
 			t.Fatalf("unknown mode %q", mode)
 		}
@@ -372,6 +529,27 @@ func TestUnqueryableCardAndErrorHandling(t *testing.T) {
 			"GPUSTACK_TEST_MTML_REQUIRE_INIT=true",
 			"GPUSTACK_TEST_MTML_INIT_FAIL_COUNT=1",
 			"GPUSTACK_TEST_MTML_INIT_ERR="+strconv.Itoa(int(mtml.ERROR_DRIVER_FAILURE)),
+		)
+	})
+
+	t.Run("known card retained as unhealthy across repeated lost passes and recovers", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_MTML_MODE=retain_unhealthy_and_recover",
+			"GPUSTACK_TEST_MTML_COUNT=3",
+		)
+	})
+
+	t.Run("all cards unqueryable after being cached still returns error", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_MTML_MODE=all_unqueryable_after_cache",
+			"GPUSTACK_TEST_MTML_COUNT=3",
+		)
+	})
+
+	t.Run("clean shrink and intentional guest VF skip prune cache without resurrecting cards", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_MTML_MODE=clean_shrink_and_vf_prune_cache",
+			"GPUSTACK_TEST_MTML_COUNT=3",
 		)
 	})
 }

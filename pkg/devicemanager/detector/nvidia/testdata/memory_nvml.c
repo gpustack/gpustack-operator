@@ -106,6 +106,11 @@ nvmlReturn_t nvmlDeviceGetName(nvmlDevice_t device, char *name, unsigned int len
     return NVML_SUCCESS;
 }
 
+nvmlReturn_t nvmlDeviceGetMinorNumber(nvmlDevice_t device, unsigned int *minorNumber) {
+    *minorNumber = device_index(device);
+    return NVML_SUCCESS;
+}
+
 nvmlReturn_t nvmlDeviceGetMemoryInfo_v2(nvmlDevice_t device, nvmlMemory_v2_t *memory) {
     unsigned int idx = device_index(device);
     nvmlReturn_t ret = maybe_fail_device("memory", idx);

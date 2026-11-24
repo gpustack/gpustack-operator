@@ -2,6 +2,7 @@ package ascend
 
 import (
 	"bufio"
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,6 +44,21 @@ func init() {
 	_PciVendor = p[len(p)-1]
 }
 
+type ascendSlotKey struct {
+	card int32
+	dev  int32
+}
+
+type cachedAccelerator struct {
+	group device.DevicesGroup
+	accel device.Accelerator
+}
+
+type cachedMetrics struct {
+	id     string
+	memory uint64
+}
+
 type ascend struct {
 	initMu      sync.Mutex
 	initialized bool
@@ -59,6 +75,10 @@ type ascend struct {
 	// superPods remembers the coordinates each accelerator last answered the super pod query with.
 	// See rememberSuperPod for why a failed read reuses them instead of reporting none.
 	superPods map[superPodKey]dcmi.SpodInfo
+
+	cacheMu         sync.Mutex
+	cachedDetected  map[ascendSlotKey]cachedAccelerator
+	cachedMonitored map[ascendSlotKey]cachedMetrics
 }
 
 // New creates a new ascend device interface and initializes the DCMI library.
@@ -66,10 +86,12 @@ func New(opts device.DetectorOptions) device.Detector {
 	logger := opts.Logger.WithName(Manufacturer)
 	lib := dcmi.New(binding.WithLogger(logger))
 	return &ascend{
-		dcmi:      lib,
-		product:   productascend.NewResolver(productDriver{lib: lib}),
-		logger:    logger,
-		superPods: make(map[superPodKey]dcmi.SpodInfo),
+		dcmi:            lib,
+		product:         productascend.NewResolver(productDriver{lib: lib}),
+		logger:          logger,
+		superPods:       make(map[superPodKey]dcmi.SpodInfo),
+		cachedDetected:  make(map[ascendSlotKey]cachedAccelerator),
+		cachedMonitored: make(map[ascendSlotKey]cachedMetrics),
 	}
 }
 
@@ -112,6 +134,7 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 		return nil, nil
 	}
 	if len(cardList) == 0 {
+		in.clearCache()
 		in.logger.Info("no ascend devices found")
 		return nil, nil
 	}
@@ -120,6 +143,11 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 	rtVer := getToolkitVersion()
 
 	grpList := device.DevicesGroupList{}
+	nextDetected := make(map[ascendSlotKey]cachedAccelerator, len(cardList)*2)
+	nextMonitored := make(map[ascendSlotKey]cachedMetrics, len(cardList)*2)
+	unqueryableSlots := make(map[ascendSlotKey]struct{})
+	unqueryableCards := make(map[int32]struct{})
+	queriedCount := 0
 	var lastUnqueryableErr error
 	for _, card := range cardList {
 		logger := in.logger.WithValues("card", card)
@@ -129,11 +157,13 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			if err := handleCardQueryError(logger, int(card), "get device count in card", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.restoreCachedDetectedCard(card, unqueryableCards, unqueryableSlots, &grpList)
 			continue
 		}
 
 		for i := int32(0); i < cnt; i++ {
 			logger := logger.WithValues("index", i)
+			slot := ascendSlotKey{card: card, dev: i}
 
 			dev := in.dcmi.GetDeviceHandleByCardAndIndex(card, i)
 
@@ -148,6 +178,7 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				if err := handleCardQueryError(logger, int(card), "get device vdie info", ret, &lastUnqueryableErr); err != nil {
 					return nil, err
 				}
+				in.restoreCachedDetected(slot, unqueryableSlots, &grpList)
 				continue
 			}
 
@@ -173,6 +204,7 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 						if err := handleCardQueryError(logger, int(card), "get device chip info", ret, &lastUnqueryableErr); err != nil {
 							return nil, err
 						}
+						in.restoreCachedDetected(slot, unqueryableSlots, &grpList)
 						continue
 					}
 				}
@@ -207,6 +239,7 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 						if err := handleCardQueryError(logger, int(card), "get device memory info", memRet, &lastUnqueryableErr); err != nil {
 							return nil, err
 						}
+						in.restoreCachedDetected(slot, unqueryableSlots, &grpList)
 						continue
 					}
 				}
@@ -217,6 +250,7 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				if err := handleCardQueryError(logger, int(card), "get device physical ID", ret, &lastUnqueryableErr); err != nil {
 					return nil, err
 				}
+				in.restoreCachedDetected(slot, unqueryableSlots, &grpList)
 				continue
 			}
 			// dcmi's own addressing for this accelerator, in the slot order every consumer reads
@@ -286,26 +320,35 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				)
 			}
 
-			grpList[grpIndex].Accelerators = append(
-				grpList[grpIndex].Accelerators,
-				device.Accelerator{
-					ID:              uuid,
-					Index:           phyId,
-					PhysicalIndexes: physicalIndexes,
-					Topology:        topo,
-					Status:          status,
-				},
-			)
+			accel := device.Accelerator{
+				ID:              uuid,
+				Index:           phyId,
+				PhysicalIndexes: physicalIndexes,
+				Topology:        topo,
+				Status:          status,
+			}
+			grpList[grpIndex].Accelerators = append(grpList[grpIndex].Accelerators, accel)
+			nextDetected[slot] = cachedAccelerator{
+				group: cloneGroupMetadata(grpList[grpIndex]),
+				accel: *accel.DeepCopy(),
+			}
+			nextMonitored[slot] = cachedMetrics{
+				id:     uuid,
+				memory: memory,
+			}
+			queriedCount++
 		}
 	}
 
-	if len(grpList) == 0 {
+	if queriedCount == 0 {
 		if lastUnqueryableErr != nil {
 			return nil, lastUnqueryableErr
 		}
+		in.clearCache()
 		return nil, nil
 	}
 
+	in.commitDetectedCache(nextDetected, nextMonitored, unqueryableSlots, unqueryableCards)
 	device.SetGroupSlicedDetails(grpList)
 
 	return grpList, nil
@@ -344,6 +387,7 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 		return nil, nil
 	}
 	if len(cardList) == 0 {
+		in.clearCache()
 		in.logger.Info("no ascend devices found")
 		return nil, nil
 	}
@@ -353,6 +397,10 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 		Timestamp:    time.Now(),
 		Accelerators: make([]device.AcceleratorMetrics, 0, len(cardList)*2),
 	}
+	nextMonitored := make(map[ascendSlotKey]cachedMetrics, len(cardList)*2)
+	unqueryableSlots := make(map[ascendSlotKey]struct{})
+	unqueryableCards := make(map[int32]struct{})
+	queriedCount := 0
 	var lastUnqueryableErr error
 	for _, card := range cardList {
 		logger := in.logger.WithValues("card", card)
@@ -362,11 +410,13 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 			if err := handleCardQueryError(logger, int(card), "get device count in card", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.restoreCachedMonitoredCard(card, unqueryableCards, unqueryableSlots, &metricsGrp.Accelerators)
 			continue
 		}
 
 		for i := int32(0); i < cnt; i++ {
 			logger := logger.WithValues("index", i)
+			slot := ascendSlotKey{card: card, dev: i}
 
 			dev := in.dcmi.GetDeviceHandleByCardAndIndex(card, i)
 
@@ -381,6 +431,7 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 				if err := handleCardQueryError(logger, int(card), "get device vdie info", ret, &lastUnqueryableErr); err != nil {
 					return nil, err
 				}
+				in.restoreCachedMonitored(slot, unqueryableSlots, &metricsGrp.Accelerators)
 				continue
 			}
 
@@ -419,6 +470,7 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 						if err := handleCardQueryError(logger, int(card), "get device memory info", memRet, &lastUnqueryableErr); err != nil {
 							return nil, err
 						}
+						in.restoreCachedMonitored(slot, unqueryableSlots, &metricsGrp.Accelerators)
 						continue
 					}
 				}
@@ -471,17 +523,226 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 					Unhealthy:         memoryUnhealthy,
 				},
 			)
+			nextMonitored[slot] = cachedMetrics{
+				id:     uuid,
+				memory: memory,
+			}
+			queriedCount++
 		}
 	}
 
-	if len(metricsGrp.Accelerators) == 0 {
+	if queriedCount == 0 {
 		if lastUnqueryableErr != nil {
 			return nil, lastUnqueryableErr
 		}
+		in.clearCache()
 		return nil, nil
 	}
 
+	in.commitMonitoredCache(nextMonitored, unqueryableSlots, unqueryableCards)
+
 	return device.MetricsGroupList{metricsGrp}, nil
+}
+
+type cachedDetectedEntry struct {
+	key    ascendSlotKey
+	cached cachedAccelerator
+}
+
+type cachedMonitoredEntry struct {
+	key    ascendSlotKey
+	cached cachedMetrics
+}
+
+func cloneGroupMetadata(grp device.DevicesGroup) device.DevicesGroup {
+	grp.Accelerators = nil
+	return *grp.DeepCopy()
+}
+
+func appendCachedAccelerator(grpList *device.DevicesGroupList, cached cachedAccelerator) {
+	grpIndex := slices.IndexFunc(*grpList, func(grp device.DevicesGroup) bool {
+		return grp.Name == cached.group.Name && grp.Memory == cached.group.Memory
+	})
+	if grpIndex == -1 {
+		*grpList = append(*grpList, cloneGroupMetadata(cached.group))
+		grpIndex = len(*grpList) - 1
+	}
+	accel := *cached.accel.DeepCopy()
+	accel.Status.Unhealthy = true
+	(*grpList)[grpIndex].Accelerators = append((*grpList)[grpIndex].Accelerators, accel)
+}
+
+func (in *ascend) getCachedDetected(slot ascendSlotKey) (cachedAccelerator, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedDetected[slot]
+	return cached, ok
+}
+
+func (in *ascend) getCachedMonitored(slot ascendSlotKey) (cachedMetrics, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedMonitored[slot]
+	return cached, ok
+}
+
+func (in *ascend) getCachedDetectedForCard(card int32) []cachedDetectedEntry {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	var entries []cachedDetectedEntry
+	for k, v := range in.cachedDetected {
+		if k.card == card {
+			entries = append(entries, cachedDetectedEntry{key: k, cached: v})
+		}
+	}
+	slices.SortFunc(entries, func(a, b cachedDetectedEntry) int {
+		return cmp.Compare(a.key.dev, b.key.dev)
+	})
+	return entries
+}
+
+func (in *ascend) getCachedMonitoredForCard(card int32) []cachedMonitoredEntry {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	var entries []cachedMonitoredEntry
+	for k, v := range in.cachedMonitored {
+		if k.card == card {
+			entries = append(entries, cachedMonitoredEntry{key: k, cached: v})
+		}
+	}
+	slices.SortFunc(entries, func(a, b cachedMonitoredEntry) int {
+		return cmp.Compare(a.key.dev, b.key.dev)
+	})
+	return entries
+}
+
+func (in *ascend) restoreCachedDetected(
+	slot ascendSlotKey, unqueryableSlots map[ascendSlotKey]struct{}, grpList *device.DevicesGroupList,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	if cached, ok := in.getCachedDetected(slot); ok {
+		appendCachedAccelerator(grpList, cached)
+	}
+}
+
+func (in *ascend) restoreCachedDetectedCard(
+	card int32,
+	unqueryableCards map[int32]struct{},
+	unqueryableSlots map[ascendSlotKey]struct{},
+	grpList *device.DevicesGroupList,
+) {
+	unqueryableCards[card] = struct{}{}
+	for _, entry := range in.getCachedDetectedForCard(card) {
+		unqueryableSlots[entry.key] = struct{}{}
+		appendCachedAccelerator(grpList, entry.cached)
+	}
+}
+
+func (in *ascend) restoreCachedMonitored(
+	slot ascendSlotKey, unqueryableSlots map[ascendSlotKey]struct{}, accels *[]device.AcceleratorMetrics,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	if cached, ok := in.getCachedMonitored(slot); ok {
+		*accels = append(*accels, device.AcceleratorMetrics{
+			ID:        cached.id,
+			Memory:    cached.memory,
+			Unhealthy: true,
+		})
+	}
+}
+
+func (in *ascend) restoreCachedMonitoredCard(
+	card int32,
+	unqueryableCards map[int32]struct{},
+	unqueryableSlots map[ascendSlotKey]struct{},
+	accels *[]device.AcceleratorMetrics,
+) {
+	unqueryableCards[card] = struct{}{}
+	for _, entry := range in.getCachedMonitoredForCard(card) {
+		unqueryableSlots[entry.key] = struct{}{}
+		*accels = append(*accels, device.AcceleratorMetrics{
+			ID:        entry.cached.id,
+			Memory:    entry.cached.memory,
+			Unhealthy: true,
+		})
+	}
+}
+
+func shouldKeepSlot(
+	slot ascendSlotKey,
+	unqueryableSlots map[ascendSlotKey]struct{},
+	unqueryableCards map[int32]struct{},
+) bool {
+	if _, keep := unqueryableSlots[slot]; keep {
+		return true
+	}
+	_, keepCard := unqueryableCards[slot.card]
+	return keepCard
+}
+
+func (in *ascend) commitDetectedCache(
+	nextDetected map[ascendSlotKey]cachedAccelerator,
+	nextMonitored map[ascendSlotKey]cachedMetrics,
+	unqueryableSlots map[ascendSlotKey]struct{},
+	unqueryableCards map[int32]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	if len(unqueryableSlots) > 0 || len(unqueryableCards) > 0 {
+		for slot, cached := range in.cachedDetected {
+			if _, exists := nextDetected[slot]; !exists && shouldKeepSlot(slot, unqueryableSlots, unqueryableCards) {
+				nextDetected[slot] = cached
+			}
+		}
+		for slot, cached := range in.cachedMonitored {
+			if _, exists := nextMonitored[slot]; !exists && shouldKeepSlot(slot, unqueryableSlots, unqueryableCards) {
+				nextMonitored[slot] = cached
+			}
+		}
+	}
+	in.cachedDetected = nextDetected
+	in.cachedMonitored = nextMonitored
+}
+
+func (in *ascend) commitMonitoredCache(
+	nextMonitored map[ascendSlotKey]cachedMetrics,
+	unqueryableSlots map[ascendSlotKey]struct{},
+	unqueryableCards map[int32]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	if len(unqueryableSlots) > 0 || len(unqueryableCards) > 0 {
+		for slot, cached := range in.cachedMonitored {
+			if _, exists := nextMonitored[slot]; !exists && shouldKeepSlot(slot, unqueryableSlots, unqueryableCards) {
+				nextMonitored[slot] = cached
+			}
+		}
+	}
+	in.cachedMonitored = nextMonitored
+
+	for slot := range in.cachedDetected {
+		if _, ok := nextMonitored[slot]; ok {
+			continue
+		}
+		if shouldKeepSlot(slot, unqueryableSlots, unqueryableCards) {
+			continue
+		}
+		delete(in.cachedDetected, slot)
+	}
+}
+
+func (in *ascend) clearCache() {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	clear(in.cachedDetected)
+	clear(in.cachedMonitored)
 }
 
 func (in *ascend) init() {

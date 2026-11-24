@@ -38,6 +38,16 @@ func init() {
 	_PciVendor = p[len(p)-1]
 }
 
+type cachedAccelerator struct {
+	group device.DevicesGroup
+	accel device.Accelerator
+}
+
+type cachedMetrics struct {
+	id     string
+	memory uint64
+}
+
 type nvidia struct {
 	initMu      sync.Mutex
 	initialized bool
@@ -53,15 +63,21 @@ type nvidia struct {
 	// fabrics remembers the registration each accelerator last answered the fabric query with, keyed
 	// by its UUID. See rememberFabric for why a failed read reuses it instead of reporting none.
 	fabrics map[string]fabricInfo
+
+	cacheMu         sync.Mutex
+	cachedDetected  map[int]cachedAccelerator
+	cachedMonitored map[int]cachedMetrics
 }
 
 // New creates a new nvidia device interface and initializes the NVML library.
 func New(opts device.DetectorOptions) device.Detector {
 	logger := opts.Logger.WithName(Manufacturer)
 	return &nvidia{
-		nvml:    nvml.New(binding.WithLogger(logger)),
-		logger:  logger,
-		fabrics: make(map[string]fabricInfo),
+		nvml:            nvml.New(binding.WithLogger(logger)),
+		logger:          logger,
+		fabrics:         make(map[string]fabricInfo),
+		cachedDetected:  make(map[int]cachedAccelerator),
+		cachedMonitored: make(map[int]cachedMetrics),
 	}
 }
 
@@ -104,6 +120,7 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 		return nil, nil
 	}
 	if cnt == 0 {
+		in.clearCache()
 		in.logger.Info("no nvidia devices found")
 		return nil, nil
 	}
@@ -112,6 +129,10 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 	rtVer, _ := in.nvml.SystemGetCudaDriverVersion()
 
 	grpList := device.DevicesGroupList{}
+	nextDetected := make(map[int]cachedAccelerator, cnt)
+	nextMonitored := make(map[int]cachedMetrics, cnt)
+	unqueryableSlots := make(map[int]struct{})
+	queriedCount := 0
 	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
@@ -121,6 +142,7 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			if err := handleCardQueryError(logger, i, "get device handle", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.restoreCachedDetected(i, unqueryableSlots, &grpList)
 			continue
 		}
 
@@ -129,6 +151,7 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			if err := handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.restoreCachedDetected(i, unqueryableSlots, &grpList)
 			continue
 		}
 
@@ -144,6 +167,7 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 					if err := handleCardQueryError(logger, i, "get device PCI info", ret, &lastUnqueryableErr); err != nil {
 						return nil, err
 					}
+					in.restoreCachedDetected(i, unqueryableSlots, &grpList)
 					continue
 				}
 			}
@@ -156,6 +180,7 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			if err := handleCardQueryError(logger, i, "get device name", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.restoreCachedDetected(i, unqueryableSlots, &grpList)
 			continue
 		}
 
@@ -178,6 +203,7 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 					if err := handleCardQueryError(logger, i, "get device memory info", ret, &lastUnqueryableErr); err != nil {
 						return nil, err
 					}
+					in.restoreCachedDetected(i, unqueryableSlots, &grpList)
 					continue
 				}
 			}
@@ -288,25 +314,34 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			}
 		}
 
-		grpList[grpIndex].Accelerators = append(
-			grpList[grpIndex].Accelerators,
-			device.Accelerator{
-				ID:              uuid,
-				Index:           uint32(i),
-				PhysicalIndexes: physicalIndexes,
-				Topology:        topo,
-				Status:          status,
-			},
-		)
+		accel := device.Accelerator{
+			ID:              uuid,
+			Index:           uint32(i),
+			PhysicalIndexes: physicalIndexes,
+			Topology:        topo,
+			Status:          status,
+		}
+		grpList[grpIndex].Accelerators = append(grpList[grpIndex].Accelerators, accel)
+		nextDetected[i] = cachedAccelerator{
+			group: cloneGroupMetadata(grpList[grpIndex]),
+			accel: *accel.DeepCopy(),
+		}
+		nextMonitored[i] = cachedMetrics{
+			id:     uuid,
+			memory: memory,
+		}
+		queriedCount++
 	}
 
-	if len(grpList) == 0 {
+	if queriedCount == 0 {
 		if lastUnqueryableErr != nil {
 			return nil, lastUnqueryableErr
 		}
+		in.clearCache()
 		return nil, nil
 	}
 
+	in.commitDetectedCache(nextDetected, nextMonitored, unqueryableSlots)
 	device.SetGroupSlicedDetails(grpList)
 
 	return grpList, nil
@@ -345,6 +380,7 @@ func (in *nvidia) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 		return nil, nil
 	}
 	if cnt == 0 {
+		in.clearCache()
 		in.logger.Info("no nvidia devices found")
 		return nil, nil
 	}
@@ -354,6 +390,9 @@ func (in *nvidia) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 		Timestamp:    time.Now(),
 		Accelerators: make([]device.AcceleratorMetrics, 0, cnt),
 	}
+	nextMonitored := make(map[int]cachedMetrics, cnt)
+	unqueryableSlots := make(map[int]struct{})
+	queriedCount := 0
 	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
@@ -363,6 +402,7 @@ func (in *nvidia) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 			if err := handleCardQueryError(logger, i, "get device handle", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.restoreCachedMonitored(i, unqueryableSlots, &metricsGrp.Accelerators)
 			continue
 		}
 
@@ -371,6 +411,7 @@ func (in *nvidia) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 			if err := handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.restoreCachedMonitored(i, unqueryableSlots, &metricsGrp.Accelerators)
 			continue
 		}
 
@@ -391,6 +432,7 @@ func (in *nvidia) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 					if err := handleCardQueryError(logger, i, "get device memory info", ret, &lastUnqueryableErr); err != nil {
 						return nil, err
 					}
+					in.restoreCachedMonitored(i, unqueryableSlots, &metricsGrp.Accelerators)
 					continue
 				}
 			}
@@ -449,16 +491,136 @@ func (in *nvidia) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 				Unhealthy:         memoryUnhealthy,
 			},
 		)
+		nextMonitored[i] = cachedMetrics{
+			id:     uuid,
+			memory: memory,
+		}
+		queriedCount++
 	}
 
-	if len(metricsGrp.Accelerators) == 0 {
+	if queriedCount == 0 {
 		if lastUnqueryableErr != nil {
 			return nil, lastUnqueryableErr
 		}
+		in.clearCache()
 		return nil, nil
 	}
 
+	in.commitMonitoredCache(nextMonitored, unqueryableSlots)
+
 	return device.MetricsGroupList{metricsGrp}, nil
+}
+
+func cloneGroupMetadata(grp device.DevicesGroup) device.DevicesGroup {
+	grp.Accelerators = nil
+	return *grp.DeepCopy()
+}
+
+func (in *nvidia) getCachedDetected(slot int) (cachedAccelerator, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedDetected[slot]
+	return cached, ok
+}
+
+func (in *nvidia) getCachedMonitored(slot int) (cachedMetrics, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedMonitored[slot]
+	return cached, ok
+}
+
+func (in *nvidia) restoreCachedDetected(
+	slot int, unqueryableSlots map[int]struct{}, grpList *device.DevicesGroupList,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	cached, ok := in.getCachedDetected(slot)
+	if !ok {
+		return
+	}
+	grpIndex := slices.IndexFunc(*grpList, func(grp device.DevicesGroup) bool {
+		return grp.Name == cached.group.Name && grp.Memory == cached.group.Memory
+	})
+	if grpIndex == -1 {
+		*grpList = append(*grpList, cloneGroupMetadata(cached.group))
+		grpIndex = len(*grpList) - 1
+	}
+	accel := *cached.accel.DeepCopy()
+	accel.Status.Unhealthy = true
+	(*grpList)[grpIndex].Accelerators = append((*grpList)[grpIndex].Accelerators, accel)
+}
+
+func (in *nvidia) restoreCachedMonitored(
+	slot int, unqueryableSlots map[int]struct{}, accels *[]device.AcceleratorMetrics,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	cached, ok := in.getCachedMonitored(slot)
+	if !ok {
+		return
+	}
+	*accels = append(*accels, device.AcceleratorMetrics{
+		ID:        cached.id,
+		Memory:    cached.memory,
+		Unhealthy: true,
+	})
+}
+
+func (in *nvidia) commitDetectedCache(
+	nextDetected map[int]cachedAccelerator,
+	nextMonitored map[int]cachedMetrics,
+	unqueryableSlots map[int]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	for slot := range unqueryableSlots {
+		if _, exists := nextDetected[slot]; !exists {
+			if cached, ok := in.cachedDetected[slot]; ok {
+				nextDetected[slot] = cached
+			}
+		}
+		if _, exists := nextMonitored[slot]; !exists {
+			if cached, ok := in.cachedMonitored[slot]; ok {
+				nextMonitored[slot] = cached
+			}
+		}
+	}
+	in.cachedDetected = nextDetected
+	in.cachedMonitored = nextMonitored
+}
+
+func (in *nvidia) commitMonitoredCache(
+	nextMonitored map[int]cachedMetrics,
+	unqueryableSlots map[int]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	for slot := range unqueryableSlots {
+		if _, exists := nextMonitored[slot]; !exists {
+			if cached, ok := in.cachedMonitored[slot]; ok {
+				nextMonitored[slot] = cached
+			}
+		}
+	}
+	in.cachedMonitored = nextMonitored
+
+	for slot := range in.cachedDetected {
+		if _, ok := nextMonitored[slot]; ok {
+			continue
+		}
+		delete(in.cachedDetected, slot)
+	}
+}
+
+func (in *nvidia) clearCache() {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	clear(in.cachedDetected)
+	clear(in.cachedMonitored)
 }
 
 func isDeviceUnhealthy(dev nvml.Device) bool {

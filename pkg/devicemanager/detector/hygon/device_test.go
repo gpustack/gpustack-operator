@@ -200,6 +200,173 @@ func TestUnqueryableCardAndErrorHandling(t *testing.T) {
 			require.Len(t, groups, 1)
 			require.Len(t, groups[0].Accelerators, 1)
 			assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+		case "retain_unhealthy_lifecycle":
+			setFail := func(stage, index string, errCode rsmi.Return) {
+				t.Setenv("GPUSTACK_TEST_RSMI_FAIL_STAGE", stage)
+				t.Setenv("GPUSTACK_TEST_RSMI_FAIL_INDEX", index)
+				if errCode == rsmi.STATUS_SUCCESS {
+					t.Setenv("GPUSTACK_TEST_RSMI_FAIL_ERR", "")
+				} else {
+					t.Setenv("GPUSTACK_TEST_RSMI_FAIL_ERR", strconv.Itoa(int(errCode)))
+				}
+			}
+
+			// Pass 1: all 3 cards healthy. Only DetectAccelerator runs first to confirm it seeds
+			// the monitor cache as well.
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			for i, wantID := range []string{"GPU-1", "GPU-2", "GPU-3"} {
+				assert.Equal(t, wantID, groups[0].Accelerators[i].ID)
+				assert.Equal(t, uint32(i), groups[0].Accelerators[i].Index)
+				assert.False(t, groups[0].Accelerators[i].Status.Unhealthy)
+			}
+
+			// Pass 2: card 1 becomes unqueryable; MonitorAccelerator runs before DetectAccelerator.
+			setFail("uuid", "1", rsmi.STATUS_FILE_ERROR)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 3)
+			assert.Equal(t, "GPU-1", metrics[0].Accelerators[0].ID)
+			assert.False(t, metrics[0].Accelerators[0].Unhealthy)
+			assert.Equal(t, "GPU-2", metrics[0].Accelerators[1].ID)
+			assert.Equal(t, uint64(65536), metrics[0].Accelerators[1].Memory)
+			assert.True(t, metrics[0].Accelerators[1].Unhealthy)
+			assert.Equal(t, "GPU-3", metrics[0].Accelerators[2].ID)
+			assert.False(t, metrics[0].Accelerators[2].Unhealthy)
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			assert.Equal(t, "GPU-1", groups[0].Accelerators[0].ID)
+			assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+			assert.False(t, groups[0].Accelerators[0].Status.Unhealthy)
+			assert.Equal(t, "GPU-2", groups[0].Accelerators[1].ID)
+			assert.Equal(t, uint32(1), groups[0].Accelerators[1].Index)
+			assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+			assert.Equal(t, "GPU-3", groups[0].Accelerators[2].ID)
+			assert.Equal(t, uint32(2), groups[0].Accelerators[2].Index)
+			assert.False(t, groups[0].Accelerators[2].Status.Unhealthy)
+
+			// Pass 3: card 1 remains unqueryable and is still retained as unhealthy.
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			assert.Equal(t, "GPU-2", groups[0].Accelerators[1].ID)
+			assert.Equal(t, uint32(1), groups[0].Accelerators[1].Index)
+			assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+
+			metrics, err = d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 3)
+			assert.Equal(t, "GPU-2", metrics[0].Accelerators[1].ID)
+			assert.Equal(t, uint64(65536), metrics[0].Accelerators[1].Memory)
+			assert.True(t, metrics[0].Accelerators[1].Unhealthy)
+
+			// Pass 4: card 1 recovers and returns healthy again.
+			setFail("", "", rsmi.STATUS_SUCCESS)
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			for i := range groups[0].Accelerators {
+				assert.False(t, groups[0].Accelerators[i].Status.Unhealthy)
+			}
+
+			metrics, err = d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 3)
+			for i := range metrics[0].Accelerators {
+				assert.False(t, metrics[0].Accelerators[i].Unhealthy)
+			}
+		case "cached_then_all_unqueryable":
+			// Pass 1: populate cache with 3 healthy cards.
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+
+			// Pass 2: all cards become unqueryable; must return error and not emit cached cards.
+			t.Setenv("GPUSTACK_TEST_RSMI_FAIL_STAGE", "memory")
+			t.Setenv("GPUSTACK_TEST_RSMI_FAIL_INDEX", "all")
+			t.Setenv("GPUSTACK_TEST_RSMI_FAIL_ERR", strconv.Itoa(int(rsmi.STATUS_AMDGPU_RESTART_ERR)))
+
+			groups, err = d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, metrics)
+
+			// Pass 3: card 0 and 2 recover while card 1 stays unqueryable; cache was preserved.
+			t.Setenv("GPUSTACK_TEST_RSMI_FAIL_INDEX", "1")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			assert.Equal(t, "GPU-2", groups[0].Accelerators[1].ID)
+			assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+		case "clean_shrink_prunes_cache":
+			// Pass 1: 3 healthy cards.
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+
+			// Pass 2: clean shrink to 2 cards with zero errors.
+			t.Setenv("GPUSTACK_TEST_RSMI_COUNT", "2")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+
+			// Pass 3: count returns to 3 with slot 2 unqueryable; pruned slot 2 must not resurrect.
+			t.Setenv("GPUSTACK_TEST_RSMI_COUNT", "3")
+			t.Setenv("GPUSTACK_TEST_RSMI_FAIL_STAGE", "uuid")
+			t.Setenv("GPUSTACK_TEST_RSMI_FAIL_INDEX", "2")
+			t.Setenv("GPUSTACK_TEST_RSMI_FAIL_ERR", strconv.Itoa(int(rsmi.STATUS_FILE_ERROR)))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			metrics, err = d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+
+			// Pass 4: clean shrink to 0 clears cache completely.
+			t.Setenv("GPUSTACK_TEST_RSMI_COUNT", "0")
+			t.Setenv("GPUSTACK_TEST_RSMI_FAIL_STAGE", "")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			assert.Nil(t, groups)
+
+			t.Setenv("GPUSTACK_TEST_RSMI_COUNT", "2")
+			t.Setenv("GPUSTACK_TEST_RSMI_FAIL_STAGE", "uuid")
+			t.Setenv("GPUSTACK_TEST_RSMI_FAIL_INDEX", "0")
+			t.Setenv("GPUSTACK_TEST_RSMI_FAIL_ERR", strconv.Itoa(int(rsmi.STATUS_FILE_ERROR)))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 1)
+			assert.Equal(t, uint32(1), groups[0].Accelerators[0].Index)
 		default:
 			t.Fatalf("unknown mode %q", mode)
 		}
@@ -266,6 +433,27 @@ func TestUnqueryableCardAndErrorHandling(t *testing.T) {
 			"GPUSTACK_TEST_RSMI_REQUIRE_INIT=true",
 			"GPUSTACK_TEST_RSMI_INIT_FAIL_COUNT=1",
 			"GPUSTACK_TEST_RSMI_INIT_ERR="+strconv.Itoa(int(rsmi.STATUS_INIT_ERROR)),
+		)
+	})
+
+	t.Run("retain dropped known card as unhealthy across passes and recover", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_RSMI_MODE=retain_unhealthy_lifecycle",
+			"GPUSTACK_TEST_RSMI_COUNT=3",
+		)
+	})
+
+	t.Run("all DCUs unqueryable after caching returns error without mutating cache", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_RSMI_MODE=cached_then_all_unqueryable",
+			"GPUSTACK_TEST_RSMI_COUNT=3",
+		)
+	})
+
+	t.Run("clean shrink prunes cache so dropped slot is not resurrected", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_RSMI_MODE=clean_shrink_prunes_cache",
+			"GPUSTACK_TEST_RSMI_COUNT=3",
 		)
 	})
 }

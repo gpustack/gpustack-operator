@@ -27,11 +27,24 @@ func init() {
 	_PciVendor = p[len(p)-1]
 }
 
+type cachedAccelerator struct {
+	group device.DevicesGroup
+	accel device.Accelerator
+}
+
+type cachedMetrics struct {
+	id     string
+	memory uint64
+}
+
 type iluvatar struct {
-	initMu      sync.Mutex
-	initialized bool
-	ixml        *ixml.IXML
-	logger      klog.Logger
+	initMu          sync.Mutex
+	initialized     bool
+	cacheMu         sync.Mutex
+	cachedDetected  map[int]cachedAccelerator
+	cachedMonitored map[int]cachedMetrics
+	ixml            *ixml.IXML
+	logger          klog.Logger
 }
 
 // New creates a new iluvatar device interface and initializes the IXML library.
@@ -59,6 +72,7 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 
 	pciDevs := binding.GetPCIDevices([]string{_PciVendor}, nil)
 	if !noPciCheck && len(pciDevs) == 0 {
+		in.clearCache()
 		in.logger.Info("no iluvatar pci devices found")
 		return nil, nil
 	}
@@ -81,6 +95,7 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 		return nil, nil
 	}
 	if cnt == 0 {
+		in.clearCache()
 		in.logger.Info("no iluvatar devices found")
 		return nil, nil
 	}
@@ -89,6 +104,10 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 	rtVer, _ := in.ixml.SystemGetCudaDriverVersion()
 
 	grpList := device.DevicesGroupList{}
+	nextDetected := make(map[int]cachedAccelerator, cnt)
+	nextMonitored := make(map[int]cachedMetrics, cnt)
+	unqueryableSlots := make(map[int]struct{})
+	queriedCount := 0
 	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
@@ -98,6 +117,7 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 			if err := handleCardQueryError(logger, i, "get device handle", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.retainCachedDetected(i, unqueryableSlots, &grpList)
 			continue
 		}
 
@@ -106,6 +126,7 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 			if err := handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.retainCachedDetected(i, unqueryableSlots, &grpList)
 			continue
 		}
 
@@ -116,6 +137,7 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 				if err := handleCardQueryError(logger, i, "get device PCI info", ret, &lastUnqueryableErr); err != nil {
 					return nil, err
 				}
+				in.retainCachedDetected(i, unqueryableSlots, &grpList)
 				continue
 			}
 			pciBusId = pciInfo.GetBusId()
@@ -127,6 +149,7 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 			if err := handleCardQueryError(logger, i, "get device name", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.retainCachedDetected(i, unqueryableSlots, &grpList)
 			continue
 		}
 
@@ -145,6 +168,7 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 					if err := handleCardQueryError(logger, i, "get device memory info", ret, &lastUnqueryableErr); err != nil {
 						return nil, err
 					}
+					in.retainCachedDetected(i, unqueryableSlots, &grpList)
 					continue
 				}
 			}
@@ -201,25 +225,37 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 			}
 		}
 
-		grpList[grpIndex].Accelerators = append(
-			grpList[grpIndex].Accelerators,
-			device.Accelerator{
-				ID:              uuid,
-				Index:           uint32(i),
-				PhysicalIndexes: physicalIndexes,
-				Topology:        topo,
-				Status:          status,
-			},
-		)
+		accel := device.Accelerator{
+			ID:              uuid,
+			Index:           uint32(i),
+			PhysicalIndexes: physicalIndexes,
+			Topology:        topo,
+			Status:          status,
+		}
+		grpList[grpIndex].Accelerators = append(grpList[grpIndex].Accelerators, accel)
+
+		grpCopy := *grpList[grpIndex].DeepCopy()
+		grpCopy.Accelerators = nil
+		nextDetected[i] = cachedAccelerator{
+			group: grpCopy,
+			accel: *accel.DeepCopy(),
+		}
+		nextMonitored[i] = cachedMetrics{
+			id:     uuid,
+			memory: memory,
+		}
+		queriedCount++
 	}
 
-	if len(grpList) == 0 {
+	if queriedCount == 0 {
 		if lastUnqueryableErr != nil {
 			return nil, lastUnqueryableErr
 		}
+		in.clearCache()
 		return nil, nil
 	}
 
+	in.updateDetectedCache(nextDetected, nextMonitored, unqueryableSlots)
 	device.SetGroupSlicedDetails(grpList)
 
 	return grpList, nil
@@ -236,6 +272,7 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 
 	pciDevs := binding.GetPCIDevices([]string{_PciVendor}, nil)
 	if !noPciCheck && len(pciDevs) == 0 {
+		in.clearCache()
 		in.logger.Info("no iluvatar pci devices found")
 		return nil, nil
 	}
@@ -258,6 +295,7 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 		return nil, nil
 	}
 	if cnt == 0 {
+		in.clearCache()
 		in.logger.Info("no iluvatar devices found")
 		return nil, nil
 	}
@@ -267,6 +305,9 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 		Timestamp:    time.Now(),
 		Accelerators: make([]device.AcceleratorMetrics, 0, cnt),
 	}
+	nextMonitored := make(map[int]cachedMetrics, cnt)
+	unqueryableSlots := make(map[int]struct{})
+	queriedCount := 0
 	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
@@ -276,6 +317,7 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 			if err := handleCardQueryError(logger, i, "get device handle", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.retainCachedMonitored(i, unqueryableSlots, &metricsGrp)
 			continue
 		}
 
@@ -284,6 +326,7 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 			if err := handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.retainCachedMonitored(i, unqueryableSlots, &metricsGrp)
 			continue
 		}
 
@@ -304,6 +347,7 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 					if err := handleCardQueryError(logger, i, "get device memory info", ret, &lastUnqueryableErr); err != nil {
 						return nil, err
 					}
+					in.retainCachedMonitored(i, unqueryableSlots, &metricsGrp)
 					continue
 				}
 			}
@@ -372,16 +416,144 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 				Unhealthy:         memoryUnhealthy,
 			},
 		)
+		nextMonitored[i] = cachedMetrics{
+			id:     uuid,
+			memory: memory,
+		}
+		queriedCount++
 	}
 
-	if len(metricsGrp.Accelerators) == 0 {
+	if queriedCount == 0 {
 		if lastUnqueryableErr != nil {
 			return nil, lastUnqueryableErr
 		}
+		in.clearCache()
 		return nil, nil
 	}
 
+	in.updateMonitoredCache(nextMonitored, unqueryableSlots)
+
 	return device.MetricsGroupList{metricsGrp}, nil
+}
+
+func (in *iluvatar) getCachedDetected(slot int) (cachedAccelerator, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedDetected[slot]
+	if !ok {
+		return cachedAccelerator{}, false
+	}
+	grpCopy := *cached.group.DeepCopy()
+	grpCopy.Accelerators = nil
+	return cachedAccelerator{
+		group: grpCopy,
+		accel: *cached.accel.DeepCopy(),
+	}, true
+}
+
+func (in *iluvatar) getCachedMonitored(slot int) (cachedMetrics, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedMonitored[slot]
+	return cached, ok
+}
+
+func (in *iluvatar) retainCachedDetected(
+	slot int, unqueryableSlots map[int]struct{}, grpList *device.DevicesGroupList,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	cached, ok := in.getCachedDetected(slot)
+	if !ok {
+		return
+	}
+
+	cached.accel.Status.Unhealthy = true
+
+	grpIndex := slices.IndexFunc(*grpList, func(grp device.DevicesGroup) bool {
+		return grp.Name == cached.group.Name && grp.Memory == cached.group.Memory
+	})
+	if grpIndex == -1 {
+		*grpList = append(*grpList, cached.group)
+		grpIndex = len(*grpList) - 1
+	}
+	(*grpList)[grpIndex].Accelerators = append((*grpList)[grpIndex].Accelerators, cached.accel)
+}
+
+func (in *iluvatar) retainCachedMonitored(
+	slot int, unqueryableSlots map[int]struct{}, metricsGrp *device.MetricsGroup,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	cached, ok := in.getCachedMonitored(slot)
+	if !ok {
+		return
+	}
+
+	metricsGrp.Accelerators = append(
+		metricsGrp.Accelerators,
+		device.AcceleratorMetrics{
+			ID:        cached.id,
+			Memory:    cached.memory,
+			Unhealthy: true,
+		},
+	)
+}
+
+func (in *iluvatar) clearCache() {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	in.cachedDetected = nil
+	in.cachedMonitored = nil
+}
+
+func (in *iluvatar) updateDetectedCache(
+	nextDetected map[int]cachedAccelerator,
+	nextMonitored map[int]cachedMetrics,
+	unqueryableSlots map[int]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	for slot := range unqueryableSlots {
+		if _, ok := nextDetected[slot]; !ok {
+			if prev, ok := in.cachedDetected[slot]; ok {
+				nextDetected[slot] = prev
+			}
+		}
+		if _, ok := nextMonitored[slot]; !ok {
+			if prev, ok := in.cachedMonitored[slot]; ok {
+				nextMonitored[slot] = prev
+			}
+		}
+	}
+	in.cachedDetected = nextDetected
+	in.cachedMonitored = nextMonitored
+}
+
+func (in *iluvatar) updateMonitoredCache(
+	nextMonitored map[int]cachedMetrics,
+	unqueryableSlots map[int]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	for slot := range unqueryableSlots {
+		if _, ok := nextMonitored[slot]; !ok {
+			if prev, ok := in.cachedMonitored[slot]; ok {
+				nextMonitored[slot] = prev
+			}
+		}
+	}
+	in.cachedMonitored = nextMonitored
+
+	for slot := range in.cachedDetected {
+		if _, ok := nextMonitored[slot]; ok {
+			continue
+		}
+		delete(in.cachedDetected, slot)
+	}
 }
 
 func isDeviceUnhealthy(dev ixml.Device) bool {

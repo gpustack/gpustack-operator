@@ -32,6 +32,16 @@ func init() {
 	_PciVendor = p[len(p)-1]
 }
 
+type cachedAccelerator struct {
+	group device.DevicesGroup
+	accel device.Accelerator
+}
+
+type cachedMetrics struct {
+	id     string
+	memory uint64
+}
+
 type amd struct {
 	initMu       sync.Mutex
 	amdgpuInit   bool
@@ -49,6 +59,10 @@ type amd struct {
 	rsmi   *rsmi.RSMI
 	hsa    *hsa.HSA
 	logger klog.Logger
+
+	cacheMu         sync.Mutex
+	cachedDetected  map[int]cachedAccelerator
+	cachedMonitored map[int]cachedMetrics
 }
 
 // New creates a new amd device interface and initializes the AMDSMI library.
@@ -101,6 +115,7 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 		return nil, nil
 	}
 	if len(devs) == 0 {
+		in.clearCache()
 		in.logger.Info("no amd devices found")
 		return nil, nil
 	}
@@ -111,6 +126,10 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 	rtVer, _ := in.amdsmi.GetROCMVersion()
 
 	grpList := device.DevicesGroupList{}
+	queriedCount := 0
+	nextDetected := make(map[int]cachedAccelerator, len(devs))
+	nextMonitored := make(map[int]cachedMetrics, len(devs))
+	unqueryableSlots := make(map[int]struct{})
 	var lastUnqueryableErr error
 	for i := 0; i < len(devs); i++ {
 		logger := in.logger.WithValues("index", i)
@@ -122,6 +141,7 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 			if err := handleCardQueryError(logger, i, "get device ASIC info", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.retainUnqueryableDetected(&grpList, unqueryableSlots, i)
 			continue
 		}
 
@@ -134,6 +154,7 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 				if err := handleCardQueryError(logger, i, "get device PCI ID", ret, &lastUnqueryableErr); err != nil {
 					return nil, err
 				}
+				in.retainUnqueryableDetected(&grpList, unqueryableSlots, i)
 				continue
 			}
 			pciBusId = bdf.String()
@@ -154,6 +175,7 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 				if err := handleCardQueryError(logger, i, "get device VRAM usage", ret, &lastUnqueryableErr); err != nil {
 					return nil, err
 				}
+				in.retainUnqueryableDetected(&grpList, unqueryableSlots, i)
 				continue
 			}
 			memory = uint64(mem.Total)
@@ -232,24 +254,36 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 			}
 		}
 
-		grpList[grpIndex].Accelerators = append(
-			grpList[grpIndex].Accelerators,
-			device.Accelerator{
-				ID:              uuid,
-				Index:           uint32(i),
-				PhysicalIndexes: physicalIndexes,
-				Topology:        topo,
-				Status:          status,
-			},
-		)
+		accel := device.Accelerator{
+			ID:              uuid,
+			Index:           uint32(i),
+			PhysicalIndexes: physicalIndexes,
+			Topology:        topo,
+			Status:          status,
+		}
+		grpList[grpIndex].Accelerators = append(grpList[grpIndex].Accelerators, accel)
+		queriedCount++
+
+		grpHeader := grpList[grpIndex]
+		grpHeader.Accelerators = nil
+		nextDetected[i] = cachedAccelerator{
+			group: *grpHeader.DeepCopy(),
+			accel: *accel.DeepCopy(),
+		}
+		nextMonitored[i] = cachedMetrics{
+			id:     uuid,
+			memory: memory,
+		}
 	}
 
-	if len(grpList) == 0 {
+	if queriedCount == 0 {
 		if lastUnqueryableErr != nil {
 			return nil, lastUnqueryableErr
 		}
 		return nil, nil
 	}
+
+	in.updateDetectedCache(nextDetected, nextMonitored, unqueryableSlots)
 
 	device.SetGroupSlicedDetails(grpList)
 
@@ -311,6 +345,7 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 		return nil, nil
 	}
 	if len(devs) == 0 {
+		in.clearCache()
 		in.logger.Info("no amd devices found")
 		return nil, nil
 	}
@@ -320,6 +355,9 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 		Timestamp:    time.Now(),
 		Accelerators: make([]device.AcceleratorMetrics, 0, len(devs)),
 	}
+	queriedCount := 0
+	nextMonitored := make(map[int]cachedMetrics, len(devs))
+	unqueryableSlots := make(map[int]struct{})
 	var lastUnqueryableErr error
 	for i := 0; i < len(devs); i++ {
 		logger := in.logger.WithValues("index", i)
@@ -331,6 +369,7 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 			if err := handleCardQueryError(logger, i, "get device ASIC info", ret, &lastUnqueryableErr); err != nil {
 				return nil, err
 			}
+			in.retainUnqueryableMonitored(&metricsGrp, unqueryableSlots, i)
 			continue
 		}
 
@@ -348,6 +387,7 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 				if err := handleCardQueryError(logger, i, "get device VRAM usage", ret, &lastUnqueryableErr); err != nil {
 					return nil, err
 				}
+				in.retainUnqueryableMonitored(&metricsGrp, unqueryableSlots, i)
 				continue
 			}
 
@@ -405,16 +445,142 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 				Unhealthy:         memoryUnhealthy,
 			},
 		)
+		queriedCount++
+		nextMonitored[i] = cachedMetrics{
+			id:     uuid,
+			memory: memory,
+		}
 	}
 
-	if len(metricsGrp.Accelerators) == 0 {
+	if queriedCount == 0 {
 		if lastUnqueryableErr != nil {
 			return nil, lastUnqueryableErr
 		}
 		return nil, nil
 	}
 
+	in.updateMonitoredCache(nextMonitored, unqueryableSlots)
+
 	return device.MetricsGroupList{metricsGrp}, nil
+}
+
+func (in *amd) getCachedDetected(slot int) (cachedAccelerator, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedDetected[slot]
+	if !ok {
+		return cachedAccelerator{}, false
+	}
+	grp := *cached.group.DeepCopy()
+	grp.Accelerators = nil
+	return cachedAccelerator{
+		group: grp,
+		accel: *cached.accel.DeepCopy(),
+	}, true
+}
+
+func (in *amd) getCachedMonitored(slot int) (cachedMetrics, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedMonitored[slot]
+	return cached, ok
+}
+
+func (in *amd) clearCache() {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	in.cachedDetected = nil
+	in.cachedMonitored = nil
+}
+
+func (in *amd) updateDetectedCache(
+	nextDetected map[int]cachedAccelerator,
+	nextMonitored map[int]cachedMetrics,
+	unqueryableSlots map[int]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	for slot := range unqueryableSlots {
+		if _, exists := nextDetected[slot]; !exists {
+			if prev, ok := in.cachedDetected[slot]; ok {
+				nextDetected[slot] = prev
+			}
+		}
+		if _, exists := nextMonitored[slot]; !exists {
+			if prev, ok := in.cachedMonitored[slot]; ok {
+				nextMonitored[slot] = prev
+			}
+		}
+	}
+	in.cachedDetected = nextDetected
+	in.cachedMonitored = nextMonitored
+}
+
+func (in *amd) updateMonitoredCache(
+	nextMonitored map[int]cachedMetrics,
+	unqueryableSlots map[int]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	for slot := range unqueryableSlots {
+		if _, exists := nextMonitored[slot]; !exists {
+			if prev, ok := in.cachedMonitored[slot]; ok {
+				nextMonitored[slot] = prev
+			}
+		}
+	}
+	in.cachedMonitored = nextMonitored
+
+	for slot := range in.cachedDetected {
+		if _, ok := nextMonitored[slot]; ok {
+			continue
+		}
+		delete(in.cachedDetected, slot)
+	}
+}
+
+func (in *amd) retainUnqueryableDetected(
+	grpList *device.DevicesGroupList,
+	unqueryableSlots map[int]struct{},
+	slot int,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	cached, ok := in.getCachedDetected(slot)
+	if !ok {
+		return
+	}
+	cached.accel.Status.Unhealthy = true
+
+	grpIndex := slices.IndexFunc(*grpList, func(grp device.DevicesGroup) bool {
+		return grp.Name == cached.group.Name && grp.Memory == cached.group.Memory
+	})
+	if grpIndex == -1 {
+		*grpList = append(*grpList, cached.group)
+		grpIndex = len(*grpList) - 1
+	}
+	(*grpList)[grpIndex].Accelerators = append((*grpList)[grpIndex].Accelerators, cached.accel)
+}
+
+func (in *amd) retainUnqueryableMonitored(
+	metricsGrp *device.MetricsGroup,
+	unqueryableSlots map[int]struct{},
+	slot int,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	cached, ok := in.getCachedMonitored(slot)
+	if !ok {
+		return
+	}
+	metricsGrp.Accelerators = append(metricsGrp.Accelerators, device.AcceleratorMetrics{
+		ID:        cached.id,
+		Memory:    cached.memory,
+		Unhealthy: true,
+	})
 }
 
 func isDeviceUnhealthy(dev amdsmi.Device) bool {

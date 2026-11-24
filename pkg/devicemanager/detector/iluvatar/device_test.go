@@ -239,6 +239,147 @@ func TestUnqueryableCardAndErrorHandling(t *testing.T) {
 			require.Len(t, groups, 1)
 			require.Len(t, groups[0].Accelerators, 1)
 			assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+		case "retain_unhealthy_and_recover":
+			// Pass 1: 3 healthy cards populate both detect and monitor caches.
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			for i, accel := range groups[0].Accelerators {
+				assert.Equal(t, uint32(i), accel.Index)
+				assert.False(t, accel.Status.Unhealthy)
+			}
+
+			// Pass 2: card 1 becomes unqueryable; Monitor runs first to verify Detect seeded its cache.
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_FAIL_STAGE", "handle"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_FAIL_INDEX", "1"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_FAIL_ERR", strconv.Itoa(int(ixml.ERROR_GPU_IS_LOST))))
+
+			for pass := 2; pass <= 3; pass++ {
+				metrics, err := d.MonitorAccelerator(true)
+				require.NoError(t, err)
+				require.Len(t, metrics, 1)
+				require.Len(t, metrics[0].Accelerators, 3)
+				assert.Equal(t, "IX-GPU-0", metrics[0].Accelerators[0].ID)
+				assert.False(t, metrics[0].Accelerators[0].Unhealthy)
+				assert.Equal(t, "IX-GPU-1", metrics[0].Accelerators[1].ID)
+				assert.Equal(t, uint64(32768), metrics[0].Accelerators[1].Memory)
+				assert.True(t, metrics[0].Accelerators[1].Unhealthy)
+				assert.Equal(t, "IX-GPU-2", metrics[0].Accelerators[2].ID)
+				assert.False(t, metrics[0].Accelerators[2].Unhealthy)
+
+				groups, err = d.DetectAccelerator(true)
+				require.NoError(t, err)
+				require.Len(t, groups, 1)
+				require.Len(t, groups[0].Accelerators, 3)
+				assert.Equal(t, "IX-GPU-0", groups[0].Accelerators[0].ID)
+				assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+				assert.False(t, groups[0].Accelerators[0].Status.Unhealthy)
+				assert.Equal(t, "IX-GPU-1", groups[0].Accelerators[1].ID)
+				assert.Equal(t, uint32(1), groups[0].Accelerators[1].Index)
+				assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+				assert.Equal(t, "IX-GPU-2", groups[0].Accelerators[2].ID)
+				assert.Equal(t, uint32(2), groups[0].Accelerators[2].Index)
+				assert.False(t, groups[0].Accelerators[2].Status.Unhealthy)
+			}
+
+			// Pass 4: card 1 recovers and reports healthy again.
+			require.NoError(t, os.Unsetenv("GPUSTACK_TEST_IXML_FAIL_STAGE"))
+			require.NoError(t, os.Unsetenv("GPUSTACK_TEST_IXML_FAIL_INDEX"))
+			require.NoError(t, os.Unsetenv("GPUSTACK_TEST_IXML_FAIL_ERR"))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			for i, accel := range groups[0].Accelerators {
+				assert.Equal(t, uint32(i), accel.Index)
+				assert.False(t, accel.Status.Unhealthy)
+			}
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 3)
+			for _, m := range metrics[0].Accelerators {
+				assert.False(t, m.Unhealthy)
+			}
+		case "all_unqueryable_after_cache":
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_FAIL_STAGE", "memory"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_FAIL_INDEX", "all"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_FAIL_ERR", strconv.Itoa(int(ixml.ERROR_GPU_IS_LOST))))
+
+			groups, err = d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, metrics)
+
+			// Cache must remain intact after all-unqueryable failure.
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_FAIL_INDEX", "1"))
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			assert.Equal(t, "IX-GPU-1", groups[0].Accelerators[1].ID)
+			assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+		case "clean_shrink_prunes_cache":
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+
+			// Clean shrink 3 -> 2 with zero errors must prune slot 2.
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_COUNT", "2"))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+
+			// If slot 2 later fails unqueryable, it must not be resurrected from stale cache.
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_COUNT", "3"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_FAIL_STAGE", "handle"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_FAIL_INDEX", "2"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_FAIL_ERR", strconv.Itoa(int(ixml.ERROR_GPU_IS_LOST))))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			metrics, err = d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+
+			// Count == 0 clears cache completely.
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_COUNT", "0"))
+			require.NoError(t, os.Unsetenv("GPUSTACK_TEST_IXML_FAIL_STAGE"))
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			assert.Nil(t, groups)
+
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_COUNT", "2"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_FAIL_STAGE", "handle"))
+			require.NoError(t, os.Setenv("GPUSTACK_TEST_IXML_FAIL_INDEX", "1"))
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 1)
+			assert.Equal(t, "IX-GPU-0", groups[0].Accelerators[0].ID)
 		default:
 			t.Fatalf("unknown mode %q", mode)
 		}
@@ -306,6 +447,27 @@ func TestUnqueryableCardAndErrorHandling(t *testing.T) {
 			"GPUSTACK_TEST_IXML_INIT_FAIL_COUNT=1",
 			"GPUSTACK_TEST_IXML_INIT_ERR="+strconv.Itoa(int(ixml.ERROR_UNINITIALIZED)),
 			"GPUSTACK_TEST_IXML_INIT_OK_RET="+strconv.Itoa(int(ixml.ERROR_ALREADY_INITIALIZED)),
+		)
+	})
+
+	t.Run("known card retained as unhealthy across repeated lost passes and recovers", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_IXML_MODE=retain_unhealthy_and_recover",
+			"GPUSTACK_TEST_IXML_COUNT=3",
+		)
+	})
+
+	t.Run("all cards unqueryable after being cached still returns error", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_IXML_MODE=all_unqueryable_after_cache",
+			"GPUSTACK_TEST_IXML_COUNT=3",
+		)
+	})
+
+	t.Run("clean device count shrink prunes cache without resurrecting card", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_IXML_MODE=clean_shrink_prunes_cache",
+			"GPUSTACK_TEST_IXML_COUNT=3",
 		)
 	})
 }
