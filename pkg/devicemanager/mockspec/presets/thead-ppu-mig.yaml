@@ -1,0 +1,146 @@
+manufacturer: thead
+groups:
+  - name: PPU-ZW810E
+    memory: 98304
+    cores: 16384
+    driverVersion: "2.1.0-ra1f23041713"
+    runtimeVersion: "2.1"
+    computeCapability: "8.0"
+    accelerators:
+      - id: GPU-019e2226-4211-0208-0000-000000ab261d
+        index: 0
+        physicalIndexes: [1]
+        topology:
+          pciBusId: "0000:a8:00.0"
+          pciRootId: "0000:a0:00.0"
+          pciClass: "1200"
+          numaAffinity: "4"
+          cpuAffinity: "64-79"
+        physicalSliced: &theadMigProfiles
+          count: 2
+          profiles:
+            - name: 4g48gb
+              memoryMib: 49152
+              computeSlices: 4
+              memorySlices: 4
+              count: 2
+              placements:
+                - {start: 0, length: 4}
+                - {start: 4, length: 4}
+            - name: 8g96gb
+              memoryMib: 98304
+              computeSlices: 8
+              memorySlices: 8
+              count: 1
+              placements:
+                - {start: 0, length: 8}
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 34
+          powerUsage: 93
+      - id: GPU-019e2226-84c1-0200-0000-0000c020e701
+        index: 1
+        physicalIndexes: [2]
+        topology:
+          pciBusId: "0000:a7:00.0"
+          pciRootId: "0000:a0:00.0"
+          pciClass: "1200"
+          numaAffinity: "4"
+          cpuAffinity: "64-79"
+        physicalSliced: *theadMigProfiles
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 35
+          powerUsage: 93
+      - id: GPU-019e2226-4422-0024-0000-000020178514
+        index: 2
+        physicalIndexes: [3]
+        topology:
+          pciBusId: "0000:a9:00.0"
+          pciRootId: "0000:a0:00.0"
+          pciClass: "1200"
+          numaAffinity: "4"
+          cpuAffinity: "64-79"
+        physicalSliced: *theadMigProfiles
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 34
+          powerUsage: 92
+      - id: GPU-019e2226-8261-0222-0000-0000a0490d60
+        index: 3
+        physicalIndexes: [4]
+        topology:
+          pciBusId: "0000:aa:00.0"
+          pciRootId: "0000:a0:00.0"
+          pciClass: "1200"
+          numaAffinity: "4"
+          cpuAffinity: "64-79"
+        physicalSliced: *theadMigProfiles
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 31
+          powerUsage: 94
+      - id: GPU-019e2226-84b1-061e-0000-000020cc396a
+        index: 4
+        physicalIndexes: [5]
+        topology:
+          pciBusId: "0000:65:00.0"
+          pciRootId: "0000:60:00.0"
+          pciClass: "1200"
+          numaAffinity: "2"
+          cpuAffinity: "32-47"
+        physicalSliced: *theadMigProfiles
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 33
+          powerUsage: 93
+      - id: GPU-019e2226-0571-0120-0000-0000405f5716
+        index: 5
+        physicalIndexes: [6]
+        topology:
+          pciBusId: "0000:66:00.0"
+          pciRootId: "0000:60:00.0"
+          pciClass: "1200"
+          numaAffinity: "2"
+          cpuAffinity: "32-47"
+        physicalSliced: *theadMigProfiles
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 34
+          powerUsage: 92
+      - id: GPU-019e2226-8491-0424-0000-000020b1f22a
+        index: 6
+        physicalIndexes: [7]
+        topology:
+          pciBusId: "0000:64:00.0"
+          pciRootId: "0000:60:00.0"
+          pciClass: "1200"
+          numaAffinity: "2"
+          cpuAffinity: "32-47"
+        physicalSliced: *theadMigProfiles
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 37
+          powerUsage: 95
+      - id: GPU-019e2226-0571-031c-0000-0000e03d0464
+        index: 7
+        physicalIndexes: [8]
+        topology:
+          pciBusId: "0000:63:00.0"
+          pciRootId: "0000:60:00.0"
+          pciClass: "1200"
+          numaAffinity: "2"
+          cpuAffinity: "32-47"
+        physicalSliced: *theadMigProfiles
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 37
+          powerUsage: 97

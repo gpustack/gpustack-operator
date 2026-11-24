@@ -1,0 +1,136 @@
+manufacturer: metax
+groups:
+  - name: MXC500
+    memory: 65536
+    driverVersion: "3.6.11"
+    runtimeVersion: "3.5"
+    family: MXC
+    accelerators:
+      - id: GPU-3fd4ee8f-169c-6d31-f9dc-c2a90a441f1b
+        index: 0
+        physicalIndexes: [1, 128]
+        topology:
+          pciBusId: "0000:0e:00.0"
+          pciRootId: "0000:0c:00.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-31"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 826
+          coresUtilization: 0
+          temperature: 36
+          powerUsage: 57
+      - id: GPU-3c0d0f70-9f8d-8a2f-a4bf-2910193f4e49
+        index: 1
+        physicalIndexes: [2, 129]
+        topology:
+          pciBusId: "0000:0f:00.0"
+          pciRootId: "0000:0c:00.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-31"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 826
+          coresUtilization: 0
+          temperature: 37
+          powerUsage: 57
+      - id: GPU-83be6bc6-a0c4-12f9-ddb2-a5fae06c2603
+        index: 2
+        physicalIndexes: [3, 130]
+        topology:
+          pciBusId: "0000:10:00.0"
+          pciRootId: "0000:0c:00.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-31"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 826
+          coresUtilization: 0
+          temperature: 38
+          powerUsage: 57
+      - id: GPU-f16121f4-06a2-fdac-5b6b-abbcba762f94
+        index: 3
+        physicalIndexes: [4, 131]
+        topology:
+          pciBusId: "0000:12:00.0"
+          pciRootId: "0000:0c:00.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-31"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 826
+          coresUtilization: 0
+          temperature: 36
+          powerUsage: 57
+      - id: GPU-96cfc8cd-156f-3794-8a69-18ff5789a11c
+        index: 4
+        physicalIndexes: [5, 132]
+        topology:
+          pciBusId: "0000:35:00.0"
+          pciRootId: "0000:33:00.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-31"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 826
+          coresUtilization: 0
+          temperature: 36
+          powerUsage: 57
+      - id: GPU-f8b4667b-fad3-331e-c87c-1a155ead8d52
+        index: 5
+        physicalIndexes: [6, 133]
+        topology:
+          pciBusId: "0000:36:00.0"
+          pciRootId: "0000:33:00.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-31"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 826
+          coresUtilization: 0
+          temperature: 35
+          powerUsage: 58
+      - id: GPU-70b0cd3b-1f3c-a439-1050-ffd599a4cc43
+        index: 6
+        physicalIndexes: [7, 134]
+        topology:
+          pciBusId: "0000:37:00.0"
+          pciRootId: "0000:33:00.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-31"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 826
+          coresUtilization: 0
+          temperature: 36
+          powerUsage: 56
+      - id: GPU-aa6c79e0-ae0e-45c4-2ed4-832002e2276c
+        index: 7
+        physicalIndexes: [8, 135]
+        topology:
+          pciBusId: "0000:38:00.0"
+          pciRootId: "0000:33:00.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-31"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 826
+          coresUtilization: 0
+          temperature: 35
+          powerUsage: 56

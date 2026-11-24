@@ -1,0 +1,186 @@
+manufacturer: nvidia
+groups:
+  - name: NVIDIA H100 80GB HBM3
+    memory: 81559
+    cores: 132
+    driverVersion: "570.195.03"
+    runtimeVersion: "12.8"
+    computeCapability: "9.0"
+    family: Hopper
+    accelerators:
+      - id: GPU-78073210-c690-bb74-d538-87bba36db45d
+        index: 0
+        physicalIndexes: [0]
+        topology:
+          pciBusId: "0000:0e:00.0"
+          pciRootId: "0000:00:01.0"
+          pciClass: "0302"
+          pciSwitches: ["0000:0c:00.0", "0000:0a:00.0"]
+          numaAffinity: "0"
+          cpuAffinity: "0-51,104-155"
+          fabric:
+            kind: nvlink
+            id: "00000000-0000-4000-8000-000000000100"
+            cliqueId: "0"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 472
+          coresUtilization: 0
+          temperature: 25
+          powerUsage: 68
+      - id: GPU-7e1bf4b9-260f-8e9f-4353-700f07d78721
+        index: 1
+        physicalIndexes: [1]
+        topology:
+          pciBusId: "0000:15:00.0"
+          pciRootId: "0000:00:01.0"
+          pciClass: "0302"
+          pciSwitches: ["0000:13:00.0", "0000:0a:00.0"]
+          numaAffinity: "0"
+          cpuAffinity: "0-51,104-155"
+          fabric:
+            kind: nvlink
+            id: "00000000-0000-4000-8000-000000000100"
+            cliqueId: "0"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 472
+          coresUtilization: 0
+          temperature: 26
+          powerUsage: 68
+      - id: GPU-1a70343b-944d-49db-b47c-a45fc98b0d59
+        index: 2
+        physicalIndexes: [2]
+        topology:
+          pciBusId: "0000:1b:00.0"
+          pciRootId: "0000:00:02.0"
+          pciClass: "0302"
+          pciSwitches: ["0000:19:00.0", "0000:17:00.0"]
+          numaAffinity: "0"
+          cpuAffinity: "0-51,104-155"
+          fabric:
+            kind: nvlink
+            id: "00000000-0000-4000-8000-000000000100"
+            cliqueId: "0"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 472
+          coresUtilization: 0
+          temperature: 27
+          powerUsage: 67
+      - id: GPU-27a0c272-06a6-1d2e-dc59-221d9ae580f9
+        index: 3
+        physicalIndexes: [3]
+        topology:
+          pciBusId: "0000:67:00.0"
+          pciRootId: "0000:00:02.0"
+          pciClass: "0302"
+          pciSwitches: ["0000:65:00.0", "0000:17:00.0"]
+          numaAffinity: "0"
+          cpuAffinity: "0-51,104-155"
+          fabric:
+            kind: nvlink
+            id: "00000000-0000-4000-8000-000000000100"
+            cliqueId: "0"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 472
+          coresUtilization: 0
+          temperature: 24
+          powerUsage: 68
+      - id: GPU-e2c5cc46-d31b-0130-3d19-51cf45afa3a5
+        index: 4
+        physicalIndexes: [4]
+        topology:
+          pciBusId: "0000:9a:00.0"
+          pciRootId: "0000:80:01.0"
+          pciClass: "0302"
+          pciSwitches: ["0000:98:00.0", "0000:96:00.0"]
+          numaAffinity: "1"
+          cpuAffinity: "52-103,156-207"
+          fabric:
+            kind: nvlink
+            id: "00000000-0000-4000-8000-000000000100"
+            cliqueId: "0"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 472
+          coresUtilization: 0
+          temperature: 25
+          powerUsage: 69
+      - id: GPU-f21a2cc2-af1d-9b8a-1a26-715c40ee3cf0
+        index: 5
+        physicalIndexes: [5]
+        topology:
+          pciBusId: "0000:ab:00.0"
+          pciRootId: "0000:80:01.0"
+          pciClass: "0302"
+          pciSwitches: ["0000:a9:00.0", "0000:96:00.0"]
+          numaAffinity: "1"
+          cpuAffinity: "52-103,156-207"
+          fabric:
+            kind: nvlink
+            id: "00000000-0000-4000-8000-000000000100"
+            cliqueId: "0"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 472
+          coresUtilization: 0
+          temperature: 26
+          powerUsage: 68
+      - id: GPU-b73b7579-d312-c95a-e32e-690671187fe0
+        index: 6
+        physicalIndexes: [6]
+        topology:
+          pciBusId: "0000:ba:00.0"
+          pciRootId: "0000:80:02.0"
+          pciClass: "0302"
+          pciSwitches: ["0000:b8:00.0", "0000:b6:00.0"]
+          numaAffinity: "1"
+          cpuAffinity: "52-103,156-207"
+          fabric:
+            kind: nvlink
+            id: "00000000-0000-4000-8000-000000000100"
+            cliqueId: "0"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 472
+          coresUtilization: 0
+          temperature: 27
+          powerUsage: 70
+      - id: GPU-55e40ce4-c850-ab4a-dd7f-65623746ada1
+        index: 7
+        physicalIndexes: [7]
+        topology:
+          pciBusId: "0000:db:00.0"
+          pciRootId: "0000:80:02.0"
+          pciClass: "0302"
+          pciSwitches: ["0000:d9:00.0", "0000:b6:00.0"]
+          numaAffinity: "1"
+          cpuAffinity: "52-103,156-207"
+          fabric:
+            kind: nvlink
+            id: "00000000-0000-4000-8000-000000000100"
+            cliqueId: "0"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 472
+          coresUtilization: 0
+          temperature: 25
+          powerUsage: 70

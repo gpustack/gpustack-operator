@@ -1,0 +1,44 @@
+manufacturer: amd
+groups:
+  - name: AMD Radeon RX 7800 XT
+    memory: 16368
+    cores: 60
+    driverVersion: "6.16.13"
+    runtimeVersion: "7.2"
+    computeCapability: "gfx1101"
+    family: "GC 11.0.0"
+    accelerators:
+      - id: GPU-5c88007d760374f3
+        index: 0
+        physicalIndexes: [1, 128]
+        topology:
+          pciBusId: "0000:04:00.0"
+          pciRootId: "0000:00:01.1"
+          pciClass: "0300"
+          numaAffinity: "0"
+          cpuAffinity: "0-15"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 174
+          coresUtilization: 13
+          temperature: 43
+          powerUsage: 10
+      - id: GPU-d99e7fe92c7bdf75
+        index: 1
+        physicalIndexes: [0, 129]
+        topology:
+          pciBusId: "0000:07:00.0"
+          pciRootId: "0000:00:03.1"
+          pciClass: "0300"
+          numaAffinity: "0"
+          cpuAffinity: "0-15"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 174
+          coresUtilization: 34
+          temperature: 44
+          powerUsage: 10

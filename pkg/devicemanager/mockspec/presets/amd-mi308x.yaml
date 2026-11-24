@@ -1,0 +1,170 @@
+manufacturer: amd
+groups:
+  - name: AMD Instinct MI308X OAM
+    memory: 196592
+    cores: 80
+    driverVersion: "6.16.6"
+    runtimeVersion: "7.1"
+    computeCapability: "gfx942"
+    family: "Arctic Islands"
+    accelerators:
+      - id: GPU-c027d079faca2939
+        index: 0
+        physicalIndexes: [0, 128]
+        topology:
+          pciBusId: "0000:25:00.0"
+          pciRootId: "0000:20:00.0"
+          pciClass: "0380"
+          numaAffinity: "0"
+          cpuAffinity: "0-47"
+          fabric:
+            kind: xgmi
+            id: "7f6e5d4c3b2a1908"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 284
+          coresUtilization: 0
+          temperature: 37
+          powerUsage: 166
+      - id: GPU-77a05eb626eac067
+        index: 1
+        physicalIndexes: [8, 136]
+        topology:
+          pciBusId: "0000:2a:00.0"
+          pciRootId: "0000:20:00.0"
+          pciClass: "0380"
+          numaAffinity: "0"
+          cpuAffinity: "0-47"
+          fabric:
+            kind: xgmi
+            id: "7f6e5d4c3b2a1908"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 284
+          coresUtilization: 0
+          temperature: 43
+          powerUsage: 160
+      - id: GPU-0af93fcec721eead
+        index: 2
+        physicalIndexes: [16, 144]
+        topology:
+          pciBusId: "0000:45:00.0"
+          pciRootId: "0000:40:00.0"
+          pciClass: "0380"
+          numaAffinity: "0"
+          cpuAffinity: "0-47"
+          fabric:
+            kind: xgmi
+            id: "7f6e5d4c3b2a1908"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 284
+          coresUtilization: 0
+          temperature: 41
+          powerUsage: 162
+      - id: GPU-da3e30f479717718
+        index: 3
+        physicalIndexes: [24, 152]
+        topology:
+          pciBusId: "0000:4a:00.0"
+          pciRootId: "0000:40:00.0"
+          pciClass: "0380"
+          numaAffinity: "0"
+          cpuAffinity: "0-47"
+          fabric:
+            kind: xgmi
+            id: "7f6e5d4c3b2a1908"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 284
+          coresUtilization: 0
+          temperature: 38
+          powerUsage: 160
+      - id: GPU-3ac217e897b247e2
+        index: 4
+        physicalIndexes: [32, 160]
+        topology:
+          pciBusId: "0000:a5:00.0"
+          pciRootId: "0000:a0:00.0"
+          pciClass: "0380"
+          numaAffinity: "1"
+          cpuAffinity: "48-95"
+          fabric:
+            kind: xgmi
+            id: "7f6e5d4c3b2a1908"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 284
+          coresUtilization: 0
+          temperature: 38
+          powerUsage: 160
+      - id: GPU-634d73e36c0e7f31
+        index: 5
+        physicalIndexes: [40, 168]
+        topology:
+          pciBusId: "0000:a8:00.0"
+          pciRootId: "0000:a0:00.0"
+          pciClass: "0380"
+          numaAffinity: "1"
+          cpuAffinity: "48-95"
+          fabric:
+            kind: xgmi
+            id: "7f6e5d4c3b2a1908"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 284
+          coresUtilization: 0
+          temperature: 41
+          powerUsage: 162
+      - id: GPU-959c09b244ce9bfe
+        index: 6
+        physicalIndexes: [48, 176]
+        topology:
+          pciBusId: "0000:c5:00.0"
+          pciRootId: "0000:c0:00.0"
+          pciClass: "0380"
+          numaAffinity: "1"
+          cpuAffinity: "48-95"
+          fabric:
+            kind: xgmi
+            id: "7f6e5d4c3b2a1908"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 284
+          coresUtilization: 0
+          temperature: 43
+          powerUsage: 160
+      - id: GPU-4ae9dfbd3391096e
+        index: 7
+        physicalIndexes: [56, 184]
+        topology:
+          pciBusId: "0000:c8:00.0"
+          pciRootId: "0000:c0:00.0"
+          pciClass: "0380"
+          numaAffinity: "1"
+          cpuAffinity: "48-95"
+          fabric:
+            kind: xgmi
+            id: "7f6e5d4c3b2a1908"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 284
+          coresUtilization: 0
+          temperature: 42
+          powerUsage: 158

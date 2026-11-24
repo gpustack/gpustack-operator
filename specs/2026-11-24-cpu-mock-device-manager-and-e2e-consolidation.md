@@ -272,7 +272,7 @@ type Allocator interface {
 
 ### Implementation Plan
 
-- [ ] **T1 · Declarative mock hardware spec, built-in presets, and hot-reload store**
+- [x] **T1 · Declarative mock hardware spec, built-in presets, and hot-reload store**
       Blocked by: None
       Owns: `pkg/devicemanager/mockspec/**`
       Gate: review

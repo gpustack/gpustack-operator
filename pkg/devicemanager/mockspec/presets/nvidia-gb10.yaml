@@ -1,0 +1,27 @@
+manufacturer: nvidia
+groups:
+  - name: NVIDIA GB10
+    memory: 138932
+    cores: 48
+    driverVersion: "580.95.05"
+    runtimeVersion: "13.0"
+    computeCapability: "12.1"
+    family: Blackwell
+    accelerators:
+      - id: GPU-35fa9bdb-8b46-c677-e98f-750e1b02d519
+        index: 0
+        physicalIndexes: [0]
+        topology:
+          pciBusId: "0000:ca:00.0"
+          pciRootId: "0000:c8:00.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-19"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 1024
+          coresUtilization: 0
+          temperature: 45
+          powerUsage: 12

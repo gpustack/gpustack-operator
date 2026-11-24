@@ -1,0 +1,135 @@
+manufacturer: mthreads
+groups:
+  - name: MTT S5000
+    memory: 81920
+    cores: 4096
+    driverVersion: "3.1.0"
+    accelerators:
+      - id: MTT-5000-0000-0001
+        index: 0
+        physicalIndexes: [0]
+        topology:
+          pciBusId: "0000:11:00.0"
+          pciRootId: "0000:10:00.0"
+          pciClass: "0300"
+          numaAffinity: "0"
+          cpuAffinity: "0-31,64-95"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 256
+          coresUtilization: 0
+          temperature: 38
+          powerUsage: 75
+      - id: MTT-5000-0000-0002
+        index: 1
+        physicalIndexes: [1]
+        topology:
+          pciBusId: "0000:12:00.0"
+          pciRootId: "0000:10:01.0"
+          pciClass: "0300"
+          numaAffinity: "0"
+          cpuAffinity: "0-31,64-95"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 256
+          coresUtilization: 0
+          temperature: 39
+          powerUsage: 76
+      - id: MTT-5000-0000-0003
+        index: 2
+        physicalIndexes: [2]
+        topology:
+          pciBusId: "0000:13:00.0"
+          pciRootId: "0000:10:02.0"
+          pciClass: "0300"
+          numaAffinity: "0"
+          cpuAffinity: "0-31,64-95"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 256
+          coresUtilization: 0
+          temperature: 38
+          powerUsage: 74
+      - id: MTT-5000-0000-0004
+        index: 3
+        physicalIndexes: [3]
+        topology:
+          pciBusId: "0000:14:00.0"
+          pciRootId: "0000:10:03.0"
+          pciClass: "0300"
+          numaAffinity: "0"
+          cpuAffinity: "0-31,64-95"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 256
+          coresUtilization: 0
+          temperature: 37
+          powerUsage: 75
+      - id: MTT-5000-0000-0005
+        index: 4
+        physicalIndexes: [4]
+        topology:
+          pciBusId: "0000:91:00.0"
+          pciRootId: "0000:90:00.0"
+          pciClass: "0300"
+          numaAffinity: "1"
+          cpuAffinity: "32-63,96-127"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 256
+          coresUtilization: 0
+          temperature: 39
+          powerUsage: 76
+      - id: MTT-5000-0000-0006
+        index: 5
+        physicalIndexes: [5]
+        topology:
+          pciBusId: "0000:92:00.0"
+          pciRootId: "0000:90:01.0"
+          pciClass: "0300"
+          numaAffinity: "1"
+          cpuAffinity: "32-63,96-127"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 256
+          coresUtilization: 0
+          temperature: 38
+          powerUsage: 75
+      - id: MTT-5000-0000-0007
+        index: 6
+        physicalIndexes: [6]
+        topology:
+          pciBusId: "0000:93:00.0"
+          pciRootId: "0000:90:02.0"
+          pciClass: "0300"
+          numaAffinity: "1"
+          cpuAffinity: "32-63,96-127"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 256
+          coresUtilization: 0
+          temperature: 37
+          powerUsage: 74
+      - id: MTT-5000-0000-0008
+        index: 7
+        physicalIndexes: [7]
+        topology:
+          pciBusId: "0000:94:00.0"
+          pciRootId: "0000:90:03.0"
+          pciClass: "0300"
+          numaAffinity: "1"
+          cpuAffinity: "32-63,96-127"
+        logicalSliced:
+          count: 16
+        metrics:
+          memoryUsage: 256
+          coresUtilization: 0
+          temperature: 38
+          powerUsage: 75

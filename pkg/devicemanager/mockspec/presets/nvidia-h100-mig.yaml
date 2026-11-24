@@ -1,0 +1,186 @@
+manufacturer: nvidia
+groups:
+  - name: NVIDIA H100 80GB HBM3
+    memory: 81559
+    cores: 132
+    driverVersion: "575.57.08"
+    runtimeVersion: "12.9"
+    computeCapability: "9.0"
+    family: Hopper
+    accelerators:
+      - id: GPU-912151ec-e9f1-fc26-2897-89f4077de4b9
+        index: 0
+        physicalIndexes: [0]
+        topology:
+          pciBusId: "0000:00:0a.0"
+          pciRootId: "0000:00:0a.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-51,104-155"
+        physicalSliced: &h100MigProfiles
+          count: 7
+          profiles:
+            - name: 1g.10gb
+              memoryMib: 9856
+              computeSlices: 1
+              memorySlices: 1
+              count: 7
+              placements:
+                - {start: 0, length: 1}
+                - {start: 1, length: 1}
+                - {start: 2, length: 1}
+                - {start: 3, length: 1}
+                - {start: 4, length: 1}
+                - {start: 5, length: 1}
+                - {start: 6, length: 1}
+            - name: 1g.20gb
+              memoryMib: 19968
+              computeSlices: 1
+              memorySlices: 2
+              count: 4
+              placements:
+                - {start: 0, length: 2}
+                - {start: 2, length: 2}
+                - {start: 4, length: 2}
+                - {start: 6, length: 2}
+            - name: 2g.20gb
+              memoryMib: 19968
+              computeSlices: 2
+              memorySlices: 2
+              count: 3
+              placements:
+                - {start: 0, length: 2}
+                - {start: 2, length: 2}
+                - {start: 4, length: 2}
+            - name: 3g.40gb
+              memoryMib: 40192
+              computeSlices: 3
+              memorySlices: 4
+              count: 2
+              placements:
+                - {start: 0, length: 4}
+                - {start: 4, length: 4}
+            - name: 4g.40gb
+              memoryMib: 40192
+              computeSlices: 4
+              memorySlices: 4
+              count: 1
+              placements:
+                - {start: 0, length: 4}
+            - name: 7g.80gb
+              memoryMib: 80896
+              computeSlices: 7
+              memorySlices: 8
+              count: 1
+              placements:
+                - {start: 0, length: 8}
+        metrics:
+          memoryUsage: 482
+          coresUtilization: 0
+          temperature: 43
+          powerUsage: 71
+      - id: GPU-3f3f8e12-3363-4c93-ebab-fe484f41c04e
+        index: 1
+        physicalIndexes: [1]
+        topology:
+          pciBusId: "0000:00:0b.0"
+          pciRootId: "0000:00:0b.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-51,104-155"
+        physicalSliced: *h100MigProfiles
+        metrics:
+          memoryUsage: 482
+          coresUtilization: 0
+          temperature: 39
+          powerUsage: 73
+      - id: GPU-12326cd1-908e-79aa-defc-94150bbeef88
+        index: 2
+        physicalIndexes: [2]
+        topology:
+          pciBusId: "0000:00:0c.0"
+          pciRootId: "0000:00:0c.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-51,104-155"
+        physicalSliced: *h100MigProfiles
+        metrics:
+          memoryUsage: 482
+          coresUtilization: 0
+          temperature: 38
+          powerUsage: 70
+      - id: GPU-1e292743-2c54-a164-fa94-926e29fc2648
+        index: 3
+        physicalIndexes: [3]
+        topology:
+          pciBusId: "0000:00:0d.0"
+          pciRootId: "0000:00:0d.0"
+          pciClass: "0302"
+          numaAffinity: "0"
+          cpuAffinity: "0-51,104-155"
+        physicalSliced: *h100MigProfiles
+        metrics:
+          memoryUsage: 482
+          coresUtilization: 0
+          temperature: 41
+          powerUsage: 73
+      - id: GPU-d0bf4dff-5628-e7b6-fce7-5bbf7197ed53
+        index: 4
+        physicalIndexes: [4]
+        topology:
+          pciBusId: "0000:00:0e.0"
+          pciRootId: "0000:00:0e.0"
+          pciClass: "0302"
+          numaAffinity: "1"
+          cpuAffinity: "52-103,156-207"
+        physicalSliced: *h100MigProfiles
+        metrics:
+          memoryUsage: 482
+          coresUtilization: 0
+          temperature: 43
+          powerUsage: 74
+      - id: GPU-738a4f51-1924-47e5-a097-f25e6e359700
+        index: 5
+        physicalIndexes: [5]
+        topology:
+          pciBusId: "0000:00:0f.0"
+          pciRootId: "0000:00:0f.0"
+          pciClass: "0302"
+          numaAffinity: "1"
+          cpuAffinity: "52-103,156-207"
+        physicalSliced: *h100MigProfiles
+        metrics:
+          memoryUsage: 482
+          coresUtilization: 0
+          temperature: 39
+          powerUsage: 72
+      - id: GPU-950792bf-a01c-3f1a-e122-3473e67f54b2
+        index: 6
+        physicalIndexes: [6]
+        topology:
+          pciBusId: "0000:00:10.0"
+          pciRootId: "0000:00:10.0"
+          pciClass: "0302"
+          numaAffinity: "1"
+          cpuAffinity: "52-103,156-207"
+        physicalSliced: *h100MigProfiles
+        metrics:
+          memoryUsage: 482
+          coresUtilization: 0
+          temperature: 42
+          powerUsage: 78
+      - id: GPU-8b14c091-4d2b-41ef-9a22-61a0e84c12ab
+        index: 7
+        physicalIndexes: [7]
+        topology:
+          pciBusId: "0000:00:11.0"
+          pciRootId: "0000:00:11.0"
+          pciClass: "0302"
+          numaAffinity: "1"
+          cpuAffinity: "52-103,156-207"
+        physicalSliced: *h100MigProfiles
+        metrics:
+          memoryUsage: 482
+          coresUtilization: 0
+          temperature: 38
+          powerUsage: 71

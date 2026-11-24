@@ -1,0 +1,43 @@
+manufacturer: ascend
+groups:
+  - name: "310P3"
+    memory: 44280
+    cores: 8
+    driverVersion: "25.2.0"
+    runtimeVersion: "9.1"
+    family: "310P"
+    accelerators:
+      - id: "16E96E64 2101968D 5EB7E8E4 AED8030A 61003039"
+        index: 0
+        physicalIndexes: [0, 4, 0]
+        topology:
+          pciBusId: "0000:81:00.0"
+          pciRootId: "0000:80:00.0"
+          pciClass: "1200"
+          numaAffinity: "2"
+          cpuAffinity: "48-71"
+        logicalSliced:
+          count: 63
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 1507
+          coresUtilization: 0
+          temperature: 47
+          powerUsage: 35
+      - id: "16E96E64 2100AA8D 4B2A68E4 AED8030A 54003039"
+        index: 1
+        physicalIndexes: [1, 4, 1]
+        topology:
+          pciBusId: "0000:81:00.0"
+          pciRootId: "0000:80:00.0"
+          pciClass: "1200"
+          numaAffinity: "2"
+          cpuAffinity: "48-71"
+        logicalSliced:
+          count: 63
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 1507
+          coresUtilization: 0
+          temperature: 45
+          powerUsage: 34

@@ -1,0 +1,251 @@
+manufacturer: thead
+groups:
+  - name: PPU-ZW810E
+    memory: 98304
+    cores: 16384
+    driverVersion: "2.1.0-ra1f23041713"
+    runtimeVersion: "2.1"
+    computeCapability: "8.0"
+    accelerators:
+      - id: GPU-019e2226-4211-0208-0000-000000ab261d
+        index: 0
+        physicalIndexes: [1]
+        topology:
+          pciBusId: "0000:a8:00.0"
+          pciRootId: "0000:a0:00.0"
+          pciClass: "1200"
+          numaAffinity: "4"
+          cpuAffinity: "64-79"
+        logicalSliced: &theadLogicalSliced
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 34
+          powerUsage: 93
+      - id: GPU-019e2226-84c1-0200-0000-0000c020e701
+        index: 1
+        physicalIndexes: [2]
+        topology:
+          pciBusId: "0000:a7:00.0"
+          pciRootId: "0000:a0:00.0"
+          pciClass: "1200"
+          numaAffinity: "4"
+          cpuAffinity: "64-79"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 35
+          powerUsage: 93
+      - id: GPU-019e2226-4422-0024-0000-000020178514
+        index: 2
+        physicalIndexes: [3]
+        topology:
+          pciBusId: "0000:a9:00.0"
+          pciRootId: "0000:a0:00.0"
+          pciClass: "1200"
+          numaAffinity: "4"
+          cpuAffinity: "64-79"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 34
+          powerUsage: 92
+      - id: GPU-019e2226-8261-0222-0000-0000a0490d60
+        index: 3
+        physicalIndexes: [4]
+        topology:
+          pciBusId: "0000:aa:00.0"
+          pciRootId: "0000:a0:00.0"
+          pciClass: "1200"
+          numaAffinity: "4"
+          cpuAffinity: "64-79"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 31
+          powerUsage: 94
+      - id: GPU-019e2226-84b1-061e-0000-000020cc396a
+        index: 4
+        physicalIndexes: [5]
+        topology:
+          pciBusId: "0000:65:00.0"
+          pciRootId: "0000:60:00.0"
+          pciClass: "1200"
+          numaAffinity: "2"
+          cpuAffinity: "32-47"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 33
+          powerUsage: 93
+      - id: GPU-019e2226-0571-0120-0000-0000405f5716
+        index: 5
+        physicalIndexes: [6]
+        topology:
+          pciBusId: "0000:66:00.0"
+          pciRootId: "0000:60:00.0"
+          pciClass: "1200"
+          numaAffinity: "2"
+          cpuAffinity: "32-47"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 34
+          powerUsage: 92
+      - id: GPU-019e2226-8491-0424-0000-000020b1f22a
+        index: 6
+        physicalIndexes: [7]
+        topology:
+          pciBusId: "0000:64:00.0"
+          pciRootId: "0000:60:00.0"
+          pciClass: "1200"
+          numaAffinity: "2"
+          cpuAffinity: "32-47"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 37
+          powerUsage: 95
+      - id: GPU-019e2226-0571-031c-0000-0000e03d0464
+        index: 7
+        physicalIndexes: [8]
+        topology:
+          pciBusId: "0000:63:00.0"
+          pciRootId: "0000:60:00.0"
+          pciClass: "1200"
+          numaAffinity: "2"
+          cpuAffinity: "32-47"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 37
+          powerUsage: 97
+      - id: GPU-01deb21c-8811-0618-0000-0000408ed50b
+        index: 8
+        physicalIndexes: [9]
+        topology:
+          pciBusId: "0000:e8:00.0"
+          pciRootId: "0000:e0:00.0"
+          pciClass: "1200"
+          numaAffinity: "6"
+          cpuAffinity: "96-111"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 35
+          powerUsage: 93
+      - id: GPU-019e2226-8491-0228-0000-000060ce486d
+        index: 9
+        physicalIndexes: [10]
+        topology:
+          pciBusId: "0000:e7:00.0"
+          pciRootId: "0000:e0:00.0"
+          pciClass: "1200"
+          numaAffinity: "6"
+          cpuAffinity: "96-111"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 35
+          powerUsage: 94
+      - id: GPU-01deb21c-8861-0430-0000-0000201ea851
+        index: 10
+        physicalIndexes: [11]
+        topology:
+          pciBusId: "0000:e9:00.0"
+          pciRootId: "0000:e0:00.0"
+          pciClass: "1200"
+          numaAffinity: "6"
+          cpuAffinity: "96-111"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 35
+          powerUsage: 91
+      - id: GPU-01deb21c-8811-0420-0000-0000a01d582e
+        index: 11
+        physicalIndexes: [12]
+        topology:
+          pciBusId: "0000:ea:00.0"
+          pciRootId: "0000:e0:00.0"
+          pciClass: "1200"
+          numaAffinity: "6"
+          cpuAffinity: "96-111"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 32
+          powerUsage: 91
+      - id: GPU-01deb21c-8851-021a-0000-000000e57d6f
+        index: 12
+        physicalIndexes: [13]
+        topology:
+          pciBusId: "0000:25:00.0"
+          pciRootId: "0000:20:00.0"
+          pciClass: "1200"
+          numaAffinity: "0"
+          cpuAffinity: "0-15"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 32
+          powerUsage: 92
+      - id: GPU-019e2226-0581-0510-0000-00004031af7d
+        index: 13
+        physicalIndexes: [14]
+        topology:
+          pciBusId: "0000:26:00.0"
+          pciRootId: "0000:20:00.0"
+          pciClass: "1200"
+          numaAffinity: "0"
+          cpuAffinity: "0-15"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 34
+          powerUsage: 91
+      - id: GPU-019e2226-8591-061e-0000-000020791642
+        index: 14
+        physicalIndexes: [15]
+        topology:
+          pciBusId: "0000:24:00.0"
+          pciRootId: "0000:20:00.0"
+          pciClass: "1200"
+          numaAffinity: "0"
+          cpuAffinity: "0-15"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 34
+          powerUsage: 62
+      - id: GPU-019e2226-8591-0510-0000-0000a066de79
+        index: 15
+        physicalIndexes: [16]
+        topology:
+          pciBusId: "0000:23:00.0"
+          pciRootId: "0000:20:00.0"
+          pciClass: "1200"
+          numaAffinity: "0"
+          cpuAffinity: "0-15"
+        logicalSliced: *theadLogicalSliced
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 34
+          powerUsage: 64
