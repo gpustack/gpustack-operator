@@ -1,6 +1,6 @@
 # Spec: CPU-Only Mock Device Manager, E2E Consolidation, and Chaos Scheduling Skill
 
-Status: Building
+Status: Built
 Type: Feature
 
 ## Summary
@@ -343,7 +343,7 @@ type Allocator interface {
       Acceptance: `hack/check/skills.sh` fails whenever `.agents/skills/gpustack-operator-e2e/cases/case-*.sh` has a numbering gap, non-sequential start, or mismatch against `SKILL.md`'s case table; `hack/check/skills-selftest.sh` proves each failure shape fails and the clean tree passes.
       Verify: `bash hack/check/skills-selftest.sh && bash hack/check/skills.sh && make lint`
 
-- [ ] **T12 · Create explicit-only `gpustack-operator-e2e-chaos` skill and multi-node Kind mock harness**
+- [x] **T12 · Create explicit-only `gpustack-operator-e2e-chaos` skill and multi-node Kind mock harness**
       Blocked by: T6, T10, T11
       Owns: `.agents/skills/gpustack-operator-e2e-chaos/**`, `AGENTS.md`, `docs/README.md`
       Gate: review

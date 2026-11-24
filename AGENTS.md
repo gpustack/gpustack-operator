@@ -61,6 +61,8 @@ one by name is your job. The change on the left is the trigger.
 - the chart, in-cluster app installation, the image build → `gpustack-operator-chart-e2e`
 - reconcile, an admission webhook, the extension-apiserver, in-cluster app installation
   → `gpustack-operator-e2e`
+- mock `device-manager`, scheduling/gating/fault-injection chaos, or multi-node Kind scale
+  verification → `gpustack-operator-e2e-chaos`
 - a pinned version in `hack/deps.sh`, a patch under `hack/deploy/`, a vendored tree edited in
   place, a bundled chart added or dropped, or `make deps` leaving a `.rej`
   → `gpustack-operator-chart-subcharts-manage`
