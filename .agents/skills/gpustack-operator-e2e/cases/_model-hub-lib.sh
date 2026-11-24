@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 #
-# Sourced by the node-delivery cases (101, 102, 103): the test model hub and forward proxy of
+# Sourced by the node-delivery cases (case-21, case-22, case-23, case-25): the test model hub and forward proxy of
 # _model-hub.py, Settings, consumer Pods and the plugin's readings. Not a case; never run it directly.
 #
 # Every function takes the namespace it acts in explicitly. The hub and the proxy run the stock

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # serving-lib.sh — where a serving ModelDeployment's evidence lives, per vendor and engine, shared by
-# gpustack-operator-e2e (cases 91, 94) and gpustack-operator-benchmark (stage_counts.sh and cases 1-4).
+# gpustack-operator-e2e (cases 32, 35) and gpustack-operator-benchmark (stage_counts.sh and cases 1-4).
 #
 # NOT A CASE. It carries no case header, no trap and no results table; each stays with the caller that
 # sources it. What it holds is the ONE place a vendor or engine difference is written: a case or

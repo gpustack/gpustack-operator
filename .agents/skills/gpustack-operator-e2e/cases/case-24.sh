@@ -1,240 +1,341 @@
 #!/usr/bin/env bash
 #
-# CASE 24 — Mixed node: a partition lands on a partitioned card, a logical slice on a whole one
-#   (MUTATING, self-recovering; AUTO-SKIPS without a partition-capable node of at least two cards
-#    AND a node-SSH address)
+# CASE 24 — Image source: a digest-pinned OCI image as a ModelArtifact's weights resolves
+#            claim-shaped and mounts through a Kubernetes image volume (MUTATING, self-recovering)
 #
-#   MIG_NODE_SSH=<user@host> case-24.sh <NS>
+#   case-24.sh <NS>
 #
-# Prerequisites: nodes=1; gpu=nvidia; features=partition; cluster=real; inputs=MIG_MIXED_INDEXES,MIG_MIXED_ROUNDS
-# Goal:        On ONE node whose cards of a single model are deliberately mixed — some put into a
-#              hardware partitioning mode, the rest left whole — every partition request lands on a
-#              partitionable card and every logical-slice request on an unpartitioned one, with ZERO
-#              UnexpectedAdmissionError. This is the regression guard for the production failure the
-#              two-family split exists to remove: a single token pool spanning both card populations
-#              let the kubelet hand a partition request a token belonging to a card that cannot be
-#              partitioned, the instance could not be created, and the Pod died terminally.
-#              The guarantee is CONSTRUCTIVE, not lucky: each family's token pool is advertised only by
-#              the cards that can serve it, and the partition family's Allocate picks the card itself.
-#              So the case runs several rounds and requires every one of them to place correctly.
-#              What the rounds do NOT cover: each one waits for the cards to go idle before the next
-#              begins, so a round never asks for a slot whose predecessor is still being reclaimed.
-#              That is deliberate -- placement is what is under test here, and starting a round inside
-#              the reclaim window would make it fail for a reason that has nothing to do with the card
-#              populations. It does mean repetition here buys sampling, not extra coverage: reuse of a
-#              just-freed slot belongs to case-29, and this case stayed green throughout a defect that
-#              destroyed every such reuse.
-# Environment: A reachable cluster whose active context is the GPU cluster, a node with at least TWO
-#              nvidia cards of one model where at least one card can be put into a partitioning mode,
-#              AND SSH to that node (sudo nvidia-smi) supplied via MIG_NODE_SSH=<user@host>. It EXITS 2
-#              (input required) when MIG_NODE_SSH is unset. It AUTO-SKIPS (exit 0) when the card
-#              reports no partitioning mode, when the node carries fewer than two cards, or when the
-#              mixed state cannot be established (every card already partitioned, or the mode switch
-#              does not converge).
-# Inputs:      All real, nothing mocked — the mixed card population, the two token pools and the
-#              placement are the verification. The case puts the cards named by MIG_MIXED_INDEXES
-#              (default: card MIG_GPU_INDEX alone) into the partitioning mode if they are not already,
-#              leaves every other card whole, and restarts the Device Manager to re-detect. Each round
-#              submits ONE partition Pod (the discovered 4-memory-slice profile) and ONE logical-slice
-#              Pod (20% memory / 20% cores) at the same time through the pool's entrance LocalQueue.
-#              Profiles are DISCOVERED from the cards' own capability, never composed.
-# Expected:    - the node advertises BOTH families at once: a partition token pool and per-profile
-#                keys from the partitioned cards, a logical token pool and .sliced counting keys from
-#                the whole ones;
-#              - in every round the partition Pod reaches Running on a card in the PARTITIONED set;
-#              - in every round the logical Pod reaches Running on a card in the UNPARTITIONED set;
-#              - no test Pod in any round records a single UnexpectedAdmissionError.
-# Cleanup:     Trap deletes every test Pod, waits for the live instances to reclaim, restores the
-#              partitioning mode of exactly the cards this case toggled (and no others), and refreshes
-#              the Device Manager so the ledger realigns. Idempotent; runs on pass AND fail.
+# Prerequisites: nodes=1; gpu=none; features=kind; cluster=kind
+# Goal:        Prove the image source end to end: a tag-only reference is refused at admission,
+#              naming the digest contract; an image artifact resolves on its first pass with no
+#              network — claim-shaped status, no manifest digest, no revision; an Instance
+#              carrying that artifact as a model volume runs a pod whose weights are the image,
+#              read-only and whole, with the fixture file matching byte for byte; the node cache
+#              plays no part (status.nodes never appears).
+# Environment: Cluster nodes run image volumes — kubelet 1.35+ (beta default-on; 1.33/1.34 would
+#              need the gate opened, which admission does not opt into) and containerd 2.1+. The
+#              stock registry:2 and python:3.12-slim images are pullable, and python3 is on the
+#              runner to generate and push the fixture. No GPU, no engine. There is no auto-skip
+#              for a cluster that cannot serve image volumes: the admission-refusal rows still
+#              run, and the mount row FAILs, which is the honest verdict for that cluster.
+# Inputs:      MOCKED: the fixture image this case generates on the runner (one gzip layer, one
+#              marker file, addressed by its own sha256) and pushes into an in-cluster registry
+#              through a port-forward; the node reaches that registry over its own loopback — a
+#              hostNetwork forwarder pod on the worker turns 127.0.0.1:35000 into the registry
+#              service, and containerd treats localhost as insecure by default, so no containerd
+#              configuration is touched.
+# Expected:    - a tag-only reference is refused, the message naming why the digest is required;
+#              - the image artifact resolves on its first pass: Resolved=True, resolved carrying
+#                only resolvedTime — no manifestDigest, no revision;
+#              - status.nodes never appears for the artifact;
+#              - the Instance's pod mounts the image read-only at its model mount path and the
+#                marker file's sha256 equals the fixture's;
+#              - a ModelPrefetch naming the image artifact is refused: nothing to warm.
+# Cleanup:     Trap deletes the case-labeled objects in the namespace, the in-cluster registry
+#              and forwarder, and the scratch dir.
 set -uo pipefail
 
-# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
-# on transport alone, and a check that takes such a failure for an answer reports a verdict
-# about the network rather than about the operator.
+CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
+. "${CASES_DIR}/_rows-lib.sh"
 
-NS="${1:?usage: MIG_NODE_SSH=<user@host> case-24.sh <NS>}"
-CASE_ID=24
-# shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_partition-lib.sh"
+NS="${1:?usage: case-24.sh <NS>}"
+P=c24
+REG_PORT=35000            # the node's loopback port the forwarder serves the registry on
+PUSH_PORT=5550            # the runner's loopback port port-forward pushes through
 
-PODPFX=gpustack-e2e-mixed
-ROUNDS="${MIG_MIXED_ROUNDS:-3}"
-
-part_require_node_ssh "case-24.sh"
-part_require_mig_capable
-part_discover
-
-# --- The card population. A mixed node needs at least two cards: one to partition, one to leave whole.
-ALL_INDEXES="$(card_indexes)"
-NCARDS="$(echo "$ALL_INDEXES" | wc -w | tr -d '[:space:]')"
-if [ "${NCARDS:-0}" -lt 2 ]; then
-  part_skip \
-    "Node ${GPU_NODE} reports ${NCARDS:-0} nvidia card(s); a mixed node needs at least two — one" \
-    "partitioned and one left whole. Run this case on a multi-card partition-capable node."
-fi
-MIXED_INDEXES="${MIG_MIXED_INDEXES:-$GPU_INDEX}"
-echo "[case-24] node cards: ${ALL_INDEXES} (${NCARDS}); partitioning: ${MIXED_INDEXES}"
-
-TOGGLED=""
-UAE_TOTAL=0
-UAE_UNREAD=0
-
-restore() {
+cleanup() {
   echo
-  echo "[case-24] cleanup: deleting test Pods and restoring the partitioning mode of card(s) '${TOGGLED:-<none>}'"
-  delete_test_pods
-  if [ -n "$TOGGLED" ]; then
-    wait_card_idle || true
-    local i
-    for i in $TOGGLED; do set_mig_mode "$i" 0 || true; done
-    refresh_dm
-  fi
+  echo "[case-24] cleanup"
+  kubectl -n "$NS" delete modelartifacts.worker.gpustack.ai -l e2e.gpustack.ai/case=24 --ignore-not-found --wait=false >/dev/null 2>&1
+  kubectl -n "$NS" delete instances.worker.gpustack.ai -l e2e.gpustack.ai/case=24 --ignore-not-found --wait=false >/dev/null 2>&1
+  kubectl -n "$NS" delete pods,svc,cm -l e2e.gpustack.ai/case=24 --ignore-not-found --wait=false --force --grace-period=0 >/dev/null 2>&1
+  [ -n "${PF_PID:-}" ] && kill "$PF_PID" 2>/dev/null
+  rm -rf "$SCRATCH"
 }
-trap restore EXIT
+SCRATCH="$(mktemp -d)"
+trap cleanup EXIT
 
-# ---------------------------------------------------------------------------------------------------
-# Establish the mixed state: partition the named cards, leave every other card whole.
-# ---------------------------------------------------------------------------------------------------
-echo
-echo "[case-24] === establishing the mixed card population ==="
-for idx in $MIXED_INDEXES; do
-  cur="$(mig_mode "$idx")"
-  case "$cur" in
-    Enabled)
-      echo "[case-24]   card ${idx} already partitioned — left as found (not restored by this case)" ;;
-    Disabled)
-      if set_mig_mode "$idx" 1; then
-        TOGGLED="${TOGGLED}${idx} "
-      else
-        record FAIL "mixed card population established" "card ${idx}: the partitioning mode did not converge to Enabled (a pending GPU reset, a busy card, or a loaded nvidia_drm blocks it) — drain the card and retry"
-        part_results "Mixed node: a partition lands on a partitioned card, a logical slice on a whole one"
-        exit 1
-      fi ;;
-    *)
-      record FAIL "mixed card population established" "card ${idx} reports no partitioning mode ('${cur:-<none>}') — MIG_MIXED_INDEXES names a card that cannot be partitioned"
-      part_results "Mixed node: a partition lands on a partitioned card, a logical slice on a whole one"
-      exit 1 ;;
-  esac
+command -v python3 >/dev/null 2>&1 || { echo "[case-24] python3 is not on the runner; NOTHING WAS VERIFIED"; exit 2; }
+# Workers are the nodes without the control-plane role — the shape the suite's kind clusters
+# provision (a control-plane plus worker nodes); on a single-node kind cluster this exits 2.
+read -r -a WORKERS <<<"$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{.items[*].metadata.name}')"
+[ "${#WORKERS[@]}" -ge 1 ] || { echo "[case-24] needs one schedulable worker, found none; NOTHING WAS VERIFIED"; exit 2; }
+NODE="${WORKERS[0]}"
+IT=$(kubectl get instancetypes.worker.gpustack.ai \
+  -o jsonpath='{.items[?(@.spec.acceleratable==false)].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep -m1 'gpustack-')
+[ -n "$IT" ] || { echo "[case-24] no general InstanceType (run case-1 first); NOTHING WAS VERIFIED"; exit 2; }
+kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+echo "[case-24] registry: in-cluster, reached by the node over its own loopback"
+kubectl -n "$NS" apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${P}-registry
+  labels: {e2e.gpustack.ai/case: "24", app: ${P}-registry}
+spec:
+  containers:
+    - name: registry
+      image: registry:2
+      ports: [{containerPort: 5000}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${P}-registry
+  labels: {e2e.gpustack.ai/case: "24"}
+spec:
+  selector: {app: ${P}-registry}
+  ports: [{port: 5000, targetPort: 5000}]
+EOF
+for _ in $(seq 1 60); do
+  [ "$(kubectl -n "$NS" get pod ${P}-registry -o jsonpath='{.status.phase}' 2>/dev/null)" = "Running" ] && { REG_UP=1; break; }
+  sleep 2
 done
-refresh_dm
-KEYS="$(wait_partition_keys)"
+[ "${REG_UP:-0}" = 1 ] || { echo "[case-24] the registry pod never reached Running; NOTHING WAS VERIFIED"; exit 2; }
 
-PARTSET="$(pad_set $(partitioned_cards))"
-PLAINSET="$(pad_set $(unpartitioned_cards))"
-NPART="$(echo "$PARTSET" | wc -w | tr -d '[:space:]')"
-NPLAIN="$(echo "$PLAINSET" | wc -w | tr -d '[:space:]')"
-echo "[case-24] partitioned cards (${NPART}):${PARTSET}"
-echo "[case-24] whole cards (${NPLAIN}):${PLAINSET}"
-if [ "${NPART:-0}" -lt 1 ] || [ "${NPLAIN:-0}" -lt 1 ]; then
-  part_skip \
-    "The node is not mixed after the toggle: ${NPART:-0} partitioned card(s), ${NPLAIN:-0} whole card(s)." \
-    "This case needs at least one of each on ONE node. Check the Device Manager re-detect and retry."
-fi
-record PASS "mixed card population established" "${NPART} partitioned card(s) + ${NPLAIN} whole card(s) on ${GPU_NODE}"
-
-read -r SMALL SMALL_CNT MID MID_CNT FULL FULL_CNT NCARD NTOT <<<"$(card_profiles)"
-echo "[case-24] discovered profiles: SMALL=${SMALL}(${SMALL_CNT}/card) MID=${MID}(${MID_CNT}/card) FULL=${FULL}(${FULL_CNT}/card)"
-MIDKEY="$(profile_key "$MID")"
-
-# ---------------------------------------------------------------------------------------------------
-# Both families are advertised at once — that is what makes the node mixed to the scheduler.
-# ---------------------------------------------------------------------------------------------------
-ptok="$(node_key "$PARTITIONED")"
-stok="$(node_key "$SLICED")"
-sunits="$(node_key "${SLICED}.units")"
-punits="$(node_key "${PARTITIONED}.units")"
-if [ -n "$MIDKEY" ] && [ -n "${ptok:-}" ] && [ "${ptok:-0}" != 0 ] && [ -n "${stok:-}" ] && [ "${stok:-0}" != 0 ]; then
-  record PASS "both families advertised on one node" "${PARTITIONED}=${ptok} (+${PARTITIONED}.units=${punits:-<absent>}, per-profile keys: ${KEYS:-<none>}), ${SLICED}=${stok} (+${SLICED}.units=${sunits:-<absent>})"
-else
-  record FAIL "both families advertised on one node" "${PARTITIONED}='${ptok:-<absent>}', ${SLICED}='${stok:-<absent>}', per-profile keys='${KEYS:-<none>}' — a mixed node must advertise a non-zero token pool for BOTH families"
-fi
-if [ -z "$MIDKEY" ]; then
-  record FAIL "partition profile key discovered" "no 4-memory-slice profile key advertised (MID='${MID:-<none>}') — cannot submit a partition request"
-  part_results "Mixed node: a partition lands on a partitioned card, a logical slice on a whole one"
-  exit 1
-fi
-
-# ---------------------------------------------------------------------------------------------------
-# The rounds. Each submits one request of each family AT THE SAME TIME and requires both to land on a
-# card of the right population. Repetition is the point: a single correct placement could be luck.
-# ---------------------------------------------------------------------------------------------------
-for r in $(seq 1 "$ROUNDS"); do
-  echo
-  echo "[case-24] === round ${r}/${ROUNDS}: one partition request + one logical-slice request ==="
-  PP="${PODPFX}-part-${r}"
-  LP="${PODPFX}-logical-${r}"
-  mkpod "$PP" "$(partition_reslines "$MIDKEY")"
-  mkpod "$LP" "$(sliced_reslines 20)"
-
-  prun=1; wait_running "$PP" || prun=0
-  lrun=1; wait_running "$LP" || lrun=0
-  pcards="$(wait_pod_cards "$PP")"
-  lcards="$(wait_pod_cards "$LP")"
-
-  # The partition request must be on a card that can host a partition.
-  if [ "$prun" = 1 ] && [ -n "$pcards" ]; then
-    bad=""
-    for c in $pcards; do in_set "$c" "$PARTSET" || bad="$c"; done
-    if [ -n "$bad" ]; then
-      record FAIL "round ${r}: partition lands on a partitioned card" "${PP} Running but attributed card ${bad}, which is NOT in the partitioned set${PARTSET}— a partition was placed on a card that cannot host one"
-    else
-      pprof="$(pod_profiles "$PP")"
-      record PASS "round ${r}: partition lands on a partitioned card" "${PP} Running on ${pcards} (profile recorded: ${pprof:-<none>}), inside the partitioned set"
-    fi
-  else
-    record FAIL "round ${r}: partition lands on a partitioned card" "${PP} running=${prun}, allocated card(s)='${pcards:-<none>}', held reason='$(held_reason "$PP")' — the partition request did not run on the mixed node"
-  fi
-
-  # The logical-slice request must be on a card that is NOT partitioned.
-  if [ "$lrun" = 1 ] && [ -n "$lcards" ]; then
-    bad=""
-    for c in $lcards; do in_set "$c" "$PLAINSET" || bad="$c"; done
-    if [ -n "$bad" ]; then
-      record FAIL "round ${r}: logical slice lands on a whole card" "${LP} Running but attributed card ${bad}, which is PARTITIONED — a logical slice was placed on a card that serves no logical slicing"
-    else
-      record PASS "round ${r}: logical slice lands on a whole card" "${LP} Running on ${lcards}, inside the whole-card set"
-    fi
-  else
-    record FAIL "round ${r}: logical slice lands on a whole card" "${LP} running=${lrun}, allocated card(s)='${lcards:-<none>}', held reason='$(held_reason "$LP")' — the logical request did not run on the mixed node"
-  fi
-
-  # The headline number: no terminal device-plugin admission failure, in either family. A Pod whose
-  # events cannot be read is counted as unread rather than as zero — the difference between "it did
-  # not happen" and "we could not tell" is the whole value of this check.
-  for p in "$PP" "$LP"; do
-    if ! n="$(pod_unexpected_admission "$p")"; then
-      UAE_UNREAD=$((UAE_UNREAD + 1))
-      continue
-    fi
-    [ -n "$n" ] && UAE_TOTAL=$((UAE_TOTAL + n))
-  done
-
-  delpods "$PP" "$LP"
-  wait_card_idle || echo "[case-24]   warning: a live instance is still present entering the next round"
+cat > "$SCRATCH/forward.py" <<'PY'
+import socket, threading, sys
+def pipe(a, b):
+    try:
+        while True:
+            d = a.recv(65536)
+            if not d: break
+            b.sendall(d)
+    except OSError: pass
+    finally:
+        try: a.close(); b.close()
+        except OSError: pass
+srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(("127.0.0.1", 35000)); srv.listen(64)
+while True:
+    c, _ = srv.accept()
+    up = socket.create_connection((sys.argv[1], 5000))
+    threading.Thread(target=pipe, args=(c, up), daemon=True).start()
+    threading.Thread(target=pipe, args=(up, c), daemon=True).start()
+PY
+kubectl -n "$NS" apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${P}-forward
+  labels: {e2e.gpustack.ai/case: "24"}
+data:
+  forward.py: |
+$(sed 's/^/    /' "$SCRATCH/forward.py")
+EOF
+REGIP="$(kubectl -n "$NS" get svc ${P}-registry -o jsonpath='{.spec.clusterIP}')"
+kubectl -n "$NS" apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${P}-forward
+  labels: {e2e.gpustack.ai/case: "24", app: ${P}-forward}
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  nodeName: $NODE
+  tolerations: [{operator: Exists}]
+  containers:
+    - name: forward
+      image: python:3.12-slim
+      command: ["python", "/forward.py", "$REGIP"]
+      volumeMounts: [{name: f, mountPath: /forward.py, subPath: forward.py}]
+  volumes:
+    - name: f
+      configMap: {name: ${P}-forward}
+EOF
+for _ in $(seq 1 60); do
+  [ "$(kubectl -n "$NS" get pod ${P}-forward -o jsonpath='{.status.phase}' 2>/dev/null)" = "Running" ] && { FWD_UP=1; break; }
+  sleep 2
 done
+[ "${FWD_UP:-0}" = 1 ] || { echo "[case-24] the forwarder pod never reached Running; NOTHING WAS VERIFIED"; exit 2; }
 
-if [ "$UAE_UNREAD" != 0 ]; then
-  record FAIL "zero UnexpectedAdmissionError across all rounds" "${UAE_TOTAL} event(s) counted, but ${UAE_UNREAD} Pod('s) events could not be read at all — this check is UNVERIFIED, which is not the same as passed"
-elif [ "$UAE_TOTAL" = 0 ]; then
-  record PASS "zero UnexpectedAdmissionError across all rounds" "${ROUNDS} round(s) × 2 Pods, 0 UnexpectedAdmissionError events"
+echo "[case-24] fixture: generate the marker image and push it"
+printf 'gpustack e2e image-source fixture, case 24\n' > "$SCRATCH/marker.txt"
+EXPECT="$(shasum -a 256 "$SCRATCH/marker.txt" | awk '{print $1}')"
+# The port-forward is long-running, so it passes --request-timeout=0 explicitly: the kubectl shim
+# would otherwise bound it at 30s and sever the push mid-flight. The local address is chosen with
+# --address — docker resolves `localhost` to ::1 first, where nothing listens, and the IPv6
+# connection times out instead of refusing.
+kubectl -n "$NS" port-forward --request-timeout=0 --address 127.0.0.1 svc/${P}-registry "${PUSH_PORT}:5000" >"$SCRATCH/pf.log" 2>&1 &
+PF_PID=$!
+PF_UP=0
+for _ in $(seq 1 30); do
+  if curl -sf "http://127.0.0.1:${PUSH_PORT}/v2/" >/dev/null 2>&1; then PF_UP=1; break; fi
+  sleep 1
+done
+[ "$PF_UP" = 1 ] || { echo "[case-24] the registry port-forward never came up; NOTHING WAS VERIFIED"; cat "$SCRATCH/pf.log"; exit 2; }
+curl -sfi -X POST "http://127.0.0.1:${PUSH_PORT}/v2/${P}-fixture/blobs/uploads/" | head -3
+# The fixture is generated and pushed in pure python through the port-forward: a docker push would
+# run in the Docker Desktop daemon's VM, whose 127.0.0.1 is not the runner's. One gzip layer, one
+# config, one manifest, each addressed by its own sha256; the manifest digest is what the artifact
+# pins. Architecture matches the node's, so the platform check on pull is exact.
+ARCH="$(kubectl get node "$NODE" -o jsonpath='{.status.nodeInfo.architecture}')"
+DIGEST="$(python3 - "$SCRATCH/marker.txt" "127.0.0.1:${PUSH_PORT}" "$ARCH" <<'PY'
+import gzip, hashlib, io, json, sys, tarfile, urllib.request
+
+# A macOS runner's urllib reads the system proxy settings, which cannot reach the runner's own
+# loopback; the registry is loopback-only, so no proxy is ever wanted here.
+urllib.request.install_opener(urllib.request.build_opener(urllib.request.ProxyHandler({})))
+
+marker_path, registry, arch = sys.argv[1], sys.argv[2], sys.argv[3]
+marker = open(marker_path, "rb").read()
+
+buf = io.BytesIO()
+with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tf:
+    info = tarfile.TarInfo("marker.txt")
+    info.size, info.mtime, info.uid, info.gid, info.mode = len(marker), 0, 0, 0, 0o644
+    tf.addfile(info, io.BytesIO(marker))
+uncompressed = buf.getvalue()
+compressed = gzip.compress(uncompressed, mtime=0)
+diff_id = "sha256:" + hashlib.sha256(uncompressed).hexdigest()
+layer_digest = "sha256:" + hashlib.sha256(compressed).hexdigest()
+
+config = json.dumps({
+    "architecture": arch, "os": "linux",
+    "config": {},
+    "rootfs": {"type": "layers", "diff_ids": [diff_id]},
+}).encode()
+config_digest = "sha256:" + hashlib.sha256(config).hexdigest()
+
+manifest = json.dumps({
+    "schemaVersion": 2,
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "config": {"mediaType": "application/vnd.oci.image.config.v1+json", "size": len(config), "digest": config_digest},
+    "layers": [{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "size": len(compressed), "digest": layer_digest}],
+}).encode()
+manifest_digest = "sha256:" + hashlib.sha256(manifest).hexdigest()
+repo = "c24-fixture"
+
+def put_blob(blob, digest):
+    req = urllib.request.Request(f"http://{registry}/v2/{repo}/blobs/uploads/", method="POST")
+    with urllib.request.urlopen(req) as r:
+        location = r.headers["Location"]
+    # registry:2 echoes the Host header, so the Location can already be absolute.
+    if not location.startswith("http"):
+        location = f"http://{registry}{location}"
+    sep = "&" if "?" in location else "?"
+    put = urllib.request.Request(f"{location}{sep}digest={digest}", data=blob, method="PUT",
+                                 headers={"Content-Type": "application/octet-stream"})
+    urllib.request.urlopen(put)
+
+put_blob(config, config_digest)
+put_blob(compressed, layer_digest)
+req = urllib.request.Request(f"http://{registry}/v2/{repo}/manifests/v1", data=manifest, method="PUT",
+                             headers={"Content-Type": "application/vnd.oci.image.manifest.v1+json"})
+urllib.request.urlopen(req)
+print(manifest_digest)
+PY
+)"
+kill "$PF_PID" 2>/dev/null; PF_PID=""
+[ -n "$DIGEST" ] || { echo "[case-24] could not pin the fixture digest; NOTHING WAS VERIFIED"; exit 2; }
+REFERENCE="localhost:${REG_PORT}/${P}-fixture@${DIGEST}"
+echo "[case-24] fixture digest: $DIGEST (node pulls localhost:${REG_PORT} over the loopback forwarder)"
+
+echo "[case-24] admission: a tag-only reference is refused"
+MSG="$(kubectl -n "$NS" create --dry-run=server -f - 2>&1 >/dev/null <<EOF
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelArtifact
+metadata: {name: ${P}-tagged, namespace: $NS}
+spec:
+  source: {image: {reference: "localhost:${REG_PORT}/${P}-fixture:v1"}}
+EOF
+)"
+if printf '%s' "$MSG" | grep -q "must pin the image to its digest"; then
+  record PASS "tag-refused" "the refusal names the digest contract"
 else
-  record FAIL "zero UnexpectedAdmissionError across all rounds" "${UAE_TOTAL} UnexpectedAdmissionError event(s) over ${ROUNDS} round(s) — a request was offered a token from the wrong card population"
+  record FAIL "tag-refused" "a tag-only reference was not refused with the digest contract (got: ${MSG:0:200})"
 fi
 
-part_results "Mixed node: a partition lands on a partitioned card, a logical slice on a whole one"
-
-if [ "$FAILS" -ne 0 ]; then
-  echo
-  echo "FAILED ${FAILS} check(s). On a mixed node each family's token pool is advertised ONLY by the cards"
-  echo "that can serve it, and the partition family's Allocate chooses the card itself — so a partition can"
-  echo "never be placed on a whole card, nor a logical slice on a partitioned one. Diagnose:"
-  echo "  kubectl get devices ${GPU_NODE} -o yaml   # per-card physicalSliced/logicalSliced capability"
-  echo "  kubectl get node ${GPU_NODE} -o json | jq '.status.allocatable | with_entries(select(.key|test(\"sliced|partitioned\")))'"
-  echo "  kubectl -n default get pod <pod> -o jsonpath='{.metadata.annotations.${ANNO}}'"
-  echo "  kubectl -n ${NS} logs ds/${DM_DS} --tail=200"
-  exit 1
+echo "[case-24] artifact: the image source resolves claim-shaped"
+kubectl -n "$NS" apply -f - >/dev/null <<EOF
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelArtifact
+metadata: {name: ${P}-weights, namespace: $NS, labels: {e2e.gpustack.ai/case: "24"}}
+spec:
+  source: {image: {reference: "$REFERENCE"}}
+EOF
+RESOLVED=""
+for _ in $(seq 1 12); do
+  RESOLVED="$(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai ${P}-weights \
+    -o jsonpath="{.status.conditions[?(@.type=='Resolved')].status}" 2>/dev/null)"
+  [ "$RESOLVED" = "True" ] && break
+  sleep 5
+done
+if [ "$RESOLVED" = "True" ]; then
+  record PASS "resolved" "the image artifact resolved on its first pass"
+else
+  record FAIL "resolved" "the image artifact never reached Resolved=True"
 fi
-echo "CASE 24 PASS"
+DIGEST_ECHO="$(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai ${P}-weights -o jsonpath='{.status.resolved.manifestDigest}' 2>/dev/null)"
+REVISION_ECHO="$(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai ${P}-weights -o jsonpath='{.status.resolved.revision}' 2>/dev/null)"
+if [ -z "$DIGEST_ECHO" ] && [ -z "$REVISION_ECHO" ]; then
+  record PASS "claim-shaped" "resolved carries neither a manifest digest nor a revision"
+else
+  record FAIL "claim-shaped" "resolved echoes digest='$DIGEST_ECHO' revision='$REVISION_ECHO', want both absent"
+fi
+NODES_ECHO="$(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai ${P}-weights -o jsonpath='{.status.nodes}' 2>/dev/null)"
+if [ -z "$NODES_ECHO" ]; then
+  record PASS "no-nodes" "status.nodes never appeared: the node cache plays no part"
+else
+  record FAIL "no-nodes" "status.nodes appeared ($NODES_ECHO)"
+fi
+
+echo "[case-24] instance: the operator renders the image volume and the pod reads the weights"
+kubectl -n "$NS" apply -f - >/dev/null <<EOF
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: Instance
+metadata: {name: ${P}-inst, namespace: $NS, labels: {e2e.gpustack.ai/case: "24"}}
+spec:
+  type: $IT
+  nodeName: $NODE
+  image: busybox:1.36
+  command: ["sleep", "86400"]
+  volume: {ephemeral: {capacity: 1Gi}}
+  additionalVolumes:
+    - mountPath: /weights
+      model: {artifactRef: {name: ${P}-weights}}
+EOF
+POD="${P}-inst"
+for _ in $(seq 1 60); do
+  [ "$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Running" ] && break
+  sleep 5
+done
+if [ -z "$POD" ]; then
+  record FAIL "mount" "no Instance pod reached Running; the weights never mounted"
+else
+  GOT="$(kubectl -n "$NS" exec "$POD" -- sh -c "sha256sum /weights/marker.txt" 2>/dev/null | awk '{print $1}')"
+  if [ "$GOT" = "$EXPECT" ]; then
+    record PASS "mount" "pod $POD reads the image's marker file with the fixture's sha256"
+  else
+    record FAIL "mount" "the marker sha256 read back '$GOT', want $EXPECT"
+  fi
+  MOUNT_RO="$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.spec.containers[0].volumeMounts[?(@.mountPath=="/weights")].readOnly}' 2>/dev/null)"
+  VOL_IMAGE="$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.spec.volumes[*].image.reference}' 2>/dev/null)"
+  if [ "$MOUNT_RO" = "true" ] && [ "$VOL_IMAGE" = "$REFERENCE" ]; then
+    record PASS "volume-shape" "the pod's weights are one image volume, read-only, the pinned reference"
+  else
+    record FAIL "volume-shape" "volumeMount readOnly='$MOUNT_RO', volume image reference='$VOL_IMAGE'"
+  fi
+fi
+
+echo "[case-24] prefetch: an image artifact is refused"
+if kubectl -n "$NS" apply -f - >/dev/null 2>&1 <<EOF
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelPrefetch
+metadata: {name: ${P}-warm, namespace: $NS}
+spec:
+  artifactRef: {name: ${P}-weights}
+  bindingRef: {name: nonexistent}
+EOF
+then
+  record FAIL "prefetch-refused" "a ModelPrefetch naming an image artifact was admitted"
+else
+  record PASS "prefetch-refused" "the prefetch was refused: nothing to warm"
+fi
+
+echo "[case-24] rows"
+print_rows
+[ "$FAILS" -eq 0 ] || exit 1

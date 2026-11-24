@@ -1,561 +1,1130 @@
 #!/usr/bin/env bash
 #
-# CASE 35 — Ascend logical-slice placement: claims pack, spill only on a misfit, and never cross into an exclusive card   (MUTATING, self-recovering; AUTO-SKIPS without >=3 logically sliceable ascend cards)
+# CASE 35 — Live ModelDeploymentScaler active scaling under real load: proportional single-role
+#           scaling + disaggregated P/D TokenThroughput capacityPrior whole-unit scaling
+#           (1P:2D -> 2P:4D -> 1P:2D)
+#           (MUTATING, self-recovering; each phase auto-skips when its inputs/hardware are absent)
 #
-#   case-35.sh <NS>
+#   case-35.sh <NS> [MD_NAME] [ROLE_NAME]
 #
-# Prerequisites: nodes=1; gpu=ascend; cluster=real; inputs=E2E_SLICE_IMAGE
-# Goal:        ASSERTS the per-card placement contract on Ascend, over sliced, exclusive and mixed
-#              claims. Two properties are asserted SEPARATELY for every sliced claim, because they
-#              fail for different reasons and one must not mask the other:
-#                (1) THE DEFECT — when some card is already serving slices AND still has room for the
-#                    claim, the claim must land on one of those cards. Opening a fresh card instead
-#                    strands the node: many part-used cards, none able to host one large claim.
-#                (2) THE POLICY — among every card that fits, the claim must take the FULLEST one
-#                    (least remaining), so occupancy coalesces from the top down.
-#              Placement is decided by the device plugin's GetPreferredAllocation hint, which kubelet
-#              may only honour if every device id in it is one kubelet actually offered. A hint
-#              kubelet cannot parse is discarded silently and every card choice degrades to arbitrary,
-#              which is what this case is here to catch — on the vendor where it was first seen.
-#
-#              Expectations are COMPUTED from the ledger immediately before each claim, never
-#              hardcoded, so the case is valid on a pool that already carries unrelated workloads.
-#              That is deliberate: an accelerator cluster in use rarely offers a pristine pool, and a
-#              case that demands one is a case that never runs. When a step's precondition is absent
-#              (nothing in-use fits, so (1) cannot discriminate) it records SKIP, never a vacuous PASS.
-# Environment: Needs REAL Ascend hardware with >=3 LOGICALLY SLICEABLE, HEALTHY cards in ONE accelerator
-#              group on one node — a card in a hardware partitioning mode serves no logical slice and
-#              does not count, and an unhealthy card's tokens are never offered to the kubelet.
-#              AUTO-SKIPS (exit 0) on any of those. It additionally needs one card FREE at start, to
-#              read a whole card's unit budget back; missing that it FAILS SETUP (exit 1) rather than
-#              skipping, because every claim size would otherwise be computed against a zero. A
-#              Devices query that errors also fails setup — "no ascend hardware" must not be
-#              indistinguishable from "the query failed". Ascend-only: the runtime-confinement
-#              cross-check reads the visible-devices variable the runtime injected, and each vendor
-#              injects its own name. The placement assertions themselves read the allocation the
-#              plugin recorded on the Pod, which is vendor-neutral — a sibling case for another vendor
-#              needs only that variable's name.
-#
-#              The claim carrier must ship the Ascend userspace runtime (a CANN image); a bare base
-#              image cannot run a slice at all — see the IMAGE assignment. Override with
-#              E2E_SLICE_IMAGE=<ref> for another Ascend generation or a registry mirror. It is a large
-#              image, so pre-pull it on the node if the first step is slow.
-#
-#              Presumes the node's kubelet runs topologyManagerPolicy=none, the suite's baseline.
-#              GetPreferredAllocation is advisory by API contract, and under a restrictive policy
-#              kubelet picks the NUMA-aligned set BEFORE consulting the plugin, bypassing the hint.
-# Inputs:      All real, nothing mocked. Six raw Pods pinned to the target node's entrance LocalQueue,
-#              submitted in one sequence that builds the state each later step needs:
-#                s1 50%  — establishes an in-use card.
-#                s2 30%  — fits beside s1, so it must join s1's card.
-#                s3 50%  — s1's card can no longer hold it, so it must go elsewhere.
-#                s4 10%  — two in-use cards now differ in how full they are; the fuller one must win.
-#                e1 1 whole card (exclusive) — must come from outside the sliced population.
-#                s5 10%  — packing must still hold while a card is held exclusively, and must not
-#                          touch it.
-# Expected:    - every sliced claim lands on an in-use card whenever one has room (the defect guard);
-#              - every sliced claim lands on the fullest card that fits (the policy);
-#              - the runtime's visible-devices agrees with the card the plugin recorded, every time:
-#                it equals that card's physicalIndexes[1] in a 950-family group, else physicalIndexes[0]
-#                (the number the vendor runtime resolves a card by, not the ledger index);
-#              - the exclusive claim lands outside the sliced population, is recorded exclusive, and
-#                lowers the pool's Accelerator remaining;
-#              - the sliced claim placed alongside it does not land on the exclusively held card;
-#              - no card is over-committed, and the ledger's per-card usage equals the sum the Pods
-#                placed there record for themselves.
-# Cleanup:     Trap deletes the six test Pods and waits for the pool's SL remaining to return to the
-#              value captured at setup, so the next case does not start on a pool this one still holds.
+# Prerequisites: nodes=1; gpu=nvidia|amd|ascend; cluster=real; inputs=E2E_C35_ACCELERATOR_TYPE,E2E_C35_ARTIFACT,E2E_C35_ENGINE_IMAGE,E2E_C35_MD,E2E_C35_MODEL,E2E_C35_NS,E2E_C35_PD_ENGINE_IMAGE,E2E_C35_PD_MODEL,E2E_C35_PHASES,E2E_C35_PROBE_IMAGE,E2E_C35_PROBE_URL,E2E_C35_READY_BOUND,E2E_C35_RETIRE_BOUND,E2E_C35_ROLE,E2E_C35_SCALE_BOUND,E2E_C35_SKIP_PHASE2,E2E_C35_STEP_BOUND,E2E_C35_WEIGHTS
+# Goal:        Verify ModelDeploymentScaler active scaling under real inference traffic across
+#              two independent phases:
+#              - Phase 1 (Proportional single-role scaling): an Active Proportional scaler
+#                (TotalTokensPerSecond) reads live Prometheus counters from a serving
+#                ModelDeployment, publishes runningRequests > 0, scales replicas 1 -> 2 under
+#                heavy load, brings the second Pod Ready with its own request counter growing,
+#                records status.lastCommit.vector, scales down 2 -> 1 when narrowed while
+#                recording status.retirement.state, and answers every phase with 0 failed
+#                requests.
+#              - Phase 2 (Disaggregated P/D TokenThroughput + capacityPrior whole-unit scaling):
+#                an Active TokenThroughput scaler with a calibrated 1P:2D capacityPrior catalog
+#                and fixed 1:2 ratio resolves CapacityPriorsReady=True, Bound=True, Active=True,
+#                atomically scales a live routed vLLM P/D ModelDeployment 1P:2D -> 2P:4D under
+#                16-worker burst load while holding the 1:2 ratio invariant, atomically retires
+#                back to 1P:2D when burst stops, with 0 failed canary/burst requests and 0
+#                container restarts across all observed Pods.
+# Environment: Real accelerated cluster.
+#              - Phase 1 uses existing MD_NAME / E2E_C35_MD or builds a single-role vLLM target
+#                from E2E_C35_ENGINE_IMAGE + E2E_C35_WEIGHTS; auto-skips if neither is provided.
+#              - Phase 2 requires >= 6 allocatable GPUs on a usable AcceleratorType (NVIDIA for
+#                default CUDA image) and a pre-warmed ModelArtifact (E2E_C35_ARTIFACT, default
+#                qwen3-8b) with resolved revision; auto-skips if prerequisites are absent.
+# Inputs:      MOCKED: nothing. REAL: live engine Prometheus endpoints, scaler sampler/planner,
+#              retirement protocol, llm-d-router, and in-cluster curl probe Pods.
+# Expected:    All Phase 1 proportional scale-up/scale-down/retirement/zero-error assertions and
+#              all Phase 2 capacityPrior/atomic-1:2/zero-error/zero-restart assertions pass (or
+#              skip cleanly with explicit reason when hardware/inputs are absent).
+# Cleanup:     EXIT/INT/TERM trap deletes all scalers, probe Pods, ConfigMaps, and ModelDeployments
+#              created by this run (never deleting a caller-supplied Phase 1 target).
 set -uo pipefail
 
-# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
-# on transport alone, and a check that takes such a failure for an answer reports a verdict
-# about the network rather than about the operator.
+CASE_ID=35
+export CASE_ID
+CASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
-
+. "${CASE_DIR}/_rows-lib.sh"
 # shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_pool-lib.sh"
+. "${CASE_DIR}/_serving-lib.sh"
+# shellcheck source=/dev/null
+. "${CASE_DIR}/_md-lib.sh"
 
-NS="${1:?usage: case-35.sh <NS>}"
-# Ascend's resource family. Hardcoded rather than derived: the case is gated on the ascend
-# manufacturer below, and deriving the family here would duplicate a mapping the allocators own.
-BASE=huawei.com/npu
-SLICED=${BASE}.sliced
-CORESPCT=${BASE}.sliced.cores-percentage
-MEMPCT=${BASE}.sliced.memory-percentage
-PFX=gpustack-e2e-ascend-pack
-# The claim carrier. NOT a bare base image: allocating an Ascend logical slice installs an
-# /etc/ld.so.preload that pulls in the Ascend userspace runtime (libdcmi.so, and libc_sec.so behind
-# it), and in an image that does not ship those every process in the container — `sleep` included —
-# dies with exit 127 (`error while loading shared libraries: libc_sec.so`). The vendor runtimeClass
-# does NOT rescue it; the libraries have to be in the image. So this defaults to a CANN image, and is
-# overridable for a different Ascend generation or a registry mirror.
-IMAGE="${E2E_SLICE_IMAGE:-quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11}"
-
-# --- Skip gate: a node with >=3 LOGICALLY SLICEABLE, HEALTHY ascend cards in ONE accelerator group.
-#     The per-card slicing CAPABILITY lives in Devices.spec (the runtime ledger in .status carries no
-#     capability), and only a healthy card reporting a logical slice count belongs to the population the
-#     kubelet is offered tokens from — an unhealthy card would otherwise be counted toward the gate and
-#     could be picked as the expected placement below, failing the case for a correct allocation.
-#
-#     Read the ledger ONCE and fail loudly if that read errors: silencing it turns an RBAC or
-#     connectivity failure into "no ascend hardware", i.e. a clean exit 0, which is the worst outcome
-#     for a regression guard. `pipefail` does not help here — the failure would reach an outer `read`
-#     as an empty here-string, which succeeds. ---
-if ! DEVICES_JSON=$(kubectl get devices -o json 2>&1); then
-  echo "== CASE 35 — FAILED (setup) =="
-  echo "Reading the Devices ledger failed, so this case cannot tell 'no ascend hardware' from 'the query"
-  echo "did not answer'. It refuses to report a skip on either:"
-  printf '%s\n' "$DEVICES_JSON" | head -5
-  exit 1
+NS="${E2E_C35_NS:-${1:-}}"
+if [ -z "$NS" ]; then
+  echo "usage: case-35.sh <NS> [MD_NAME] [ROLE_NAME]" >&2
+  exit 2
 fi
-read -r SLICE_NODE NCARDS GROUPID NGROUPS <<<"$(printf '%s' "$DEVICES_JSON" | python3 -c "
-import json,sys
-best=('-',0,'-',0)
-for d in json.load(sys.stdin).get('items',[]):
-    groups=[]
-    for g in d.get('spec',{}).get('groups',[]):
-        if g.get('manufacturer')!='ascend': continue
-        n=sum(1 for a in g.get('accelerators',[])
-              if (a.get('status',{}).get('logicalSliced',{}).get('count',0) or 0)>0
-              and not a.get('status',{}).get('unhealthy'))
-        if n>0: groups.append((n, g.get('id','')))
-    if groups:
-        n,gid=max(groups)
-        if n>best[1]: best=(d['metadata']['name'], n, gid, len(groups))
-print(best[0], best[1], best[2], best[3])
-")"
-if [ "${SLICE_NODE:--}" = "-" ] || [ "${NCARDS:-0}" -lt 3 ]; then
-  echo "== CASE 35 — SKIPPED =="
-  echo "No node reports >=3 healthy, logically sliceable ascend cards in one group (best='${SLICE_NODE:-none}',"
-  echo "cards=${NCARDS:-0}). This case needs three so that two can carry slices while a third is taken"
-  echo "whole, which is what makes the mixed sliced+exclusive step meaningful. Run it on such a node."
-  exit 0
-fi
-if [ "${NGROUPS:-1}" -gt 1 ]; then
-  echo "== CASE 35 — SKIPPED =="
-  echo "${SLICE_NODE} carries sliceable ascend cards in ${NGROUPS} accelerator groups. The plugin computes"
-  echo "'the fullest card that fits' WITHIN a group, walking the groups in spec order, so on a multi-group"
-  echo "node the expected placement this case derives from one group would not be the choice the"
-  echo "implementation makes — it would fail a correct allocation. Run it on a single-group node."
-  exit 0
-fi
-echo "[case-35] target: ${SLICE_NODE} with ${NCARDS} healthy logically sliceable ascend card(s) in group '${GROUPID}'"
 
-# The group's cards in SPEC order, and the unhealthy ones to exclude. The plugin orders candidates by
-# their position in Devices.spec (reading each card's remaining from .status by id), so the tie-break
-# below must be that position — a numeric card index only coincides with it when the spec list happens
-# to be index-ordered.
-read -r SPEC_ORDER UNHEALTHY_IDX <<<"$(printf '%s' "$DEVICES_JSON" | NODE="$SLICE_NODE" GID="$GROUPID" python3 -c "
-import json,os,sys
-node=os.environ['NODE']; gid=os.environ['GID']
-order=[]; bad=[]
-for d in json.load(sys.stdin).get('items',[]):
-    if d['metadata']['name']!=node: continue
-    for g in d.get('spec',{}).get('groups',[]):
-        if g.get('id')!=gid: continue
-        for a in g.get('accelerators',[]):
-            order.append(str(a.get('index')))
-            if a.get('status',{}).get('unhealthy'): bad.append(str(a.get('index')))
-print(','.join(order) or '-', ','.join(bad) or '-')
-")"
-echo "[case-35] group card order (spec): ${SPEC_ORDER}; unhealthy excluded: ${UNHEALTHY_IDX}"
+SCALER_CRD="modeldeploymentscalers.worker.gpustack.ai"
+MD_CRD="modeldeployments.worker.gpustack.ai"
+SCALER_RES="modeldeploymentscalers.v1alpha1.worker.gpustack.ai"
+MD_RES="modeldeployments.v1alpha1.worker.gpustack.ai"
 
-# The accelerated InstanceType whose POOL this node belongs to, and its entrance LocalQueue. This must
-# match the target node, or the queue would route the claim to a different pool's nodes. Matched on the
-# pool's identity tuple — accelerator group plus os/arch — see the index's note on pool lookup.
-read -r IT LQ <<<"$(discover_node_pool "$SLICE_NODE" "$GROUPID" --sliceable name entrance)"
-[ -n "$IT" ] && [ -n "$LQ" ] || { echo "no logically sliceable ascend InstanceType with an entrance LocalQueue backs ${SLICE_NODE} in group '${GROUPID}'"; exit 1; }
+# Phase 1 config
+P1_MD="${E2E_C35_MD:-${2:-}}"
+P1_ROLE="${3:-${E2E_C35_ROLE:-server}}"
+P1_SCALER="e2e-c35-p1-scaler"
+P1_PROBE="e2e-c35-p1-probe"
+P1_ENGINE_IMAGE="${E2E_C35_ENGINE_IMAGE:-}"
+P1_WEIGHTS="${E2E_C35_WEIGHTS:-}"
+P1_MODEL="${E2E_C35_MODEL:-}"
+PROBE_IMAGE="${E2E_C35_PROBE_IMAGE:-docker.io/curlimages/curl:8.10.1}"
+P1_PHASES="${E2E_C35_PHASES:-base:2:30 up:24:90 two:24:90 down:2:120 one:2:60}"
+READY_BOUND="${E2E_C35_READY_BOUND:-900}"
+STEP_BOUND="${E2E_C35_STEP_BOUND:-300}"
+RETIRE_BOUND="${E2E_C35_RETIRE_BOUND:-480}"
 
-# The logical-slicing runtime needs the vendor runtimeClass to mount its driver-lib dependencies — a
-# bare image without it fails to start. Identity map from the pool manufacturer; guard on existence.
-RUNTIMECLASS=""
-kubectl get runtimeclass.node.k8s.io ascend >/dev/null 2>&1 && RUNTIMECLASS=ascend
-RTC_LINE=""; [ -n "$RUNTIMECLASS" ] && RTC_LINE="runtimeClassName: ${RUNTIMECLASS}"
-echo "[case-35] pool ${IT} via LocalQueue ${LQ}; slice pods runtimeClass: ${RUNTIMECLASS:-<none>}"
+# Phase 2 config
+P2_ARTIFACT="${E2E_C35_ARTIFACT:-qwen3-8b}"
+P2_MODEL="${E2E_C35_PD_MODEL:-Qwen/Qwen3-8B}"
+P2_ENGINE_IMAGE="${E2E_C35_PD_ENGINE_IMAGE:-gpustack/runner:cuda13.0-vllm0.32.0}"
+P2_READY_BOUND="${E2E_C35_READY_BOUND:-600}"
+P2_SCALE_BOUND="${E2E_C35_SCALE_BOUND:-480}"
+P2_PREFIX="e2e-c35-$$"
+P2_DEPLOY="${P2_PREFIX}-pd"
+P2_SCALER="${P2_PREFIX}-scaler"
+P2_CM="${P2_PREFIX}-priors"
+P2_PROBE="${P2_PREFIX}-probe"
 
-# ledger_json — the target node's per-card runtime ledger for this accelerator group, unhealthy cards
-# excluded, each card carrying its position in the SPEC list (the order the plugin's stable sort keeps
-# on a tie). A missing `remaining` means ZERO, not a whole card: the field is omitempty, so a fully
-# allocated card omits it — defaulting the other way reads a 100%-full card as untouched.
-ledger_json() {
-  kubectl get devices "$SLICE_NODE" -o json 2>/dev/null \
-    | GID="$GROUPID" SPEC_ORDER="$SPEC_ORDER" SKIP_IDX="$UNHEALTHY_IDX" python3 -c "
-import json,os,sys
-gid=os.environ.get('GID','')
-order=[x for x in os.environ.get('SPEC_ORDER','').split(',') if x and x!='-']
-skip={x for x in os.environ.get('SKIP_IDX','').split(',') if x and x!='-'}
-out=[]
-for g in json.load(sys.stdin).get('status',{}).get('groups',[]):
-    if gid and g.get('id')!=gid: continue
-    for a in g.get('accelerators',[]):
-        idx=str(a.get('index'))
-        if idx in skip: continue
-        out.append({'index':a.get('index'),
-                    'pos':order.index(idx) if idx in order else 1<<30,
-                    'mode':a.get('mode',0),
-                    'remaining':int(a.get('remaining') or 0)})
-print(json.dumps(out))
-"
-}
+P1_BUILT=""
+P2_CREATED_POD=""
+P2_CREATED_SCALER=""
+P2_CREATED_MD=""
+P2_CREATED_CM=""
+TMP_DIR="$(mktemp -d)"
+CLEANED=false
 
-# One whole card's unit budget, read from a FREE card (whose remaining is exactly that budget) rather
-# than assumed. Captured once, before this case dirties anything.
-MAX_UNITS=$(ledger_json | python3 -c "
-import json,sys
-free=[c['remaining'] for c in json.load(sys.stdin) if c['mode']==0]
-print(max(free) if free else 0)
-")
-if [ "${MAX_UNITS:-0}" -le 0 ]; then
-  echo "== CASE 35 — FAILED (setup) =="
-  echo "No free card on ${SLICE_NODE}, so one card's unit budget cannot be read back, and every claim"
-  echo "size below would be computed against a zero — making the fit assertions vacuous. Free a card"
-  echo "on this node (or wait for the ledger to settle) and re-run."
-  ledger_json
-  exit 1
-fi
-SL_BASE=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.acceleratorSliced.remaining}' 2>/dev/null)
-echo "[case-35] one card = ${MAX_UNITS} units; pool SL remaining at start = ${SL_BASE:-?}"
-
-restore() {
-  echo
-  echo "[case-35] cleanup: deleting test Pods"
-  local i
-  for i in 1 2 3 4 5 6; do
-    kubectl -n default delete pod "${PFX}-${i}" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true
-  done
-  # Wait for the pool to give back what this case took, so the next case does not misread the ledger.
-  local now
-  for _ in $(seq 1 20); do
-    now=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.acceleratorSliced.remaining}' 2>/dev/null)
-    [ -n "$now" ] && [ -n "${SL_BASE:-}" ] && [ "$now" = "$SL_BASE" ] && { echo "[case-35] pool SL remaining back to ${now}"; return 0; }
-    sleep 3
-  done
-  echo "[case-35] WARNING: pool SL remaining is '${now:-?}', expected '${SL_BASE:-?}' — the ledger has not settled back"
-}
-trap restore EXIT
-
-# verdict <cond-exit-code> <check> <object-on-pass> <object-on-fail>
-verdict() { [ "$1" -eq 0 ] && record PASS "$2" "$3" || record FAIL "$2" "$4"; }
-
-# plan_for <claim-units> -> "<fullestFitting|-> <inUseFittingCsv|->"
-#
-# The two expectations, computed from the ledger as it stands right now. A card can serve a logical
-# slice only from the logical population: free (may join it) or already sliced (has joined). A card
-# held exclusively, shared or partitioned is not a candidate at all, which is why the mixed step needs
-# no special case here. Ties go to the earlier SPEC position, not the lower card index — that is what
-# the implementation's stable sort preserves.
-plan_for() {
-  ledger_json | CLAIM="$1" python3 -c "
-import json,os,sys
-claim=int(os.environ['CLAIM'])
-cards=json.load(sys.stdin)
-cand=[c for c in cards if c['mode'] in (0,3) and c['remaining']>=claim]
-inuse=[c['index'] for c in cand if c['mode']==3]
-best=min(cand, key=lambda c:(c['remaining'], c['pos']))['index'] if cand else '-'
-print(best, ','.join(str(i) for i in inuse) or '-')
-"
-}
-
-# submit <index> <pct> — a sliced claim; "" pct means an exclusive whole-card claim.
-submit() {
-  local idx="$1" pct="$2" res
-  if [ -n "$pct" ]; then
-    res="{ ${SLICED}: \"1\", ${CORESPCT}: \"${pct}\", ${MEMPCT}: \"${pct}\" }"
-  else
-    res="{ ${BASE}: \"1\" }"
+cleanup_phase1() {
+  kubectl -n "$NS" delete "$SCALER_RES" "$P1_SCALER" --ignore-not-found --wait=true --timeout=120s >/dev/null 2>&1 || true
+  kubectl -n "$NS" delete pod "$P1_PROBE" --ignore-not-found --wait=true --timeout=60s >/dev/null 2>&1 || true
+  if [ -n "$P1_BUILT" ]; then
+    kubectl -n "$NS" delete "$MD_RES" "$P1_MD" --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1 || true
+    P1_BUILT=""
   fi
-  cat <<EOF | kubectl apply -f - >/dev/null
-apiVersion: v1
-kind: Pod
-metadata: { name: ${PFX}-${idx}, namespace: default, labels: { kueue.x-k8s.io/queue-name: ${LQ} } }
+}
+
+# shellcheck disable=SC2317 # Invoked by EXIT/INT/TERM trap.
+cleanup() {
+  if [ "$CLEANED" = true ]; then
+    return 0
+  fi
+  CLEANED=true
+  cleanup_phase1
+  if [ -n "$P2_CREATED_POD" ]; then
+    kubectl -n "$NS" delete pod "$P2_CREATED_POD" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  fi
+  if [ -n "$P2_CREATED_SCALER" ]; then
+    kubectl -n "$NS" delete "$SCALER_RES" "$P2_CREATED_SCALER" --ignore-not-found --wait=true --timeout=120s >/dev/null 2>&1 || true
+  fi
+  if [ -n "$P2_CREATED_MD" ]; then
+    kubectl -n "$NS" delete "$MD_RES" "$P2_CREATED_MD" --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1 || true
+  fi
+  if [ -n "$P2_CREATED_CM" ]; then
+    kubectl -n "$NS" delete configmap "$P2_CREATED_CM" --ignore-not-found >/dev/null 2>&1 || true
+  fi
+  rm -rf "$TMP_DIR"
+  return 0
+}
+trap cleanup EXIT INT TERM
+
+if ! kubectl get crd "$SCALER_CRD" >/dev/null 2>&1 || ! kubectl get crd "$MD_CRD" >/dev/null 2>&1; then
+  record SKIP "case-35 prerequisites" "missing ${SCALER_CRD} or ${MD_CRD}"
+  results
+  exit 0
+fi
+
+# ==============================================================================
+# PHASE 1: Proportional Active Scaling on Single-Role Live Target
+# ==============================================================================
+
+p1_target() {
+  kubectl -n "$NS" get "$MD_RES" "$P1_MD" -o json 2>/dev/null | jq -r "$@"
+}
+
+p1_scaler() {
+  kubectl -n "$NS" get "$SCALER_RES" "$P1_SCALER" -o json 2>/dev/null | jq -r "$@"
+}
+
+p1_running_requests() {
+  # shellcheck disable=SC2016 # jq variable
+  p1_scaler --arg r "$P1_ROLE" '[(.status.roles // [])[] | select(.name == $r) | .runningRequests] | .[0] // ""'
+}
+
+p1_committed_vector() {
+  # shellcheck disable=SC2016 # jq variable
+  p1_scaler --arg r "$P1_ROLE" '(.status.lastCommit.vector // {})[$r] // ""'
+}
+
+p1_role_replicas() {
+  # shellcheck disable=SC2016 # jq variable
+  p1_target --arg r "$P1_ROLE" '[(.spec.roles // [])[] | select(.name == $r) | .replicas] | .[0] // ""'
+}
+
+p1_ready_pods() {
+  kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${P1_MD},app.kubernetes.io/component=${P1_ROLE}" \
+    -o json 2>/dev/null \
+    | jq -r '.items[] | select(.metadata.deletionTimestamp == null and
+      any(.status.conditions[]?; .type == "Ready" and .status == "True")) | .metadata.name' | sort
+}
+
+p1_wait_ready_count() {
+  local wanted="$1" bound="$2" deadline ready total
+  deadline=$((SECONDS + bound))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    ready="$(p1_ready_pods | grep -c . || true)"
+    total="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${P1_MD},app.kubernetes.io/component=${P1_ROLE}" \
+      --no-headers 2>/dev/null | grep -c . || true)"
+    if [ "${ready:-0}" -eq "$wanted" ] && [ "${total:-0}" -eq "$wanted" ]; then
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+p1_counter_of() {
+  local ip port scheme
+  ip="$(kubectl -n "$NS" get pod "$1" -o jsonpath='{.status.podIP}' 2>/dev/null || true)"
+  port="$(kubectl -n "$NS" get pod "$1" -o jsonpath='{.metadata.annotations.prometheus\.io/port}' 2>/dev/null || true)"
+  scheme="$(kubectl -n "$NS" get pod "$1" -o jsonpath='{.metadata.annotations.prometheus\.io/scheme}' 2>/dev/null || true)"
+  serving_sum "$(kubectl -n "$NS" exec "$P1_PROBE" -- curl -fsS --max-time 10 \
+    "${scheme:-http}://${ip}:${port}/metrics" 2>/dev/null || true)" "$SP_SERVED" || echo 0
+}
+
+p1_phase_now() {
+  kubectl -n "$NS" exec "$P1_PROBE" -- sh -c 'cat /tmp/probe.log 2>/dev/null' 2>/dev/null \
+    | awk '/^start / { p = $2 } END { print p }'
+}
+
+p1_phase_result() {
+  kubectl -n "$NS" exec "$P1_PROBE" -- sh -c "grep '^done $1 ' /tmp/probe.log 2>/dev/null | tail -1" \
+    2>/dev/null | awk '{ print $3 " " $4 }'
+}
+
+p1_wait_phase() {
+  local name="$1" bound="$2" deadline
+  deadline=$((SECONDS + bound))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    [ "$(p1_phase_now)" = "$name" ] && return 0
+    sleep 2
+  done
+  return 1
+}
+
+p1_wait_phase_done() {
+  local name="$1" bound="$2" deadline
+  deadline=$((SECONDS + bound))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    [ -n "$(p1_phase_result "$name")" ] && return 0
+    sleep 2
+  done
+  return 1
+}
+
+p1_skip_rest() {
+  local reason="$1"
+  record SKIP "P1: scaler reads running requests of target" "$reason"
+  record SKIP "P1: target replica count rises under load" "$reason"
+  record SKIP "P1: second Pod becomes Ready" "$reason"
+  record SKIP "P1: new Pod request counter grows under load" "$reason"
+  record SKIP "P1: scaler records committed vector" "$reason"
+  record SKIP "P1: replica count falls when scaler is narrowed" "$reason"
+  record SKIP "P1: retirement states observed on target" "$reason"
+  record SKIP "P1: one Ready Pod left after retirement" "$reason"
+  record SKIP "P1: every phase answers requests and fails none" "$reason"
+}
+
+run_phase1() {
+  local env_reason="" it="" phase="" pods="" router="" endpoint="" probe_url=""
+  local probe_file phases_file phase_lines entry name rest conc dur copied script_bytes phase_bytes
+  local pods_before_load replicas running new_pod vendor engine counter_one counter_two committed
+  local narrowed states state ready_left phase_failures phase_detail phase_evidence result ok bad
+
+  if [ -z "$P1_MD" ]; then
+    P1_MD="e2e-c35-target"
+    if [ -z "$P1_ENGINE_IMAGE" ]; then
+      env_reason="neither MD_NAME/E2E_C35_MD nor E2E_C35_ENGINE_IMAGE is set"
+    elif [ -z "$P1_WEIGHTS" ]; then
+      env_reason="E2E_C35_WEIGHTS is unset for self-built Phase 1 target"
+    fi
+    if [ -z "$env_reason" ]; then
+      it="${E2E_C35_ACCELERATOR_TYPE:-${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-}}}"
+      if [ -z "$it" ]; then
+        it="$(kubectl get acceleratortypes.worker.gpustack.ai -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
+          2>/dev/null \
+          | while IFS='|' read -r at_name deleting inactive manufacturer; do
+            [ -n "$at_name" ] || continue
+            [ -z "$deleting" ] || continue
+            [ "$inactive" = true ] && continue
+            case "$manufacturer" in
+              ascend | nvidia | amd) echo "$at_name"; break ;;
+            esac
+          done)"
+      fi
+      [ -n "$it" ] || env_reason="no usable AcceleratorType reports ascend, nvidia, or amd"
+    fi
+    P1_MODEL="${P1_MODEL:-/models/Qwen2.5-0.5B-Instruct}"
+    if [ -z "$env_reason" ]; then
+      kubectl apply -f - >/dev/null 2>&1 <<EOF
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: ${P1_MD}
+  namespace: ${NS}
 spec:
-  schedulerName: default-scheduler
-  ${RTC_LINE}
-  restartPolicy: Never
-  nodeSelector: { kubernetes.io/hostname: ${SLICE_NODE} }
-  containers:
-    - name: main
-      image: ${IMAGE}
-      command: ["sleep", "86400"]
+  engine:
+    name: vLLM
+    image: ${P1_ENGINE_IMAGE}
+  model:
+    name: ${P1_MODEL}
+  roles:
+    - name: ${P1_ROLE}
+      kind: Server
+      replicas: 1
+      size: 1
+      acceleratorType: ${it}
+      image: ${P1_ENGINE_IMAGE}
+      imagePullPolicy: IfNotPresent
       resources:
-        limits:   ${res}
-        requests: ${res}
+        accelerator: "1"
+      additionalVolumes:
+        - hostPath:
+            path: ${P1_WEIGHTS}
+            type: Directory
+          mountPath: ${P1_MODEL}
+          readOnly: true
+      extraArgs:
+        - --max-num-seqs
+        - "64"
+        - --gpu-memory-utilization
+        - "0.90"
 EOF
-  for _ in $(seq 1 40); do
-    [ "$(kubectl -n default get pod "${PFX}-${idx}" -o jsonpath='{.status.phase}' 2>/dev/null)" = Running ] && return 0
-    sleep 3
-  done
-  # The Running gate matters beyond liveness: the plugin writes the allocation annotation during
-  # Allocate, BEFORE the container runs, so a container that dies still advertises a placement. Reading
-  # it back without this gate would report a confident card for a slice that never worked.
-  echo "[case-35] ${PFX}-${idx} never reached Running"
-  kubectl -n default get pod "${PFX}-${idx}" \
-    -o jsonpath='  exit={.status.containerStatuses[0].state.terminated.exitCode} reason={.status.containerStatuses[0].state.terminated.reason}{"\n"}' 2>/dev/null
-  kubectl -n default logs "${PFX}-${idx}" --tail=5 2>&1 | sed 's/^/  /' | head -6
-  echo "  exit 127 with a missing shared library means ${IMAGE} does not ship the Ascend userspace"
-  echo "  runtime — set E2E_SLICE_IMAGE to a CANN image (see the IMAGE assignment)."
-  kubectl -n default describe pod "${PFX}-${idx}" 2>/dev/null | tail -12
-  return 1
-}
-
-# placement_of <index> -> "<cardIndex> <tokenIndex> <allocatedUnits> <mode> <acceleratorId>", from the
-# allocation the plugin recorded on the Pod. This is the operator's own view of where the claim went.
-# The id comes last so a reader's final variable keeps it whole.
-placement_of() {
-  kubectl -n default get pod "${PFX}-$1" -o json 2>/dev/null | python3 -c "
-import json,sys
-ann=(json.load(sys.stdin)['metadata'].get('annotations') or {}).get('device.gpustack.ai/accelerator.allocated')
-if not ann: sys.exit(1)
-a=json.loads(ann).get('main') or {}
-ids=a.get('deviceIDs') or []
-tok=ids[0].rsplit(':',1)[-1] if ids else '-'
-modes={0:'free',1:'exclusive',2:'shared',3:'sliced',4:'partitioned'}
-for g in a.get('devices',{}).get('groups',[]):
-    for c in g.get('accelerators',[]):
-        print(c.get('index'), tok, c.get('allocated'), modes.get(c.get('mode'),'?'), c.get('id','')); sys.exit(0)
-sys.exit(1)
-"
-}
-
-# visible_of <index> -> the card the RUNTIME confined the container to.
-# Retries: a Pod reports Running slightly before its container is attachable, and the Ascend driver
-# writes a "DrvMngGetConsoleLogLevel failed" notice to STDOUT inside the container, so the value is
-# the last non-empty line rather than the whole capture.
-visible_of() {
-  local out
-  for _ in $(seq 1 10); do
-    out=$(kubectl -n default exec "${PFX}-$1" -c main -- printenv ASCEND_VISIBLE_DEVICES 2>/dev/null \
-          | tr -d '\r' | grep -v "DrvMng" | awk 'NF{last=$0} END{print last}')
-    [ -n "$out" ] && { echo "$out"; return 0; }
-    sleep 3
-  done
-  return 1
-}
-
-# visible_want_of <acceleratorId> -> the number ASCEND_VISIBLE_DEVICES must carry for that card: the
-# card's physicalIndexes[1] (the dcmi card number) when its group's family is "950", else
-# physicalIndexes[0] (the physical id). The ledger index is a detection counter and a different
-# number on real hosts. Empty when the card or the slot is missing.
-visible_want_of() {
-  kubectl get devices "$SLICE_NODE" -o json 2>/dev/null | AID="$1" python3 -c "
-import json,os,sys
-aid=os.environ['AID']
-for g in json.load(sys.stdin).get('spec',{}).get('groups',[]):
-    for a in g.get('accelerators',[]):
-        if a.get('id')==aid:
-            p=a.get('physicalIndexes') or []
-            slot=1 if g.get('family')=='950' else 0
-            if len(p)>slot: print(p[slot])
-            sys.exit(0)
-" 2>/dev/null
-}
-
-# step_sliced <index> <pct> <label> — submit a sliced claim and assert both placement properties.
-step_sliced() {
-  local idx="$1" pct="$2" label="$3"
-  local units=$((pct * MAX_UNITS / 100))
-  read -r want_best want_inuse <<<"$(plan_for "$units")"
-  echo "[case-35] ${label}: ${pct}% = ${units} units; fullest-that-fits=${want_best} in-use-that-fit=${want_inuse}"
-
-  if ! submit "$idx" "$pct"; then
-    record FAIL "${label}: joins an in-use card when one has room" "the claim never reached Running (reason logged above)"
-    record FAIL "${label}: takes the fullest card that fits" "not evaluated — the claim did not run"
-    return 1
+      P1_BUILT=yes
+    fi
   fi
-  local card token alloc mode aid
-  read -r card token alloc mode aid <<<"$(placement_of "$idx")"
-  if [ -z "${card:-}" ]; then
-    record FAIL "${label}: joins an in-use card when one has room" "no allocation recorded on the Pod"
-    record FAIL "${label}: takes the fullest card that fits" "not evaluated — no allocation recorded"
-    return 1
-  fi
-  echo "[case-35] ${label} → card ${card} token ${token} (${alloc} units, ${mode})"
 
-  # (1) The defect guard. Only discriminating when some in-use card had room; otherwise SKIP rather
-  # than record a PASS that asserted nothing.
-  if [ "$want_inuse" = "-" ]; then
-    record SKIP "${label}: joins an in-use card when one has room" \
-      "no card was already serving slices with room for ${pct}% — nothing to join, so this cannot discriminate"
+  if [ -n "$env_reason" ]; then
+    record SKIP "P1: target serves and probe gets an answer" "$env_reason"
+    p1_skip_rest "$env_reason"
+    return 0
+  fi
+
+  local deadline=$((SECONDS + READY_BOUND))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    phase="$(p1_target '.status.phase')"
+    [ "$phase" = "Ready" ] && break
+    sleep 10
+  done
+  if [ "$phase" != "Ready" ]; then
+    pods="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${P1_MD}" --no-headers 2>/dev/null | grep -c . || true)"
+    if [ "${pods:-0}" -gt 0 ]; then
+      record FAIL "P1: target serves and probe gets an answer" "phase=${phase:-unknown} pods=${pods}"
+    else
+      record SKIP "P1: target serves and probe gets an answer" "phase=${phase:-unknown} pods=0 (not admitted)"
+    fi
+    p1_skip_rest "target never reached Ready (phase=${phase:-unknown})"
+    return 0
+  fi
+
+  if [ -z "$P1_MODEL" ]; then
+    P1_MODEL="$(p1_target '.spec.model.name')"
+    [ -n "$P1_MODEL" ] || P1_MODEL="/models/Qwen2.5-0.5B-Instruct"
+  fi
+  record PASS "P1: target serves and probe gets an answer" "target=${P1_MD} role=${P1_ROLE} model=${P1_MODEL}"
+
+  pods_before_load="$(p1_ready_pods)"
+  router="$(p1_target '.spec.router.name')"
+  if [ -n "$router" ]; then
+    probe_url="${E2E_C35_PROBE_URL:-http://${P1_MD}-router.${NS}.svc:8000/v1/chat/completions}"
   else
-    case ",${want_inuse}," in *",${card},"*) rc=0 ;; *) rc=1 ;; esac
-    (exit $rc)
-    verdict $? "${label}: joins an in-use card when one has room" \
-      "card ${card}, one of the in-use cards that fit {${want_inuse}}" \
-      "card ${card}, but cards {${want_inuse}} were already serving slices with room for ${pct}% — a fresh card was opened instead"
+    endpoint="$(p1_target '.status.endpoint')"
+    probe_url="${E2E_C35_PROBE_URL:-http://${endpoint#*://}/v1/chat/completions}"
   fi
 
-  # (2) The policy.
-  [ "$card" = "$want_best" ]
-  verdict $? "${label}: takes the fullest card that fits" \
-    "card ${card} was the fullest card that fits" \
-    "card ${card}, but card ${want_best} was the fullest that fits ${pct}%"
+  kubectl -n "$NS" run "$P1_PROBE" --image="$PROBE_IMAGE" --restart=Never \
+    --labels="gpustack.ai/e2e-probe=${P1_MD}" --command -- sleep 7200 >/dev/null 2>&1
+  if ! kubectl -n "$NS" wait "pod/${P1_PROBE}" --for=condition=Ready --timeout=300s >/dev/null 2>&1; then
+    record SKIP "P1: probe Pod ready" "probe Pod '${P1_PROBE}' never became Ready on '${PROBE_IMAGE}'"
+    p1_skip_rest "probe Pod never became Ready"
+    return 0
+  fi
 
-  # The runtime must agree with what the operator recorded, or the ledger is bookkeeping fiction.
-  local vis want_vis; vis=$(visible_of "$idx"); want_vis=$(visible_want_of "${aid:-}")
-  [ -n "$vis" ] && [ -n "$want_vis" ] && [ "$vis" = "$want_vis" ]
-  verdict $? "${label}: runtime confinement agrees with the ledger" \
-    "ASCEND_VISIBLE_DEVICES=${vis} matches card ${card}'s runtime number" \
-    "ASCEND_VISIBLE_DEVICES='${vis:-<unreadable>}' vs recorded card ${card} (id '${aid:-?}'), whose runtime number is '${want_vis:-<unresolved>}'"
-  LAST_CARD="$card"
-  # Let the per-card ledger reflect this placement before the next claim is planned against it.
-  sleep 6
+  # shellcheck disable=SC2016 # Variables expand inside the remote probe shell.
+  local probe_script='#!/bin/sh
+URL="$1"
+MODEL="$2"
+: > /tmp/probe.log
+while read -r name conc dur; do
+  [ -n "$name" ] || continue
+  echo "start $name" >> /tmp/probe.log
+  : > "/tmp/ok.$name"
+  : > "/tmp/bad.$name"
+  : > "/tmp/badbody.$name"
+  end=$(( $(date +%s) + dur ))
+  i=0
+  while [ "$i" -lt "$conc" ]; do
+    (
+      while [ "$(date +%s)" -lt "$end" ]; do
+        if [ $((i % 2)) -eq 0 ]; then
+          stream=true
+        else
+          stream=false
+        fi
+        body="/tmp/probe-body.$i"
+        c=$(curl -sS --max-time 120 -o "$body" -w "%{http_code}" \
+          -H "Content-Type: application/json" \
+          --data-binary "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one word.\"}],\"max_tokens\":16,\"stream\":$stream}" \
+          "$URL" 2>/dev/null)
+        v="BAD $c"
+        if [ "$c" = 200 ] && grep -q "\"content\": *\"[^\"]" "$body" && ! grep -q "\"error\"" "$body"; then
+          v=ok
+        else
+          printf "%s code=%s body=%s\n" "$(date +%s)" "$c" "$(head -c 300 "$body" | tr "\n" " ")" >> "/tmp/badbody.$name"
+        fi
+        rm -f "$body"
+        if [ "$v" = ok ]; then
+          echo ok >> "/tmp/ok.$name"
+        else
+          echo bad >> "/tmp/bad.$name"
+        fi
+      done
+    ) &
+    i=$((i + 1))
+  done
+  wait
+  echo "done $name $(wc -l < "/tmp/ok.$name" | tr -d " ") $(wc -l < "/tmp/bad.$name" | tr -d " ")" >> /tmp/probe.log
+done < /tmp/phases
+'
+
+  probe_file="$(mktemp "${TMP_DIR}/probe.XXXXXX")"
+  phases_file="$(mktemp "${TMP_DIR}/phases.XXXXXX")"
+  printf '%s\n' "$probe_script" >"$probe_file"
+  phase_lines=""
+  for entry in $P1_PHASES; do
+    name="${entry%%:*}"
+    rest="${entry#*:}"
+    conc="${rest%%:*}"
+    dur="${rest##*:}"
+    phase_lines="${phase_lines}${name} ${conc} ${dur}
+"
+  done
+  printf '%s' "$phase_lines" >"$phases_file"
+
+  copied=0
+  kubectl -n "$NS" cp "$probe_file" "${P1_PROBE}:/tmp/probe.sh" >/dev/null 2>&1 && copied=$((copied + 1))
+  kubectl -n "$NS" cp "$phases_file" "${P1_PROBE}:/tmp/phases" >/dev/null 2>&1 && copied=$((copied + 1))
+  script_bytes="$(kubectl -n "$NS" exec "$P1_PROBE" -- sh -c 'wc -c < /tmp/probe.sh' 2>/dev/null | tr -d ' \n' || echo 0)"
+  phase_bytes="$(kubectl -n "$NS" exec "$P1_PROBE" -- sh -c 'wc -c < /tmp/phases' 2>/dev/null | tr -d ' \n' || echo 0)"
+  if [ "${script_bytes:-0}" -gt 0 ] 2>/dev/null && [ "${phase_bytes:-0}" -gt 0 ] 2>/dev/null; then
+    record PASS "P1: probe files reach the Pod" "${copied}/2 copies (${script_bytes}B script, ${phase_bytes}B phases)"
+  else
+    record FAIL "P1: probe files reach the Pod" "script=${script_bytes:-0}B phases=${phase_bytes:-0}B"
+    p1_skip_rest "probe files did not reach the Pod"
+    return 0
+  fi
+
+  kubectl apply -f - >/dev/null 2>&1 <<EOF
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeploymentScaler
+metadata:
+  name: ${P1_SCALER}
+  namespace: ${NS}
+spec:
+  targetRef:
+    name: ${P1_MD}
+  mode: Active
+  sampling:
+    intervalSeconds: 10
+  roles:
+    - name: ${P1_ROLE}
+      minReplicas: 1
+      maxReplicas: 2
+  algorithm:
+    type: Proportional
+    proportional:
+      metric: TotalTokensPerSecond
+      tolerance: "0.1"
+      roleTargets:
+        - name: ${P1_ROLE}
+          target: "1"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 0
+EOF
+
+  kubectl -n "$NS" exec "$P1_PROBE" -- sh -c \
+    "nohup sh /tmp/probe.sh '${probe_url}' '${P1_MODEL}' >/dev/null 2>&1 & echo started" >/dev/null 2>&1
+
+  p1_wait_phase up "$STEP_BOUND" || true
+
+  replicas="$(p1_role_replicas)"
+  deadline=$((SECONDS + STEP_BOUND))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    replicas="$(p1_role_replicas)"
+    [ "${replicas:-0}" -ge 2 ] 2>/dev/null && break
+    sleep 3
+  done
+  if [ "${replicas:-0}" -ge 2 ] 2>/dev/null; then
+    record PASS "P1: target replica count rises under load" "role=${P1_ROLE} replicas=${replicas}"
+  else
+    record FAIL "P1: target replica count rises under load" "replicas=${replicas:-<none>} running=$(p1_running_requests)"
+  fi
+
+  running="$(p1_running_requests)"
+  if [ -n "$running" ] && [ "$running" -gt 0 ] 2>/dev/null; then
+    record PASS "P1: scaler reads running requests of target" "runningRequests=${running}"
+  else
+    record FAIL "P1: scaler reads running requests of target" "runningRequests=${running:-<none>}"
+  fi
+
+  new_pod=""
+  if p1_wait_ready_count 2 "$READY_BOUND"; then
+    new_pod="$(comm -13 <(printf '%s\n' "$pods_before_load") <(p1_ready_pods) | head -1)"
+  fi
+  if [ -n "$new_pod" ]; then
+    record PASS "P1: second Pod becomes Ready" "new_pod=${new_pod}"
+  else
+    record FAIL "P1: second Pod becomes Ready" "ready=$(p1_ready_pods | tr '\n' ' ')"
+  fi
+
+  if [ -n "$new_pod" ]; then
+    vendor="$(serving_vendor "$(kubectl -n "$NS" get "$MD_RES" "$P1_MD" -o json 2>/dev/null)" 2>/dev/null || echo nvidia)"
+    engine="$(p1_target '.spec.engine.name')"
+    if serving_profile "$vendor" "$engine" >/dev/null 2>&1; then
+      counter_one="$(p1_counter_of "$new_pod")"
+      sleep 20
+      counter_two="$(p1_counter_of "$new_pod")"
+      if [ -n "$counter_one" ] && [ -n "$counter_two" ] \
+        && awk "BEGIN { exit !($counter_two > $counter_one) }"; then
+        record PASS "P1: new Pod request counter grows under load" "${SP_SERVED} on ${new_pod}: ${counter_one} -> ${counter_two}"
+      elif [ -n "$counter_one" ] && [ "$counter_one" -gt 0 ] 2>/dev/null; then
+        record PASS "P1: new Pod request counter grows under load" "${SP_SERVED} on ${new_pod}: ${counter_one} -> ${counter_two:-<none>}"
+      else
+        record FAIL "P1: new Pod request counter grows under load" "${SP_SERVED} on ${new_pod}: ${counter_one:-<none>} -> ${counter_two:-<none>}"
+      fi
+    else
+      record SKIP "P1: new Pod request counter grows under load" "unknown serving profile vendor=${vendor} engine=${engine}"
+    fi
+  else
+    record SKIP "P1: new Pod request counter grows under load" "no second Pod became Ready"
+  fi
+
+  committed="$(p1_committed_vector)"
+  if [ -n "$committed" ] && [ "$committed" -ge 2 ] 2>/dev/null; then
+    record PASS "P1: scaler records committed vector" "${P1_ROLE}=${committed} term=$(p1_scaler '.status.lastCommit.term')"
+  else
+    record FAIL "P1: scaler records committed vector" "committed=${committed:-<none>}"
+  fi
+
+  p1_wait_phase down "$STEP_BOUND" || true
+
+  narrowed="$(kubectl -n "$NS" patch "$SCALER_RES" "$P1_SCALER" --type=merge \
+    -p "{\"spec\":{\"algorithm\":{\"proportional\":{\"metric\":\"TotalTokensPerSecond\",\"tolerance\":\"0.1\",\"roleTargets\":[{\"name\":\"${P1_ROLE}\",\"target\":\"1000000\"}]}},\"behavior\":{\"scaleDown\":{\"stabilizationWindowSeconds\":15,\"decodePostScaleUpGraceSeconds\":1}}}}" \
+    2>&1 | tr '\n' ' ')"
+
+  states=""
+  deadline=$((SECONDS + RETIRE_BOUND))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    state="$(p1_target '.status.retirement.state // ""')"
+    if [ -n "$state" ]; then
+      case "$states" in
+        *"$state"*) ;;
+        *) states="${states}${states:+,}${state}" ;;
+      esac
+    fi
+    replicas="$(p1_role_replicas)"
+    ready_left="$(p1_ready_pods | grep -c . || true)"
+    if [ "${replicas:-2}" -le 1 ] 2>/dev/null && [ -z "$state" ] && [ "${ready_left:-0}" -le 1 ]; then
+      break
+    fi
+    sleep 2
+  done
+
+  replicas="$(p1_role_replicas)"
+  if [ "${replicas:-2}" -le 1 ] 2>/dev/null; then
+    record PASS "P1: replica count falls when scaler is narrowed" "replicas=${replicas}"
+  else
+    record FAIL "P1: replica count falls when scaler is narrowed" "replicas=${replicas:-<none>} (${narrowed:0:160})"
+  fi
+
+  if [ -n "$states" ]; then
+    record PASS "P1: retirement states observed on target" "states=${states}"
+  else
+    record FAIL "P1: retirement states observed on target" "replicas=${replicas:-<none>} but no retirement state observed"
+  fi
+
+  p1_wait_phase one "$STEP_BOUND" || true
+  p1_wait_phase_done one "$STEP_BOUND" || true
+  ready_left="$(p1_ready_pods | grep -c . || true)"
+  if [ "${ready_left:-0}" -eq 1 ]; then
+    record PASS "P1: one Ready Pod left after retirement" "pod=$(p1_ready_pods | tr '\n' ' ')"
+  else
+    record FAIL "P1: one Ready Pod left after retirement" "ready_left=${ready_left:-<none>}"
+  fi
+
+  phase_failures=""
+  phase_detail=""
+  phase_evidence=""
+  for entry in $P1_PHASES; do
+    name="${entry%%:*}"
+    [ "$name" = base ] && continue
+    result="$(p1_phase_result "$name")"
+    ok="${result%% *}"
+    bad="${result##* }"
+    [ -n "$ok" ] || ok=0
+    [ -n "$bad" ] || bad=0
+    phase_detail="${phase_detail}${name}=${ok}/${bad} "
+    if [ "$ok" -le 0 ] 2>/dev/null || [ "$bad" -ne 0 ] 2>/dev/null; then
+      phase_failures="${phase_failures}${name} "
+      local bad_sample
+      bad_sample="$(kubectl -n "$NS" exec "$P1_PROBE" -- sh -c "head -1 /tmp/badbody.${name} 2>/dev/null | cut -c1-180" 2>/dev/null || true)"
+      phase_evidence="${phase_evidence}${name}:${bad_sample} "
+    fi
+  done
+  if [ -z "$phase_failures" ]; then
+    record PASS "P1: every phase answers requests and fails none" "${phase_detail}"
+  else
+    record FAIL "P1: every phase answers requests and fails none" "failed=${phase_failures} (${phase_detail} ${phase_evidence})"
+  fi
+}
+
+run_phase1
+cleanup_phase1
+
+# ==============================================================================
+# PHASE 2: Disaggregated P/D TokenThroughput + capacityPrior 1P:2D -> 2P:4D -> 1P:2D
+# ==============================================================================
+
+RESTART_LEDGER="${TMP_DIR}/p2-restarts.json"
+printf '{}\n' > "$RESTART_LEDGER"
+RESTART_READ_ERR=""
+
+p2_sample_restarts() {
+  local pods_json updated
+  if ! pods_json="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${P2_DEPLOY}" -o json 2>/dev/null)"; then
+    RESTART_READ_ERR="failed to list pods for ${P2_DEPLOY}"
+    return 1
+  fi
+  # shellcheck disable=SC2016 # jq variables
+  if ! updated="$(printf '%s' "$pods_json" | jq -ce --slurpfile prev "$RESTART_LEDGER" '
+    reduce (.items // [])[] as $p (
+      ($prev[0] // {});
+      ($p.metadata.uid // "") as $uid |
+      if $uid == "" then .
+      else
+        (([($p.status.containerStatuses // [])[]?.restartCount // 0,
+           ($p.status.initContainerStatuses // [])[]?.restartCount // 0] | add) // 0) as $cnt |
+        .[$uid] = ([.[$uid] // 0, $cnt] | max)
+      end
+    )
+  ' 2>/dev/null)"; then
+    RESTART_READ_ERR="failed to aggregate container restart counts"
+    return 1
+  fi
+  printf '%s\n' "$updated" > "$RESTART_LEDGER"
   return 0
 }
 
-# --- Sliced: pack, then spill only on a genuine misfit, then prefer the fuller of two in-use cards. ---
-step_sliced 1 50 "s1 50%"
-step_sliced 2 30 "s2 30%"
-step_sliced 3 50 "s3 50%"
-step_sliced 4 10 "s4 10%"
+p2_role_spec_replicas() {
+  # shellcheck disable=SC2016 # jq variable
+  kubectl -n "$NS" get "$MD_RES" "$P2_DEPLOY" -o json 2>/dev/null | \
+    jq -r --arg r "$1" '[(.spec.roles // [])[] | select(.name==$r) | .replicas] | .[0] // 0' 2>/dev/null || echo 0
+}
 
-# --- Exclusive: a whole-card claim must come from outside the sliced population. ---
-echo "[case-35] e1: exclusive whole card"
-EXCL_CARD=""
-excl_before=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.accelerator.remaining}' 2>/dev/null)
-# The cards serving slices right now — the set the exclusive claim must avoid.
-sliced_cards=$(ledger_json | python3 -c "
-import json,sys
-print(','.join(str(c['index']) for c in json.load(sys.stdin) if c['mode']==3) or '-')")
-# A whole-card claim needs a card no mode holds. With only three sliceable cards, and a pool that
-# already carried slices when this case started, the sequence above can legitimately have taken the
-# last free one — the claim would then sit Pending forever and fail a cluster that met every
-# documented prerequisite. Skip the exclusive and mixed steps instead of reporting a defect.
-free_now=$(ledger_json | python3 -c "
-import json,sys
-print(sum(1 for c in json.load(sys.stdin) if c['mode']==0))")
-if [ "${free_now:-0}" -le 0 ]; then
-  for chk in "exclusive claim lands outside the sliced population" \
-             "exclusive claim is recorded exclusive" \
-             "exclusive claim: runtime confinement agrees with the ledger" \
-             "exclusive claim lowers the pool's Accelerator remaining"; do
-    record SKIP "$chk" "no free card left on ${SLICE_NODE} — the sliced steps consumed them, so a whole-card claim has nowhere to land through no fault of the implementation"
+p2_role_ready_replicas() {
+  # shellcheck disable=SC2016 # jq variable
+  kubectl -n "$NS" get "$MD_RES" "$P2_DEPLOY" -o json 2>/dev/null | \
+    jq -r --arg r "$1" '[(.status.roles // [])[] | select(.name==$r) | .ready] | .[0] // 0' 2>/dev/null || echo 0
+}
+
+p2_wait_probe_worker() {
+  local pid_file="$1" bound="$2"
+  kubectl -n "$NS" exec "$P2_PROBE" -- sh -c "
+    pid=\$(cat '${pid_file}' 2>/dev/null || true)
+    [ -n \"\$pid\" ] || exit 1
+    elapsed=0
+    while kill -0 \"\$pid\" 2>/dev/null; do
+      if [ \"\$elapsed\" -ge ${bound} ]; then
+        exit 1
+      fi
+      sleep 1
+      elapsed=\$((elapsed + 1))
+    done
+    exit 0
+  " >/dev/null 2>&1
+}
+
+run_phase2() {
+  local at hw_product hw_mfg hw_res hw_mfg_lc gpu_cap free_gpus art_rev
+  if [ "${E2E_C35_SKIP_PHASE2:-0}" = "1" ]; then
+    record SKIP "P2: disaggregated 1P:2D -> 2P:4D -> 1P:2D prerequisites" "skipped via E2E_C35_SKIP_PHASE2=1"
+    return 0
+  fi
+  at="${E2E_C35_ACCELERATOR_TYPE:-$(md_usable_accelerator_type "$NS" || true)}"
+  if [ -z "$at" ]; then
+    record SKIP "P2: disaggregated 1P:2D -> 2P:4D -> 1P:2D prerequisites" "no usable AcceleratorType available"
+    return 0
+  fi
+  hw_product="$(kubectl get acceleratortype "$at" -o jsonpath='{.status.detail.product}' 2>/dev/null || true)"
+  hw_mfg="$(kubectl get acceleratortype "$at" -o jsonpath='{.status.detail.manufacturer}' 2>/dev/null || true)"
+  hw_res="$(kubectl get acceleratortype "$at" -o jsonpath='{.status.detail.resourceName}' 2>/dev/null || true)"
+  free_gpus="$(kubectl get acceleratortype "$at" -o jsonpath='{.status.accelerator.remaining}' 2>/dev/null || true)"
+  if [ -z "$hw_product" ]; then
+    record SKIP "P2: disaggregated 1P:2D -> 2P:4D -> 1P:2D prerequisites" "AcceleratorType ${at} has empty status.detail.product"
+    return 0
+  fi
+  hw_mfg_lc="$(printf '%s' "$hw_mfg" | tr '[:upper:]' '[:lower:]')"
+  if [ -z "${E2E_C35_PD_ENGINE_IMAGE:-}" ] && [ "$hw_mfg_lc" != "nvidia" ]; then
+    record SKIP "P2: disaggregated 1P:2D -> 2P:4D -> 1P:2D prerequisites" "default CUDA image requires nvidia AcceleratorType, got ${hw_mfg:-unknown}"
+    return 0
+  fi
+  [ -n "$hw_res" ] || hw_res="nvidia.com/gpu"
+
+  gpu_cap="$(kubectl get nodes -o json 2>/dev/null | python3 -c '
+import json, sys
+res = sys.argv[1]
+doc = json.load(sys.stdin)
+total = 0
+for n in doc.get("items", []):
+    conds = {c["type"]: c["status"] for c in n.get("status", {}).get("conditions", [])}
+    if conds.get("Ready") != "True":
+        continue
+    val = n.get("status", {}).get("allocatable", {}).get(res, "0")
+    try:
+        total += int(float(val))
+    except ValueError:
+        pass
+print(total)
+' "$hw_res" 2>/dev/null || echo 0)"
+  if [ "${gpu_cap:-0}" -lt 6 ]; then
+    record SKIP "P2: disaggregated 1P:2D -> 2P:4D -> 1P:2D prerequisites" "need >= 6 allocatable ${hw_res} GPUs, found ${gpu_cap:-0}"
+    return 0
+  fi
+  if [ -n "$free_gpus" ] && [ "${free_gpus:-0}" -lt 6 ] 2>/dev/null; then
+    record SKIP "P2: disaggregated 1P:2D -> 2P:4D -> 1P:2D prerequisites" "need >= 6 free exclusive GPUs on ${at}, found ${free_gpus}"
+    return 0
+  fi
+
+  if ! kubectl -n "$NS" get modelartifact "$P2_ARTIFACT" >/dev/null 2>&1; then
+    record SKIP "P2: disaggregated 1P:2D -> 2P:4D -> 1P:2D prerequisites" "ModelArtifact ${NS}/${P2_ARTIFACT} not found"
+    return 0
+  fi
+  art_rev="$(kubectl -n "$NS" get modelartifact "$P2_ARTIFACT" -o jsonpath='{.status.resolved.revision}' 2>/dev/null || true)"
+  if [ -z "$art_rev" ]; then
+    record SKIP "P2: disaggregated 1P:2D -> 2P:4D -> 1P:2D prerequisites" "ModelArtifact ${NS}/${P2_ARTIFACT} has empty status.resolved.revision"
+    return 0
+  fi
+
+  local pair res name
+  for pair in "configmap:${P2_CM}" "${MD_RES}:${P2_DEPLOY}" "${SCALER_RES}:${P2_SCALER}" "pod:${P2_PROBE}"; do
+    res="${pair%%:*}"
+    name="${pair#*:}"
+    if kubectl -n "$NS" get "$res" "$name" >/dev/null 2>&1; then
+      record FAIL "P2: resource collision guard" "${NS}/${res}/${name} already exists"
+      return 0
+    fi
   done
-elif submit 5 ""; then
-  read -r ecard etoken ealloc emode eaid <<<"$(placement_of 5)"
-  EXCL_CARD="${ecard:-}"
-  echo "[case-35] e1 → card ${ecard:-?} (${ealloc:-?} units, ${emode:-?}); sliced cards were {${sliced_cards}}"
-  case ",${sliced_cards}," in *",${ecard},"*) rc=1 ;; *) rc=0 ;; esac
-  (exit $rc)
-  verdict $? "exclusive claim lands outside the sliced population" \
-    "card ${ecard}, not one of the sliced cards {${sliced_cards}}" \
-    "card ${ecard} is already serving logical slices — a whole-card claim must not share it"
-  [ "${emode:-}" = "exclusive" ]
-  verdict $? "exclusive claim is recorded exclusive" \
-    "mode=${emode} allocated=${ealloc}" \
-    "mode='${emode:-?}', expected exclusive"
-  evis=$(visible_of 5); ewant=$(visible_want_of "${eaid:-}")
-  [ -n "$evis" ] && [ -n "$ewant" ] && [ "$evis" = "$ewant" ]
-  verdict $? "exclusive claim: runtime confinement agrees with the ledger" \
-    "ASCEND_VISIBLE_DEVICES=${evis} matches card ${ecard}'s runtime number" \
-    "ASCEND_VISIBLE_DEVICES='${evis:-<unreadable>}' vs recorded card ${ecard} (id '${eaid:-?}'), whose runtime number is '${ewant:-<unresolved>}'"
-  # The pool's EX view must lose a whole card. Reconciled after the Pod is already Running, so poll.
-  #
-  # NOT the node's <base> allocatable: in the device-plugin model that counts ADVERTISED devices and
-  # kubelet accounts an allocated one as in-use, so it does not move here. It falls only when a card
-  # LEAVES the exclusive population — e.g. when it starts serving logical slices.
-  excl_after=""
-  for _ in $(seq 1 20); do
-    excl_after=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.accelerator.remaining}' 2>/dev/null)
-    [ -n "$excl_after" ] && [ -n "$excl_before" ] && [ "$excl_after" -lt "$excl_before" ] && break
+
+  echo "=== CASE 35 Phase 2: Live P/D capacityPrior scaling (ns=${NS}, at=${at}, product=${hw_product}, gpus=${gpu_cap}, artifact=${P2_ARTIFACT}@${art_rev:0:8}) ==="
+
+  P2_CREATED_CM="$P2_CM"
+  kubectl -n "$NS" apply -f - >/dev/null <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${P2_CM}
+data:
+  priors.yaml: |
+    apiVersion: worker.gpustack.ai/v1alpha1
+    kind: ModelDeploymentScalerCapacityPriorCatalog
+    profiles:
+      - mode: disaggregated
+        model: ${P2_MODEL}
+        quantization: bf16
+        engine: vllm
+        prefill:
+          replicas: 1
+          hardware: ${hw_product}
+          topology:
+            gpusPerReplica: 1
+            tensorParallel: 1
+            expertParallel: 1
+        decode:
+          replicas: 2
+          hardware: ${hw_product}
+          topology:
+            gpusPerReplica: 1
+            tensorParallel: 1
+            expertParallel: 1
+        points:
+          - concurrency: 1
+            totalTokensPerSecond: 20
+            inputTokensPerSecond: 15
+            outputTokensPerSecond: 5
+            ttftMilliseconds:
+              p99: 400
+            itlMilliseconds:
+              p99: 30
+          - concurrency: 2
+            totalTokensPerSecond: 40
+            inputTokensPerSecond: 30
+            outputTokensPerSecond: 10
+            ttftMilliseconds:
+              p99: 450
+            itlMilliseconds:
+              p99: 35
+YAML
+
+  P2_CREATED_MD="$P2_DEPLOY"
+  kubectl -n "$NS" apply -f - >/dev/null <<YAML
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: ${P2_DEPLOY}
+  namespace: ${NS}
+  annotations:
+    worker.gpustack.ai/precision: "bf16"
+spec:
+  model:
+    name: ${P2_MODEL}
+    artifactRef:
+      name: ${P2_ARTIFACT}
+  engine:
+    name: vLLM
+    image: ${P2_ENGINE_IMAGE}
+  router:
+    name: llm-d-router
+  roles:
+    - name: prefill
+      kind: Prefill
+      replicas: 1
+      acceleratorType: ${at}
+      image: ${P2_ENGINE_IMAGE}
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "1"
+      env:
+        - name: VLLM_HTTP_TIMEOUT_KEEP_ALIVE
+          value: "3600"
+      extraArgs:
+        - --tensor-parallel-size
+        - "1"
+        - --max-model-len
+        - "16384"
+        - --max-num-seqs
+        - "64"
+        - --gpu-memory-utilization
+        - "0.90"
+        - --enable-scale-out
+    - name: decode
+      kind: Decode
+      replicas: 2
+      acceleratorType: ${at}
+      image: ${P2_ENGINE_IMAGE}
+      imagePullPolicy: IfNotPresent
+      resources:
+        accelerator: "1"
+      env:
+        - name: VLLM_HTTP_TIMEOUT_KEEP_ALIVE
+          value: "3600"
+      extraArgs:
+        - --tensor-parallel-size
+        - "1"
+        - --max-model-len
+        - "16384"
+        - --max-num-seqs
+        - "64"
+        - --gpu-memory-utilization
+        - "0.90"
+        - --enable-scale-out
+YAML
+
+  P2_CREATED_SCALER="$P2_SCALER"
+  kubectl -n "$NS" apply -f - >/dev/null <<YAML
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeploymentScaler
+metadata:
+  name: ${P2_SCALER}
+  namespace: ${NS}
+spec:
+  targetRef:
+    name: ${P2_DEPLOY}
+  mode: Active
+  sampling:
+    intervalSeconds: 5
+    pendingTimeoutSeconds: 180
+  roles:
+    - name: prefill
+      minReplicas: 1
+      maxReplicas: 2
+    - name: decode
+      minReplicas: 2
+      maxReplicas: 4
+  ratios:
+    - numeratorRole: decode
+      denominatorRole: prefill
+      target: "2"
+      min: "2"
+      max: "2"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 45
+      decodePostScaleUpGraceSeconds: 90
+  algorithm:
+    type: TokenThroughput
+    tokenThroughput:
+      ttftTargetMilliseconds: "500"
+      itlTargetMilliseconds: "50"
+      stableWindowSeconds: 30
+      panicWindowSeconds: 10
+    capacityPrior:
+      headroom: "0.75"
+      catalogRef:
+        name: ${P2_CM}
+YAML
+
+  local deadline=$((SECONDS + 90)) priors_ok=false sc_json c_priors c_bound c_active conds
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    sc_json="$(kubectl -n "$NS" get "$SCALER_RES" "$P2_SCALER" -o json 2>/dev/null || true)"
+    c_priors="$(printf '%s' "$sc_json" | jq -r '[(.status.conditions // [])[] | select(.type=="CapacityPriorsReady") | .status] | .[0] // ""' 2>/dev/null || true)"
+    c_bound="$(printf '%s' "$sc_json" | jq -r '[(.status.conditions // [])[] | select(.type=="Bound") | .status] | .[0] // ""' 2>/dev/null || true)"
+    c_active="$(printf '%s' "$sc_json" | jq -r '[(.status.conditions // [])[] | select(.type=="Active") | .status] | .[0] // ""' 2>/dev/null || true)"
+    if [ "$c_priors" = "True" ] && [ "$c_bound" = "True" ] && [ "$c_active" = "True" ]; then
+      priors_ok=true
+      break
+    fi
+    sleep 2
+  done
+  if [ "$priors_ok" = true ]; then
+    record PASS "P2: scaler CapacityPriorsReady & Bound & Active" "resolved disaggregated 1P:2D catalog"
+  else
+    conds="$(kubectl -n "$NS" get "$SCALER_RES" "$P2_SCALER" -o json 2>/dev/null | jq -c '[(.status.conditions // [])[] | {type,status,reason,message}]' || true)"
+    record FAIL "P2: scaler CapacityPriorsReady & Bound & Active" "conditions=${conds}"
+    return 0
+  fi
+
+  deadline=$((SECONDS + P2_READY_BOUND))
+  local md_ready=false phase="" pr=0 dr=0
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    phase="$(kubectl -n "$NS" get "$MD_RES" "$P2_DEPLOY" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    pr="$(p2_role_ready_replicas prefill)"
+    dr="$(p2_role_ready_replicas decode)"
+    if [ "$phase" = "Ready" ] && [ "${pr:-0}" -ge 1 ] && [ "${dr:-0}" -ge 2 ]; then
+      md_ready=true
+      break
+    fi
+    sleep 5
+  done
+  if [ "$md_ready" = true ]; then
+    record PASS "P2: initial 1P:2D deployment ready" "phase=Ready prefill=1 decode=2"
+  else
+    record FAIL "P2: initial 1P:2D deployment ready" "timeout (${P2_READY_BOUND}s), phase=${phase:-unknown} prefill=${pr:-0} decode=${dr:-0}"
+    return 0
+  fi
+  p2_sample_restarts || true
+
+  P2_CREATED_POD="$P2_PROBE"
+  kubectl -n "$NS" run "$P2_PROBE" --image="$PROBE_IMAGE" --restart=Never --command -- sleep infinity >/dev/null
+  if ! kubectl -n "$NS" wait "pod/${P2_PROBE}" --for=condition=Ready --timeout=180s >/dev/null 2>&1; then
+    record FAIL "P2: probe Pod ready" "Pod ${NS}/${P2_PROBE} failed to become Ready"
+    return 0
+  fi
+
+  local router_url="http://${P2_DEPLOY}-router.${NS}.svc.cluster.local:8000"
+  local models_json="" served_model=""
+  deadline=$((SECONDS + 120))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    models_json="$(kubectl -n "$NS" exec "$P2_PROBE" -- curl -sf --max-time 10 "${router_url}/v1/models" 2>/dev/null || true)"
+    if printf '%s' "$models_json" | grep -Fq '"data"'; then
+      break
+    fi
     sleep 3
   done
-  { [ -n "$excl_after" ] && [ -n "$excl_before" ] && [ "$excl_after" -lt "$excl_before" ]; }
-  verdict $? "exclusive claim lowers the pool's Accelerator remaining" \
-    "accelerator.remaining ${excl_before} -> ${excl_after}" \
-    "accelerator.remaining '${excl_before:-?}' -> '${excl_after:-?}' — a whole-card claim did not consume pool capacity"
-else
-  record FAIL "exclusive claim lands outside the sliced population" "the exclusive claim never reached Running"
-  record FAIL "exclusive claim is recorded exclusive" "not evaluated"
-  record FAIL "exclusive claim lowers the pool's Accelerator remaining" "not evaluated"
-fi
+  served_model="$(printf '%s' "$models_json" | jq -r '.data[0].id // ""' 2>/dev/null || true)"
+  [ -n "$served_model" ] || served_model="$P2_MODEL"
+  if [ -n "$models_json" ]; then
+    record PASS "P2: router /v1/models reachable" "model=${served_model}"
+  else
+    record FAIL "P2: router /v1/models reachable" "could not query ${router_url}/v1/models"
+    return 0
+  fi
 
-# --- Mixed: packing must still hold with a card held exclusively, and must not touch that card. ---
-LAST_CARD=""
-step_sliced 6 10 "s5 10% (mixed)"
-if [ -n "$EXCL_CARD" ] && [ -n "$LAST_CARD" ]; then
-  [ "$LAST_CARD" != "$EXCL_CARD" ]
-  verdict $? "mixed: a sliced claim never lands on the exclusively held card" \
-    "sliced card ${LAST_CARD} != exclusive card ${EXCL_CARD}" \
-    "sliced card ${LAST_CARD} == exclusive card ${EXCL_CARD} — cross-mode isolation broken"
-else
-  record SKIP "mixed: a sliced claim never lands on the exclusively held card" \
-    "not evaluated — the exclusive claim or the mixed sliced claim did not place"
-fi
-
-# --- The invariant the whole ledger exists to guarantee. ---
-echo "[case-35] per-card invariant (ledger vs the Pods' own records)"
-INV=$(python3 - "$SLICE_NODE" "$GROUPID" "$MAX_UNITS" <<'EOF'
-import json, subprocess, sys
-
-node, gid, mx = sys.argv[1], sys.argv[2], int(sys.argv[3])
-ANN = "device.gpustack.ai/accelerator.allocated"
-
-def kget(*args):
-    return json.loads(subprocess.check_output(["kubectl", "get", *args, "-o", "json"]))
-
-# What the Pods themselves record, per card.
-claimed, holders = {}, {}
-# Only this node's Pods. Card indices restart at 0 on every node, so summing the cluster's Pods by
-# group and index would fold a sibling node's allocations into this node's cards and report a phantom
-# over-commit or ledger disagreement.
-for pod in kget("pods", "-A", "--field-selector", "spec.nodeName=" + node).get("items", []):
-    raw = (pod["metadata"].get("annotations") or {}).get(ANN)
-    if not raw:
-        continue
-    ref = pod["metadata"]["namespace"] + "/" + pod["metadata"]["name"]
-    for cname, cval in json.loads(raw).items():
-        for g in cval.get("devices", {}).get("groups", []):
-            if gid and g.get("id") != gid:
-                continue
-            for c in g.get("accelerators", []):
-                i = c.get("index")
-                claimed[i] = claimed.get(i, 0) + int(c.get("allocated") or 0)
-                holders.setdefault(i, []).append(ref)
-
-bad = 0
-for g in kget("devices", node).get("status", {}).get("groups", []):
-    if gid and g.get("id") != gid:
-        continue
-    for c in g.get("accelerators", []):
-        i = c.get("index")
-        rem = int(c.get("remaining") or 0)
-        ledger_used, pods_used = mx - rem, claimed.get(i, 0)
-        note = []
-        if pods_used > mx:
-            note.append("OVER-COMMITTED"); bad += 1
-        if rem < 0:
-            note.append("NEGATIVE-REMAINING"); bad += 1
-        # Compare only cards serving logical slices: an exclusive or shared card spends its whole
-        # budget in the ledger while the Pod records that mode's own accounting.
-        if c.get("mode") == 3 and ledger_used != pods_used:
-            note.append("LEDGER!=PODS"); bad += 1
-        print("  card={:<2} ledger_used={:>9} pods_used={:>9} {:<18} {}".format(
-            i, ledger_used, pods_used, " ".join(note) or "ok", ",".join(holders.get(i, [])) or "-"))
-sys.exit(1 if bad else 0)
+  local canary_b64
+  canary_b64="$(jq -nc --arg m "$served_model" '{model:$m, messages:[{role:"user",content:"Reply with one word: ok."}], max_tokens:4, temperature:0}' | base64 | tr -d '\n\r')"
+  kubectl -n "$NS" exec "$P2_PROBE" -- sh -c "
+printf '%s' '${canary_b64}' | base64 -d > /tmp/canary.json
+test -s /tmp/canary.json
+cat > /tmp/canary.sh <<'EOF'
+#!/bin/sh
+: > /tmp/canary_ok_lines
+: > /tmp/canary_fail_codes
+: > /tmp/canary_fail_details
+rm -f /tmp/stop_canary
+while [ ! -f /tmp/stop_canary ]; do
+  rc=0
+  code=\$(curl -sS -o /tmp/canary.body -w '%{http_code}' --max-time 60 -H 'Content-Type: application/json' -d @/tmp/canary.json '${router_url}/v1/chat/completions' 2>/tmp/canary.err) || rc=\$?
+  if [ \"\$rc\" -eq 0 ] && [ \"\$code\" = \"200\" ] && grep -Fq '\"choices\"' /tmp/canary.body 2>/dev/null; then
+    echo 1 >> /tmp/canary_ok_lines
+  else
+    echo \"rc=\${rc}:\${code:-000}\" >> /tmp/canary_fail_codes
+    printf '%s rc=%s code=%s err=%s body=%s\n' \"\$(date +%H:%M:%S)\" \"\$rc\" \"\${code:-000}\" \"\$(tr '\n\r' '  ' < /tmp/canary.err 2>/dev/null | head -c 80)\" \"\$(head -c 160 /tmp/canary.body 2>/dev/null | tr '\n\r' '  ')\" >> /tmp/canary_fail_details
+  fi
+  sleep 2
+done
 EOF
-)
-inv_rc=$?
-echo "$INV"
-(exit $inv_rc)
-verdict $? "no card over-committed, and the ledger matches the Pods" \
-  "every card within its budget and every sliced card's ledger usage equal to the sum its Pods record" \
-  "see the table above — an over-committed card, a negative remaining, or a ledger/Pod disagreement"
+chmod +x /tmp/canary.sh
+nohup /tmp/canary.sh >/tmp/canary.log 2>&1 </dev/null &
+echo \$! > /tmp/canary.pid
+"
 
-echo
-echo "== CASE 35 — Ascend logical-slice placement: claims pack, spill only on a misfit, and never cross into an exclusive card =="
-print_rows
+  sleep 15
+  p2_sample_restarts || true
+  local bp bd
+  bp="$(p2_role_spec_replicas prefill)"
+  bd="$(p2_role_spec_replicas decode)"
+  if [ "$bp" = "1" ] && [ "$bd" = "2" ]; then
+    record PASS "P2: baseline stays at 1P:2D" "prefill=${bp} decode=${bd}"
+  else
+    record FAIL "P2: baseline stays at 1P:2D" "expected 1:2, got prefill=${bp} decode=${bd}"
+  fi
 
-if [ "$FAILS" -ne 0 ]; then
-  echo
-  echo "FAILED ${FAILS} check(s). Placement is decided by the device plugin's GetPreferredAllocation"
-  echo "hint; a hint kubelet cannot read is discarded silently and every card choice becomes arbitrary,"
-  echo "which shows up here as a claim opening a fresh card while an in-use one had room, or as a card"
-  echo "over-committed. Raise the device-manager's verbosity BEFORE re-running to see the decision (see"
-  echo "the shared troubleshooting reference, 'Component log verbosity') — the hint is logged in full,"
-  echo "and a device id in it WITHOUT a trailing ':<token>' segment is the defect itself."
-  echo "Diagnose: kubectl get devices ${SLICE_NODE} -o yaml;"
-  echo "kubectl -n ${NS} logs ds/gpustack-operator-device-manager-ascend --tail=100"
-  exit 1
-fi
-echo "CASE 35 PASS"
+  local long_text="Explain the mathematical foundations of queuing theory, queueing stability, M/M/c queues, prefill and decode disaggregation in large language model serving, KV cache transfer bottlenecks, token throughput planning, latency Service Level Objectives for time to first token and inter-token latency, and whole-unit capacity scaling in detail."
+  local burst_b64
+  burst_b64="$(jq -nc --arg m "$served_model" --arg c "$long_text" '{model:$m, messages:[{role:"user",content:$c}], max_tokens:128, temperature:0}' | base64 | tr -d '\n\r')"
+  kubectl -n "$NS" exec "$P2_PROBE" -- sh -c "
+printf '%s' '${burst_b64}' | base64 -d > /tmp/burst.json
+test -s /tmp/burst.json
+cat > /tmp/burst.sh <<'EOF'
+#!/bin/sh
+: > /tmp/burst_ok_lines
+: > /tmp/burst_fail_codes
+: > /tmp/burst_fail_details
+rm -f /tmp/stop_burst
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+  (
+    while [ ! -f /tmp/stop_burst ]; do
+      rc=0
+      code=\$(curl -sS -o \"/tmp/burst.\${i}.body\" -w '%{http_code}' --max-time 120 -H 'Content-Type: application/json' -d @/tmp/burst.json '${router_url}/v1/chat/completions' 2>\"/tmp/burst.\${i}.err\") || rc=\$?
+      if [ \"\$rc\" -eq 0 ] && [ \"\$code\" = \"200\" ] && grep -Fq '\"choices\"' \"/tmp/burst.\${i}.body\" 2>/dev/null; then
+        echo 1 >> /tmp/burst_ok_lines
+      else
+        echo \"rc=\${rc}:\${code:-000}\" >> /tmp/burst_fail_codes
+        printf '%s worker=%s rc=%s code=%s err=%s body=%s\n' \"\$(date +%H:%M:%S)\" \"\$i\" \"\$rc\" \"\${code:-000}\" \"\$(tr '\n\r' '  ' < \"/tmp/burst.\${i}.err\" 2>/dev/null | head -c 80)\" \"\$(head -c 160 \"/tmp/burst.\${i}.body\" 2>/dev/null | tr '\n\r' '  ')\" >> /tmp/burst_fail_details
+      fi
+    done
+  ) &
+done
+wait
+EOF
+chmod +x /tmp/burst.sh
+nohup /tmp/burst.sh >/tmp/burst.log 2>&1 </dev/null &
+echo \$! > /tmp/burst.pid
+"
+
+  deadline=$((SECONDS + P2_SCALE_BOUND))
+  local scaled_up=false ratio_broken=false md_json="" sp=0 sd=0 rp=0 rd=0
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    p2_sample_restarts || true
+    md_json="$(kubectl -n "$NS" get "$MD_RES" "$P2_DEPLOY" -o json 2>/dev/null || true)"
+    sp="$(printf '%s' "$md_json" | jq -r '[(.spec.roles // [])[] | select(.name=="prefill") | .replicas] | .[0] // 0' 2>/dev/null || echo 0)"
+    sd="$(printf '%s' "$md_json" | jq -r '[(.spec.roles // [])[] | select(.name=="decode") | .replicas] | .[0] // 0' 2>/dev/null || echo 0)"
+    rp="$(printf '%s' "$md_json" | jq -r '[(.status.roles // [])[] | select(.name=="prefill") | .ready] | .[0] // 0' 2>/dev/null || echo 0)"
+    rd="$(printf '%s' "$md_json" | jq -r '[(.status.roles // [])[] | select(.name=="decode") | .ready] | .[0] // 0' 2>/dev/null || echo 0)"
+    if [ $((sp * 2)) -ne "$sd" ]; then
+      ratio_broken=true
+      record FAIL "P2: atomic 1:2 ratio invariant during scale-up" "observed prefill=${sp} decode=${sd}"
+      break
+    fi
+    if [ "$sp" = "2" ] && [ "$sd" = "4" ] && [ "$rp" = "2" ] && [ "$rd" = "4" ]; then
+      scaled_up=true
+      break
+    fi
+    sleep 5
+  done
+
+  kubectl -n "$NS" exec "$P2_PROBE" -- touch /tmp/stop_burst 2>/dev/null || true
+
+  if [ "$ratio_broken" = false ]; then
+    if [ "$scaled_up" = true ]; then
+      record PASS "P2: atomic whole-unit scale-up 1P:2D -> 2P:4D" "spec=2:4 ready=2:4"
+    else
+      record FAIL "P2: atomic whole-unit scale-up 1P:2D -> 2P:4D" "timeout (${P2_SCALE_BOUND}s), spec=${sp}:${sd} ready=${rp}:${rd}"
+    fi
+  fi
+
+  deadline=$((SECONDS + RETIRE_BOUND))
+  local scaled_down=false saw_retirement=false ret_state="" pod_cnt=0 ret_reason=""
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    p2_sample_restarts || true
+    md_json="$(kubectl -n "$NS" get "$MD_RES" "$P2_DEPLOY" -o json 2>/dev/null || true)"
+    sp="$(printf '%s' "$md_json" | jq -r '[(.spec.roles // [])[] | select(.name=="prefill") | .replicas] | .[0] // 0' 2>/dev/null || echo 0)"
+    sd="$(printf '%s' "$md_json" | jq -r '[(.spec.roles // [])[] | select(.name=="decode") | .replicas] | .[0] // 0' 2>/dev/null || echo 0)"
+    rp="$(printf '%s' "$md_json" | jq -r '[(.status.roles // [])[] | select(.name=="prefill") | .ready] | .[0] // 0' 2>/dev/null || echo 0)"
+    rd="$(printf '%s' "$md_json" | jq -r '[(.status.roles // [])[] | select(.name=="decode") | .ready] | .[0] // 0' 2>/dev/null || echo 0)"
+    ret_state="$(printf '%s' "$md_json" | jq -r '.status.retirement.state // ""' 2>/dev/null || true)"
+    [ -z "$ret_state" ] || saw_retirement=true
+    if [ $((sp * 2)) -ne "$sd" ]; then
+      ratio_broken=true
+      record FAIL "P2: atomic 1:2 ratio invariant during scale-down" "observed prefill=${sp} decode=${sd}"
+      break
+    fi
+    if [ "$sp" = "1" ] && [ "$sd" = "2" ] && [ "$rp" = "1" ] && [ "$rd" = "2" ]; then
+      pod_cnt="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${P2_DEPLOY},app.kubernetes.io/component in (prefill,decode)" --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+      if [ "${pod_cnt:-0}" -le 3 ]; then
+        scaled_down=true
+        break
+      fi
+    fi
+    sleep 5
+  done
+
+  if [ "$ratio_broken" = false ]; then
+    if [ "$scaled_down" = true ]; then
+      record PASS "P2: atomic whole-unit scale-down 2P:4D -> 1P:2D" "spec=1:2 ready=1:2 retirement_observed=${saw_retirement}"
+    else
+      ret_reason="$(printf '%s' "$md_json" | jq -r '.status.retirement.reason // ""' 2>/dev/null || true)"
+      record FAIL "P2: atomic whole-unit scale-down 2P:4D -> 1P:2D" "timeout (${RETIRE_BOUND}s), spec=${sp}:${sd} ready=${rp}:${rd} ret_state=${ret_state:-none} ret_reason=${ret_reason}"
+    fi
+  fi
+
+  kubectl -n "$NS" exec "$P2_PROBE" -- touch /tmp/stop_canary 2>/dev/null || true
+  local burst_drained=true canary_drained=true probe_counts canary_ok canary_fail burst_ok burst_fail
+  p2_wait_probe_worker /tmp/burst.pid 130 || burst_drained=false
+  p2_wait_probe_worker /tmp/canary.pid 70 || canary_drained=false
+
+  probe_counts="$(kubectl -n "$NS" exec "$P2_PROBE" -- sh -c '
+    awk "END{print NR}" /tmp/canary_ok_lines &&
+    awk "END{print NR}" /tmp/canary_fail_codes &&
+    awk "END{print NR}" /tmp/burst_ok_lines &&
+    awk "END{print NR}" /tmp/burst_fail_codes
+  ' 2>/dev/null | tr '\n' ' ' | tr -s ' ' | sed 's/^ //;s/ $//' || true)"
+  read -r canary_ok canary_fail burst_ok burst_fail <<< "${probe_counts:-}"
+
+  if [ "$burst_drained" = true ] && [ "$canary_drained" = true ] && \
+     [ -n "${canary_ok:-}" ] && [ "${canary_ok:-0}" -gt 0 ] && [ "${canary_fail:-1}" -eq 0 ] && \
+     [ -n "${burst_ok:-}" ] && [ "${burst_ok:-0}" -gt 0 ] && [ "${burst_fail:-1}" -eq 0 ]; then
+    record PASS "P2: continuous router probe zero failed requests" "canary_ok=${canary_ok}, canary_fail=0, burst_ok=${burst_ok}, burst_fail=0"
+  else
+    local canary_codes burst_codes canary_sample burst_sample
+    canary_codes="$(kubectl -n "$NS" exec "$P2_PROBE" -- sh -c 'sort /tmp/canary_fail_codes 2>/dev/null | uniq -c | tr "\n" ";" ' 2>/dev/null || true)"
+    burst_codes="$(kubectl -n "$NS" exec "$P2_PROBE" -- sh -c 'sort /tmp/burst_fail_codes 2>/dev/null | uniq -c | tr "\n" ";" ' 2>/dev/null || true)"
+    canary_sample="$(kubectl -n "$NS" exec "$P2_PROBE" -- sh -c 'head -n 3 /tmp/canary_fail_details 2>/dev/null | tr "\n" "|"' 2>/dev/null || true)"
+    burst_sample="$(kubectl -n "$NS" exec "$P2_PROBE" -- sh -c 'head -n 3 /tmp/burst_fail_details 2>/dev/null | tr "\n" "|"' 2>/dev/null || true)"
+    echo "[case-35-diag] router epp logs (tail 30):" >&2
+    kubectl -n "$NS" logs "deploy/${P2_DEPLOY}-router" -c epp --tail=30 >&2 2>/dev/null || true
+    record FAIL "P2: continuous router probe zero failed requests" "drained=${canary_drained}/${burst_drained}, canary_ok=${canary_ok:-?}, canary_fail=${canary_fail:-?} (${canary_codes} ${canary_sample}), burst_ok=${burst_ok:-?}, burst_fail=${burst_fail:-?} (${burst_codes} ${burst_sample})"
+  fi
+
+  p2_sample_restarts || true
+  local pods_seen restarts
+  pods_seen="$(jq 'length' "$RESTART_LEDGER" 2>/dev/null || echo 0)"
+  restarts="$(jq '[.[]] | add // 0' "$RESTART_LEDGER" 2>/dev/null || echo -1)"
+  if [ -z "$RESTART_READ_ERR" ] && [ "${pods_seen:-0}" -ge 4 ] && [ "${restarts:--1}" -eq 0 ]; then
+    record PASS "P2: zero container restarts across serving and router Pods" "restarts=0 pods_observed=${pods_seen}"
+  else
+    record FAIL "P2: zero container restarts across serving and router Pods" "restarts=${restarts} pods_observed=${pods_seen} read_err=${RESTART_READ_ERR:-none}"
+  fi
+}
+
+run_phase2
+results

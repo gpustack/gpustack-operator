@@ -11,10 +11,10 @@
 #
 #     set -uo pipefail
 #     NS="${1:?usage: ...}"
-#     CASE_ID=24
+#     CASE_ID=9
 #     # shellcheck source=/dev/null
 #     . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_partition-lib.sh"
-#     part_require_node_ssh "case-24.sh"     # exits 2 when MIG_NODE_SSH is unset
+#     part_require_node_ssh "case-9.sh"      # exits 2 when MIG_NODE_SSH is unset
 #     part_require_mig_capable               # skips (exit 0) when the card is not MIG-capable
 #     part_discover                          # correlates the k8s node, pool, queue and key bases
 #
@@ -455,8 +455,8 @@ part_ensure_partitioned_card() {
 # `nvidia-smi` round trip plus a Device Manager rollout and its settle — minutes, and the dominant
 # cost of a short case. Run standalone, a case must restore what it changed, so the default stays
 # "restore". Run as a BLOCK, every case pays that twice only for the next case to pay it again, so
-# the block-level runner sets this and restores once at the end. It changes no assertion: cases that
-# require an unpartitioned start (CASE 27) skip rather than silently weaken when they find one.
+# the block-level runner sets this and restores once at the end. It changes no assertion: phases that
+# require an unpartitioned start (CASE 9 phase 2) skip rather than silently weaken when they find one.
 part_restore_toggled() {
   if [ -z "${TOGGLED:-}" ]; then
     node_ssh_close

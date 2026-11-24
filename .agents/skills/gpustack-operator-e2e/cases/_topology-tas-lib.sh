@@ -61,7 +61,7 @@ TAS_POD_SHARE_PERCENT=60
 
 # Millicores from a Kubernetes CPU quantity, or 0 when the value is not one this can read.
 #
-# NOT BASH ARITHMETIC, and the shape is matched before conversion, for the reasons case-50 records:
+# NOT BASH ARITHMETIC, and the shape is matched before conversion, for the reasons case-28 records:
 # a CPU quantity is legally fractional, `$(( 1.5 * 1000 ))` is a syntax error rather than a wrong
 # number, and awk's numeric prefix would silently turn "1Ki" into a confident 1.
 tas_millis() {

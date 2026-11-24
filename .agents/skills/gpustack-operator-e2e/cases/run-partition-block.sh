@@ -1,70 +1,97 @@
 #!/usr/bin/env bash
 #
-# Run the hardware-partition cases in their required order. MUTATING (every case
-# toggles node hardware) — the skill confirms before running this.
+# Run the hardware-partition cases serially in their required order. MUTATING — the skill confirms
+# before running this.
 #
+#   # Real hardware (NVIDIA MIG or Hygon DCU Multi-Instance):
 #   MIG_NODE_SSH=<user@host> run-partition-block.sh <RAW_DIR> [NS] [CASES...]
 #
-# Why a runner and not a list in prose: the family has a real ordering constraint
-# and a run is long enough to outlive the lead's context, so a step remembered
-# only in conversation is a step that gets dropped after a compaction.
+#   # CPU-only Mock Device Manager (deviceManager.mock.enabled=true, no SSH needed):
+#   run-partition-block.sh <RAW_DIR> [NS] [CASES...]
 #
-#   CASE 27 FIRST. It measures the before/after delta of the whole-card and
-#   shared keys across the first partitioning, so it skips outright if any card
-#   is already partitioned.
-#   CASE 24 SECOND. It needs to establish a mixed population from an all-whole
-#   node.
-#   THE REST in any order. Each partitions a card only if none is partitioned
-#   yet and restores exactly the card it toggled.
+# Default case sequence:
+#   - With MIG_NODE_SSH set (real hardware):  9 7 13
+#       * CASE 9  — real NVIDIA MIG hardware lifecycle (starts unpartitioned in Phase 2 to measure
+#                   whole-card exclusion delta, exercises carve/mixed/live-ledger/concurrent/reclaim,
+#                   and disables MIG in Phase 8; auto-skips on non-NVIDIA hosts).
+#       * CASE 7  — unified SSH Instance suite (Leg 4 verifies partition-backed SSH sidecar
+#                   confinement; on an NVIDIA MIG host where CASE 9 ended Disabled, this runner
+#                   temporarily enables MIG on MIG_GPU_INDEX before CASE 7 and restores at the end).
+#       * CASE 13 — real Hygon DCU Multi-Instance partitions (auto-skips on non-Hygon hosts).
+#   - Without MIG_NODE_SSH when CPU Mock Device Manager is active:  5 7
+#       * CASE 5  — CPU Mock logical-slice packing/co-residency & virtual MIG lifecycle.
+#       * CASE 7  — unified SSH Instance suite (hot-reloading Mock DM to nvidia-h100-mig for Leg 4).
 #
-#   CASE 22 IS NOT HERE. It is a cross-mode case, not a partition case: it claims
-#   whole-card, shared and sliced resources on cards that are NOT partitioned, and
-#   the block holds the partitioning mode across the whole run, so inside the block
-#   it would auto-skip on the missing unpartitioned card rather than measure
-#   anything. Run it on its own, against an unpartitioned node.
-#   CASE 82 IS NOT HERE. It is an RDMA case - the family 80-85, driven by
-#   run-rdma-block.sh - and it wants a node whose accelerators straddle its RDMA
-#   endpoints' NUMA nodes under a kubelet enforcing one-NUMA-node placement. It
-#   toggles no accelerator mode at all, so the block's mode handling has nothing
-#   to do with it, and the two blocks would fight over the same node's cards.
-#
-# The cases all toggle the SAME node hardware, so they can never overlap; this is
-# serial by construction. A failure is recorded and the block CONTINUES, because
-# each case is self-recovering and the next one's precondition is the restored
-# baseline, not its predecessor's verdict.
-#
-# Every case writes to <RAW_DIR>/5<N>-case<N>.txt and its exit code is echoed, so
-# the block's outcome is readable from the files alone after a compaction.
+# Every case writes to <RAW_DIR>/case-<N>.txt and its exit code is echoed, so the block's outcome
+# is readable from the files alone after a compaction.
 set -uo pipefail
 
-# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
-# on transport alone, and a check that takes such a failure for an answer reports a verdict
-# about the network rather than about the operator.
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
 [ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 
 RAW="${1:?usage: run-partition-block.sh <RAW_DIR> [NS] [CASES...]}"
 NS="${2:-gpustack-system}"
 shift 2 2>/dev/null || shift $#
-CASES="${*:-27 24 25 28 29 32 34}"
-: "${MIG_NODE_SSH:?MIG_NODE_SSH=<user@host> required — ask the user, never hardcode it}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "${HERE}/_mock-dm-lib.sh"
+
 mkdir -p "$RAW"
 
-# block_ssh <cmd...> — the same ssh options the cases use, including MIG_NODE_SSH_OPTS (identity file,
-# port, jump host). Unquoted on purpose so the options split into words, as in the lib.
+# CPU-only Mock Device Manager mode when MIG_NODE_SSH is not supplied.
+if [ -z "${MIG_NODE_SSH:-}" ]; then
+  if mock_dm_detect_env "$NS"; then
+    CASES="${*:-5 7}"
+    echo "== partition block (CPU Mock Device Manager mode): cases ${CASES} =="
+    echo "   namespace ${NS}, mock ds ${MOCK_DM_DS}, raw output under ${RAW}"
+    FAILED=""
+    for n in $CASES; do
+      if [ ! -f "${HERE}/case-${n}.sh" ]; then
+        echo "!! no case-${n}.sh — skipping"
+        continue
+      fi
+      out="${RAW}/case-${n}.txt"
+      echo
+      echo "---------- CASE ${n} start $(date +%H:%M:%S) ----------"
+      bash "${HERE}/case-${n}.sh" "$NS" >"$out" 2>&1
+      rc=$?
+      echo "CASE ${n} exit=${rc} $(date +%H:%M:%S) -> ${out}"
+      [ "$rc" -ne 0 ] && FAILED="${FAILED}${n} "
+      tail -25 "$out"
+    done
+    echo
+    if [ -n "$FAILED" ]; then
+      echo "PARTITION_BLOCK_DONE — non-zero exits: ${FAILED}"
+      exit 1
+    fi
+    echo "PARTITION_BLOCK_DONE — all cases exited 0"
+    exit 0
+  fi
+
+  echo "!! MIG_NODE_SSH=<user@host> is required on real hardware (and no active Mock Device Manager was detected in ${NS})." >&2
+  echo "   Ask the user for MIG_NODE_SSH (never hardcode it), or enable deviceManager.mock.enabled=true for CPU Mock MIG." >&2
+  exit 2
+fi
+
+CASES="${*:-9 7 13}"
+GPU_INDEX="${MIG_GPU_INDEX:-0}"
+
+# block_ssh <cmd...> — the same ssh options the cases use, including MIG_NODE_SSH_OPTS.
 block_ssh() {
   # shellcheck disable=SC2086
   ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 ${MIG_NODE_SSH_OPTS:-} "$MIG_NODE_SSH" "$@"
 }
 
-# mig_modes — "<index>, <mode>" per card, as nvidia-smi reports it.
-mig_modes() { block_ssh sudo nvidia-smi --query-gpu=index,mig.mode.current --format=csv,noheader 2>/dev/null; }
+if ! block_ssh true >/dev/null 2>&1; then
+  echo "!! could not reach ${MIG_NODE_SSH} over SSH; check MIG_NODE_SSH / MIG_NODE_SSH_OPTS." >&2
+  exit 1
+fi
 
-# cards_to_disable <start-modes> <end-modes> — the indexes that were Disabled when the block started
-# and are Enabled now. Only those were switched by the block; a card already Enabled at the start is
-# the lead's and is left as found.
+# mig_modes — "<index>, <mode>" per NVIDIA card when nvidia-smi is present on the node, empty on
+# non-NVIDIA hosts (such as Hygon DCU Multi-Instance nodes, whose mode is never toggled here).
+mig_modes() { block_ssh sudo nvidia-smi --query-gpu=index,mig.mode.current --format=csv,noheader 2>/dev/null || true; }
+
 cards_to_disable() {
   local start="$1" end="$2" line idx mode was=" "
   while IFS= read -r line; do
@@ -80,46 +107,73 @@ cards_to_disable() {
   return 0
 }
 
-# Record every card's mode before any case runs. Without it the final restore cannot tell a card the
-# block switched from one the lead enabled on purpose, so the block refuses to start.
+any_mig_enabled() {
+  local line mode
+  while IFS= read -r line; do
+    mode="$(printf '%s' "${line#*,}" | tr -d '[:space:]')"
+    [ "$mode" = Enabled ] && return 0
+  done <<<"$1"
+  return 1
+}
+
 START_MODES="$(mig_modes)"
-if [ -z "$START_MODES" ]; then
-  echo "!! could not read the cards' MIG modes over SSH before the block; refusing to run, because the"
-  echo "   final restore could not tell which cards the block switched. Check MIG_NODE_SSH / MIG_NODE_SSH_OPTS."
-  exit 1
+if [ -n "$START_MODES" ]; then
+  echo "   NVIDIA MIG modes at block start:"
+  printf '%s\n' "$START_MODES" | sed 's/^/     /'
+else
+  echo "   non-NVIDIA or non-MIG host (${MIG_NODE_SSH}); no nvidia-smi MIG mode to snapshot"
 fi
-echo "   MIG modes at block start:"
-printf '%s\n' "$START_MODES" | sed 's/^/     /'
+
+restore_nvidia_modes() {
+  [ -n "$START_MODES" ] || return 0
+  echo "---------- restoring NVIDIA partitioning mode to block-start state ----------"
+  local end_modes c restored=0
+  end_modes="$(mig_modes)"
+  if [ -z "$end_modes" ]; then
+    echo "!! could not read NVIDIA MIG modes over SSH; check cards manually"
+    return 0
+  fi
+  for c in $(cards_to_disable "$START_MODES" "$end_modes"); do
+    echo "   card ${c}: Disabled at block start, Enabled now — disabling"
+    block_ssh sudo nvidia-smi -i "$c" -mig 0 >/dev/null 2>&1 || true
+    restored=1
+  done
+  if [ "$restored" -eq 1 ]; then
+    kubectl -n "$NS" rollout restart ds/gpustack-operator-device-manager-nvidia >/dev/null 2>&1 || true
+    kubectl -n "$NS" rollout status ds/gpustack-operator-device-manager-nvidia --timeout=300s >/dev/null 2>&1 || true
+  fi
+  mig_modes | sed 's/^/  /'
+}
+trap restore_nvidia_modes EXIT
 
 echo "== partition block: cases ${CASES} =="
 echo "   namespace ${NS}, raw output under ${RAW}"
 FAILED=""
 for n in $CASES; do
-  [ -f "${HERE}/case-${n}.sh" ] || { echo "!! no case-${n}.sh — skipping"; continue; }
-  out="${RAW}/5${n}-case${n}.txt"
+  if [ ! -f "${HERE}/case-${n}.sh" ]; then
+    echo "!! no case-${n}.sh — skipping"
+    continue
+  fi
+  # CASE 7 Leg 4 exercises partition-backed SSH sidecar confinement when a partitioned card is
+  # already active. On an NVIDIA MIG host where no card is currently Enabled (for instance right
+  # after CASE 9 Phase 8 disabled MIG), enable MIG on GPU_INDEX so Leg 4 runs against real MIG.
+  if [ "$n" = "7" ] && [ -n "$START_MODES" ] && ! any_mig_enabled "$(mig_modes)"; then
+    echo "   enabling MIG on card ${GPU_INDEX} before CASE 7 so Leg 4 sees a live real MIG partition"
+    if block_ssh sudo nvidia-smi -i "$GPU_INDEX" -mig 1 >/dev/null 2>&1; then
+      kubectl -n "$NS" rollout restart ds/gpustack-operator-device-manager-nvidia >/dev/null 2>&1 || true
+      kubectl -n "$NS" rollout status ds/gpustack-operator-device-manager-nvidia --timeout=300s >/dev/null 2>&1 || true
+      sleep 10
+    fi
+  fi
+  out="${RAW}/case-${n}.txt"
   echo
   echo "---------- CASE ${n} start $(date +%H:%M:%S) ----------"
-  # Hold the partitioning mode across the block: each case restores what it toggled, which in a block
-  # only means the next case pays to switch it back on. CASE 27 must see an unpartitioned node, so it
-  # runs before the lease is taken; the block restores once at the end.
-  keep=1; [ "$n" = 27 ] && keep=0
-  MIG_NODE_SSH="$MIG_NODE_SSH" MIG_KEEP_MODE="$keep" bash "${HERE}/case-${n}.sh" "$NS" >"$out" 2>&1
+  MIG_NODE_SSH="$MIG_NODE_SSH" MIG_KEEP_MODE=0 bash "${HERE}/case-${n}.sh" "$NS" >"$out" 2>&1
   rc=$?
   echo "CASE ${n} exit=${rc} $(date +%H:%M:%S) -> ${out}"
   [ "$rc" -ne 0 ] && FAILED="${FAILED}${n} "
   tail -25 "$out"
 done
-
-echo "---------- restoring the partitioning mode the block held ----------"
-END_MODES="$(mig_modes)"
-[ -n "$END_MODES" ] || echo "!! could not read the cards' MIG modes over SSH; no card restored — check them by hand"
-for c in $(cards_to_disable "$START_MODES" "$END_MODES"); do
-  echo "   card ${c}: Disabled at block start, Enabled now — disabling"
-  block_ssh sudo nvidia-smi -i "$c" -mig 0 >/dev/null 2>&1 || true
-done
-kubectl -n "$NS" rollout restart ds/gpustack-operator-device-manager-nvidia >/dev/null 2>&1
-kubectl -n "$NS" rollout status ds/gpustack-operator-device-manager-nvidia --timeout=300s >/dev/null 2>&1
-block_ssh sudo nvidia-smi --query-gpu=index,mig.mode.current --format=csv,noheader 2>&1 | sed 's/^/  /'
 
 echo
 if [ -n "$FAILED" ]; then

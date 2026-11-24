@@ -329,7 +329,7 @@ type Allocator interface {
       Acceptance: Authors `next/case-26.sh` through `next/case-37.sh` consolidating MD admission matrix (`45+116+126+133`), rendered topology/router/EPD (`47+70+117`), joint admission (`49+50+68+118`), scaling & replacement (`78+115`), compile cache (`127`), Scaler + capacityPrior (`128+131`), live P/D serving & scaling (`91+94`), live ModelArtifact serving (`99+100+104`), live EPD serving (`120+121`), live Scaler (`129+132`), live vLLM+SGLang runtimeControl (`134+135+137`), and live folded Elastic EP (`136`).
       Verify: `bash -n .agents/skills/gpustack-operator-e2e/cases/next/case-2[6-9].sh .agents/skills/gpustack-operator-e2e/cases/next/case-3[0-7].sh && make lint agents-shell`
 
-- [ ] **T10 · Cut over `case-1.sh .. case-37.sh`, remove legacy 90 scripts, and sync `SKILL.md` and helpers**
+- [x] **T10 · Cut over `case-1.sh .. case-37.sh`, remove legacy 90 scripts, and sync `SKILL.md` and helpers**
       Blocked by: T6, T7, T8, T9
       Owns: `.agents/skills/gpustack-operator-e2e/**`, `.agents/skills/_e2e-lib/**`, `.agents/skills/gpustack-operator-benchmark/**`
       Gate: review

@@ -73,7 +73,7 @@ for n in json.load(sys.stdin).get("items",[]):
     # A CPU-vendor probe only reads back on a node that feeds the CPU-only catalog. An
     # acceleratable node feeds the GPU InstanceType instead, whose manufacturer is the
     # accelerator vendor, so an injected cpu-model.vendor_id never surfaces here and the
-    # platform-type poll below times out. Skip those nodes, exactly as case-16 reads the
+    # platform-type poll below times out. Skip those nodes, exactly as case-2 reads the
     # CPU pool (acceleratable=false) rather than the accelerator one.
     if n.get("metadata",{}).get("labels",{}).get("feature.gpustack.ai/acceleratable") == "true":
         continue
@@ -86,7 +86,7 @@ for n in json.load(sys.stdin).get("items",[]):
 }
 
 # epd_platform_type <manufacturer> prints the AcceleratorType reporting that manufacturer, skipping
-# types on their way out and Inactive ones for the reasons case-45 records: naming either is
+# types on their way out and Inactive ones for the reasons case-26 records: naming either is
 # refused at admission for a reason no row here is about.
 #
 # The manufacturer is read from status, not from spec: the platform of a role is whatever its
@@ -128,7 +128,7 @@ epd_any_type_exists() {
 }
 
 # epd_set_awareness <system-ns> <true|false> turns CPU-manufacturer awareness on or off in the
-# settings Secret. The value rides the Secret base64-encoded (case-50's mechanic).
+# settings Secret. The value rides the Secret base64-encoded (case-28's mechanic).
 epd_set_awareness() { # <system-ns> <true|false>
   kubectl -n "$1" patch secret gpustack-settings --type=merge \
     -p "{\"data\":{\"${EPD_AWARENESS_KEY}\":\"$(printf '%s' "$2" | base64)\"}}" >/dev/null 2>&1
@@ -149,7 +149,7 @@ epd_restore_setting() { # <system-ns> <original-encoded>
 # Restoring the value is not the end of the restore: the worker reads it through a thirty-second
 # cache, and the type derived from it outlives the patch by that cache plus one reconcile. Wait for
 # the derived type to go, so the next case in a serial run does not list an aware type this run
-# left behind (case-16's wait_generic, on this same fixture). A cluster that started with the
+# left behind (case-2's wait_generic, on this same fixture). A cluster that started with the
 # setting already on keeps its derived type, so there is nothing to wait for and the wait is
 # skipped.
 epd_settle_back() { # <original-encoded> <rounds> <type-name>...
@@ -175,7 +175,7 @@ epd_settle_back() { # <original-encoded> <rounds> <type-name>...
 # found, the types it derived and the fact that it changed anything at all — is left in this
 # shell, and a subshell would take it with it, leaving the teardown with nothing to undo.
 #
-# The label rides a NodeFeature object (case-4's mechanism): the object stays and keeps
+# The label rides a NodeFeature object (NFD override mechanism): the object stays and keeps
 # re-asserting the label, where a bare `kubectl label` is a cpuid-owned value NFD reverts on its
 # next pass. The same object carries a second vendor when a case needs one, so one delete restores
 # both.
