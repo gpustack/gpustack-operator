@@ -193,18 +193,25 @@ The Device Manager re-detects whenever the device set or health changes, and the
 `gpustack.ai/managed` mark from the `Node` onto the same-named `Devices`, so the per-node Device
 Manager never asserts a node-management decision it does not own.
 
-> **A pass that failed is not a manufacturer with no accelerators** — every detector answers an absent
-> driver, a library that will not initialise and a bus holding no card with an empty list and no error.
-> So an error means that pass could not measure, and carries no claim about the hardware. The loop
-> reports such a manufacturer as it was **last detected**: its allocator keeps serving, the `Devices`
-> keeps its group and the node keeps that family's capacity keys. A manufacturer that has never
-> answered is still absent, and a pass that ran and found nothing is what undetects one, which also
-> drops whatever was held for it, so a later failure cannot resurrect a card that was pulled.
+> **A pass that failed is not a manufacturer with no accelerators** — a detector answers an absent
+> driver (with no matching PCI devices) or a clean empty bus with an empty list and no error. A
+> library initialization failure, a non-card-specific error, or a pass where every enumerated card
+> fails to query returns an error instead and retries initialization on later passes.
+>
+> An error carries no claim about the hardware, so the loop reports that manufacturer as it was
+> **last detected**: its allocator keeps serving, `Devices` keeps its group, and the node keeps that
+> family's capacity keys. A manufacturer that has never answered stays absent. A clean empty pass
+> drops what was held so a later failure cannot resurrect a removed card.
+>
+> When a previously detected card becomes unqueryable while at least one sibling succeeds, the
+> detector retains that card in place with `status.unhealthy: true` (and `unhealthy: true` in
+> monitor samples) while keeping healthy siblings' `index` values. The card recovers once it answers
+> again; a clean shrink, zero count, or intentional skip prunes the cached entry.
 >
 > The monitor pass cannot be carried forward the same way, because a sample is worth what its
-> timestamp claims. A manufacturer it could not measure is simply absent from the sample, and is named
-> as unmeasured so that its absence is not read as accelerators that went away — which would take the
-> loop round again on no evidence.
+> timestamp claims. A manufacturer it could not measure is simply absent from the sample, and is
+> named as unmeasured so its absence is not read as accelerators that went away — which would take
+> the loop round again on no evidence.
 
 > **Before the first detection, a Device Manager asked for one manufacturer reports nothing at
 > all**: no
