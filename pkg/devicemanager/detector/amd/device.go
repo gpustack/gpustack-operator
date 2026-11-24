@@ -1,6 +1,7 @@
 package amd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,9 +33,13 @@ func init() {
 }
 
 type amd struct {
-	once   sync.Once
-	amdgpu *amdgpu.AMDGPU
-	amdsmi *amdsmi.AMDSMI
+	initMu     sync.Mutex
+	amdgpuInit bool
+	rsmiInit   bool
+	amdsmiInit bool
+	hsaInit    bool
+	amdgpu     *amdgpu.AMDGPU
+	amdsmi     *amdsmi.AMDSMI
 	// rsmi serves the per-process query alone. AMD SMI is this backend's library for everything
 	// else, but its per-process device membership entry point answers INVAL on a live process id
 	// (measured on ROCm 7.2.0 / AMD SMI 26.2.1), and without membership a row cannot be told from
@@ -77,15 +82,25 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 		return nil, nil
 	}
 
-	in.init()
+	if ret := in.ensureInit(); !ret.IsSuccess() {
+		if err := classifyInitOrCountError("initialize AMDSMI library", ret, noPciCheck, len(pciDevs)); err != nil {
+			return nil, err
+		}
+		in.logger.Info("amd driver api unavailable", "reason", ret)
+		return nil, nil
+	}
 
 	devs, ret := in.amdsmi.GetProcessorHandles()
-	if !ret.IsSuccess() || len(devs) == 0 {
-		if ret.IsSuccess() {
-			in.logger.Info("no amd devices found")
-		} else {
-			in.logger.Error(ret, "no amd devices found")
+	if !ret.IsSuccess() {
+		if err := classifyInitOrCountError("get amd devices", ret, noPciCheck, len(pciDevs)); err != nil {
+			in.logger.Error(ret, "failed to get amd devices")
+			return nil, err
 		}
+		in.logger.Info("no amd devices found", "reason", ret)
+		return nil, nil
+	}
+	if len(devs) == 0 {
+		in.logger.Info("no amd devices found")
 		return nil, nil
 	}
 
@@ -94,8 +109,8 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 
 	rtVer, _ := in.amdsmi.GetROCMVersion()
 
-	var index uint32
 	grpList := device.DevicesGroupList{}
+	var lastUnqueryableErr error
 	for i := 0; i < len(devs); i++ {
 		logger := in.logger.WithValues("index", i)
 
@@ -103,7 +118,9 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 
 		asicInfo, ret := dev.GetGpuAsicInfo()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device ASIC info")
+			if err := handleCardQueryError(logger, i, "get device ASIC info", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -113,7 +130,9 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 		{
 			bdf, ret := dev.GetGpuDeviceBdf()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device PCI ID")
+				if err := handleCardQueryError(logger, i, "get device PCI ID", ret, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			pciBusId = bdf.String()
@@ -131,7 +150,9 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 		{
 			mem, ret := dev.GetGpuVramUsage()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device VRAM usage")
+				if err := handleCardQueryError(logger, i, "get device VRAM usage", ret, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			memory = uint64(mem.Total)
@@ -214,13 +235,19 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 			grpList[grpIndex].Accelerators,
 			device.Accelerator{
 				ID:              uuid,
-				Index:           index,
+				Index:           uint32(i),
 				PhysicalIndexes: physicalIndexes,
 				Topology:        topo,
 				Status:          status,
 			},
 		)
-		index++
+	}
+
+	if len(grpList) == 0 {
+		if lastUnqueryableErr != nil {
+			return nil, lastUnqueryableErr
+		}
+		return nil, nil
 	}
 
 	device.SetGroupSlicedDetails(grpList)
@@ -265,25 +292,34 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 		return nil, nil
 	}
 
-	in.init()
-
-	devs, ret := in.amdsmi.GetProcessorHandles()
-	if !ret.IsSuccess() || len(devs) == 0 {
-		if ret.IsSuccess() {
-			in.logger.Info("no amd devices found")
-		} else {
-			in.logger.Error(ret, "no amd devices found")
+	if ret := in.ensureInit(); !ret.IsSuccess() {
+		if err := classifyInitOrCountError("initialize AMDSMI library", ret, noPciCheck, len(pciDevs)); err != nil {
+			return nil, err
 		}
+		in.logger.Info("amd driver api unavailable", "reason", ret)
 		return nil, nil
 	}
 
-	grpList := device.MetricsGroupList{
-		{
-			Manufacturer: Manufacturer,
-			Timestamp:    time.Now(),
-			Accelerators: make([]device.AcceleratorMetrics, 0, len(devs)),
-		},
+	devs, ret := in.amdsmi.GetProcessorHandles()
+	if !ret.IsSuccess() {
+		if err := classifyInitOrCountError("get amd devices", ret, noPciCheck, len(pciDevs)); err != nil {
+			in.logger.Error(ret, "failed to get amd devices")
+			return nil, err
+		}
+		in.logger.Info("no amd devices found", "reason", ret)
+		return nil, nil
 	}
+	if len(devs) == 0 {
+		in.logger.Info("no amd devices found")
+		return nil, nil
+	}
+
+	metricsGrp := device.MetricsGroup{
+		Manufacturer: Manufacturer,
+		Timestamp:    time.Now(),
+		Accelerators: make([]device.AcceleratorMetrics, 0, len(devs)),
+	}
+	var lastUnqueryableErr error
 	for i := 0; i < len(devs); i++ {
 		logger := in.logger.WithValues("index", i)
 
@@ -291,7 +327,9 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 
 		asicInfo, ret := dev.GetGpuAsicInfo()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device ASIC info")
+			if err := handleCardQueryError(logger, i, "get device ASIC info", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -306,7 +344,9 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 		{
 			mem, ret := dev.GetGpuVramUsage()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device VRAM usage")
+				if err := handleCardQueryError(logger, i, "get device VRAM usage", ret, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
 				continue
 			}
 
@@ -351,8 +391,8 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 			}
 		}
 
-		grpList[0].Accelerators = append(
-			grpList[0].Accelerators,
+		metricsGrp.Accelerators = append(
+			metricsGrp.Accelerators,
 			device.AcceleratorMetrics{
 				ID:                uuid,
 				Memory:            memory,
@@ -366,7 +406,14 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 		)
 	}
 
-	return grpList, nil
+	if len(metricsGrp.Accelerators) == 0 {
+		if lastUnqueryableErr != nil {
+			return nil, lastUnqueryableErr
+		}
+		return nil, nil
+	}
+
+	return device.MetricsGroupList{metricsGrp}, nil
 }
 
 func isDeviceUnhealthy(dev amdsmi.Device) bool {
@@ -381,28 +428,105 @@ func evaluateDeviceUnhealthy(eccCount amdsmi.ErrorCount, ret amdsmi.Return) bool
 }
 
 func (in *amd) init() {
-	in.once.Do(func() {
+	_ = in.ensureInit()
+}
+
+func (in *amd) ensureInit() amdsmi.Return {
+	in.initMu.Lock()
+	defer in.initMu.Unlock()
+
+	if in.amdsmiInit {
+		return amdsmi.STATUS_SUCCESS
+	}
+
+	if !in.amdgpuInit {
 		if ret := in.amdgpu.Init(); !ret.IsSuccess() {
 			in.logger.Error(ret, "failed to initialize AMDGPU library")
+		} else {
+			in.amdgpuInit = true
 		}
-		// ROCm SMI IS LOADED BEFORE AMD SMI, AND THE ORDER IS NOT INTERCHANGEABLE. Measured on
-		// ROCm 7.2.0: with AMD SMI loaded first, the dlopen of ROCm SMI aborts the process with
-		// SIGBUS inside dlopen itself, while this order leaves both libraries working and agreeing
-		// on every accelerator's identity. Whoever reorders these will not find out from a test.
-		//
-		// The order is not free on a newer stack, and amdsmi.New is where it is paid for: ROCm SMI
-		// in the global scope zeroes AMD SMI's socket enumeration, so that library is loaded
-		// RTLD_DEEPBIND.
+	}
+	// ROCm SMI IS LOADED BEFORE AMD SMI, AND THE ORDER IS NOT INTERCHANGEABLE. Measured on
+	// ROCm 7.2.0: with AMD SMI loaded first, the dlopen of ROCm SMI aborts the process with
+	// SIGBUS inside dlopen itself, while this order leaves both libraries working and agreeing
+	// on every accelerator's identity. Whoever reorders these will not find out from a test.
+	//
+	// The order is not free on a newer stack, and amdsmi.New is where it is paid for: ROCm SMI
+	// in the global scope zeroes AMD SMI's socket enumeration, so that library is loaded
+	// RTLD_DEEPBIND.
+	if !in.rsmiInit {
 		if ret := in.rsmi.Init(); !ret.IsSuccess() {
 			in.logger.Error(ret, "failed to initialize ROCm SMI library")
+		} else {
+			in.rsmiInit = true
 		}
-		if ret := in.amdsmi.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize AMDSMI library")
+	}
+	ret := in.amdsmi.Init()
+	if !ret.IsSuccess() {
+		in.logger.Error(ret, "failed to initialize AMDSMI library")
+		return ret
+	}
+	in.amdsmiInit = true
+
+	if !in.hsaInit {
+		if hsaRet := in.hsa.Init(); !hsaRet.IsSuccess() {
+			in.logger.Error(hsaRet, "failed to initialize HSA library")
+		} else {
+			in.hsaInit = true
 		}
-		if ret := in.hsa.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize HSA library")
-		}
-	})
+	}
+	return amdsmi.STATUS_SUCCESS
+}
+
+// isUnqueryableDeviceError reports whether a non-success AMDSMI return indicates a card-specific
+// hardware or bus fault where skipping the affected card allows healthy sibling cards to remain
+// queryable.
+func isUnqueryableDeviceError(ret amdsmi.Return) bool {
+	switch ret {
+	case amdsmi.STATUS_DRM_ERROR,
+		amdsmi.STATUS_API_FAILED,
+		amdsmi.STATUS_IO,
+		amdsmi.STATUS_FILE_ERROR,
+		amdsmi.STATUS_FILE_NOT_FOUND,
+		amdsmi.STATUS_DIRECTORY_NOT_FOUND,
+		amdsmi.STATUS_BUSY,
+		amdsmi.STATUS_NOT_FOUND,
+		amdsmi.STATUS_NO_DATA,
+		amdsmi.STATUS_AMDGPU_RESTART_ERR,
+		amdsmi.STATUS_CORRUPTED_EEPROM,
+		amdsmi.STATUS_INTERNAL_EXCEPTION,
+		amdsmi.STATUS_IPC_ERROR:
+		return true
+	default:
+		return false
+	}
+}
+
+// classifyInitOrCountError distinguishes an absent driver or library on a node without detected PCI
+// devices from an operational failure that must fail the pass.
+func classifyInitOrCountError(op string, ret amdsmi.Return, noPciCheck bool, pciDevCount int) error {
+	if ret.IsSuccess() {
+		return nil
+	}
+	if ret.IsAPIUnavailable() && (noPciCheck || pciDevCount == 0) {
+		return nil
+	}
+	return fmt.Errorf("failed to %s: %w", op, ret)
+}
+
+// handleCardQueryError classifies a fatal per-card query error. Card-specific unqueryable errors
+// are logged, recorded in lastUnqueryableErr, and skipped; other errors fail the pass immediately.
+func handleCardQueryError(
+	logger klog.Logger, index int, op string, ret amdsmi.Return, lastUnqueryableErr *error,
+) error {
+	err := fmt.Errorf("failed to %s at index %d: %w", op, index, ret)
+	if isUnqueryableDeviceError(ret) {
+		logger.Error(ret, "skipping unqueryable device", "operation", op)
+		*lastUnqueryableErr = err
+		return nil
+	}
+	logger.Error(ret, "failed to "+op)
+	return err
 }
 
 func getPhysicalIndexes(bdf string) []uint32 {

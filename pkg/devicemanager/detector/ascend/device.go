@@ -2,6 +2,7 @@ package ascend
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -43,8 +44,9 @@ func init() {
 }
 
 type ascend struct {
-	once sync.Once
-	dcmi *dcmi.DCMI
+	initMu      sync.Mutex
+	initialized bool
+	dcmi        *dcmi.DCMI
 	// product is the A5 shape this node is, shared with the allocator's own copy of the rule. It is
 	// read once per process rather than once per pass: a node cannot change shape while the device
 	// manager runs.
@@ -92,29 +94,41 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 		return nil, nil
 	}
 
-	in.init()
+	if ret := in.ensureInit(); !ret.IsSuccess() {
+		if err := classifyInitOrCountError("initialize DCMI library", ret, noPciCheck, len(pciDevs)); err != nil {
+			return nil, err
+		}
+		in.logger.Info("ascend driver api unavailable", "reason", ret)
+		return nil, nil
+	}
 
 	_, cardList, ret := in.dcmi.GetCardList()
-	if !ret.IsSuccess() || len(cardList) == 0 {
-		if ret.IsSuccess() {
-			in.logger.Info("no ascend devices found")
-		} else {
-			in.logger.Error(ret, "no ascend devices found")
+	if !ret.IsSuccess() {
+		if err := classifyInitOrCountError("get ascend card list", ret, noPciCheck, len(pciDevs)); err != nil {
+			in.logger.Error(ret, "failed to get ascend card list")
+			return nil, err
 		}
+		in.logger.Info("no ascend devices found", "reason", ret)
+		return nil, nil
+	}
+	if len(cardList) == 0 {
+		in.logger.Info("no ascend devices found")
 		return nil, nil
 	}
 
 	drVer, _ := in.dcmi.GetDriverVersion()
 	rtVer := getToolkitVersion()
 
-	var index uint32
 	grpList := device.DevicesGroupList{}
+	var lastUnqueryableErr error
 	for _, card := range cardList {
 		logger := in.logger.WithValues("card", card)
 
 		cnt, ret := in.dcmi.GetDeviceNumInCard(card)
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device count in card")
+			if err := handleCardQueryError(logger, int(card), "get device count in card", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -131,7 +145,9 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 
 			uuid, ret := deviceUUID(dev)
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device vdie info")
+				if err := handleCardQueryError(logger, int(card), "get device vdie info", ret, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
 				continue
 			}
 
@@ -150,9 +166,13 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				infoHandler := dev.GetChipInfoV()
 				chipInfo, ret = infoHandler.V2()
 				if !ret.IsSuccess() {
-					chipInfo, ret = infoHandler.V1()
+					var v1Ret dcmi.Return
+					chipInfo, v1Ret = infoHandler.V1()
+					ret = selectVersionedReturn(ret, v1Ret)
 					if !ret.IsSuccess() {
-						logger.Error(ret, "failed to get device chip info")
+						if err := handleCardQueryError(logger, int(card), "get device chip info", ret, &lastUnqueryableErr); err != nil {
+							return nil, err
+						}
 						continue
 					}
 				}
@@ -180,7 +200,13 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 						memory = hbmInfo.Memory_size
 						memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_HBM)
 					default:
-						logger.Error(ddrRet, "failed to get device memory info")
+						memRet := ddrRet
+						if !hbmRet.IsSuccess() {
+							memRet = selectVersionedReturn(hbmRet, ddrRet)
+						}
+						if err := handleCardQueryError(logger, int(card), "get device memory info", memRet, &lastUnqueryableErr); err != nil {
+							return nil, err
+						}
 						continue
 					}
 				}
@@ -188,7 +214,9 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 
 			phyId, ret := dev.GetPhysicalID()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device physical ID")
+				if err := handleCardQueryError(logger, int(card), "get device physical ID", ret, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			// dcmi's own addressing for this accelerator, in the slot order every consumer reads
@@ -262,14 +290,20 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				grpList[grpIndex].Accelerators,
 				device.Accelerator{
 					ID:              uuid,
-					Index:           index,
+					Index:           phyId,
 					PhysicalIndexes: physicalIndexes,
 					Topology:        topo,
 					Status:          status,
 				},
 			)
-			index++
 		}
+	}
+
+	if len(grpList) == 0 {
+		if lastUnqueryableErr != nil {
+			return nil, lastUnqueryableErr
+		}
+		return nil, nil
 	}
 
 	device.SetGroupSlicedDetails(grpList)
@@ -292,31 +326,42 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 		return nil, nil
 	}
 
-	in.init()
-
-	_, cardList, ret := in.dcmi.GetCardList()
-	if !ret.IsSuccess() || len(cardList) == 0 {
-		if ret.IsSuccess() {
-			in.logger.Info("no ascend devices found")
-		} else {
-			in.logger.Error(ret, "no ascend devices found")
+	if ret := in.ensureInit(); !ret.IsSuccess() {
+		if err := classifyInitOrCountError("initialize DCMI library", ret, noPciCheck, len(pciDevs)); err != nil {
+			return nil, err
 		}
+		in.logger.Info("ascend driver api unavailable", "reason", ret)
 		return nil, nil
 	}
 
-	grpList := device.MetricsGroupList{
-		{
-			Manufacturer: Manufacturer,
-			Timestamp:    time.Now(),
-			Accelerators: make([]device.AcceleratorMetrics, 0, len(cardList)*2),
-		},
+	_, cardList, ret := in.dcmi.GetCardList()
+	if !ret.IsSuccess() {
+		if err := classifyInitOrCountError("get ascend card list", ret, noPciCheck, len(pciDevs)); err != nil {
+			in.logger.Error(ret, "failed to get ascend card list")
+			return nil, err
+		}
+		in.logger.Info("no ascend devices found", "reason", ret)
+		return nil, nil
 	}
+	if len(cardList) == 0 {
+		in.logger.Info("no ascend devices found")
+		return nil, nil
+	}
+
+	metricsGrp := device.MetricsGroup{
+		Manufacturer: Manufacturer,
+		Timestamp:    time.Now(),
+		Accelerators: make([]device.AcceleratorMetrics, 0, len(cardList)*2),
+	}
+	var lastUnqueryableErr error
 	for _, card := range cardList {
 		logger := in.logger.WithValues("card", card)
 
 		cnt, ret := in.dcmi.GetDeviceNumInCard(card)
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device count in card")
+			if err := handleCardQueryError(logger, int(card), "get device count in card", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -333,7 +378,9 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 
 			uuid, ret := deviceUUID(dev)
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device vdie info")
+				if err := handleCardQueryError(logger, int(card), "get device vdie info", ret, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
 				continue
 			}
 
@@ -365,7 +412,13 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 						memoryUtilization = device.CalculateUtilization(memoryUsage, memory)
 						memoryUnhealthy = isDeviceUnhealthy(dev, dcmi.DEVICE_TYPE_HBM)
 					default:
-						logger.Error(ddrRet, "failed to get device memory info")
+						memRet := ddrRet
+						if !hbmRet.IsSuccess() {
+							memRet = selectVersionedReturn(hbmRet, ddrRet)
+						}
+						if err := handleCardQueryError(logger, int(card), "get device memory info", memRet, &lastUnqueryableErr); err != nil {
+							return nil, err
+						}
 						continue
 					}
 				}
@@ -405,8 +458,8 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 				}
 			}
 
-			grpList[0].Accelerators = append(
-				grpList[0].Accelerators,
+			metricsGrp.Accelerators = append(
+				metricsGrp.Accelerators,
 				device.AcceleratorMetrics{
 					ID:                uuid,
 					Memory:            memory,
@@ -421,15 +474,104 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 		}
 	}
 
-	return grpList, nil
+	if len(metricsGrp.Accelerators) == 0 {
+		if lastUnqueryableErr != nil {
+			return nil, lastUnqueryableErr
+		}
+		return nil, nil
+	}
+
+	return device.MetricsGroupList{metricsGrp}, nil
 }
 
 func (in *ascend) init() {
-	in.once.Do(func() {
-		if ret := in.dcmi.Init(in.logger); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize DCMI library")
-		}
-	})
+	_ = in.ensureInit()
+}
+
+func (in *ascend) ensureInit() dcmi.Return {
+	in.initMu.Lock()
+	defer in.initMu.Unlock()
+
+	if in.initialized {
+		return dcmi.SUCCESS
+	}
+
+	ret := in.dcmi.Init(in.logger)
+	if ret.IsSuccess() {
+		in.initialized = true
+		return dcmi.SUCCESS
+	}
+
+	in.logger.Error(ret, "failed to initialize DCMI library")
+	return ret
+}
+
+// isUnqueryableDeviceError reports whether a non-success DCMI return indicates a card-specific
+// hardware or bus fault where skipping the affected card allows healthy sibling cards to remain
+// queryable.
+func isUnqueryableDeviceError(ret dcmi.Return) bool {
+	switch ret {
+	case dcmi.ERROR_MEM_OPERATE_FAIL,
+		dcmi.ERROR_SECURE_FUN_FAIL,
+		dcmi.ERROR_INNER_ERR,
+		dcmi.ERROR_INVALID_DEVICE_ID,
+		dcmi.ERROR_DEVICE_NOT_EXIST,
+		dcmi.ERROR_IOCTL_FAIL,
+		dcmi.ERROR_SEND_MSG_FAIL,
+		dcmi.ERROR_RECV_MSG_FAIL,
+		dcmi.ERROR_NOT_REDAY,
+		dcmi.ERROR_RESET_FAIL,
+		dcmi.ERROR_ABORT_OPERATE,
+		dcmi.ERROR_IS_UPGRADING,
+		dcmi.ERROR_RESOURCE_OCCUPIED,
+		dcmi.ERROR_UNKNOWN:
+		return true
+	default:
+		return false
+	}
+}
+
+// classifyInitOrCountError distinguishes an absent driver or library on a node without detected PCI
+// devices from an operational failure that must fail the pass.
+func classifyInitOrCountError(op string, ret dcmi.Return, noPciCheck bool, pciDevCount int) error {
+	if ret.IsSuccess() {
+		return nil
+	}
+	if ret.IsAPIUnavailable() && (noPciCheck || pciDevCount == 0) {
+		return nil
+	}
+	return fmt.Errorf("failed to %s: %w", op, ret)
+}
+
+// selectVersionedReturn resolves the return code after a V2 query fails and falls back to V1.
+// When V1 is unsupported or absent (as on V2 drivers), V2's return is preserved; when V2 is
+// unsupported or absent (as on V1 drivers), V1's return is used.
+func selectVersionedReturn(v2Ret, v1Ret dcmi.Return) dcmi.Return {
+	if v1Ret.IsSuccess() {
+		return v1Ret
+	}
+	if v1Ret == dcmi.ERROR_NOT_SUPPORT || v1Ret.IsAPIUnavailable() {
+		return v2Ret
+	}
+	if v2Ret == dcmi.ERROR_NOT_SUPPORT || v2Ret.IsAPIUnavailable() {
+		return v1Ret
+	}
+	return v2Ret
+}
+
+// handleCardQueryError classifies a fatal per-card query error. Card-specific unqueryable errors
+// are logged, recorded in lastUnqueryableErr, and skipped; other errors fail the pass immediately.
+func handleCardQueryError(
+	logger klog.Logger, card int, op string, ret dcmi.Return, lastUnqueryableErr *error,
+) error {
+	err := fmt.Errorf("failed to %s on card %d: %w", op, card, ret)
+	if isUnqueryableDeviceError(ret) {
+		logger.Error(ret, "skipping unqueryable device", "operation", op)
+		*lastUnqueryableErr = err
+		return nil
+	}
+	logger.Error(ret, "failed to "+op)
+	return err
 }
 
 // Borrowed from https://gitcode.com/Ascend/pytorch/blob/master/torch_npu/csrc/core/npu/NpuVariables.cpp#L13-L40 and

@@ -1,6 +1,7 @@
 package metax
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,9 +32,10 @@ func init() {
 }
 
 type metax struct {
-	once   sync.Once
-	mxsml  *mxsml.MXSML
-	logger klog.Logger
+	initMu      sync.Mutex
+	initialized bool
+	mxsml       *mxsml.MXSML
+	logger      klog.Logger
 }
 
 // New creates a new metax device interface and initializes the MXSML library.
@@ -65,7 +67,13 @@ func (in *metax) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		return nil, nil
 	}
 
-	in.init()
+	if ret := in.ensureInit(); !ret.IsSuccess() {
+		if err := classifyInitOrCountError("initialize MXSML library", ret, noPciCheck, len(pciDevs)); err != nil {
+			return nil, err
+		}
+		in.logger.Info("metax driver api unavailable", "reason", ret)
+		return nil, nil
+	}
 
 	cnt := in.mxsml.GetDeviceCount()
 	if cnt == 0 {
@@ -76,8 +84,8 @@ func (in *metax) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 	drVer, _ := in.mxsml.GetDriverVersion()
 	rtVer, _ := in.mxsml.GetMacaVersion()
 
-	var index uint32
 	grpList := device.DevicesGroupList{}
+	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
 
@@ -85,7 +93,9 @@ func (in *metax) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 
 		info, ret := dev.GetInfo()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device info")
+			if err := handleCardQueryError(logger, i, "get device info", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		if mxsml.DeviceVirtualizationMode(info.Mode) == mxsml.Virtualization_Mode_Vf {
@@ -107,7 +117,9 @@ func (in *metax) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		{
 			memInfo, ret := dev.GetMemoryInfo()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device memory info")
+				if err := handleCardQueryError(logger, i, "get device memory info", ret, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			memory = device.ConvertKiBToMiB(memInfo.VramTotal)
@@ -151,13 +163,19 @@ func (in *metax) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			grpList[grpIndex].Accelerators,
 			device.Accelerator{
 				ID:              uuid,
-				Index:           index,
+				Index:           uint32(i),
 				PhysicalIndexes: physicalIndexes,
 				Topology:        topo,
 				Status:          status,
 			},
 		)
-		index++
+	}
+
+	if len(grpList) == 0 {
+		if lastUnqueryableErr != nil {
+			return nil, lastUnqueryableErr
+		}
+		return nil, nil
 	}
 
 	device.SetGroupSlicedDetails(grpList)
@@ -176,11 +194,17 @@ func (in *metax) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 
 	pciDevs := binding.GetPCIDevices([]string{_PciVendor}, nil)
 	if !noPciCheck && len(pciDevs) == 0 {
-		in.logger.Info("no iluvatar pci devices found")
+		in.logger.Info("no metax pci devices found")
 		return nil, nil
 	}
 
-	in.init()
+	if ret := in.ensureInit(); !ret.IsSuccess() {
+		if err := classifyInitOrCountError("initialize MXSML library", ret, noPciCheck, len(pciDevs)); err != nil {
+			return nil, err
+		}
+		in.logger.Info("metax driver api unavailable", "reason", ret)
+		return nil, nil
+	}
 
 	cnt := in.mxsml.GetDeviceCount()
 	if cnt == 0 {
@@ -188,13 +212,12 @@ func (in *metax) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 		return nil, nil
 	}
 
-	grpList := device.MetricsGroupList{
-		{
-			Manufacturer: Manufacturer,
-			Timestamp:    time.Now(),
-			Accelerators: make([]device.AcceleratorMetrics, 0, cnt),
-		},
+	metricsGrp := device.MetricsGroup{
+		Manufacturer: Manufacturer,
+		Timestamp:    time.Now(),
+		Accelerators: make([]device.AcceleratorMetrics, 0, cnt),
 	}
+	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
 
@@ -202,7 +225,9 @@ func (in *metax) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 
 		info, ret := dev.GetInfo()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device info")
+			if err := handleCardQueryError(logger, i, "get device info", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		if mxsml.DeviceVirtualizationMode(info.Mode) == mxsml.Virtualization_Mode_Vf {
@@ -221,7 +246,9 @@ func (in *metax) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 		{
 			memInfo, ret := dev.GetMemoryInfo()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device memory info")
+				if err := handleCardQueryError(logger, i, "get device memory info", ret, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
 				continue
 			}
 
@@ -261,8 +288,8 @@ func (in *metax) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 			}
 		}
 
-		grpList[0].Accelerators = append(
-			grpList[0].Accelerators,
+		metricsGrp.Accelerators = append(
+			metricsGrp.Accelerators,
 			device.AcceleratorMetrics{
 				ID:                uuid,
 				Memory:            memory,
@@ -276,7 +303,14 @@ func (in *metax) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 		)
 	}
 
-	return grpList, nil
+	if len(metricsGrp.Accelerators) == 0 {
+		if lastUnqueryableErr != nil {
+			return nil, lastUnqueryableErr
+		}
+		return nil, nil
+	}
+
+	return device.MetricsGroupList{metricsGrp}, nil
 }
 
 func isDeviceUnhealthy(dev mxsml.Device) bool {
@@ -291,11 +325,74 @@ func evaluateDeviceUnhealthy(eccErrors mxsml.EccErrorCount, ret mxsml.Return) bo
 }
 
 func (in *metax) init() {
-	in.once.Do(func() {
-		if ret := in.mxsml.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize MXSML library")
-		}
-	})
+	_ = in.ensureInit()
+}
+
+func (in *metax) ensureInit() mxsml.Return {
+	in.initMu.Lock()
+	defer in.initMu.Unlock()
+
+	if in.initialized {
+		return mxsml.Success
+	}
+
+	ret := in.mxsml.Init()
+	if ret.IsSuccess() {
+		in.initialized = true
+		return mxsml.Success
+	}
+
+	in.logger.Error(ret, "failed to initialize MXSML library")
+	return ret
+}
+
+// isUnqueryableDeviceError reports whether a non-success MXSML return indicates a card-specific
+// hardware or bus fault where skipping the affected card allows healthy sibling cards to remain
+// queryable.
+func isUnqueryableDeviceError(ret mxsml.Return) bool {
+	switch ret {
+	case mxsml.Failure,
+		mxsml.NoDevice,
+		mxsml.SysfsError,
+		mxsml.InvalidDeviceId,
+		mxsml.InvalidDieId,
+		mxsml.IOControlFailure,
+		mxsml.FlrNotReady,
+		mxsml.OpenDeviceFileFailure,
+		mxsml.CloseDeviceFileFailure,
+		mxsml.BusyDevice,
+		mxsml.GetPciBridgeFailure:
+		return true
+	default:
+		return false
+	}
+}
+
+// classifyInitOrCountError distinguishes an absent driver or library (or zero-card Init return) on
+// a node without detected PCI devices from an operational failure that must fail the pass.
+func classifyInitOrCountError(op string, ret mxsml.Return, noPciCheck bool, pciDevCount int) error {
+	if ret.IsSuccess() {
+		return nil
+	}
+	if (ret.IsAPIUnavailable() || ret == mxsml.NoDevice) && (noPciCheck || pciDevCount == 0) {
+		return nil
+	}
+	return fmt.Errorf("failed to %s: %w", op, ret)
+}
+
+// handleCardQueryError classifies a fatal per-card query error. Card-specific unqueryable errors
+// are logged, recorded in lastUnqueryableErr, and skipped; other errors fail the pass immediately.
+func handleCardQueryError(
+	logger klog.Logger, index int, op string, ret mxsml.Return, lastUnqueryableErr *error,
+) error {
+	err := fmt.Errorf("failed to %s at index %d: %w", op, index, ret)
+	if isUnqueryableDeviceError(ret) {
+		logger.Error(ret, "skipping unqueryable device", "operation", op)
+		*lastUnqueryableErr = err
+		return nil
+	}
+	logger.Error(ret, "failed to "+op)
+	return err
 }
 
 func getPhysicalIndexes(bdf string) []uint32 {

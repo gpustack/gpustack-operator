@@ -29,9 +29,10 @@ func init() {
 }
 
 type cambricon struct {
-	once   sync.Once
-	cndev  *cndev.CNDev
-	logger klog.Logger
+	initMu      sync.Mutex
+	initialized bool
+	cndev       *cndev.CNDev
+	logger      klog.Logger
 }
 
 // New creates a new cambricon device interface and initializes the RSMI library.
@@ -63,34 +64,48 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 		return nil, nil
 	}
 
-	in.init()
+	if ret := in.ensureInit(); !ret.IsSuccess() {
+		if err := classifyInitOrCountError("initialize CNDev library", ret, noPciCheck, len(pciDevs)); err != nil {
+			return nil, err
+		}
+		in.logger.Info("cambricon driver api unavailable", "reason", ret)
+		return nil, nil
+	}
 
 	cnt, ret := in.cndev.GetDeviceCount()
-	if !ret.IsSuccess() || cnt == 0 {
-		if ret.IsSuccess() {
-			in.logger.Info("no cambricon devices found")
-		} else {
-			in.logger.Error(ret, "no cambricon devices found")
+	if !ret.IsSuccess() {
+		if err := classifyInitOrCountError("get cambricon device count", ret, noPciCheck, len(pciDevs)); err != nil {
+			in.logger.Error(ret, "failed to get cambricon device count")
+			return nil, err
 		}
+		in.logger.Info("no cambricon devices found", "reason", ret)
+		return nil, nil
+	}
+	if cnt == 0 {
+		in.logger.Info("no cambricon devices found")
 		return nil, nil
 	}
 
 	rtVer := getRuntimeVersion()
 
-	var index uint32
 	grpList := device.DevicesGroupList{}
+	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
 
 		dev, ret := in.cndev.GetDeviceHandleByIndex(i)
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device handle by index")
+			if err := handleCardQueryError(logger, i, "get device handle by index", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
 		uuid, ret := dev.GetUUID()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device UUID")
+			if err := handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -99,7 +114,9 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 			pciHandler := dev.GetPCIeInfoV()
 			pciInfo, ret := pciHandler.V2()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device PCI info")
+				if err := handleCardQueryError(logger, i, "get device PCI info", ret, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			pciBusId = pciInfo.GetBusId()
@@ -108,7 +125,9 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 
 		name, ret := dev.GetCardName()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device name")
+			if err := handleCardQueryError(logger, i, "get device name", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -120,7 +139,9 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 			memHandler := dev.GetMemoryInfoV()
 			memInfo, ret := memHandler.V2()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device memory total")
+				if err := handleCardQueryError(logger, i, "get device memory total", ret, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			memory = uint64(memInfo.PhysicalMemoryTotal)
@@ -166,13 +187,19 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 			grpList[grpIndex].Accelerators,
 			device.Accelerator{
 				ID:              uuid,
-				Index:           index,
+				Index:           uint32(i),
 				PhysicalIndexes: physicalIndexes,
 				Topology:        topo,
 				Status:          status,
 			},
 		)
-		index++
+	}
+
+	if len(grpList) == 0 {
+		if lastUnqueryableErr != nil {
+			return nil, lastUnqueryableErr
+		}
+		return nil, nil
 	}
 
 	device.SetGroupSlicedDetails(grpList)
@@ -195,37 +222,50 @@ func (in *cambricon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupL
 		return nil, nil
 	}
 
-	in.init()
-
-	cnt, ret := in.cndev.GetDeviceCount()
-	if !ret.IsSuccess() || cnt == 0 {
-		if ret.IsSuccess() {
-			in.logger.Info("no cambricon devices found")
-		} else {
-			in.logger.Error(ret, "no cambricon devices found")
+	if ret := in.ensureInit(); !ret.IsSuccess() {
+		if err := classifyInitOrCountError("initialize CNDev library", ret, noPciCheck, len(pciDevs)); err != nil {
+			return nil, err
 		}
+		in.logger.Info("cambricon driver api unavailable", "reason", ret)
 		return nil, nil
 	}
 
-	grpList := device.MetricsGroupList{
-		{
-			Manufacturer: Manufacturer,
-			Timestamp:    time.Now(),
-			Accelerators: make([]device.AcceleratorMetrics, 0, cnt),
-		},
+	cnt, ret := in.cndev.GetDeviceCount()
+	if !ret.IsSuccess() {
+		if err := classifyInitOrCountError("get cambricon device count", ret, noPciCheck, len(pciDevs)); err != nil {
+			in.logger.Error(ret, "failed to get cambricon device count")
+			return nil, err
+		}
+		in.logger.Info("no cambricon devices found", "reason", ret)
+		return nil, nil
 	}
+	if cnt == 0 {
+		in.logger.Info("no cambricon devices found")
+		return nil, nil
+	}
+
+	metricsGrp := device.MetricsGroup{
+		Manufacturer: Manufacturer,
+		Timestamp:    time.Now(),
+		Accelerators: make([]device.AcceleratorMetrics, 0, cnt),
+	}
+	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
 
 		dev, ret := in.cndev.GetDeviceHandleByIndex(i)
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device handle by index")
+			if err := handleCardQueryError(logger, i, "get device handle by index", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
 		uuid, ret := dev.GetUUID()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device UUID")
+			if err := handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -239,7 +279,9 @@ func (in *cambricon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupL
 			memHandler := dev.GetMemoryInfoV()
 			memInfo, ret := memHandler.V2()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device memory total")
+				if err := handleCardQueryError(logger, i, "get device memory total", ret, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
 				continue
 			}
 
@@ -277,8 +319,8 @@ func (in *cambricon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupL
 			}
 		}
 
-		grpList[0].Accelerators = append(
-			grpList[0].Accelerators,
+		metricsGrp.Accelerators = append(
+			metricsGrp.Accelerators,
 			device.AcceleratorMetrics{
 				ID:                uuid,
 				Memory:            memory,
@@ -292,15 +334,80 @@ func (in *cambricon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupL
 		)
 	}
 
-	return grpList, nil
+	if len(metricsGrp.Accelerators) == 0 {
+		if lastUnqueryableErr != nil {
+			return nil, lastUnqueryableErr
+		}
+		return nil, nil
+	}
+
+	return device.MetricsGroupList{metricsGrp}, nil
 }
 
 func (in *cambricon) init() {
-	in.once.Do(func() {
-		if ret := in.cndev.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize CNDev library")
-		}
-	})
+	_ = in.ensureInit()
+}
+
+func (in *cambricon) ensureInit() cndev.Return {
+	in.initMu.Lock()
+	defer in.initMu.Unlock()
+
+	if in.initialized {
+		return cndev.SUCCESS
+	}
+
+	ret := in.cndev.Init()
+	if ret.IsSuccess() {
+		in.initialized = true
+		return cndev.SUCCESS
+	}
+
+	in.logger.Error(ret, "failed to initialize CNDev library")
+	return ret
+}
+
+// isUnqueryableDeviceError reports whether a non-success CNDev return indicates a card-specific
+// hardware or bus fault where skipping the affected card allows healthy sibling cards to remain
+// queryable.
+func isUnqueryableDeviceError(ret cndev.Return) bool {
+	switch ret {
+	case cndev.ERROR_INVALID_DEVICE_ID,
+		cndev.ERROR_UNKNOWN,
+		cndev.ERROR_INVALID_LINK,
+		cndev.ERROR_NOT_FOUND,
+		cndev.ERROR_IN_USE,
+		cndev.ERROR_IN_PROBLEM:
+		return true
+	default:
+		return false
+	}
+}
+
+// classifyInitOrCountError distinguishes an absent driver or library (or zero-card Init return) on
+// a node without detected PCI devices from an operational failure that must fail the pass.
+func classifyInitOrCountError(op string, ret cndev.Return, noPciCheck bool, pciDevCount int) error {
+	if ret.IsSuccess() {
+		return nil
+	}
+	if (ret.IsAPIUnavailable() || ret == cndev.ERROR_NO_DEVICES) && (noPciCheck || pciDevCount == 0) {
+		return nil
+	}
+	return fmt.Errorf("failed to %s: %w", op, ret)
+}
+
+// handleCardQueryError classifies a fatal per-card query error. Card-specific unqueryable errors
+// are logged, recorded in lastUnqueryableErr, and skipped; other errors fail the pass immediately.
+func handleCardQueryError(
+	logger klog.Logger, index int, op string, ret cndev.Return, lastUnqueryableErr *error,
+) error {
+	err := fmt.Errorf("failed to %s at index %d: %w", op, index, ret)
+	if isUnqueryableDeviceError(ret) {
+		logger.Error(ret, "skipping unqueryable device", "operation", op)
+		*lastUnqueryableErr = err
+		return nil
+	}
+	logger.Error(ret, "failed to "+op)
+	return err
 }
 
 func isDeviceUnhealthy(dev cndev.Device) bool {

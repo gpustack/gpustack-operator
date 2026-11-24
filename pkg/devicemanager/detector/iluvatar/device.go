@@ -28,9 +28,10 @@ func init() {
 }
 
 type iluvatar struct {
-	once   sync.Once
-	ixml   *ixml.IXML
-	logger klog.Logger
+	initMu      sync.Mutex
+	initialized bool
+	ixml        *ixml.IXML
+	logger      klog.Logger
 }
 
 // New creates a new iluvatar device interface and initializes the IXML library.
@@ -62,35 +63,49 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 		return nil, nil
 	}
 
-	in.init()
+	if ret := in.ensureInit(); !ret.IsSuccess() {
+		if err := classifyInitOrCountError("initialize IXML library", ret, noPciCheck, len(pciDevs)); err != nil {
+			return nil, err
+		}
+		in.logger.Info("iluvatar driver api unavailable", "reason", ret)
+		return nil, nil
+	}
 
 	cnt, ret := in.ixml.DeviceGetCount()
-	if !ret.IsSuccess() || cnt == 0 {
-		if ret.IsSuccess() {
-			in.logger.Info("no iluvatar devices found")
-		} else {
-			in.logger.Error(ret, "no iluvatar devices found")
+	if !ret.IsSuccess() {
+		if err := classifyInitOrCountError("get iluvatar device count", ret, noPciCheck, len(pciDevs)); err != nil {
+			in.logger.Error(ret, "failed to get iluvatar device count")
+			return nil, err
 		}
+		in.logger.Info("no iluvatar devices found", "reason", ret)
+		return nil, nil
+	}
+	if cnt == 0 {
+		in.logger.Info("no iluvatar devices found")
 		return nil, nil
 	}
 
 	drVer, _ := in.ixml.SystemGetDriverVersion()
 	rtVer, _ := in.ixml.SystemGetCudaDriverVersion()
 
-	var index uint32
 	grpList := device.DevicesGroupList{}
+	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
 
 		dev, ret := in.ixml.DeviceGetHandleByIndex(i)
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device handle")
+			if err := handleCardQueryError(logger, i, "get device handle", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
 		uuid, ret := dev.GetUUID()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device UUID")
+			if err := handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -98,7 +113,9 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 		{
 			pciInfo, ret := dev.GetPciInfo()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device PCI Info")
+				if err := handleCardQueryError(logger, i, "get device PCI info", ret, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			pciBusId = pciInfo.GetBusId()
@@ -107,7 +124,9 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 
 		name, ret := dev.GetName()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device name")
+			if err := handleCardQueryError(logger, i, "get device name", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -119,9 +138,13 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 			memHandler := dev.GetMemoryInfoV()
 			memInfo, ret := memHandler.V2()
 			if !ret.IsSuccess() {
-				memInfo, ret = memHandler.V1()
+				var v1Ret ixml.Return
+				memInfo, v1Ret = memHandler.V1()
+				ret = selectVersionedReturn(ret, v1Ret)
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device memory info")
+					if err := handleCardQueryError(logger, i, "get device memory info", ret, &lastUnqueryableErr); err != nil {
+						return nil, err
+					}
 					continue
 				}
 			}
@@ -182,13 +205,19 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 			grpList[grpIndex].Accelerators,
 			device.Accelerator{
 				ID:              uuid,
-				Index:           index,
+				Index:           uint32(i),
 				PhysicalIndexes: physicalIndexes,
 				Topology:        topo,
 				Status:          status,
 			},
 		)
-		index++
+	}
+
+	if len(grpList) == 0 {
+		if lastUnqueryableErr != nil {
+			return nil, lastUnqueryableErr
+		}
+		return nil, nil
 	}
 
 	device.SetGroupSlicedDetails(grpList)
@@ -211,37 +240,50 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 		return nil, nil
 	}
 
-	in.init()
-
-	cnt, ret := in.ixml.DeviceGetCount()
-	if !ret.IsSuccess() || cnt == 0 {
-		if ret.IsSuccess() {
-			in.logger.Info("no iluvatar devices found")
-		} else {
-			in.logger.Error(ret, "no iluvatar devices found")
+	if ret := in.ensureInit(); !ret.IsSuccess() {
+		if err := classifyInitOrCountError("initialize IXML library", ret, noPciCheck, len(pciDevs)); err != nil {
+			return nil, err
 		}
+		in.logger.Info("iluvatar driver api unavailable", "reason", ret)
 		return nil, nil
 	}
 
-	grpList := device.MetricsGroupList{
-		{
-			Manufacturer: Manufacturer,
-			Timestamp:    time.Now(),
-			Accelerators: make([]device.AcceleratorMetrics, 0, cnt),
-		},
+	cnt, ret := in.ixml.DeviceGetCount()
+	if !ret.IsSuccess() {
+		if err := classifyInitOrCountError("get iluvatar device count", ret, noPciCheck, len(pciDevs)); err != nil {
+			in.logger.Error(ret, "failed to get iluvatar device count")
+			return nil, err
+		}
+		in.logger.Info("no iluvatar devices found", "reason", ret)
+		return nil, nil
 	}
+	if cnt == 0 {
+		in.logger.Info("no iluvatar devices found")
+		return nil, nil
+	}
+
+	metricsGrp := device.MetricsGroup{
+		Manufacturer: Manufacturer,
+		Timestamp:    time.Now(),
+		Accelerators: make([]device.AcceleratorMetrics, 0, cnt),
+	}
+	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
 
 		dev, ret := in.ixml.DeviceGetHandleByIndex(i)
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device handle")
+			if err := handleCardQueryError(logger, i, "get device handle", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
 		uuid, ret := dev.GetUUID()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device UUID")
+			if err := handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -255,9 +297,13 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 			memHandler := dev.GetMemoryInfoV()
 			memInfo, ret := memHandler.V2()
 			if !ret.IsSuccess() {
-				memInfo, ret = memHandler.V1()
+				var v1Ret ixml.Return
+				memInfo, v1Ret = memHandler.V1()
+				ret = selectVersionedReturn(ret, v1Ret)
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device memory info")
+					if err := handleCardQueryError(logger, i, "get device memory info", ret, &lastUnqueryableErr); err != nil {
+						return nil, err
+					}
 					continue
 				}
 			}
@@ -313,8 +359,8 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 			}
 		}
 
-		grpList[0].Accelerators = append(
-			grpList[0].Accelerators,
+		metricsGrp.Accelerators = append(
+			metricsGrp.Accelerators,
 			device.AcceleratorMetrics{
 				ID:                uuid,
 				Memory:            memory,
@@ -328,7 +374,14 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 		)
 	}
 
-	return grpList, nil
+	if len(metricsGrp.Accelerators) == 0 {
+		if lastUnqueryableErr != nil {
+			return nil, lastUnqueryableErr
+		}
+		return nil, nil
+	}
+
+	return device.MetricsGroupList{metricsGrp}, nil
 }
 
 func isDeviceUnhealthy(dev ixml.Device) bool {
@@ -343,11 +396,82 @@ func evaluateDeviceUnhealthy(health uint64, ret ixml.Return) bool {
 }
 
 func (in *iluvatar) init() {
-	in.once.Do(func() {
-		if ret := in.ixml.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize IXML library")
-		}
-	})
+	_ = in.ensureInit()
+}
+
+func (in *iluvatar) ensureInit() ixml.Return {
+	in.initMu.Lock()
+	defer in.initMu.Unlock()
+
+	if in.initialized {
+		return ixml.SUCCESS
+	}
+
+	ret := in.ixml.Init()
+	if ret.IsSuccess() || ret == ixml.ERROR_ALREADY_INITIALIZED {
+		in.initialized = true
+		return ixml.SUCCESS
+	}
+
+	in.logger.Error(ret, "failed to initialize IXML library")
+	return ret
+}
+
+// isUnqueryableDeviceError reports whether a non-success IXML return indicates a card-specific
+// hardware or bus fault where skipping the affected card allows healthy sibling cards to remain
+// queryable.
+func isUnqueryableDeviceError(ret ixml.Return) bool {
+	switch ret {
+	case ixml.ERROR_GPU_IS_LOST,
+		ixml.ERROR_UNKNOWN,
+		ixml.ERROR_RESET_REQUIRED,
+		ixml.ERROR_INSUFFICIENT_POWER,
+		ixml.ERROR_IRQ_ISSUE:
+		return true
+	default:
+		return false
+	}
+}
+
+// classifyInitOrCountError distinguishes an absent driver or library on a node without detected PCI
+// devices from an operational failure that must fail the pass.
+func classifyInitOrCountError(op string, ret ixml.Return, noPciCheck bool, pciDevCount int) error {
+	if ret.IsSuccess() {
+		return nil
+	}
+	if ret.IsAPIUnavailable() && (noPciCheck || pciDevCount == 0) {
+		return nil
+	}
+	return fmt.Errorf("failed to %s: %w", op, ret)
+}
+
+// selectVersionedReturn resolves the return code after a V2 query fails and falls back to V1.
+// When V1 also fails, V2's return is kept unless V2 itself was unavailable or unsupported.
+func selectVersionedReturn(v2Ret, v1Ret ixml.Return) ixml.Return {
+	if v1Ret.IsSuccess() {
+		return v1Ret
+	}
+	if v2Ret == ixml.ERROR_FUNCTION_NOT_FOUND ||
+		v2Ret == ixml.ERROR_NOT_SUPPORTED ||
+		v2Ret == ixml.ERROR_ARGUMENT_VERSION_MISMATCH {
+		return v1Ret
+	}
+	return v2Ret
+}
+
+// handleCardQueryError classifies a fatal per-card query error. Card-specific unqueryable errors
+// are logged, recorded in lastUnqueryableErr, and skipped; other errors fail the pass immediately.
+func handleCardQueryError(
+	logger klog.Logger, index int, op string, ret ixml.Return, lastUnqueryableErr *error,
+) error {
+	err := fmt.Errorf("failed to %s at index %d: %w", op, index, ret)
+	if isUnqueryableDeviceError(ret) {
+		logger.Error(ret, "skipping unqueryable device", "operation", op)
+		*lastUnqueryableErr = err
+		return nil
+	}
+	logger.Error(ret, "failed to "+op)
+	return err
 }
 
 func stringifyRuntimeVersion(rtVer int32) string {

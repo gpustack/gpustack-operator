@@ -1,9 +1,17 @@
 package ascend
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	klog "k8s.io/klog/v2"
 
 	"gpustack.ai/gpustack/binding/dcmi"
 	"gpustack.ai/gpustack/pkg/device"
@@ -494,6 +502,423 @@ func TestApplyFallbackAffinity(t *testing.T) {
 			)
 			assert.Equal(t, tc.wantRead, readCalled)
 			assert.Equal(t, tc.want, topo)
+		})
+	}
+}
+
+const dcmiFixtureSource = `
+#include "dcmi_interface_api.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int init_calls = 0;
+static int is_initialized = 0;
+
+static const char *fixture_env(const char *name) {
+    const char *value = getenv(name);
+    return value == NULL ? "" : value;
+}
+
+static int device_phy_id(int card_id, int device_id) {
+    int per_card = atoi(fixture_env("GPUSTACK_TEST_DCMI_DEVS_PER_CARD"));
+    if (per_card <= 0)
+        per_card = 1;
+    return card_id * per_card + device_id;
+}
+
+static int maybe_fail_device(const char *stage, int phy_id) {
+    if (strcmp(fixture_env("GPUSTACK_TEST_DCMI_FAIL_STAGE"), stage) != 0)
+        return 0;
+    const char *fail_idx = fixture_env("GPUSTACK_TEST_DCMI_FAIL_PHY");
+    if (fail_idx[0] == '\0')
+        return 0;
+    if (strcmp(fail_idx, "all") != 0 && atoi(fail_idx) != phy_id)
+        return 0;
+    return atoi(fixture_env("GPUSTACK_TEST_DCMI_FAIL_ERR"));
+}
+
+int dcmi_init(void) {
+    const char *err_env = fixture_env("GPUSTACK_TEST_DCMI_INIT_ERR");
+    if (err_env[0] != '\0') {
+        const char *fail_cnt_env = fixture_env("GPUSTACK_TEST_DCMI_INIT_FAIL_COUNT");
+        int fail_cnt = fail_cnt_env[0] == '\0' ? -1 : atoi(fail_cnt_env);
+        if (fail_cnt < 0 || init_calls < fail_cnt) {
+            init_calls++;
+            return atoi(err_env);
+        }
+    }
+    init_calls++;
+    is_initialized = 1;
+    return 0;
+}
+
+int dcmi_get_card_list(int *card_num, int *card_list, int list_len) {
+    if (strcmp(fixture_env("GPUSTACK_TEST_DCMI_REQUIRE_INIT"), "true") == 0 && !is_initialized)
+        return -8005;
+    const char *err_env = fixture_env("GPUSTACK_TEST_DCMI_COUNT_ERR");
+    if (err_env[0] != '\0')
+        return atoi(err_env);
+    int cards = atoi(fixture_env("GPUSTACK_TEST_DCMI_CARDS"));
+    if (cards <= 0)
+        cards = 1;
+    if (cards > list_len)
+        cards = list_len;
+    *card_num = cards;
+    for (int i = 0; i < cards; i++) {
+        card_list[i] = i;
+    }
+    return 0;
+}
+
+int dcmi_get_device_num_in_card(int card_id, int *device_num) {
+    (void)card_id;
+    int per_card = atoi(fixture_env("GPUSTACK_TEST_DCMI_DEVS_PER_CARD"));
+    if (per_card <= 0)
+        per_card = 1;
+    *device_num = per_card;
+    return 0;
+}
+
+int dcmi_get_device_type(int card_id, int device_id, enum dcmi_unit_type *device_type) {
+    (void)card_id;
+    (void)device_id;
+    if (strcmp(fixture_env("GPUSTACK_TEST_DCMI_NON_NPU"), "true") == 0) {
+        *device_type = MCU_TYPE;
+        return 0;
+    }
+    *device_type = NPU_TYPE;
+    return 0;
+}
+
+int dcmi_get_device_die_v2(int card_id, int device_id, enum dcmi_die_type input_type, struct dcmi_die_id *die_id) {
+    (void)input_type;
+    int phy = device_phy_id(card_id, device_id);
+    int ret = maybe_fail_device("die", phy);
+    if (ret != 0)
+        return ret;
+    memset(die_id, 0, sizeof(*die_id));
+    die_id->soc_die[0] = (unsigned int)(phy + 1);
+    return 0;
+}
+
+int dcmi_get_device_die(int card_id, int device_id, struct dcmi_soc_die_stru *device_die) {
+    (void)card_id;
+    (void)device_id;
+    (void)device_die;
+    return -8255;
+}
+
+int dcmi_get_device_chip_info_v2(int card_id, int device_id, struct dcmi_chip_info_v2 *device_info) {
+    int phy = device_phy_id(card_id, device_id);
+    int ret = maybe_fail_device("chip", phy);
+    if (ret != 0)
+        return ret;
+    memset(device_info, 0, sizeof(*device_info));
+    snprintf((char *)device_info->chip_name, sizeof(device_info->chip_name), "Ascend910B2");
+    device_info->aicore_cnt = 24;
+    return 0;
+}
+
+int dcmi_get_device_chip_info(int card_id, int device_id, struct dcmi_chip_info *chip_info) {
+    (void)card_id;
+    (void)device_id;
+    (void)chip_info;
+    return -8255;
+}
+
+int dcmi_get_device_hbm_info(int card_id, int device_id, struct dcmi_hbm_info *hbm_info) {
+    int phy = device_phy_id(card_id, device_id);
+    int ret = maybe_fail_device("memory", phy);
+    if (ret != 0)
+        return ret;
+    memset(hbm_info, 0, sizeof(*hbm_info));
+    hbm_info->memory_size = 65536;
+    hbm_info->memory_usage = 1024;
+    return 0;
+}
+
+int dcmi_get_device_logic_id(int *device_logic_id, int card_id, int device_id) {
+    *device_logic_id = device_phy_id(card_id, device_id);
+    return 0;
+}
+
+int dcmi_get_device_phyid_from_logicid(unsigned int logicid, unsigned int *phyid) {
+    int ret = maybe_fail_device("phyid", (int)logicid);
+    if (ret != 0)
+        return ret;
+    *phyid = logicid;
+    return 0;
+}
+`
+
+func compileDCMIFixture(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	libDir := filepath.Join(dir, "driver", "lib64", "driver")
+	require.NoError(t, os.MkdirAll(libDir, 0o755))
+	// The vendored header defines DCMIDLLEXPORT as static; rewrite a local copy so the
+	// fixture exports external symbols while keeping the exact vendored ABI.
+	hdr, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "binding", "dcmi", "dcmi_interface_api.h"))
+	require.NoError(t, err)
+	patchedHdr := strings.Replace(string(hdr), "#define DCMIDLLEXPORT static", "#define DCMIDLLEXPORT", 1)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "dcmi_interface_api.h"), []byte(patchedHdr), 0o600))
+
+	src := filepath.Join(dir, "fixture_dcmi.c")
+	require.NoError(t, os.WriteFile(src, []byte(dcmiFixtureSource), 0o600))
+
+	flags := make([]string, 0, 7)
+	if runtime.GOOS == "darwin" {
+		flags = append(flags, "-dynamiclib")
+	} else {
+		flags = append(flags, "-shared", "-fPIC")
+	}
+	flags = append(flags, "-I"+dir, "-I../../../../binding/dcmi", src, "-o", filepath.Join(libDir, "libdcmi.so"))
+	output, err := exec.Command("cc", flags...).CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	return dir
+}
+
+func TestUnqueryableCardAndErrorHandling(t *testing.T) {
+	if mode := os.Getenv("GPUSTACK_TEST_DCMI_MODE"); mode != "" {
+		d := New(device.DetectorOptions{Logger: klog.Background()})
+		switch mode {
+		case "multi_card_skip_one":
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 3)
+			assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+			assert.Equal(t, uint32(2), groups[0].Accelerators[1].Index)
+			assert.Equal(t, uint32(3), groups[0].Accelerators[2].Index)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 3)
+		case "intentional_skip_non_npu":
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			assert.Nil(t, groups)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			assert.Nil(t, metrics)
+		case "fatal_per_card", "all_unqueryable", "count_error":
+			groups, err := d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, metrics)
+		case "transient_init_error":
+			groups, err := d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 1)
+			assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+		default:
+			t.Fatalf("unknown mode %q", mode)
+		}
+		return
+	}
+
+	dir := compileDCMIFixture(t)
+
+	runCase := func(t *testing.T, extraEnv ...string) {
+		t.Helper()
+		cmd := exec.Command(os.Args[0], "-test.run=^TestUnqueryableCardAndErrorHandling$", "-test.count=1")
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"CANN_HOME="+dir,
+			"LD_LIBRARY_PATH="+filepath.Join(dir, "driver", "lib64", "driver"),
+			"DYLD_LIBRARY_PATH="+filepath.Join(dir, "driver", "lib64", "driver"),
+		)
+		cmd.Env = append(cmd.Env, extraEnv...)
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+	}
+
+	t.Run("multi-card skips phyId 1 and keeps unique non-compacting phyId indexes", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_DCMI_MODE=multi_card_skip_one",
+			"GPUSTACK_TEST_DCMI_CARDS=2",
+			"GPUSTACK_TEST_DCMI_DEVS_PER_CARD=2",
+			"GPUSTACK_TEST_DCMI_FAIL_STAGE=die",
+			"GPUSTACK_TEST_DCMI_FAIL_PHY=1",
+			"GPUSTACK_TEST_DCMI_FAIL_ERR="+strconv.Itoa(int(dcmi.ERROR_DEVICE_NOT_EXIST)),
+		)
+	})
+
+	t.Run("all non-NPU devices skipped intentionally returns nil nil", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_DCMI_MODE=intentional_skip_non_npu",
+			"GPUSTACK_TEST_DCMI_CARDS=2",
+			"GPUSTACK_TEST_DCMI_DEVS_PER_CARD=1",
+			"GPUSTACK_TEST_DCMI_NON_NPU=true",
+		)
+	})
+
+	t.Run("OPER_NOT_PERMITTED fails detect and monitor immediately", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_DCMI_MODE=fatal_per_card",
+			"GPUSTACK_TEST_DCMI_CARDS=2",
+			"GPUSTACK_TEST_DCMI_DEVS_PER_CARD=1",
+			"GPUSTACK_TEST_DCMI_FAIL_STAGE=die",
+			"GPUSTACK_TEST_DCMI_FAIL_PHY=1",
+			"GPUSTACK_TEST_DCMI_FAIL_ERR="+strconv.Itoa(int(dcmi.ERROR_OPER_NOT_PERMITTED)),
+		)
+	})
+
+	t.Run("all devices unqueryable returns error in detect and monitor", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_DCMI_MODE=all_unqueryable",
+			"GPUSTACK_TEST_DCMI_CARDS=2",
+			"GPUSTACK_TEST_DCMI_DEVS_PER_CARD=1",
+			"GPUSTACK_TEST_DCMI_FAIL_STAGE=die",
+			"GPUSTACK_TEST_DCMI_FAIL_PHY=all",
+			"GPUSTACK_TEST_DCMI_FAIL_ERR="+strconv.Itoa(int(dcmi.ERROR_DEVICE_NOT_EXIST)),
+		)
+	})
+
+	t.Run("GetCardList OPER_NOT_PERMITTED returns error", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_DCMI_MODE=count_error",
+			"GPUSTACK_TEST_DCMI_COUNT_ERR="+strconv.Itoa(int(dcmi.ERROR_OPER_NOT_PERMITTED)),
+		)
+	})
+
+	t.Run("transient Init failure recovers on next DetectAccelerator", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_DCMI_MODE=transient_init_error",
+			"GPUSTACK_TEST_DCMI_CARDS=1",
+			"GPUSTACK_TEST_DCMI_DEVS_PER_CARD=1",
+			"GPUSTACK_TEST_DCMI_REQUIRE_INIT=true",
+			"GPUSTACK_TEST_DCMI_INIT_FAIL_COUNT=1",
+			"GPUSTACK_TEST_DCMI_INIT_ERR="+strconv.Itoa(int(dcmi.ERROR_INNER_ERR)),
+		)
+	})
+}
+
+func TestClassifyInitOrCountError(t *testing.T) {
+	testCases := []struct {
+		name        string
+		ret         dcmi.Return
+		noPciCheck  bool
+		pciDevCount int
+		wantErr     bool
+	}{
+		{name: "success", ret: dcmi.SUCCESS, noPciCheck: false, pciDevCount: 1, wantErr: false},
+		{name: "library not found with noPciCheck", ret: dcmi.ERROR_LIBRARY_NOT_FOUND, noPciCheck: true, pciDevCount: 1, wantErr: false},
+		{name: "function not found with no pci devices", ret: dcmi.ERROR_FUNCTION_NOT_FOUND, noPciCheck: false, pciDevCount: 0, wantErr: false},
+		{name: "library not found with pci devices present", ret: dcmi.ERROR_LIBRARY_NOT_FOUND, noPciCheck: false, pciDevCount: 2, wantErr: true},
+		{name: "oper not permitted with noPciCheck", ret: dcmi.ERROR_OPER_NOT_PERMITTED, noPciCheck: true, pciDevCount: 0, wantErr: true},
+		{name: "inner err with noPciCheck", ret: dcmi.ERROR_INNER_ERR, noPciCheck: true, pciDevCount: 0, wantErr: true},
+		{name: "timeout with pci devices", ret: dcmi.ERROR_TIME_OUT, noPciCheck: false, pciDevCount: 1, wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := classifyInitOrCountError("initialize DCMI", tc.ret, tc.noPciCheck, tc.pciDevCount)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, tc.ret)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestIsUnqueryableDeviceError(t *testing.T) {
+	testCases := []struct {
+		name string
+		ret  dcmi.Return
+		want bool
+	}{
+		{name: "DEVICE_NOT_EXIST", ret: dcmi.ERROR_DEVICE_NOT_EXIST, want: true},
+		{name: "INVALID_DEVICE_ID", ret: dcmi.ERROR_INVALID_DEVICE_ID, want: true},
+		{name: "IOCTL_FAIL", ret: dcmi.ERROR_IOCTL_FAIL, want: true},
+		{name: "SEND_MSG_FAIL", ret: dcmi.ERROR_SEND_MSG_FAIL, want: true},
+		{name: "RECV_MSG_FAIL", ret: dcmi.ERROR_RECV_MSG_FAIL, want: true},
+		{name: "NOT_REDAY", ret: dcmi.ERROR_NOT_REDAY, want: true},
+		{name: "RESET_FAIL", ret: dcmi.ERROR_RESET_FAIL, want: true},
+		{name: "IS_UPGRADING", ret: dcmi.ERROR_IS_UPGRADING, want: true},
+		{name: "INNER_ERR", ret: dcmi.ERROR_INNER_ERR, want: true},
+		{name: "MEM_OPERATE_FAIL", ret: dcmi.ERROR_MEM_OPERATE_FAIL, want: true},
+		{name: "SECURE_FUN_FAIL", ret: dcmi.ERROR_SECURE_FUN_FAIL, want: true},
+		{name: "ABORT_OPERATE", ret: dcmi.ERROR_ABORT_OPERATE, want: true},
+		{name: "RESOURCE_OCCUPIED", ret: dcmi.ERROR_RESOURCE_OCCUPIED, want: true},
+		{name: "UNKNOWN", ret: dcmi.ERROR_UNKNOWN, want: true},
+		{name: "SUCCESS", ret: dcmi.SUCCESS, want: false},
+		{name: "OPER_NOT_PERMITTED", ret: dcmi.ERROR_OPER_NOT_PERMITTED, want: false},
+		{name: "INVALID_PARAMETER", ret: dcmi.ERROR_INVALID_PARAMETER, want: false},
+		{name: "TIME_OUT", ret: dcmi.ERROR_TIME_OUT, want: false},
+		{name: "NOT_SUPPORT", ret: dcmi.ERROR_NOT_SUPPORT, want: false},
+		{name: "LIBRARY_NOT_FOUND", ret: dcmi.ERROR_LIBRARY_NOT_FOUND, want: false},
+		{name: "FUNCTION_NOT_FOUND", ret: dcmi.ERROR_FUNCTION_NOT_FOUND, want: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isUnqueryableDeviceError(tc.ret))
+		})
+	}
+}
+
+func TestSelectVersionedReturn(t *testing.T) {
+	testCases := []struct {
+		name  string
+		v2Ret dcmi.Return
+		v1Ret dcmi.Return
+		want  dcmi.Return
+	}{
+		{name: "v1 succeeds", v2Ret: dcmi.ERROR_NOT_SUPPORT, v1Ret: dcmi.SUCCESS, want: dcmi.SUCCESS},
+		{name: "v1 unsupported preserves v2 error", v2Ret: dcmi.ERROR_DEVICE_NOT_EXIST, v1Ret: dcmi.ERROR_NOT_SUPPORT, want: dcmi.ERROR_DEVICE_NOT_EXIST},
+		{name: "v1 missing preserves v2 permission error", v2Ret: dcmi.ERROR_OPER_NOT_PERMITTED, v1Ret: dcmi.ERROR_FUNCTION_NOT_FOUND, want: dcmi.ERROR_OPER_NOT_PERMITTED},
+		{name: "v2 unsupported uses v1 error", v2Ret: dcmi.ERROR_NOT_SUPPORT, v1Ret: dcmi.ERROR_IOCTL_FAIL, want: dcmi.ERROR_IOCTL_FAIL},
+		{name: "v2 missing uses v1 error", v2Ret: dcmi.ERROR_FUNCTION_NOT_FOUND, v1Ret: dcmi.ERROR_OPER_NOT_PERMITTED, want: dcmi.ERROR_OPER_NOT_PERMITTED},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, selectVersionedReturn(tc.v2Ret, tc.v1Ret))
+		})
+	}
+}
+
+func TestHandleCardQueryError(t *testing.T) {
+	testCases := []struct {
+		name         string
+		ret          dcmi.Return
+		wantFatalErr bool
+		wantLastErr  bool
+	}{
+		{name: "DEVICE_NOT_EXIST skips and records last error", ret: dcmi.ERROR_DEVICE_NOT_EXIST, wantFatalErr: false, wantLastErr: true},
+		{name: "IOCTL_FAIL skips and records last error", ret: dcmi.ERROR_IOCTL_FAIL, wantFatalErr: false, wantLastErr: true},
+		{name: "OPER_NOT_PERMITTED fails pass immediately", ret: dcmi.ERROR_OPER_NOT_PERMITTED, wantFatalErr: true, wantLastErr: false},
+		{name: "TIME_OUT fails pass immediately", ret: dcmi.ERROR_TIME_OUT, wantFatalErr: true, wantLastErr: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var lastErr error
+			err := handleCardQueryError(klog.Background(), 1, "get device vdie info", tc.ret, &lastErr)
+			if tc.wantFatalErr {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, tc.ret)
+				assert.NoError(t, lastErr)
+			} else {
+				assert.NoError(t, err)
+				require.Error(t, lastErr)
+				assert.ErrorIs(t, lastErr, tc.ret)
+			}
 		})
 	}
 }
