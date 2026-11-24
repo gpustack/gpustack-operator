@@ -41,7 +41,7 @@ func (l *IXML) Init() Return {
 	if err := l.so.Load(); err != nil {
 		return ERROR_LIBRARY_NOT_FOUND
 	}
-	if l.so.Lookup("nvmlInit_v2") == nil {
+	if l.so.Lookup("nvmlInit_v2") != nil {
 		return ERROR_FUNCTION_NOT_FOUND
 	}
 
@@ -78,11 +78,11 @@ func (l *IXML) SystemGetDriverVersion() (string, Return) {
 // SystemGetCudaDriverVersion retrieves the version of the CoreX driver.
 func (l *IXML) SystemGetCudaDriverVersion() (int32, Return) {
 	var version int32
-	if l.so.Lookup("nvmlSystemGetCudaDriverVersion") != nil {
+	if l.so.Lookup("nvmlSystemGetCudaDriverVersion") == nil {
 		ret := nvmlSystemGetCudaDriverVersion(&version)
 		return version, ret
 	}
-	if l.so.Lookup("nvmlSystemGetCudaDriverVersion_v2") != nil {
+	if l.so.Lookup("nvmlSystemGetCudaDriverVersion_v2") == nil {
 		ret := nvmlSystemGetCudaDriverVersion_v2(&version)
 		return version, ret
 	}
