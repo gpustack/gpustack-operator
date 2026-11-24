@@ -323,7 +323,7 @@ type Allocator interface {
       Acceptance: Authors `next/case-16.sh` through `next/case-25.sh` consolidating KV Cache pool/quota (`43+44`), HA leader/failover/rollout (`62+75`), Pod injection (`53`), local disk (`65`), ModelArtifact Hub + consumers (`97+98`), CSI node cache + lifecycle (`101+103`), progress/prefetch/peer sync (`108+111`), TAS preference (`107`), OCI image volume (`112`), and ModelScope (`113`).
       Verify: `bash -n .agents/skills/gpustack-operator-e2e/cases/next/case-1[6-9].sh .agents/skills/gpustack-operator-e2e/cases/next/case-2[0-5].sh && make lint agents-shell`
 
-- [ ] **T9 · Author consolidated Domain 6 & 7 MD, Scaler & Live Serving E2E cases (`next/case-26.sh` .. `next/case-37.sh`)**
+- [x] **T9 · Author consolidated Domain 6 & 7 MD, Scaler & Live Serving E2E cases (`next/case-26.sh` .. `next/case-37.sh`)**
       Blocked by: None
       Owns: `.agents/skills/gpustack-operator-e2e/cases/next/case-2[6-9].sh`, `.agents/skills/gpustack-operator-e2e/cases/next/case-3[0-7].sh`
       Acceptance: Authors `next/case-26.sh` through `next/case-37.sh` consolidating MD admission matrix (`45+116+126+133`), rendered topology/router/EPD (`47+70+117`), joint admission (`49+50+68+118`), scaling & replacement (`78+115`), compile cache (`127`), Scaler + capacityPrior (`128+131`), live P/D serving & scaling (`91+94`), live ModelArtifact serving (`99+100+104`), live EPD serving (`120+121`), live Scaler (`129+132`), live vLLM+SGLang runtimeControl (`134+135+137`), and live folded Elastic EP (`136`).
