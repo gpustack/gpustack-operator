@@ -414,7 +414,7 @@ if [[ -n "$NODE_B" ]]; then
   mock_dm_wait_node_allocatable "$NODE_B" ".[\"${EXCL_RES}\"] == \"4\"" "$CHAOS_TIMEOUT" || rec_ok=0
 fi
 if [[ -n "$IT_POOL" ]]; then
-  mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_POOL}\" and (.status.accelerator.capacity // 0) >= 4)" 60 || rec_ok=0
+  mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_POOL}\" and ((.status.accelerator.capacity // \"0\") | tostring | tonumber) >= 4)" 60 || rec_ok=0
 fi
 
 ex1_alive="$(kubectl -n "$TEST_NS" get pod chaos-c2-ex-1 -o jsonpath='{.status.phase}' 2>/dev/null || true)"

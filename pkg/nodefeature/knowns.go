@@ -1,6 +1,7 @@
 package nodefeature
 
 import (
+	"os"
 	"regexp"
 	"slices"
 	"sort"
@@ -198,15 +199,11 @@ func init() {
 		ManufacturerMThreads:  "mthreads",
 		ManufacturerNVIDIA:    "nvidia",
 	}
-	for _, manufacturer := range maps.Keys(_ManufacturerAcceleratableResourceNameMap) {
-		// Extract runtime name from environment variable if exists,
-		// and override the default value in the map.
-		//
-		// E.g. for AMD, the environment variable is "GPUSTACK_AMD_ACCELERATABLE_RUNTIME_NAME".
-		if v := osx.Getenv("GPUSTACK_" + strings.ToUpper(manufacturer) + "_ACCELERATABLE_RUNTIME_NAME"); v != "" {
-			_ManufacturerAcceleratableRuntimeNameMap[manufacturer] = v
-		}
-	}
+	applyAcceleratableRuntimeNameOverrides(
+		_ManufacturerAcceleratableRuntimeNameMap,
+		maps.Keys(_ManufacturerAcceleratableResourceNameMap),
+		os.LookupEnv,
+	)
 
 	// _ManufacturerPartitionKindMap maps a manufacturer to its own name for hardware
 	// partitioning, which becomes the per-profile key's segment prefix — "mig" is NVIDIA's
@@ -265,6 +262,21 @@ func init() {
 	_SlicedResourceUnitsPerSlice = make(map[int64]int64)
 	for _, size := range _SlicedResourceSizes {
 		_SlicedResourceUnitsPerSlice[size] = ResourceMaxUnits / size
+	}
+}
+
+// applyAcceleratableRuntimeNameOverrides overlays GPUSTACK_<MFR>_ACCELERATABLE_RUNTIME_NAME
+// values onto dst. Explicit empty values clear the default runtime name so mock deployments
+// can suppress vendor RuntimeClass attachment on CPU-only clusters.
+func applyAcceleratableRuntimeNameOverrides(
+	dst map[string]string,
+	manufacturers []string,
+	lookup func(string) (string, bool),
+) {
+	for _, manufacturer := range manufacturers {
+		if v, ok := lookup("GPUSTACK_" + strings.ToUpper(manufacturer) + "_ACCELERATABLE_RUNTIME_NAME"); ok {
+			dst[manufacturer] = strings.TrimSpace(v)
+		}
 	}
 }
 

@@ -372,9 +372,14 @@ Takes a dict of "name" (the manufacturer) and "identity" (its row).
 - name: {{ $prefix }}_ACCELERATABLE_RESOURCE_NAME
   value: {{ . | quote }}
 {{- end }}
+{{- if .omitRuntimeName }}
+- name: {{ $prefix }}_ACCELERATABLE_RUNTIME_NAME
+  value: ""
+{{- else }}
 {{- with .identity.runtimeName }}
 - name: {{ $prefix }}_ACCELERATABLE_RUNTIME_NAME
   value: {{ . | quote }}
+{{- end }}
 {{- end }}
 {{- with .identity.partitionKind }}
 - name: {{ $prefix }}_PARTITION_KIND

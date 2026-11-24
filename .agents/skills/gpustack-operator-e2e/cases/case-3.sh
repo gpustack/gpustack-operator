@@ -534,9 +534,16 @@ if [ -n "$IT_NV" ]; then
     record FAIL "accelerated InstanceType materializes spec.os/arch" "${IT_NV}: ${os_arch_ok#*|}"
   fi
 
-  # Start a native watch before the exclusive Pod runs and releases so we verify watch transitions too.
+  # Wait for InstanceType EX remaining to converge to >= 2 before starting the native watch.
+  base_ex=""
+  for _ in $(seq 1 20); do
+    base_ex="$(kubectl get instancetypes.worker.gpustack.ai "$IT_NV" -o jsonpath='{.status.accelerator.remaining}' 2>/dev/null || true)"
+    if [[ "$base_ex" =~ ^[0-9]+$ ]] && [ "$base_ex" -ge 2 ]; then
+      break
+    fi
+    sleep 2
+  done
   watch_file="$(mktemp)"
-  base_ex="$(kubectl get instancetypes.worker.gpustack.ai "$IT_NV" -o jsonpath='{.status.accelerator.remaining}' 2>/dev/null)"
   ( timeout 75 kubectl get instancetypes.v1alpha1.worker.gpustack.ai "$IT_NV" -w \
       -o "jsonpath={.status.accelerator.remaining}{'\n'}" >"$watch_file" 2>/dev/null ) &
   wpid=$!
@@ -578,7 +585,8 @@ if [ -n "$IT_NV" ]; then
   done
   kill "$wpid" >/dev/null 2>&1 || true
   wait "$wpid" 2>/dev/null || true
-  if grep -qx "$want_drop" "$watch_file" && grep -qx "$base_ex" "$watch_file"; then
+  if [[ "$base_ex" =~ ^[0-9]+$ ]] && [ "$base_ex" -gt 0 ] \
+    && grep -qx -- "$want_drop" "$watch_file" && grep -qx -- "$base_ex" "$watch_file"; then
     record PASS "four-view and native watch reflect occupancy transitions" \
       "observed accelerator.remaining ${base_ex}->${want_drop}->${base_ex}"
   else
@@ -648,7 +656,7 @@ mock_dm_wait_devices "$NS" "$NODE_A" '([.spec.groups[] | select(.manufacturer ==
 mock_dm_wait_node_allocatable "$NODE_A" '.["nvidia.com/gpu"] == "4"' 90 || true
 
 read -r IT_NV LQ_NV <<<"$(discover_node_pool "$NODE_A" "$NV_GID" --sliceable --require-entrance name entrance 2>/dev/null || true)"
-mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and (.status.accelerator.remaining // 0) == 4)" 60 || true
+mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and ((.status.accelerator.remaining // \"0\") | tostring | tonumber) == 4)" 60 || true
 
 # Place 4 x 60% sliced Pods so each of the 4 cards is in Sliced mode while 1.6 cards of Kueue credits stay free.
 b2_ok=1
@@ -663,32 +671,46 @@ for idx in 1 2 3 4; do
 done
 
 if [ "$b2_ok" -eq 1 ]; then
-  mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and (.status.accelerator.remaining // 0) == 0)" 60 || true
+  mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and ((.status.accelerator.remaining // \"0\") | tostring | tonumber) == 0)" 60 || true
   P_OVER=e2e-c3-overadmit-excl
   mk_mock_pod "$P_OVER" "" "$LQ_NV" '{"nvidia.com/gpu":"1"}'
 
-  held_retry=""
+  held_reason=""
   ac_state=""
+  wl_qr=""
   wl_admitted=""
+  qr_false_ticks=0
   for _ in $(seq 1 40); do
-    read -r ac_state wl_admitted <<<"$(kubectl -n default get workloads.kueue.x-k8s.io -o json 2>/dev/null | P="$P_OVER" AC="$AC" python3 -c '
+    read -r ac_state wl_qr wl_admitted <<<"$(kubectl -n default get workloads.kueue.x-k8s.io -o json 2>/dev/null | P="$P_OVER" AC="$AC" python3 -c '
 import json, os, sys
 for wl in json.load(sys.stdin).get("items", []):
     if any(o.get("kind") == "Pod" and o.get("name") == os.environ["P"] for o in wl["metadata"].get("ownerReferences", [])):
         st = wl.get("status", {})
         chk = next((c.get("state", "-") for c in st.get("admissionChecks", []) if c.get("name") == os.environ["AC"]), "-")
+        qr = next((c.get("status", "False") for c in st.get("conditions", []) if c.get("type") == "QuotaReserved"), "False")
         adm = next((c.get("status", "False") for c in st.get("conditions", []) if c.get("type") == "Admitted"), "False")
-        print(chk, adm)
+        print(chk, qr, adm)
         break
 ' 2>/dev/null)"
-    [ "$ac_state" = "Retry" ] && [ "$wl_admitted" != "True" ] && { held_retry=1; break; }
-    [ "$wl_admitted" = "True" ] && break
+    if [ "$ac_state" = "Retry" ] && [ "$wl_admitted" != "True" ]; then
+      held_reason="AdmissionCheck state=Retry, Workload Admitted=${wl_admitted} (0 clean whole cards)"
+      break
+    fi
+    if [ "$wl_admitted" = "True" ]; then
+      break
+    fi
+    if [ "$wl_qr" = "False" ] && [ -z "$(kubectl -n default get pod "$P_OVER" -o jsonpath='{.spec.nodeName}' 2>/dev/null)" ]; then
+      qr_false_ticks=$((qr_false_ticks + 1))
+      if [ "$qr_false_ticks" -ge 5 ]; then
+        held_reason="TAS QuotaReserved=False, AdmissionCheck=${ac_state}, Admitted=${wl_admitted} (0 clean whole cards)"
+        break
+      fi
+    fi
     sleep 3
   done
 
-  if [ -n "$held_retry" ]; then
-    record PASS "exclusive over-admit held by AdmissionCheck" \
-      "AdmissionCheck state=Retry, Workload Admitted=${wl_admitted} (0 clean whole cards)"
+  if [ -n "$held_reason" ]; then
+    record PASS "exclusive over-admit held by AdmissionCheck" "$held_reason"
     # Free one 60% sliced Pod -> 1 card becomes clean -> P_OVER must flip to Ready + Admitted + Running!
     delete_pod_and_workload "e2e-c3-hold-sl-1"
     released_ok=""
@@ -705,7 +727,7 @@ for wl in json.load(sys.stdin).get("items", []):
       record FAIL "freed card releases held Workload to Running" "${P_OVER} phase=$(pod_phase "$P_OVER")"
     fi
   else
-    record FAIL "exclusive over-admit held by AdmissionCheck" "state='${ac_state:-<none>}' admitted='${wl_admitted:-<none>}'"
+    record FAIL "exclusive over-admit held by AdmissionCheck" "state='${ac_state:-<none>}' qr='${wl_qr:-<none>}' admitted='${wl_admitted:-<none>}'"
     record SKIP "freed card releases held Workload to Running" "not attempted: request was not held"
   fi
 else
@@ -732,7 +754,7 @@ EOF
 mock_dm_apply_spec "$NS" "$MOCK_DM_CM" "$MOCK_DM_KEY" "$SPEC_B3"
 mock_dm_wait_devices "$NS" "$NODE_A" '([.spec.groups[] | select(.manufacturer == "nvidia") | .accelerators[]] | length == 2)' 90
 mock_dm_wait_node_allocatable "$NODE_A" '.["nvidia.com/gpu"] == "2"' 90 || true
-mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and (.status.accelerator.remaining // 0) == 2)" 60 || true
+mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and ((.status.accelerator.remaining // \"0\") | tostring | tonumber) == 2)" 60 || true
 
 run_ex_shared_variant() {
   local tag="$1" lq="$2"
@@ -766,7 +788,7 @@ run_ex_shared_variant() {
     record FAIL "cross-mode ${tag}: exclusive->shared held" "cards='${scards:-<none>}' signal='${sig:-<none>}'"
   fi
   clear_test_pods
-  mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and (.status.accelerator.remaining // 0) == 2)" 60 || true
+  mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and ((.status.accelerator.remaining // \"0\") | tostring | tonumber) == 2)" 60 || true
 }
 
 run_ex_shared_variant "queued" "$LQ_NV"
@@ -788,7 +810,7 @@ if wait_pod_running "e2e-c3-c-ex1" 40; then
     record FAIL "cross-mode C: sliced claim steers to free card" "e2e-c3-c-sl1 phase=$(pod_phase "e2e-c3-c-sl1")"
   fi
   delete_pod_and_workload "e2e-c3-c-sl1"
-  mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and (.status.accelerator.remaining // 0) == 1)" 45 || true
+  mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and ((.status.accelerator.remaining // \"0\") | tostring | tonumber) == 1)" 45 || true
   mk_mock_pod "e2e-c3-c-ex2" "$NODE_A" "" '{"nvidia.com/gpu":"1"}'
   if wait_pod_running "e2e-c3-c-ex2" 40; then
     mk_mock_pod "e2e-c3-c-slfull" "$NODE_A" "" '{"nvidia.com/gpu.sliced":"1","nvidia.com/gpu.sliced.memory-percentage":"20"}'
@@ -814,7 +836,7 @@ else
   record SKIP "cross-mode C: sliced claim held when all cards exclusive" "precondition failed"
 fi
 clear_test_pods
-mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and (.status.accelerator.remaining // 0) == 2)" 60 || true
+mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and ((.status.accelerator.remaining // \"0\") | tostring | tonumber) == 2)" 60 || true
 
 # Variant D: sliced -> exclusive (exclusive avoids sliced card; 2nd exclusive held)
 mk_mock_pod "e2e-c3-d-sl1" "$NODE_A" "" '{"nvidia.com/gpu.sliced":"1","nvidia.com/gpu.sliced.memory-percentage":"20"}'
@@ -852,7 +874,7 @@ else
   record SKIP "cross-mode D: exclusive claim held when remaining card is sliced" "precondition failed"
 fi
 clear_test_pods
-mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and (.status.accelerator.remaining // 0) == 2)" 60 || true
+mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and ((.status.accelerator.remaining // \"0\") | tostring | tonumber) == 2)" 60 || true
 
 # ===================================================================================================
 # Phase B4 — Fit-label fragmentation skip (sliced-max-free-units.fit.gpustack.ai/*)
@@ -1012,7 +1034,7 @@ else
   AWARE_BOUNCED=1
   bounce_worker
 
-  if mock_dm_wait_it ".items[] | select(.metadata.name == \"${AWARE_IT}\" and .status.phase == \"Active\")" 90; then
+  if mock_dm_wait_it ".items[] | select(.metadata.name == \"${AWARE_IT}\" and .status.phase == \"Active\" and ((.status.accelerator.remaining // \"0\") | tostring | tonumber) >= 2)" 90; then
     record PASS "aware accelerated InstanceType materializes Active" "$AWARE_IT"
   else
     record FAIL "aware accelerated InstanceType materializes Active" "${AWARE_IT} did not reach Active"
@@ -1055,6 +1077,8 @@ spec:
   command: ["sleep", "86400"]
   volume: { ephemeral: { capacity: 1Gi } }
   resources:
+    cpu: "500m"
+    ram: "512Mi"
     accelerator: "2"
     localStorage: 1Gi
 EOF

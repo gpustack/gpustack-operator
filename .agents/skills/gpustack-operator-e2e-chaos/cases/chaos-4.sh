@@ -11,15 +11,16 @@
 # Goal:        Verify reconcile-loop convergence and resource self-healing under mid-flight
 #              control-plane and node-agent disruptions while mock workloads (including port-bearing
 #              Instance and virtual MIG partitions when nvidia is served) are active:
-#                1. Out-of-band deletion of watched worker objects: deleting an Instance Service,
-#                   an entrance LocalQueue in the test namespace, and <node>-gpustack-worker
-#                   NodeFeature triggers immediate watch-driven self-healing with fresh UIDs;
+#                1. Out-of-band deletion of watched worker objects: deleting an Instance Service
+#                   and <node>-gpustack-worker NodeFeature triggers immediate watch-driven
+#                   self-healing with fresh UIDs;
 #                2. Out-of-band deletion of Devices/<node> + <node>-gpustack-device-manager
 #                   NodeFeature paired with mid-flight mock device-manager Pod deletion: DaemonSet
 #                   replaces the Pod, Detector recreates Devices (with device.gpustack.ai/mock=true)
 #                   and NodeFeature, and NodeDevicesReconciler restores Devices.status;
-#                3. Mid-flight worker controller Pod deletion: Deployment replaces the worker Pod,
-#                   reconcilers re-elect leader, and pool InstanceTypes stay Active;
+#                3. Mid-flight worker controller Pod deletion (with an entrance LocalQueue deleted
+#                   out of band): Deployment replaces the worker Pod, reconcilers re-elect leader,
+#                   NodeQueueEntranceReconciler recreates the LocalQueue, and pool InstanceTypes stay Active;
 #                4. Node gpustack.ai/managed=false -> true toggle on a mock worker node: drains/stops
 #                   managed capacity on false and restores Active schedulable capacity on true;
 #                5. Hot card shrink + expand via ConfigMap hot-reload (4 -> 2 -> 4) plus clean
@@ -92,9 +93,9 @@ trap cleanup EXIT
 
 if ! mock_dm_detect_env "$NS"; then
   skip_msg="mock device-manager DaemonSet (gpustack.ai/manufacturer=mock) is not active on this cluster"
-  record SKIP "out-of-band Service, LocalQueue & worker NodeFeature watch self-heal" "$skip_msg"
+  record SKIP "out-of-band Service & worker NodeFeature watch self-heal" "$skip_msg"
   record SKIP "Devices & device-manager NodeFeature self-heal across mock DM Pod kill" "$skip_msg"
-  record SKIP "worker controller Pod mid-flight deletion & convergence" "$skip_msg"
+  record SKIP "worker controller Pod mid-flight deletion & LocalQueue/pool convergence" "$skip_msg"
   record SKIP "gpustack.ai/managed=false -> true node drain and re-admission" "$skip_msg"
   record SKIP "hot card shrink (4 -> 2) and expand (2 -> 4) via ConfigMap hot-reload" "$skip_msg"
   record SKIP "clean teardown with zero stuck finalizers and zero leaked virtual partitions" "$skip_msg"
@@ -275,6 +276,8 @@ spec:
       port: 8080
       protocol: TCP
   resources:
+    cpu: "500m"
+    ram: "512Mi"
     accelerator: "1"
     localStorage: 1Gi
   volume:
@@ -285,6 +288,8 @@ EOF
 PART_POD_1="chaos-c4-mig-3g"
 PART_POD_2="chaos-c4-mig-1g"
 if [[ "$HAS_NV_MIG" -eq 1 ]]; then
+  mock_dm_wait_node_allocatable "$NODE_A" \
+    '(.["nvidia.com/gpu.partitioned.mig-3g.40gb"] == "2") and (.["nvidia.com/gpu.partitioned.mig-1g.10gb"] == "7")' "$CHAOS_TIMEOUT" || true
   for pair in "${PART_POD_1}:mig-3g.40gb" "${PART_POD_2}:mig-1g.10gb"; do
     pname="${pair%%:*}"
     pprof="${pair#*:}"
@@ -352,27 +357,24 @@ if [[ "$HAS_NV_MIG" -eq 1 ]]; then
 fi
 
 # ===================================================================================================
-# Step 1 — Out-of-band deletion of watched worker objects: Service, LocalQueue, worker NodeFeature
+# Step 1 — Out-of-band deletion of watched worker objects: Service & worker NodeFeature
 # ===================================================================================================
 WORKER_NF_A="${NODE_A}-gpustack-worker"
 old_svc_uid="$(kubectl -n "$TEST_NS" get svc "$INST_SVC_NAME" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
-old_lq_uid="$(kubectl -n "$TEST_NS" get localqueue.kueue.x-k8s.io "$LQ_A" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
 old_wnf_uid="$(kubectl -n "$NS" get nodefeature "$WORKER_NF_A" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
 
 kubectl -n "$TEST_NS" delete svc "$INST_SVC_NAME" --ignore-not-found >/dev/null 2>&1 || true
-kubectl -n "$TEST_NS" delete localqueue.kueue.x-k8s.io "$LQ_A" --ignore-not-found >/dev/null 2>&1 || true
 kubectl -n "$NS" delete nodefeature "$WORKER_NF_A" --ignore-not-found >/dev/null 2>&1 || true
 
 new_svc_uid="$(wait_obj_uid_changed "$TEST_NS" svc "$INST_SVC_NAME" "$old_svc_uid" 90 || true)"
-new_lq_uid="$(wait_obj_uid_changed "$TEST_NS" localqueue.kueue.x-k8s.io "$LQ_A" "$old_lq_uid" 90 || true)"
 new_wnf_uid="$(wait_obj_uid_changed "$NS" nodefeature "$WORKER_NF_A" "$old_wnf_uid" 90 || true)"
 
-if [[ -n "$new_svc_uid" && -n "$new_lq_uid" && -n "$new_wnf_uid" ]]; then
-  record PASS "out-of-band Service, LocalQueue & worker NodeFeature watch self-heal" \
-    "recreated svc/${INST_SVC_NAME}, lq/${LQ_A}, and nf/${WORKER_NF_A} with new UIDs"
+if [[ -n "$new_svc_uid" && -n "$new_wnf_uid" ]]; then
+  record PASS "out-of-band Service & worker NodeFeature watch self-heal" \
+    "recreated svc/${INST_SVC_NAME} and nf/${WORKER_NF_A} with new UIDs"
 else
-  record FAIL "out-of-band Service, LocalQueue & worker NodeFeature watch self-heal" \
-    "svc='${new_svc_uid:-<missing>}' lq='${new_lq_uid:-<missing>}' wnf='${new_wnf_uid:-<missing>}'"
+  record FAIL "out-of-band Service & worker NodeFeature watch self-heal" \
+    "svc='${new_svc_uid:-<missing>}' wnf='${new_wnf_uid:-<missing>}'"
 fi
 
 # ===================================================================================================
@@ -412,8 +414,11 @@ else
 fi
 
 # ===================================================================================================
-# Step 3 — Mid-flight worker controller Pod deletion & control-plane convergence
+# Step 3 — Mid-flight worker controller Pod deletion & LocalQueue/pool convergence
 # ===================================================================================================
+old_lq_uid="$(kubectl -n "$TEST_NS" get localqueue.kueue.x-k8s.io "$LQ_A" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
+kubectl -n "$TEST_NS" delete localqueue.kueue.x-k8s.io "$LQ_A" --ignore-not-found >/dev/null 2>&1 || true
+
 WORKER_PODS="$(kubectl -n "$NS" get pods -l app.kubernetes.io/component=worker \
   -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
 if [[ -z "$WORKER_PODS" ]]; then
@@ -422,22 +427,24 @@ if [[ -z "$WORKER_PODS" ]]; then
 fi
 
 worker_rec_ok=0
+new_lq_uid=""
 if [[ -n "$WORKER_PODS" ]]; then
   for wp in $WORKER_PODS; do
     kubectl -n "$NS" delete pod "$wp" --ignore-not-found >/dev/null 2>&1 || true
   done
   if kubectl -n "$NS" rollout status deploy/gpustack-operator-worker --timeout=150s >/dev/null 2>&1 \
     && mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_A}\" and .status.phase == \"Active\")" 60; then
-    worker_rec_ok=1
+    new_lq_uid="$(wait_obj_uid_changed "$TEST_NS" localqueue.kueue.x-k8s.io "$LQ_A" "$old_lq_uid" 90 || true)"
+    [[ -n "$new_lq_uid" ]] && worker_rec_ok=1
   fi
 fi
 
 if [[ "$worker_rec_ok" -eq 1 ]]; then
-  record PASS "worker controller Pod mid-flight deletion & convergence" \
-    "worker Deployment rolled back Ready and ${IT_A} stayed Active"
+  record PASS "worker controller Pod mid-flight deletion & LocalQueue/pool convergence" \
+    "worker Deployment rolled back Ready, recreated lq/${LQ_A}, and ${IT_A} stayed Active"
 else
-  record FAIL "worker controller Pod mid-flight deletion & convergence" \
-    "workerPods='${WORKER_PODS:-<none>}' recovered=${worker_rec_ok}"
+  record FAIL "worker controller Pod mid-flight deletion & LocalQueue/pool convergence" \
+    "workerPods='${WORKER_PODS:-<none>}' newLqUid='${new_lq_uid:-<missing>}' recovered=${worker_rec_ok}"
 fi
 
 # ===================================================================================================
@@ -469,7 +476,7 @@ for _ in $(seq 1 45); do
   nd_m="$(kubectl get node "$NODE_B" -o jsonpath='{.metadata.labels.gpustack\.ai/managed}' 2>/dev/null || true)"
   dv_m="$(kubectl get devices.worker.gpustack.ai "$NODE_B" -o jsonpath='{.metadata.labels.gpustack\.ai/managed}' 2>/dev/null || true)"
   if [[ "$nd_m" == "true" && "$dv_m" == "true" ]] \
-    && mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_A}\" and .status.phase == \"Active\" and ((.status.accelerator.capacity // 0) > 0 or (.status.acceleratorPartitioned.capacity // 0) > 0))" 6; then
+    && mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_A}\" and .status.phase == \"Active\" and (((.status.accelerator.capacity // \"0\") | tostring | tonumber) > 0 or ((.status.acceleratorPartitioned.capacity // \"0\") | tostring | tonumber) > 0))" 6; then
     managed_on=1
     break
   fi

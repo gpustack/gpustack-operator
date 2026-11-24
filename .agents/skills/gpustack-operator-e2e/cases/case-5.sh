@@ -233,7 +233,7 @@ for _ in $(seq 1 30); do
   [ -n "$IT_SL" ] && [ -n "$LQ_SL" ] && break
   sleep 3
 done
-mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_SL}\" and (.status.acceleratorSliced.remaining // 0) == 200)" 60 || true
+mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_SL}\" and ((.status.acceleratorSliced.remaining // \"0\") | tostring | tonumber) == 200)" 60 || true
 
 # Pass 1: 2 x 60% claims (>50%, so no two fit on one card) -> must take 2 distinct cards.
 submit_pod "e2e-c5-spread-1" "$LQ_SL" '{"nvidia.com/gpu.sliced":"1","nvidia.com/gpu.sliced.cores-percentage":"60","nvidia.com/gpu.sliced.memory-percentage":"60"}'
@@ -273,7 +273,7 @@ else
 fi
 
 clear_test_pods
-mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_SL}\" and (.status.acceleratorSliced.remaining // 0) == 200)" 60 || true
+mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_SL}\" and ((.status.acceleratorSliced.remaining // \"0\") | tostring | tonumber) == 200)" 60 || true
 
 # Pass 2: Packing — 100% fills card A, 50% goes to card B, free 100%, then 30% must JOIN card B.
 submit_pod "e2e-c5-pack-100" "$LQ_SL" '{"nvidia.com/gpu.sliced":"1","nvidia.com/gpu.sliced.cores-percentage":"100","nvidia.com/gpu.sliced.memory-percentage":"100"}'
@@ -339,7 +339,7 @@ EOF
 mock_dm_apply_spec "$NS" "$MOCK_DM_CM" "$MOCK_DM_KEY" "$SPEC_A2"
 mock_dm_wait_devices "$NS" "$TARGET_NODE" \
   '([.spec.groups[] | select(.manufacturer == "nvidia") | .accelerators[]] | length == 1)' 90
-mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_SL}\" and (.status.acceleratorSliced.capacity // 0) == 100 and (.status.acceleratorSliced.remaining // 0) == 100)" 60 || true
+mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_SL}\" and ((.status.acceleratorSliced.capacity // \"0\") | tostring | tonumber) == 100 and ((.status.acceleratorSliced.remaining // \"0\") | tostring | tonumber) == 100)" 60 || true
 
 mk_slice_inst() {
   local name="$1" pct="$2"
@@ -478,7 +478,7 @@ else
     "${TARGET_NODE} mixed resource keys did not converge"
 fi
 
-mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_SL}\" and (.status.accelerator.capacity // 0) == 1 and (.status.acceleratorShared.capacity // 0) == 10 and (.status.acceleratorPartitioned.capacity // 0) > 0)" 60 || true
+mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_SL}\" and ((.status.accelerator.capacity // \"0\") | tostring | tonumber) == 1 and ((.status.acceleratorShared.capacity // \"0\") | tostring | tonumber) == 10 and ((.status.acceleratorPartitioned.capacity // \"0\") | tostring | tonumber) > 0)" 60 || true
 read -r mix_ex mix_sh mix_pt <<<"$(kubectl get instancetypes.worker.gpustack.ai "$IT_SL" \
   -o jsonpath='{.status.accelerator.capacity}{" "}{.status.acceleratorShared.capacity}{" "}{.status.acceleratorPartitioned.capacity}' 2>/dev/null)"
 if [ "$mix_ex" = "1" ] && [ "$mix_sh" = "10" ] && [ "${mix_pt:-0}" -gt 0 ]; then
@@ -504,7 +504,7 @@ else
   record FAIL "exclusive claim never lands on idle partitioned card" "e2e-c5-mix-ex1 did not reach Running"
 fi
 clear_test_pods
-mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_SL}\" and (.status.accelerator.remaining // 0) == 1)" 60 || true
+mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_SL}\" and ((.status.accelerator.remaining // \"0\") | tostring | tonumber) == 1)" 60 || true
 
 # Simultaneous partition (3g.40gb) + logical slice (20%) on the mixed node.
 submit_pod "e2e-c5-mix-part" "$LQ_SL" '{"nvidia.com/gpu.partitioned":"1","nvidia.com/gpu.partitioned.mig-3g.40gb":"1"}'

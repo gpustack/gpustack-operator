@@ -185,7 +185,12 @@ node_mock_vendors = set()
 for n in nodes.get("items") or []:
     md = n.get("metadata") or {}
     labels = md.get("labels") or {}
-    if any(c in labels for c in CONTROL):
+    taints = (n.get("spec") or {}).get("taints") or []
+    cp_tainted = any(
+        t.get("key") in CONTROL and t.get("effect") in ("NoSchedule", "NoExecute")
+        for t in taints
+    )
+    if any(c in labels for c in CONTROL) and cp_tainted:
         continue
     spec = n.get("spec") or {}
     status = n.get("status") or {}

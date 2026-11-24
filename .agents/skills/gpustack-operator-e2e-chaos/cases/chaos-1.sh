@@ -170,12 +170,13 @@ build_storm_spec() {
     node="${MOCK_DM_NODES[$idx]}"
     printf '  "%s":\n' "$node"
     if [[ "$NODE_COUNT" -eq 1 && "$HAS_NV" -eq 1 ]]; then
-      # On a 1-node cluster, include 3 logical H100 cards + 1 virtual MIG H100 card (distinct id for _DeviceKey).
+      # On a 1-node cluster, include 11 logical H100 cards + 1 virtual MIG H100 card (distinct id for _DeviceKey)
+      # so P/D (2), EPD (3), and mixed EX/SH/SL/PT burst Pods fit concurrently without oversubscription.
       cat <<'EOF'
     preset: nvidia-h100
-    count: 4
+    count: 12
     cardOverrides:
-      3:
+      11:
         id: GPU-c1-mig-912151ec-e9f1-fc26
         physicalSliced:
           count: 7
@@ -206,7 +207,7 @@ EOF
     else
       case $((idx % 4)) in
         0)
-          printf '    preset: %s\n    count: 4\n' "$PRIMARY_PRESET"
+          printf '    preset: %s\n    count: 8\n' "$PRIMARY_PRESET"
           ;;
         1)
           if [[ "$HAS_NV" -eq 1 ]]; then
@@ -324,17 +325,25 @@ fi
 
 # Wait for baseline InstanceType capacities to settle and snapshot baseline four-view values.
 sleep 5
-BASE_ITS_SNAP="$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | jq -c '
+JQ_QNUM='def qnum:
+  if . == null then 0
+  elif type == "number" then .
+  elif test("^-?[0-9]+(\\.[0-9]+)?k$") then (sub("k$";"") | tonumber * 1000)
+  elif test("^-?[0-9]+(\\.[0-9]+)?M$") then (sub("M$";"") | tonumber * 1000000)
+  elif test("^-?[0-9]+(\\.[0-9]+)?m$") then (sub("m$";"") | tonumber / 1000)
+  else (tonumber? // 0) end;'
+
+BASE_ITS_SNAP="$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | jq -c "${JQ_QNUM}"'
   [.items[] | select(.spec.acceleratable == true and (.status.phase // "") == "Active") | {
     name: .metadata.name,
-    exCap: (.status.accelerator.capacity // 0),
-    exRem: (.status.accelerator.remaining // 0),
-    shCap: (.status.acceleratorShared.capacity // 0),
-    shRem: (.status.acceleratorShared.remaining // 0),
-    slCap: (.status.acceleratorSliced.capacity // 0),
-    slRem: (.status.acceleratorSliced.remaining // 0),
-    ptCap: (.status.acceleratorPartitioned.capacity // 0),
-    ptRem: (.status.acceleratorPartitioned.remaining // 0)
+    exCap: (.status.accelerator.capacity | qnum),
+    exRem: (.status.accelerator.remaining | qnum),
+    shCap: (.status.acceleratorShared.capacity | qnum),
+    shRem: (.status.acceleratorShared.remaining | qnum),
+    slCap: (.status.acceleratorSliced.capacity | qnum),
+    slRem: (.status.acceleratorSliced.remaining | qnum),
+    ptCap: (.status.acceleratorPartitioned.capacity | qnum),
+    ptRem: (.status.acceleratorPartitioned.remaining | qnum)
   }]
 ')"
 
@@ -417,13 +426,6 @@ EOF
     PD_SUBMITTED=1
   fi
 
-  at_slice_count="$(kubectl get acceleratortypes.worker.gpustack.ai "$AT_PD" \
-    -o jsonpath='{.status.detail.slicedDetail.logical.count}' 2>/dev/null || echo 0)"
-  epd_res_block=""
-  if [[ "${at_slice_count:-0}" -gt 0 ]]; then
-    epd_res_block="$(printf '      resources:\n        accelerator: "1"\n        acceleratorSlicedMemoryPercentage: 25')"
-  fi
-
   if epd_out="$(cat <<EOF | kubectl apply -f - 2>&1
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
@@ -445,19 +447,19 @@ spec:
       acceleratorType: ${AT_PD}
       replicas: 1
       image: ${MOCK_IMAGE}
-${epd_res_block}
+      command: ["sleep", "86400"]
     - name: prefill
       kind: Prefill
       acceleratorType: ${AT_PD}
       replicas: 1
       image: ${MOCK_IMAGE}
-${epd_res_block}
+      command: ["sleep", "86400"]
     - name: decode
       kind: Decode
       acceleratorType: ${AT_PD}
       replicas: 1
       image: ${MOCK_IMAGE}
-${epd_res_block}
+      command: ["sleep", "86400"]
 EOF
   )"; then
     EPD_SUBMITTED=1
@@ -651,7 +653,7 @@ print("; ".join(errs[:3]))
   fi
 
   # Check for negative Remaining across Devices.status and InstanceType four-view statuses.
-  if ! cur_neg="$(jq -rn --argjson devs "$devs_json" --argjson its "$its_json" '
+  if ! cur_neg="$(jq -rn --argjson devs "$devs_json" --argjson its "$its_json" "${JQ_QNUM}"'
     (
       [($devs.items // [])[] | .metadata.name as $n
        | (.status.groups // [])[] | (.accelerators // [])[]
@@ -660,10 +662,10 @@ print("; ".join(errs[:3]))
       +
       [($its.items // [])[] | .metadata.name as $it
        | [
-           ["EX", (.status.accelerator.remaining // 0), (.status.accelerator.capacity // 0)],
-           ["SH", (.status.acceleratorShared.remaining // 0), (.status.acceleratorShared.capacity // 0)],
-           ["SL", (.status.acceleratorSliced.remaining // 0), (.status.acceleratorSliced.capacity // 0)],
-           ["PT", (.status.acceleratorPartitioned.remaining // 0), (.status.acceleratorPartitioned.capacity // 0)]
+           ["EX", (.status.accelerator.remaining | qnum), (.status.accelerator.capacity | qnum)],
+           ["SH", (.status.acceleratorShared.remaining | qnum), (.status.acceleratorShared.capacity | qnum)],
+           ["SL", (.status.acceleratorSliced.remaining | qnum), (.status.acceleratorSliced.capacity | qnum)],
+           ["PT", (.status.acceleratorPartitioned.remaining | qnum), (.status.acceleratorPartitioned.capacity | qnum)]
          ][]
        | select(.[1] < 0 or .[1] > .[2])
        | "\($it)/\(.[0]):rem=\(.[1])/cap=\(.[2])"]
@@ -675,13 +677,13 @@ print("; ".join(errs[:3]))
   fi
 
   # Observe whether at least one accelerated InstanceType decremented remaining while workloads run.
-  drop_hit="$(jq -rn --argjson its "$its_json" '
+  drop_hit="$(jq -rn --argjson its "$its_json" "${JQ_QNUM}"'
     any(($its.items // [])[];
       .spec.acceleratable == true and (
-        ((.status.accelerator.remaining // 0) < (.status.accelerator.capacity // 0))
-        or ((.status.acceleratorShared.remaining // 0) < (.status.acceleratorShared.capacity // 0))
-        or ((.status.acceleratorSliced.remaining // 0) < (.status.acceleratorSliced.capacity // 0))
-        or ((.status.acceleratorPartitioned.remaining // 0) < (.status.acceleratorPartitioned.capacity // 0))
+        ((.status.accelerator.remaining | qnum) < (.status.accelerator.capacity | qnum))
+        or ((.status.acceleratorShared.remaining | qnum) < (.status.acceleratorShared.capacity | qnum))
+        or ((.status.acceleratorSliced.remaining | qnum) < (.status.acceleratorSliced.capacity | qnum))
+        or ((.status.acceleratorPartitioned.remaining | qnum) < (.status.acceleratorPartitioned.capacity | qnum))
       )
     )
   ' 2>/dev/null || echo false)"
@@ -759,14 +761,14 @@ kubectl -n "$TEST_NS" delete workloads.kueue.x-k8s.io --all --ignore-not-found -
 recovered=0
 for _ in $(seq 1 35); do
   cur_its="$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null || echo '{"items":[]}')"
-  all_full="$(jq -rn --argjson base "$BASE_ITS_SNAP" --argjson cur "$cur_its" '
+  all_full="$(jq -rn --argjson base "$BASE_ITS_SNAP" --argjson cur "$cur_its" "${JQ_QNUM}"'
     all($base[]; . as $b |
       any(($cur.items // [])[];
         .metadata.name == $b.name
-        and (.status.accelerator.remaining // 0) == (.status.accelerator.capacity // 0)
-        and (.status.acceleratorShared.remaining // 0) == (.status.acceleratorShared.capacity // 0)
-        and (.status.acceleratorSliced.remaining // 0) == (.status.acceleratorSliced.capacity // 0)
-        and (.status.acceleratorPartitioned.remaining // 0) == (.status.acceleratorPartitioned.capacity // 0)
+        and (.status.accelerator.remaining | qnum) == (.status.accelerator.capacity | qnum)
+        and (.status.acceleratorShared.remaining | qnum) == (.status.acceleratorShared.capacity | qnum)
+        and (.status.acceleratorSliced.remaining | qnum) == (.status.acceleratorSliced.capacity | qnum)
+        and (.status.acceleratorPartitioned.remaining | qnum) == (.status.acceleratorPartitioned.capacity | qnum)
       )
     )
   ' 2>/dev/null || echo false)"

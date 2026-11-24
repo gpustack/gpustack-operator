@@ -199,7 +199,7 @@ for _ in $(seq 1 30); do
 done
 
 TOTAL_LOGICAL=$(( (ACTIVE_COUNT * 4) - 1 ))
-mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and (.status.accelerator.remaining // 0) == ${TOTAL_LOGICAL})" 60 || true
+mock_dm_wait_it ".items[] | select(.metadata.name == \"${IT_NV}\" and ((.status.accelerator.remaining // \"0\") | tostring | tonumber) == ${TOTAL_LOGICAL})" 60 || true
 
 submit_c3_pod() {
   local name="$1" node="$2" lq="$3" res_json="$4"
@@ -429,11 +429,14 @@ else
 fi
 
 # ===================================================================================================
-# Step 3 — Release 3 checkerboard blockers on NODE0 -> held EX, SH, and 60% SL promptly reach Running
+# Step 3 — Release 3 checkerboard blockers (+ 30% co-residents) on NODE0 -> held EX, SH, and 60% SL reach Running
 # ===================================================================================================
 for c in 1 2 3; do
   bp="chaos-c3-blk-n0-c${c}"
   kubectl -n "$TEST_NS" delete pod "$bp" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true
+done
+for p30 in "$P_RACE_SL30_A" "$P_RACE_SL30_B"; do
+  kubectl -n "$TEST_NS" delete pod "$p30" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true
 done
 
 rel_ex=0; wait_c3_running "$P_RACE_EX" 90 && rel_ex=1
