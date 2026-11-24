@@ -311,7 +311,7 @@ type Allocator interface {
       Acceptance: Adds `_mock-dm-lib.sh` (ConfigMap fixture + hot-reload helper + trap restore) and authors `next/case-1.sh` through `next/case-7.sh` covering CPU baseline, merged CPU Instance/catalog/pinning (`2+16+36`), Mock full scheduling & cross-mode/fit-label chain (`4+5+19+22+96`), Mock dynamic fault/unhealthy-retention lifecycle, Mock logical slicing & virtual MIG (`11+14+24+25+27+29`), metrics/exporter (`37+41`), and unified SSH suite (`21+13+15+28`), all passing `shellcheck` and header contract.
       Verify: `bash -n .agents/skills/gpustack-operator-e2e/cases/_mock-dm-lib.sh .agents/skills/gpustack-operator-e2e/cases/next/case-[1-7].sh && make lint agents-shell`
 
-- [ ] **T7 · Author consolidated Domain 2 & 3 Real-Hardware, RDMA & TAS E2E cases (`next/case-8.sh` .. `next/case-15.sh`)**
+- [x] **T7 · Author consolidated Domain 2 & 3 Real-Hardware, RDMA & TAS E2E cases (`next/case-8.sh` .. `next/case-15.sh`)**
       Blocked by: None
       Owns: `.agents/skills/gpustack-operator-e2e/cases/next/case-8.sh`, `.agents/skills/gpustack-operator-e2e/cases/next/case-9.sh`, `.agents/skills/gpustack-operator-e2e/cases/next/case-1[0-5].sh`
       Acceptance: Authors `next/case-8.sh` through `next/case-15.sh` consolidating real NVIDIA slicing (`8+11+14`), real NVIDIA MIG lifecycle (`23+24+25+27+29`), Ascend (`35`), AMD (`38`), T-Head (`39`), Hygon (`42`), unified NIC/RDMA (`52+80+81+85`), and Topology/TAS (`87+88`), preserving all real-hardware guards and auto-skip contracts.
