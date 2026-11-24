@@ -36,8 +36,6 @@ type dmiMigDriver struct {
 	// initMu guards lazy, retry-on-failure library initialization across concurrent callers.
 	initMu      sync.Mutex
 	initialized bool
-	// initRet holds the last initialization result (also used by unit-test fixtures with nil lib).
-	initRet dmi.Return
 	// initFn overrides lib.Init in unit tests.
 	initFn func() dmi.Return
 }
@@ -51,22 +49,18 @@ func (d *dmiMigDriver) ready() error {
 	if d.initialized {
 		return nil
 	}
-	if d.initFn == nil && d.lib == nil {
-		ret := d.initRet
-		if ret.IsSuccess() {
-			ret = dmi.ERROR_UNINITIALIZED
-		}
+	var ret dmi.Return
+	switch {
+	case d.initFn != nil:
+		ret = d.initFn()
+	case d.lib != nil:
+		ret = d.lib.Init(klog.Background())
+	default:
 		return fmt.Errorf(
-			"hygon multi-instance library unavailable (%w); the node cannot serve partitions", ret,
+			"hygon multi-instance library unavailable (%w); the node cannot serve partitions",
+			dmi.ERROR_UNINITIALIZED,
 		)
 	}
-	var ret dmi.Return
-	if d.initFn != nil {
-		ret = d.initFn()
-	} else {
-		ret = d.lib.Init(klog.Background())
-	}
-	d.initRet = ret
 	if !ret.IsSuccess() && ret != dmi.ERROR_ALREADY_INITIALIZED {
 		return fmt.Errorf(
 			"hygon multi-instance library unavailable (%w); the node cannot serve partitions", ret,

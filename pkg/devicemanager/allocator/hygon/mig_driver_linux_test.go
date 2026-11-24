@@ -22,7 +22,7 @@ func TestMigDriverVendorErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			driver := &dmiMigDriver{initRet: tc.ret}
+			driver := &dmiMigDriver{initFn: func() dmi.Return { return tc.ret }}
 			var err error
 			switch tc.operation {
 			case "device":

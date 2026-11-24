@@ -77,6 +77,7 @@ func TestDmiMigDriverReadyRetriesAfterFailure(t *testing.T) {
 	}
 	wg.Wait()
 	assert.Equal(t, int32(3), attempts.Load())
+	require.ErrorIs(t, (&dmiMigDriver{}).ready(), dmi.ERROR_UNINITIALIZED)
 }
 
 func TestListInstancesAcrossCards(t *testing.T) {
