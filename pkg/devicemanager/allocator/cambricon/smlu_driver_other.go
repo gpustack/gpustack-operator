@@ -15,6 +15,8 @@ var errStubDriver = errors.New("cndev sMLU driver is not available on this platf
 
 type stubSMLUDriver struct{}
 
+var _ smluDriver = stubSMLUDriver{}
+
 func (stubSMLUDriver) GetSMLUMode(string) (bool, error) { return false, errStubDriver }
 
 func (stubSMLUDriver) SetSMLUMode(string, bool) error { return errStubDriver }
@@ -28,6 +30,8 @@ func (stubSMLUDriver) CreateInstance(string, int32, string) (smluInstance, error
 }
 
 func (stubSMLUDriver) DestroyInstance(_, _ string) error { return errStubDriver }
+
+func (stubSMLUDriver) CardInstances(string) ([]smluInstance, error) { return nil, errStubDriver }
 
 func (stubSMLUDriver) ListInstances() ([]smluInstance, error) { return nil, errStubDriver }
 

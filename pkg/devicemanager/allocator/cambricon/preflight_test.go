@@ -532,3 +532,67 @@ func TestCheck_APanicDoesNotLeaveSMLUModeOn(t *testing.T) {
 	assert.False(t, smlu.modes[testCard0],
 		"the card was left in sMLU mode after the driver crashed putting it back")
 }
+
+func TestPreflightResponder_IsolatedFromNodeListError(t *testing.T) {
+	testCases := []struct {
+		name            string
+		allocated       map[deviceplugin.Resource]int32
+		targetCard      string
+		otherCard       string
+		wantErr         bool
+		wantErrContains string
+	}{
+		{
+			name:       "healthy card succeeds when node-wide ListInstances and sibling card fail",
+			allocated:  allocateMLU0(),
+			targetCard: testCard0,
+			otherCard:  testCard1,
+		},
+		{
+			name:            "unqueryable target card fails preflight responder without calling ListInstances",
+			allocated:       map[deviceplugin.Resource]int32{{Group: testGroupID, Device: "MLU-1"}: 1},
+			targetCard:      testCard1,
+			otherCard:       testCard0,
+			wantErr:         true,
+			wantErrContains: testCard1,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			smlu := newFakeDriver()
+			smlu.failList = true
+			smlu.failCardList[testCard1] = errors.New("IN_PROBLEM")
+
+			p := &preflighter{logger: klog.Background(), smlu: smlu}
+			responder, restore, err := p.PreflightResponder(workercore.DeviceAllocationModeSliced)
+			require.NoError(t, err)
+			defer restore()
+
+			pod, ctr := slicedPod("preflight-iso", "train", 25, 50)
+			_, err = responder.GetContainerAllocateResponse(context.Background(), pod, ctr,
+				cambriconDevicesFixture(), tc.allocated)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErrContains)
+			} else {
+				require.NoError(t, err)
+				s, ok := responder.(*server)
+				require.True(t, ok)
+				rec, ok := s.smlu.(*recordingSMLUDriver)
+				require.True(t, ok)
+				assert.Equal(t, []string{tc.targetCard}, rec.modeWrites)
+				require.Len(t, rec.profileCreates, 1)
+				assert.Equal(t, profileRequest{card: tc.targetCard, coresPct: 25, memMiB: 24576}, rec.profileCreates[0])
+				require.Len(t, rec.instanceCreates, 1)
+				assert.Equal(t, tc.targetCard, rec.instanceCreates[0].card)
+			}
+
+			assert.Zero(t, smlu.listCalls, "preflight responder must never call node-wide ListInstances")
+			assert.Equal(t, 1, smlu.cardListCalls[tc.targetCard], "target card CardInstances calls")
+			assert.Zero(t, smlu.cardListCalls[tc.otherCard], "sibling card must not be queried")
+			assert.Zero(t, smlu.profileCreates, "real driver must never receive profile writes")
+			assert.Zero(t, smlu.instanceCreates, "real driver must never receive instance writes")
+		})
+	}
+}

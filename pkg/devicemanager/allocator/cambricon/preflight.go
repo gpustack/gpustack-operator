@@ -118,9 +118,9 @@ type instanceRequest struct {
 // path does -- on a card whose mode is off it cuts an sMLU profile and instantiates it, a
 // resource that outlives the container and has to be torn down again. Every write reserveInstance
 // can make -- the mode flag, the profile, the instance -- is therefore recorded here instead of
-// reaching the driver. Reading through (GetSMLUMode, ListInstances, ListProfiles) is what keeps
-// the simulation honest: a responder over a driver that invented its answers would take whichever
-// branch the invention chose, not the one this host would send it down.
+// reaching the driver. Reading through (GetSMLUMode, CardInstances, ListInstances, ListProfiles) is
+// what keeps the simulation honest: a responder over a driver that invented its answers would take
+// whichever branch the invention chose, not the one this host would send it down.
 type recordingSMLUDriver struct {
 	read smluDriver
 
@@ -134,6 +134,8 @@ type recordingSMLUDriver struct {
 	// creates more than one instance in one call does not collide two of them onto the same ID.
 	nextProfileID int32
 }
+
+var _ smluDriver = (*recordingSMLUDriver)(nil)
 
 func (d *recordingSMLUDriver) GetSMLUMode(card string) (bool, error) {
 	return d.read.GetSMLUMode(card)
@@ -165,6 +167,10 @@ func (d *recordingSMLUDriver) CreateInstance(card string, profileID int32, name 
 
 func (d *recordingSMLUDriver) DestroyInstance(string, string) error {
 	return nil
+}
+
+func (d *recordingSMLUDriver) CardInstances(card string) ([]smluInstance, error) {
+	return d.read.CardInstances(card)
 }
 
 func (d *recordingSMLUDriver) ListInstances() ([]smluInstance, error) {
