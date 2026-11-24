@@ -305,7 +305,7 @@ type Allocator interface {
       Acceptance: `deviceManager.mock.enabled` defaults to `false` with byte-identical `helm template` output vs `main`; when `enabled: true`, renders mock DaemonSets mounting `configMapName`, passing `--mock-devices-file`, and honoring `omitRuntimeClass` and custom `nodeSelector`; regenerated `values.schema.json` and chart `README.md` pass lint.
       Verify: `make generate chart && make lint chart`
 
-- [ ] **T6 · Author consolidated Domain 1 CPU & Mock E2E cases (`next/case-1.sh` .. `next/case-7.sh`)**
+- [x] **T6 · Author consolidated Domain 1 CPU & Mock E2E cases (`next/case-1.sh` .. `next/case-7.sh`)**
       Blocked by: T4, T5
       Owns: `.agents/skills/gpustack-operator-e2e/cases/next/case-[1-7].sh`, `.agents/skills/gpustack-operator-e2e/cases/_mock-dm-lib.sh`
       Acceptance: Adds `_mock-dm-lib.sh` (ConfigMap fixture + hot-reload helper + trap restore) and authors `next/case-1.sh` through `next/case-7.sh` covering CPU baseline, merged CPU Instance/catalog/pinning (`2+16+36`), Mock full scheduling & cross-mode/fit-label chain (`4+5+19+22+96`), Mock dynamic fault/unhealthy-retention lifecycle, Mock logical slicing & virtual MIG (`11+14+24+25+27+29`), metrics/exporter (`37+41`), and unified SSH suite (`21+13+15+28`), all passing `shellcheck` and header contract.
