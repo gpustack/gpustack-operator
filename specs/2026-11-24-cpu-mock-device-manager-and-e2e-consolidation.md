@@ -279,7 +279,7 @@ type Allocator interface {
       Acceptance: YAML/JSON schema parses flat and per-node (`default` + `nodes.<nodeName>`) specs, resolves embedded built-in presets across all 9 manufacturers (`nvidia`, `amd`, `ascend`, `hygon`, `metax`, `mthreads`, `thead`, `cambricon`, `iluvatar`), validates manufacturers/indexes/fault modes, hot-reloads on file change (including atomic ConfigMap symlink swap), and retains the last valid spec on malformed reload.
       Verify: `go test -count=1 ./pkg/devicemanager/mockspec/...`
 
-- [ ] **T2 · CPU-only Mock `Detector` with unhealthy retention and process/partition/RDMA providers**
+- [x] **T2 · CPU-only Mock `Detector` with unhealthy retention and process/partition/RDMA providers**
       Blocked by: T1
       Owns: `pkg/devicemanager/detector/mock/**`
       Acceptance: Implements `device.Detector`, `device.AcceleratorProcessDetector`, `device.AcceleratorPartitionDetector`, and mock node interface/RDMA readers with zero CGO; enforces init/count/fatal/all-cards-failed error propagation, per-slot in-place unhealthy retention (`Status.Unhealthy: true` and `Unhealthy: true` in monitor), sibling `Index` preservation, recovery, and clean shrink cache pruning on both macOS and Linux.
