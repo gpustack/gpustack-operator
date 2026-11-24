@@ -42,6 +42,10 @@ const smluHashLen = 12
 // transient list gap never destroys a live slice.
 const reclaimMaxMisses = 3
 
+// corruptMissPrefix namespaces per-path miss counters for unparseable marker files in
+// reclaimer.misses so dead-pod corrupt markers are debounced without colliding with pod UIDs.
+const corruptMissPrefix = "corrupt:"
+
 // errSMLUUnsupported marks a mode call that failed because this cnDev library or driver has no sMLU
 // API at all, as opposed to failing for something about the card or the moment. It is the one
 // failure that no retry, no write and no host command can get past, so the preflight refuses on it
@@ -103,8 +107,8 @@ type profileKey struct {
 // is in-memory so the mapping / name-encoding / marker / reclaim logic is table-tested
 // without hardware. Profile reuse and refcount live above this seam (in reserveInstance /
 // reclaim) so they are testable; the seam itself is thin create/destroy/list over the
-// wrappers. ListInstances is global (every accelerator's instances, each carrying its own) so
-// reclaim can catch a crash-orphan on an accelerator that has no marker yet.
+// wrappers. CardInstances scopes Allocate and preflight reads to a single accelerator, while
+// ListInstances is global so reclaim can catch a crash-orphan on an accelerator with no marker.
 type smluDriver interface {
 	// GetSMLUMode reports whether sMLU mode is on for the accelerator.
 	GetSMLUMode(card string) (enabled bool, err error)
@@ -122,6 +126,8 @@ type smluDriver interface {
 	// DestroyInstance destroys the named instance on the accelerator. It is idempotent:
 	// destroying an already-absent instance is not an error.
 	DestroyInstance(card, name string) error
+	// CardInstances enumerates every sMLU instance on one accelerator addressed by PCI bus ID.
+	CardInstances(card string) ([]smluInstance, error)
 	// ListInstances enumerates every sMLU instance across all accelerators.
 	ListInstances() ([]smluInstance, error)
 	// ListProfiles enumerates every sMLU profile across all accelerators, so the reclaim loop
@@ -186,6 +192,19 @@ type markerEntry struct {
 // markerPath returns the marker file path for a sliced container.
 func markerPath(podUID, container string) string {
 	return filepath.Join(deviceplugin.PodWorkDir(podUID, container), markerName)
+}
+
+// podUIDFromMarkerPath extracts the owning pod UID from <podsDir>/<podUID>/<container>/cambricon-smlu.json.
+func podUIDFromMarkerPath(podsDir, path string) (string, bool) {
+	rel, err := filepath.Rel(podsDir, path)
+	if err != nil {
+		return "", false
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 3 || parts[0] == "" || parts[0] == "." || parts[0] == ".." || parts[2] != markerName {
+		return "", false
+	}
+	return parts[0], true
 }
 
 // parseMarker reads a marker fail-closed: a missing / malformed / incomplete record is
@@ -334,9 +353,9 @@ func reserveInstance(driver smluDriver, podUID, container, card string, ordinal,
 				self, card, coresPct, memMiB,
 			)
 		}
-		list, err := driver.ListInstances()
+		list, err := driver.CardInstances(card)
 		if err != nil {
-			return smluInstance{}, fmt.Errorf("list smlu instances: %w", err)
+			return smluInstance{}, fmt.Errorf("card %s: list smlu instances: %w", card, err)
 		}
 		for i := range list {
 			if list[i].name == m.Instance {
@@ -357,9 +376,9 @@ func reserveInstance(driver smluDriver, podUID, container, card string, ordinal,
 		return smluInstance{}, err
 	}
 
-	list, err := driver.ListInstances()
+	list, err := driver.CardInstances(card)
 	if err != nil {
-		return smluInstance{}, fmt.Errorf("list smlu instances: %w", err)
+		return smluInstance{}, fmt.Errorf("card %s: list smlu instances: %w", card, err)
 	}
 	profileID, created, err := findOrCreateProfile(driver, list, card, coresPct, memMiB)
 	if err != nil {
@@ -440,15 +459,7 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 
 	live := sets.New[string](livePodUIDs...)
 
-	instances, err := r.driver.ListInstances()
-	if err != nil {
-		r.logger.Error(err, "reclaim: list smlu instances, skipping this pass")
-		return
-	}
 	markers, corrupt := scanMarkers(r.podsDir)
-	for _, p := range corrupt {
-		r.logger.Info("reclaim: skipping unparseable marker", "path", p)
-	}
 
 	// Index the markers' instance names so registry orphans can be detected.
 	markedName := make(map[string]bool, len(markers))
@@ -457,8 +468,9 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 	}
 
 	// Collect reclaim targets per pod UID: the marker files to remove and the instances
-	// to destroy. Markers contribute their (accelerator, name, profileID); marker-less instances
-	// contribute theirs under their decoded UID (an undecodable name is foreign, skipped).
+	// to destroy. Markers contribute their (accelerator, name, profileID) independent of
+	// ListInstances so dead pods on healthy cards are still reclaimed when another card
+	// makes the node-wide walk fail; marker-less instances are added when ListInstances succeeds.
 	type target struct {
 		markers   []markerEntry
 		instances []smluRef
@@ -478,16 +490,22 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 		t.markers = append(t.markers, markers[i])
 		t.instances = append(t.instances, smluRef{card: m.Card, name: m.Instance})
 	}
-	for i := range instances {
-		inst := instances[i]
-		if markedName[inst.name] {
-			continue // has a marker; handled above
+
+	instances, listErr := r.driver.ListInstances()
+	if listErr != nil {
+		r.logger.Error(listErr, "reclaim: list smlu instances, skipping orphan discovery and profile gc")
+	} else {
+		for i := range instances {
+			inst := instances[i]
+			if markedName[inst.name] {
+				continue // has a marker; handled above
+			}
+			uid, ok := decodeInstanceUID(inst.name)
+			if !ok {
+				continue // not operator-encoded; leave foreign instances alone
+			}
+			get(uid).instances = append(get(uid).instances, smluRef{card: inst.card, name: inst.name})
 		}
-		uid, ok := decodeInstanceUID(inst.name)
-		if !ok {
-			continue // not operator-encoded; leave foreign instances alone
-		}
-		get(uid).instances = append(get(uid).instances, smluRef{card: inst.card, name: inst.name})
 	}
 
 	// touched marks every miss key still relevant this pass; the rest are pruned below.
@@ -505,33 +523,87 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 		r.destroy(uid, t.instances, t.markers)
 	}
 
-	for k := range r.misses {
-		if !touched.Has(k) {
-			delete(r.misses, k)
+	r.pruneCorruptMarkers(corrupt, live, touched)
+
+	if listErr == nil {
+		for k := range r.misses {
+			if !touched.Has(k) {
+				delete(r.misses, k)
+			}
+		}
+		// Sweep profiles once per pass: destroy any profile no instance references, whether freed
+		// by the destroys above or left behind by a crash between profile and instance creation.
+		// Safe under allocMu when ListInstances succeeded across all cards.
+		r.gcOrphanProfiles()
+	} else {
+		// Preserve pod-UID miss counters for marker-less orphans unseen while ListInstances fails,
+		// while resetting any live pod and pruning stale corrupt-marker keys.
+		for k := range r.misses {
+			if strings.HasPrefix(k, corruptMissPrefix) {
+				if !touched.Has(k) {
+					delete(r.misses, k)
+				}
+				continue
+			}
+			if live.Has(k) {
+				r.misses[k] = 0
+			}
 		}
 	}
+}
 
-	// Sweep profiles once per pass: destroy any profile no instance references — one freed
-	// by the destroys above, or a crash orphan left when a create fell between the profile
-	// and its instance. Safe under allocMu: no in-flight Allocate holds an as-yet
-	// instance-less profile.
-	r.gcOrphanProfiles()
+// pruneCorruptMarkers logs unparseable markers and removes those belonging to dead pods after
+// reclaimMaxMisses consecutive absent passes, while keeping unparseable markers of live pods.
+func (r *reclaimer) pruneCorruptMarkers(corrupt []string, live, touched sets.Set[string]) {
+	for _, path := range corrupt {
+		uid, ok := podUIDFromMarkerPath(r.podsDir, path)
+		if !ok {
+			r.logger.Info("reclaim: skipping unparseable marker", "path", path)
+			continue
+		}
+		key := corruptMissPrefix + path
+		touched.Insert(key)
+		if live.Has(uid) {
+			r.misses[key] = 0
+			r.logger.Info("reclaim: skipping unparseable marker", "path", path, "podUID", uid)
+			continue
+		}
+		r.misses[key]++
+		if r.misses[key] < reclaimMaxMisses {
+			r.logger.Info("reclaim: skipping unparseable marker", "path", path, "podUID", uid)
+			continue
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			r.logger.Error(err, "reclaim: remove corrupt marker", "path", path)
+			continue
+		}
+		removeIfEmpty(filepath.Dir(path))
+		removeIfEmpty(filepath.Dir(filepath.Dir(path)))
+		delete(r.misses, key)
+		r.logger.Info("reclaim: removed unparseable marker of dead pod", "path", path, "podUID", uid)
+	}
 }
 
 // destroy tears down one dead pod's instances: destroy each instance (idempotent), then
-// remove each marker file and its pod dir when empty. A miss counter is cleared only when
-// the whole pod is reclaimed, so a partial failure retries next pass. Freed profiles are
-// reclaimed by gcOrphanProfiles at the end of the reconcile pass.
+// remove each marker file whose instance destroy succeeded and its pod dir when empty. A
+// miss counter is cleared only when the whole pod is reclaimed, so a partial failure
+// retains the failed marker and retries next pass even if ListInstances is failing.
 func (r *reclaimer) destroy(uid string, instances []smluRef, markers []markerEntry) {
 	ok := true
+	failed := make(map[smluRef]bool)
 	for _, inst := range instances {
 		if err := r.driver.DestroyInstance(inst.card, inst.name); err != nil {
 			r.logger.Error(err, "reclaim: destroy instance", "podUID", uid, "card", inst.card, "instance", inst.name)
+			failed[inst] = true
 			ok = false
 			continue
 		}
 	}
 	for i := range markers {
+		ref := smluRef{card: markers[i].marker.Card, name: markers[i].marker.Instance}
+		if failed[ref] {
+			continue
+		}
 		if err := os.Remove(markers[i].path); err != nil && !os.IsNotExist(err) {
 			r.logger.Error(err, "reclaim: remove marker", "path", markers[i].path)
 			ok = false
@@ -551,7 +623,8 @@ func (r *reclaimer) destroy(uid string, instances []smluRef, markers []markerEnt
 // gcOrphanProfiles destroys every profile no surviving instance references, so a profile
 // shared by a live instance is never torn out from under it while a genuinely orphaned one
 // (its instances reclaimed, or a create-before-instance crash) is freed. It fails closed:
-// a list error skips the sweep rather than acting on a partial view.
+// ListProfiles and ListInstances walk all cards separately, so any error in either walk skips
+// the entire sweep rather than risking deleting live profiles on an unreadable or flapping card.
 func (r *reclaimer) gcOrphanProfiles() {
 	profiles, err := r.driver.ListProfiles()
 	if err != nil {

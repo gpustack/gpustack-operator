@@ -2,6 +2,7 @@ package cambricon
 
 import (
 	"fmt"
+	"sync"
 
 	"gpustack.ai/gpustack/binding/cndev"
 )
@@ -11,8 +12,7 @@ import (
 // aborts at dyld load (the .so-less host cannot resolve the flat-namespace symbols), so
 // the darwin build uses the stub in smlu_driver_other.go instead.
 func newSMLUDriver() smluDriver {
-	l := cndev.New()
-	return &cndevSMLUDriver{lib: l, initRet: l.Init()}
+	return &cndevSMLUDriver{lib: cndev.New()}
 }
 
 // cndevSMLUDriver is the real smluDriver, driving cnDev on an accelerator addressed by PCI bus ID
@@ -23,21 +23,45 @@ func newSMLUDriver() smluDriver {
 // unvalidated on real hardware, which is why every op goes through the seam so only this
 // type changes when the contract is confirmed. All unit tests use a fake driver.
 type cndevSMLUDriver struct {
-	lib *cndev.CNDev
-	// initRet captures cndevInit's result so the first device() call reports a single,
-	// actionable root cause when the library failed to load/initialize.
-	initRet cndev.Return
+	initMu      sync.Mutex
+	lib         *cndev.CNDev
+	initialized bool
+}
+
+var _ smluDriver = (*cndevSMLUDriver)(nil)
+
+// ready initializes cnDev on demand and retries failed attempts under initMu so the driver
+// recovers if the library or kernel module becomes ready after process startup.
+func (d *cndevSMLUDriver) ready() (*cndev.CNDev, cndev.Return) {
+	d.initMu.Lock()
+	defer d.initMu.Unlock()
+	if d.initialized {
+		return d.lib, cndev.SUCCESS
+	}
+	if d.lib == nil {
+		d.lib = cndev.New()
+	}
+	ret := d.lib.Init()
+	if ret == cndev.ERROR_LIBRARY_NOT_FOUND {
+		d.lib = nil
+		return nil, ret
+	}
+	if ret.IsSuccess() {
+		d.initialized = true
+	}
+	return d.lib, ret
 }
 
 func (d *cndevSMLUDriver) device(card string) (cndev.Device, error) {
-	if !d.initRet.IsSuccess() {
+	lib, ret := d.ready()
+	if !ret.IsSuccess() {
 		// A library that never loaded offers no sMLU API either, so the mode preflight must read
 		// this the same way it reads an absent entry point rather than trying to write past it.
-		return cndev.Device{}, smluModeError("cndev init failed", d.initRet, d.initRet.IsAPIUnavailable())
+		return cndev.Device{}, smluModeError("cndev init failed", ret, ret.IsAPIUnavailable())
 	}
 	// The handle lookup is looked up in the library like everything else, so its failure carries the
 	// same distinction: an absent entry point here is an absent API, not a passing condition.
-	dev, ret := d.lib.GetDeviceHandleByPciBusId(card)
+	dev, ret := lib.GetDeviceHandleByPciBusId(card)
 	if !ret.IsSuccess() {
 		return cndev.Device{}, smluModeError(
 			fmt.Sprintf("get cndev handle for %s", card), ret, ret.IsAPIUnavailable(),
@@ -125,19 +149,37 @@ func (d *cndevSMLUDriver) DestroyInstance(card, name string) error {
 	return nil
 }
 
-func (d *cndevSMLUDriver) ListInstances() ([]smluInstance, error) {
-	if !d.initRet.IsSuccess() {
-		return nil, fmt.Errorf("cndev init failed: %w", d.initRet)
+func (d *cndevSMLUDriver) CardInstances(card string) ([]smluInstance, error) {
+	dev, err := d.device(card)
+	if err != nil {
+		return nil, err
 	}
-	count, ret := d.lib.GetDeviceCount()
+	infos, ret := dev.GetAllSMluInstanceInfo()
+	if !ret.IsSuccess() {
+		return nil, fmt.Errorf("list smlu instances on %s: %w", card, ret)
+	}
+	out := make([]smluInstance, 0, len(infos))
+	for i := range infos {
+		out = append(out, instanceFromInfo(card, infos[i]))
+	}
+	return out, nil
+}
+
+func (d *cndevSMLUDriver) ListInstances() ([]smluInstance, error) {
+	lib, ret := d.ready()
+	if !ret.IsSuccess() {
+		return nil, fmt.Errorf("cndev init failed: %w", ret)
+	}
+	count, ret := lib.GetDeviceCount()
 	if !ret.IsSuccess() {
 		return nil, fmt.Errorf("get cndev device count: %w", ret)
 	}
 	var out []smluInstance
 	for i := 0; i < count; i++ {
-		// Fail closed on any per-device error: a partial list would let the reclaim loop's
-		// profile GC treat a still-referenced profile as orphaned and destroy it.
-		dev, ret := d.lib.GetDeviceHandleByIndex(i)
+		// Fail closed on any per-device error: ListProfiles and ListInstances are separate
+		// device walks, so skipping a flapping card here would let gcOrphanProfiles treat
+		// its live profiles as orphaned and destroy them.
+		dev, ret := lib.GetDeviceHandleByIndex(i)
 		if !ret.IsSuccess() {
 			return nil, fmt.Errorf("get cndev handle for device %d: %w", i, ret)
 		}
@@ -158,16 +200,17 @@ func (d *cndevSMLUDriver) ListInstances() ([]smluInstance, error) {
 }
 
 func (d *cndevSMLUDriver) ListProfiles() ([]profileKey, error) {
-	if !d.initRet.IsSuccess() {
-		return nil, fmt.Errorf("cndev init failed: %w", d.initRet)
+	lib, ret := d.ready()
+	if !ret.IsSuccess() {
+		return nil, fmt.Errorf("cndev init failed: %w", ret)
 	}
-	count, ret := d.lib.GetDeviceCount()
+	count, ret := lib.GetDeviceCount()
 	if !ret.IsSuccess() {
 		return nil, fmt.Errorf("get cndev device count: %w", ret)
 	}
 	var out []profileKey
 	for i := 0; i < count; i++ {
-		dev, ret := d.lib.GetDeviceHandleByIndex(i)
+		dev, ret := lib.GetDeviceHandleByIndex(i)
 		if !ret.IsSuccess() {
 			return nil, fmt.Errorf("get cndev handle for device %d: %w", i, ret)
 		}

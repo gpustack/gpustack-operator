@@ -27,18 +27,35 @@ func init() {
 	_PciVendor = p[len(p)-1]
 }
 
+type cachedAccelerator struct {
+	group device.DevicesGroup
+	accel device.Accelerator
+}
+
+type cachedMetrics struct {
+	id     string
+	memory uint64
+}
+
 type thead struct {
-	once   sync.Once
-	hgml   *hgml.HGML
-	logger klog.Logger
+	initMu      sync.Mutex
+	initialized bool
+	hgml        *hgml.HGML
+	logger      klog.Logger
+
+	cacheMu         sync.Mutex
+	cachedDetected  map[int]cachedAccelerator
+	cachedMonitored map[int]cachedMetrics
 }
 
 // New creates a new thead device interface and initializes the HGML library.
 func New(opts device.DetectorOptions) device.Detector {
 	logger := opts.Logger.WithName(Manufacturer)
 	return &thead{
-		hgml:   hgml.New(binding.WithLogger(logger)),
-		logger: logger,
+		hgml:            hgml.New(binding.WithLogger(logger)),
+		logger:          logger,
+		cachedDetected:  make(map[int]cachedAccelerator),
+		cachedMonitored: make(map[int]cachedMetrics),
 	}
 }
 
@@ -63,35 +80,56 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		return nil, nil
 	}
 
-	in.init()
+	if ret := in.ensureInit(); !ret.IsSuccess() {
+		if err := classifyInitOrCountError("initialize HGML library", ret, noPciCheck, len(pciDevs)); err != nil {
+			return nil, err
+		}
+		in.logger.Info("thead driver api unavailable", "reason", ret)
+		return nil, nil
+	}
 
 	cnt, ret := in.hgml.DeviceGetCount()
-	if !ret.IsSuccess() || cnt == 0 {
-		if ret.IsSuccess() {
-			in.logger.Info("no thead devices found")
-		} else {
-			in.logger.Error(ret, "no thead devices found")
+	if !ret.IsSuccess() {
+		if err := classifyInitOrCountError("get thead device count", ret, noPciCheck, len(pciDevs)); err != nil {
+			in.logger.Error(ret, "failed to get thead device count")
+			return nil, err
 		}
+		in.logger.Info("no thead devices found", "reason", ret)
+		return nil, nil
+	}
+	if cnt == 0 {
+		in.clearCache()
+		in.logger.Info("no thead devices found")
 		return nil, nil
 	}
 
 	drVer, _ := in.hgml.SystemGetDriverVersion()
 	rtVer, _ := in.hgml.SystemGetHggcDriverVersion()
 
-	var index uint32
 	grpList := device.DevicesGroupList{}
+	liveSlots := make(map[int]struct{}, cnt)
+	nextMonitored := make(map[int]cachedMetrics, cnt)
+	unqueryableSlots := make(map[int]struct{})
+	queriedCount := 0
+	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
 
 		dev, ret := in.hgml.DeviceGetHandleByIndex(i)
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device handle")
+			if err := handleCardQueryError(logger, i, "get device handle", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
+			in.restoreCachedDetected(i, unqueryableSlots, &grpList)
 			continue
 		}
 
 		uuid, ret := dev.GetUUID()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device UUID")
+			if err := handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
+			in.restoreCachedDetected(i, unqueryableSlots, &grpList)
 			continue
 		}
 
@@ -100,9 +138,14 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			pciHandler := dev.GetPciInfoV()
 			pciInfo, ret := pciHandler.V2()
 			if !ret.IsSuccess() {
-				pciInfo, ret = pciHandler.V1()
+				var v1Ret hgml.Return
+				pciInfo, v1Ret = pciHandler.V1()
+				ret = selectVersionedReturn(ret, v1Ret)
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device PCI info")
+					if err := handleCardQueryError(logger, i, "get device PCI info", ret, &lastUnqueryableErr); err != nil {
+						return nil, err
+					}
+					in.restoreCachedDetected(i, unqueryableSlots, &grpList)
 					continue
 				}
 			}
@@ -112,7 +155,10 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 
 		name, ret := dev.GetName()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device name")
+			if err := handleCardQueryError(logger, i, "get device name", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
+			in.restoreCachedDetected(i, unqueryableSlots, &grpList)
 			continue
 		}
 
@@ -124,9 +170,14 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			memHandler := dev.GetMemoryInfoV()
 			memInfo, ret := memHandler.V2()
 			if !ret.IsSuccess() {
-				memInfo, ret = memHandler.V1()
+				var v1Ret hgml.Return
+				memInfo, v1Ret = memHandler.V1()
+				ret = selectVersionedReturn(ret, v1Ret)
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device memory info")
+					if err := handleCardQueryError(logger, i, "get device memory info", ret, &lastUnqueryableErr); err != nil {
+						return nil, err
+					}
+					in.restoreCachedDetected(i, unqueryableSlots, &grpList)
 					continue
 				}
 			}
@@ -225,17 +276,28 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			}
 		}
 
-		grpList[grpIndex].Accelerators = append(
-			grpList[grpIndex].Accelerators,
-			device.Accelerator{
-				ID:              uuid,
-				Index:           index,
-				PhysicalIndexes: physicalIndexes,
-				Topology:        topo,
-				Status:          status,
-			},
-		)
-		index++
+		accel := device.Accelerator{
+			ID:              uuid,
+			Index:           uint32(i),
+			PhysicalIndexes: physicalIndexes,
+			Topology:        topo,
+			Status:          status,
+		}
+		grpList[grpIndex].Accelerators = append(grpList[grpIndex].Accelerators, accel)
+		liveSlots[i] = struct{}{}
+		nextMonitored[i] = cachedMetrics{
+			id:     uuid,
+			memory: memory,
+		}
+		queriedCount++
+	}
+
+	if queriedCount == 0 {
+		if lastUnqueryableErr != nil {
+			return nil, lastUnqueryableErr
+		}
+		in.clearCache()
+		return nil, nil
 	}
 
 	// Accelerators of one group must agree on what a profile name means before the aggregation
@@ -246,6 +308,8 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				"group", grpList[i].ID, "reason", reason)
 		}
 	}
+
+	in.commitDetectedCache(snapshotLiveDetected(grpList, liveSlots), nextMonitored, unqueryableSlots)
 
 	device.SetGroupSlicedDetails(grpList)
 
@@ -267,37 +331,56 @@ func (in *thead) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 		return nil, nil
 	}
 
-	in.init()
-
-	cnt, ret := in.hgml.DeviceGetCount()
-	if !ret.IsSuccess() || cnt == 0 {
-		if ret.IsSuccess() {
-			in.logger.Info("no thead devices found")
-		} else {
-			in.logger.Error(ret, "no thead devices found")
+	if ret := in.ensureInit(); !ret.IsSuccess() {
+		if err := classifyInitOrCountError("initialize HGML library", ret, noPciCheck, len(pciDevs)); err != nil {
+			return nil, err
 		}
+		in.logger.Info("thead driver api unavailable", "reason", ret)
 		return nil, nil
 	}
 
-	grpList := device.MetricsGroupList{
-		{
-			Manufacturer: Manufacturer,
-			Timestamp:    time.Now(),
-			Accelerators: make([]device.AcceleratorMetrics, 0, cnt),
-		},
+	cnt, ret := in.hgml.DeviceGetCount()
+	if !ret.IsSuccess() {
+		if err := classifyInitOrCountError("get thead device count", ret, noPciCheck, len(pciDevs)); err != nil {
+			in.logger.Error(ret, "failed to get thead device count")
+			return nil, err
+		}
+		in.logger.Info("no thead devices found", "reason", ret)
+		return nil, nil
 	}
+	if cnt == 0 {
+		in.clearCache()
+		in.logger.Info("no thead devices found")
+		return nil, nil
+	}
+
+	metricsGrp := device.MetricsGroup{
+		Manufacturer: Manufacturer,
+		Timestamp:    time.Now(),
+		Accelerators: make([]device.AcceleratorMetrics, 0, cnt),
+	}
+	nextMonitored := make(map[int]cachedMetrics, cnt)
+	unqueryableSlots := make(map[int]struct{})
+	queriedCount := 0
+	var lastUnqueryableErr error
 	for i := 0; i < cnt; i++ {
 		logger := in.logger.WithValues("index", i)
 
 		dev, ret := in.hgml.DeviceGetHandleByIndex(i)
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device handle")
+			if err := handleCardQueryError(logger, i, "get device handle", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
+			in.restoreCachedMonitored(i, unqueryableSlots, &metricsGrp.Accelerators)
 			continue
 		}
 
 		uuid, ret := dev.GetUUID()
 		if !ret.IsSuccess() {
-			logger.Error(ret, "failed to get device UUID")
+			if err := handleCardQueryError(logger, i, "get device UUID", ret, &lastUnqueryableErr); err != nil {
+				return nil, err
+			}
+			in.restoreCachedMonitored(i, unqueryableSlots, &metricsGrp.Accelerators)
 			continue
 		}
 
@@ -311,9 +394,14 @@ func (in *thead) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 			memHandler := dev.GetMemoryInfoV()
 			memInfo, ret := memHandler.V2()
 			if !ret.IsSuccess() {
-				memInfo, ret = memHandler.V1()
+				var v1Ret hgml.Return
+				memInfo, v1Ret = memHandler.V1()
+				ret = selectVersionedReturn(ret, v1Ret)
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device memory info")
+					if err := handleCardQueryError(logger, i, "get device memory info", ret, &lastUnqueryableErr); err != nil {
+						return nil, err
+					}
+					in.restoreCachedMonitored(i, unqueryableSlots, &metricsGrp.Accelerators)
 					continue
 				}
 			}
@@ -359,8 +447,8 @@ func (in *thead) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 			}
 		}
 
-		grpList[0].Accelerators = append(
-			grpList[0].Accelerators,
+		metricsGrp.Accelerators = append(
+			metricsGrp.Accelerators,
 			device.AcceleratorMetrics{
 				ID:                uuid,
 				Memory:            memory,
@@ -372,9 +460,155 @@ func (in *thead) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 				Unhealthy:         memoryUnhealthy,
 			},
 		)
+		nextMonitored[i] = cachedMetrics{
+			id:     uuid,
+			memory: memory,
+		}
+		queriedCount++
 	}
 
-	return grpList, nil
+	if queriedCount == 0 {
+		if lastUnqueryableErr != nil {
+			return nil, lastUnqueryableErr
+		}
+		in.clearCache()
+		return nil, nil
+	}
+
+	in.commitMonitoredCache(nextMonitored, unqueryableSlots)
+
+	return device.MetricsGroupList{metricsGrp}, nil
+}
+
+func cloneGroupMetadata(grp device.DevicesGroup) device.DevicesGroup {
+	grp.Accelerators = nil
+	return *grp.DeepCopy()
+}
+
+func snapshotLiveDetected(
+	grpList device.DevicesGroupList, liveSlots map[int]struct{},
+) map[int]cachedAccelerator {
+	nextDetected := make(map[int]cachedAccelerator, len(liveSlots))
+	for _, grp := range grpList {
+		for _, accel := range grp.Accelerators {
+			slot := int(accel.Index)
+			if _, isLive := liveSlots[slot]; !isLive {
+				continue
+			}
+			nextDetected[slot] = cachedAccelerator{
+				group: cloneGroupMetadata(grp),
+				accel: *accel.DeepCopy(),
+			}
+		}
+	}
+	return nextDetected
+}
+
+func (in *thead) getCachedDetected(slot int) (cachedAccelerator, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedDetected[slot]
+	return cached, ok
+}
+
+func (in *thead) getCachedMonitored(slot int) (cachedMetrics, bool) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	cached, ok := in.cachedMonitored[slot]
+	return cached, ok
+}
+
+func (in *thead) restoreCachedDetected(
+	slot int, unqueryableSlots map[int]struct{}, grpList *device.DevicesGroupList,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	cached, ok := in.getCachedDetected(slot)
+	if !ok {
+		return
+	}
+	grpIndex := slices.IndexFunc(*grpList, func(grp device.DevicesGroup) bool {
+		return grp.Name == cached.group.Name && grp.Memory == cached.group.Memory
+	})
+	if grpIndex == -1 {
+		*grpList = append(*grpList, cloneGroupMetadata(cached.group))
+		grpIndex = len(*grpList) - 1
+	}
+	accel := *cached.accel.DeepCopy()
+	accel.Status.Unhealthy = true
+	(*grpList)[grpIndex].Accelerators = append((*grpList)[grpIndex].Accelerators, accel)
+}
+
+func (in *thead) restoreCachedMonitored(
+	slot int, unqueryableSlots map[int]struct{}, accels *[]device.AcceleratorMetrics,
+) {
+	unqueryableSlots[slot] = struct{}{}
+	cached, ok := in.getCachedMonitored(slot)
+	if !ok {
+		return
+	}
+	*accels = append(*accels, device.AcceleratorMetrics{
+		ID:        cached.id,
+		Memory:    cached.memory,
+		Unhealthy: true,
+	})
+}
+
+func (in *thead) commitDetectedCache(
+	nextDetected map[int]cachedAccelerator,
+	nextMonitored map[int]cachedMetrics,
+	unqueryableSlots map[int]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	for slot := range unqueryableSlots {
+		if _, exists := nextDetected[slot]; !exists {
+			if cached, ok := in.cachedDetected[slot]; ok {
+				nextDetected[slot] = cached
+			}
+		}
+		if _, exists := nextMonitored[slot]; !exists {
+			if cached, ok := in.cachedMonitored[slot]; ok {
+				nextMonitored[slot] = cached
+			}
+		}
+	}
+	in.cachedDetected = nextDetected
+	in.cachedMonitored = nextMonitored
+}
+
+func (in *thead) commitMonitoredCache(
+	nextMonitored map[int]cachedMetrics,
+	unqueryableSlots map[int]struct{},
+) {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	for slot := range unqueryableSlots {
+		if _, exists := nextMonitored[slot]; !exists {
+			if cached, ok := in.cachedMonitored[slot]; ok {
+				nextMonitored[slot] = cached
+			}
+		}
+	}
+	in.cachedMonitored = nextMonitored
+
+	for slot := range in.cachedDetected {
+		if _, ok := nextMonitored[slot]; ok {
+			continue
+		}
+		delete(in.cachedDetected, slot)
+	}
+}
+
+func (in *thead) clearCache() {
+	in.cacheMu.Lock()
+	defer in.cacheMu.Unlock()
+
+	clear(in.cachedDetected)
+	clear(in.cachedMonitored)
 }
 
 func isDeviceUnhealthy(dev hgml.Device) bool {
@@ -417,11 +651,83 @@ func coresUtilizationOf(logger klog.Logger, dev hgml.Device) uint32 {
 }
 
 func (in *thead) init() {
-	in.once.Do(func() {
-		if ret := in.hgml.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize HGML library")
-		}
-	})
+	_ = in.ensureInit()
+}
+
+func (in *thead) ensureInit() hgml.Return {
+	in.initMu.Lock()
+	defer in.initMu.Unlock()
+
+	if in.initialized {
+		return hgml.SUCCESS
+	}
+
+	ret := in.hgml.Init()
+	if ret.IsSuccess() || ret == hgml.ERROR_ALREADY_INITIALIZED {
+		in.initialized = true
+		return hgml.SUCCESS
+	}
+
+	in.logger.Error(ret, "failed to initialize HGML library")
+	return ret
+}
+
+// isUnqueryableDeviceError reports whether a non-success HGML return indicates a card-specific
+// hardware or bus fault where skipping the affected card allows healthy sibling cards to remain
+// queryable.
+func isUnqueryableDeviceError(ret hgml.Return) bool {
+	switch ret {
+	case hgml.ERROR_GPU_IS_LOST,
+		hgml.ERROR_UNKNOWN,
+		hgml.ERROR_RESET_REQUIRED,
+		hgml.ERROR_INSUFFICIENT_POWER,
+		hgml.ERROR_IRQ_ISSUE,
+		hgml.ERROR_GPU_NOT_FOUND:
+		return true
+	default:
+		return false
+	}
+}
+
+// classifyInitOrCountError distinguishes an absent driver or library on a node without detected PCI
+// devices from an operational failure that must fail the pass.
+func classifyInitOrCountError(op string, ret hgml.Return, noPciCheck bool, pciDevCount int) error {
+	if ret.IsSuccess() {
+		return nil
+	}
+	if ret.IsAPIUnavailable() && (noPciCheck || pciDevCount == 0) {
+		return nil
+	}
+	return fmt.Errorf("failed to %s: %w", op, ret)
+}
+
+// selectVersionedReturn resolves the return code after a V2 query fails and falls back to V1.
+// When V1 also fails, V2's return is kept unless V2 itself was unavailable or unsupported.
+func selectVersionedReturn(v2Ret, v1Ret hgml.Return) hgml.Return {
+	if v1Ret.IsSuccess() {
+		return v1Ret
+	}
+	if v2Ret == hgml.ERROR_FUNCTION_NOT_FOUND ||
+		v2Ret == hgml.ERROR_NOT_SUPPORTED ||
+		v2Ret == hgml.ERROR_ARGUMENT_VERSION_MISMATCH {
+		return v1Ret
+	}
+	return v2Ret
+}
+
+// handleCardQueryError classifies a fatal per-card query error. Card-specific unqueryable errors
+// are logged, recorded in lastUnqueryableErr, and skipped; other errors fail the pass immediately.
+func handleCardQueryError(
+	logger klog.Logger, index int, op string, ret hgml.Return, lastUnqueryableErr *error,
+) error {
+	err := fmt.Errorf("failed to %s at index %d: %w", op, index, ret)
+	if isUnqueryableDeviceError(ret) {
+		logger.Error(ret, "skipping unqueryable device", "operation", op)
+		*lastUnqueryableErr = err
+		return nil
+	}
+	logger.Error(ret, "failed to "+op)
+	return err
 }
 
 func stringifyRuntimeVersion(rtVer int32) string {

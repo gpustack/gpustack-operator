@@ -132,6 +132,7 @@ func (info AsicInfo) GetTargetGraphicsVersion() string {
 
 // GetGpuAsicInfo retrieves the ASIC information for the specified GPU device.
 func (l Device) GetGpuAsicInfo() (AsicInfo, Return) {
+	// Intentionally probe amdsmi_get_processor_handle_from_bdf rather than amdsmi_get_gpu_asic_info.
 	if l.so.Lookup("amdsmi_get_processor_handle_from_bdf") != nil {
 		return AsicInfo{}, STATUS_FUNCTION_NOT_FOUND
 	}

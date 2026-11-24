@@ -170,7 +170,7 @@ func (l Device) GetMinorNumber() (uint32, Return) {
 
 // GetName retrieves the name of the device, which typically includes the GPU model and other identifying information.
 func (l Device) GetName() (string, Return) {
-	if l.so.Lookup("hgmlDeviceGetMinorNumber") != nil {
+	if l.so.Lookup("hgmlDeviceGetName") != nil {
 		return "", ERROR_FUNCTION_NOT_FOUND
 	}
 

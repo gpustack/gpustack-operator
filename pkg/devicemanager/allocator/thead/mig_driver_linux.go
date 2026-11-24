@@ -3,9 +3,12 @@
 package thead
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+
+	klog "k8s.io/klog/v2"
 
 	"gpustack.ai/gpustack/binding/hgml"
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -16,29 +19,20 @@ import (
 // darwin test binary (which links Go's plugin package) aborts at dyld load on the unresolved
 // vendor symbols, so the darwin build uses the stub in mig_driver_other.go instead.
 func newMigDriver() migDriver {
-	l := hgml.New()
 	return &hgmlMigDriver{
-		lib:      l,
-		initRet:  l.Init(),
+		lib:      hgml.New(),
 		profiles: make(map[string][]hgml.GpuInstanceProfileInfo_v3),
 	}
 }
 
 // hgmlMigDriver is the real migDriver, driving the vendor management binding on an accelerator
 // addressed by its UUID over the partition GPU/compute-instance lifecycle wrappers.
-//
-// Every enumeration here reports either a state it can prove whole or an error. It never degrades
-// to partial state on a failed query, which is where it is deliberately stricter than the vendor
-// implementation it mirrors: a live partition that reads as absent has its ownership marker
-// removed as "already gone", its occupied placement handed out a second time, and a marker-less
-// one leaks past the orphan collector. The create/reuse sequence and the identity resolution are
-// verified on real hardware; the platform-independent core is table-tested with a fake driver.
 type hgmlMigDriver struct {
 	lib *hgml.HGML
-	// initRet captures the library's initialization result so every operation reports one
-	// actionable root cause when the library failed to load or initialize, instead of failing
-	// obscurely deeper in a call that cannot possibly work.
-	initRet hgml.Return
+
+	// initMu guards lazy, retry-on-failure library initialization across concurrent callers.
+	initMu      sync.Mutex
+	initialized bool
 
 	// profiles caches each accelerator's partition-profile catalog under profilesMu. The catalog
 	// is a property of the accelerator and of its partitioning mode, and both are fixed for this
@@ -111,12 +105,23 @@ func (d *hgmlMigDriver) cardInstances(dev hgml.Device, cardUUID string) ([]migIn
 	return liveInstances(dev, cardUUID, infos, identityByGI)
 }
 
-// ready reports the captured initialization failure, so a driver that cannot work says so on
-// every entry point rather than half-working.
+// ready initializes the vendor management library on demand and retries failed attempts under
+// initMu so a driver that loads after startup recovers without restarting the process.
 func (d *hgmlMigDriver) ready() error {
-	if !d.initRet.IsSuccess() {
-		return fmt.Errorf("vendor management library init failed: %w", d.initRet)
+	d.initMu.Lock()
+	defer d.initMu.Unlock()
+
+	if d.initialized {
+		return nil
 	}
+	if d.lib == nil {
+		return fmt.Errorf("vendor management library init failed: %w", hgml.ERROR_UNINITIALIZED)
+	}
+	ret := d.lib.Init()
+	if !ret.IsSuccess() && ret != hgml.ERROR_ALREADY_INITIALIZED {
+		return fmt.Errorf("vendor management library init failed: %w", ret)
+	}
+	d.initialized = true
 	return nil
 }
 
@@ -674,15 +679,31 @@ func (d *hgmlMigDriver) CreateInstance(
 	}, nil
 }
 
-// ListInstances enumerates every live GPU instance across the node's partitioning accelerators, each
-// carrying its accelerator id, so the orphan collector can find a marker-less instance on a drained
-// accelerator. A GPU instance carries no operator tag, so this is the only way an untracked one is
-// ever seen.
-//
-// An accelerator the driver answers is not in the partitioning mode holds no partition and is
-// skipped; one whose mode, profiles, identities or instances could not be read fails the whole
-// enumeration, because a caller acting on a list missing one accelerator's partitions would destroy
-// or double-book exactly what it could not see.
+// isUnqueryableReturn reports whether an HGML return code indicates a single card hardware fault
+// where sibling cards can still be queried safely.
+func isUnqueryableReturn(ret hgml.Return) bool {
+	switch ret {
+	case hgml.ERROR_GPU_IS_LOST,
+		hgml.ERROR_UNKNOWN,
+		hgml.ERROR_RESET_REQUIRED,
+		hgml.ERROR_INSUFFICIENT_POWER,
+		hgml.ERROR_IRQ_ISSUE,
+		hgml.ERROR_GPU_NOT_FOUND:
+		return true
+	default:
+		return false
+	}
+}
+
+func isUnqueryableError(err error) bool {
+	var ret hgml.Return
+	return errors.As(err, &ret) && isUnqueryableReturn(ret)
+}
+
+// ListInstances enumerates every live GPU instance across queryable partitioning accelerators,
+// each carrying its accelerator id, so the orphan collector can find marker-less instances on
+// drained healthy accelerators. Cards failing with a card-specific unqueryable error are skipped
+// and logged; non-card-specific errors or failure of all cards fail the enumeration.
 func (d *hgmlMigDriver) ListInstances() ([]migLiveInstance, error) {
 	if err := d.ready(); err != nil {
 		return nil, err
@@ -692,26 +713,32 @@ func (d *hgmlMigDriver) ListInstances() ([]migLiveInstance, error) {
 		return nil, fmt.Errorf("get device count: %w", ret)
 	}
 
-	var out []migLiveInstance
-	for i := 0; i < count; i++ {
-		dev, ret := d.lib.DeviceGetHandleByIndex(i)
-		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("get device handle at index %d: %w", i, ret)
-		}
-		cardUUID, ret := dev.GetUUID()
-		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("get card uuid at device index %d: %w", i, ret)
-		}
-
-		live, err := d.cardInstances(dev, cardUUID)
-		if err != nil {
-			return nil, err
-		}
-		for j := range live {
-			out = append(out, migLiveInstance{Card: cardUUID, Inst: live[j]})
-		}
-	}
-	return out, nil
+	return listInstancesAcrossCards(
+		count,
+		func(i int) ([]migLiveInstance, error) {
+			dev, ret := d.lib.DeviceGetHandleByIndex(i)
+			if !ret.IsSuccess() {
+				return nil, fmt.Errorf("get device handle at index %d: %w", i, ret)
+			}
+			cardUUID, ret := dev.GetUUID()
+			if !ret.IsSuccess() {
+				return nil, fmt.Errorf("get card uuid at device index %d: %w", i, ret)
+			}
+			live, err := d.cardInstances(dev, cardUUID)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]migLiveInstance, 0, len(live))
+			for j := range live {
+				out = append(out, migLiveInstance{Card: cardUUID, Inst: live[j]})
+			}
+			return out, nil
+		},
+		isUnqueryableError,
+		func(i int, err error) {
+			klog.Background().Error(err, "mig: skipping unqueryable card during partition listing", "index", i)
+		},
+	)
 }
 
 // DestroyInstance tears down the partition the caller snapshotted, under the accelerator lock the

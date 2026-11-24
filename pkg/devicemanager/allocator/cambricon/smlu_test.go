@@ -62,14 +62,20 @@ type fakeSMLUDriver struct {
 	profiles  map[profileKey]fakeQuota
 	// modes is the per-card sMLU mode the driver holds, so a test can start a card already on,
 	// already off, and then assert which way the preflight moved it.
-	modes           map[string]bool
-	nextProfileID   int32
-	profileCreates  int
-	instanceCreates int
-	destroyedProfs  []profileKey
-	failCard        map[string]bool
-	failList        bool
-	failProfileList bool
+	modes               map[string]bool
+	nextProfileID       int32
+	profileCreates      int
+	instanceCreates     int
+	destroyedProfs      []profileKey
+	failCard            map[string]bool
+	failList            bool
+	failInstanceList    bool
+	failNthInstanceList int
+	failProfileList     bool
+	failCardList        map[string]error
+	failDestroy         map[string]error
+	listCalls           int
+	cardListCalls       map[string]int
 	// The mode read and the mode write are counted and failed separately, which is the whole
 	// point of splitting them out of one compound call: "one read and no write" is assertable.
 	modeReads     int
@@ -83,10 +89,13 @@ type fakeSMLUDriver struct {
 
 func newFakeDriver() *fakeSMLUDriver {
 	return &fakeSMLUDriver{
-		instances: map[string]smluInstance{},
-		profiles:  map[profileKey]fakeQuota{},
-		modes:     map[string]bool{},
-		failCard:  map[string]bool{},
+		instances:     map[string]smluInstance{},
+		profiles:      map[profileKey]fakeQuota{},
+		modes:         map[string]bool{},
+		failCard:      map[string]bool{},
+		failCardList:  map[string]error{},
+		failDestroy:   map[string]error{},
+		cardListCalls: map[string]int{},
 	}
 }
 
@@ -150,17 +159,37 @@ func (f *fakeSMLUDriver) CreateInstance(card string, profileID int32, name strin
 	return inst, nil
 }
 
-func (f *fakeSMLUDriver) DestroyInstance(_, name string) error {
+func (f *fakeSMLUDriver) DestroyInstance(card, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.failDestroy[card]; err != nil {
+		return err
+	}
 	delete(f.instances, name)
 	return nil
+}
+
+func (f *fakeSMLUDriver) CardInstances(card string) ([]smluInstance, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cardListCalls[card]++
+	if err := f.failCardList[card]; err != nil {
+		return nil, err
+	}
+	var out []smluInstance
+	for _, inst := range f.instances {
+		if inst.card == card {
+			out = append(out, inst)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeSMLUDriver) ListInstances() ([]smluInstance, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.failList {
+	f.listCalls++
+	if f.failList || (f.failInstanceList && (f.failNthInstanceList == 0 || f.failNthInstanceList == f.listCalls)) {
 		return nil, fmt.Errorf("driver list failed")
 	}
 	out := make([]smluInstance, 0, len(f.instances))
@@ -844,6 +873,268 @@ func TestLegacyMarkerRoundTrip(t *testing.T) {
 			require.NoError(t, err)
 			assert.Contains(t, string(data), `"card":`, "the legacy on-disk key must be re-emitted")
 			assert.NotContains(t, string(data), `"accelerator"`, "no vocabulary key may leak on disk")
+		})
+	}
+}
+
+func Test_reserveInstance_isolatedFromNodeListError(t *testing.T) {
+	testCases := []struct {
+		name               string
+		setup              func(t *testing.T, d *fakeSMLUDriver)
+		podUID             string
+		card               string
+		ordinal            int
+		wantErr            bool
+		wantErrContains    string
+		wantProfileCreates int
+		wantInstCreates    int
+		wantCardCalls      int
+	}{
+		{
+			name: "fresh allocation succeeds on healthy card when node-wide ListInstances fails",
+			setup: func(_ *testing.T, d *fakeSMLUDriver) {
+				d.failList = true
+				d.failCardList[testCard1] = errors.New("IN_PROBLEM")
+			},
+			podUID:             "pod-fresh",
+			card:               testCard0,
+			ordinal:            testOrdinal0,
+			wantProfileCreates: 1,
+			wantInstCreates:    1,
+			wantCardCalls:      1,
+		},
+		{
+			name: "profile reuse succeeds on healthy card when node-wide ListInstances fails",
+			setup: func(t *testing.T, d *fakeSMLUDriver) {
+				_, err := reserveInstance(d, "pod-seed", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
+				require.NoError(t, err)
+				d.failList = true
+				d.failCardList[testCard1] = errors.New("IN_PROBLEM")
+			},
+			podUID:             "pod-reuse-prof",
+			card:               testCard0,
+			ordinal:            testOrdinal0,
+			wantProfileCreates: 1,
+			wantInstCreates:    2,
+			wantCardCalls:      2,
+		},
+		{
+			name: "kubelet retry marker reuse succeeds on healthy card when node-wide ListInstances fails",
+			setup: func(t *testing.T, d *fakeSMLUDriver) {
+				_, err := reserveInstance(d, "pod-retry", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
+				require.NoError(t, err)
+				d.failList = true
+				d.failCardList[testCard1] = errors.New("IN_PROBLEM")
+			},
+			podUID:             "pod-retry",
+			card:               testCard0,
+			ordinal:            testOrdinal0,
+			wantProfileCreates: 1,
+			wantInstCreates:    1,
+			wantCardCalls:      2,
+		},
+		{
+			name: "per-card list error on target card fails closed",
+			setup: func(_ *testing.T, d *fakeSMLUDriver) {
+				d.failCardList[testCard0] = errors.New("IN_PROBLEM")
+			},
+			podUID:          "pod-bad-card",
+			card:            testCard0,
+			ordinal:         testOrdinal0,
+			wantErr:         true,
+			wantErrContains: testCard0,
+			wantCardCalls:   1,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			d := newFakeDriver()
+			tc.setup(t, d)
+
+			inst, err := reserveInstance(d, tc.podUID, "train", tc.card, tc.ordinal, 25, 16384, logr.Discard())
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErrContains)
+				assert.False(t, markerExists(tc.podUID, "train"))
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, encodeInstanceName(tc.podUID, "train"), inst.name)
+				assert.NotEmpty(t, inst.devNode)
+				assert.True(t, markerExists(tc.podUID, "train"))
+			}
+			assert.Zero(t, d.listCalls, "reserveInstance must never call node-wide ListInstances")
+			assert.Equal(t, tc.wantCardCalls, d.cardListCalls[tc.card], "per-card CardInstances calls")
+			assert.Zero(t, d.cardListCalls[testCard1], "sibling card must not be queried")
+			assert.Equal(t, tc.wantProfileCreates, d.profileCreates, "profile creates")
+			assert.Equal(t, tc.wantInstCreates, d.instanceCreates, "instance creates")
+		})
+	}
+}
+
+func Test_reclaim_deadPodMarkersWhenNodeListFails(t *testing.T) {
+	testCases := []struct {
+		name string
+		run  func(t *testing.T, d *fakeSMLUDriver, r *reclaimer)
+	}{
+		{
+			name: "reclaims dead pod markers on healthy card while skipping orphan discovery",
+			run: func(t *testing.T, d *fakeSMLUDriver, r *reclaimer) {
+				deadInst, err := reserveInstance(d, "pod-dead", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
+				require.NoError(t, err)
+				liveInst, err := reserveInstance(d, "pod-live", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
+				require.NoError(t, err)
+				orphanName := encodeInstanceName("pod-orphan", "train")
+				d.seedInstance(smluInstance{card: testCard0, name: orphanName, profileID: 9, coresPct: 50, memMiB: 8192})
+
+				d.failInstanceList = true
+				for i := 0; i < reclaimMaxMisses; i++ {
+					r.reconcile([]string{"pod-live"})
+				}
+
+				assert.False(t, d.hasInstance(deadInst.name), "dead pod instance on healthy card reclaimed")
+				assert.False(t, markerExists("pod-dead", "train"), "dead pod marker removed")
+				assert.True(t, d.hasInstance(liveInst.name), "live pod instance preserved")
+				assert.True(t, markerExists("pod-live", "train"), "live pod marker preserved")
+				assert.True(t, d.hasInstance(orphanName), "marker-less orphan skipped while ListInstances fails")
+			},
+		},
+		{
+			name: "preserves marker-less orphan miss streak across transient ListInstances failure",
+			run: func(t *testing.T, d *fakeSMLUDriver, r *reclaimer) {
+				liveInst, err := reserveInstance(d, "pod-live", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
+				require.NoError(t, err)
+				orphanName := encodeInstanceName("pod-orphan", "train")
+				d.seedInstance(smluInstance{card: testCard0, name: orphanName, profileID: 0, coresPct: 25, memMiB: 16384})
+
+				r.reconcile([]string{"pod-live"}) // miss 1
+				d.failInstanceList = true
+				r.reconcile([]string{"pod-live"}) // transient list error: must not wipe miss 1
+				d.failInstanceList = false
+				r.reconcile([]string{"pod-live"}) // miss 2
+				assert.True(t, d.hasInstance(orphanName), "orphan still within debounce window at miss 2")
+				r.reconcile([]string{"pod-live"}) // miss 3
+				assert.False(t, d.hasInstance(orphanName), "orphan reclaimed on third observed miss")
+				assert.True(t, d.hasInstance(liveInst.name), "live pod instance preserved")
+			},
+		},
+		{
+			name: "removes dead pod corrupt marker after debounce while keeping live pod corrupt marker",
+			run: func(t *testing.T, d *fakeSMLUDriver, r *reclaimer) {
+				deadCorrupt := markerPath("pod-corrupt-dead", "train")
+				liveCorrupt := markerPath("pod-corrupt-live", "train")
+				require.NoError(t, os.MkdirAll(filepath.Dir(deadCorrupt), 0o777))
+				require.NoError(t, os.MkdirAll(filepath.Dir(liveCorrupt), 0o777))
+				require.NoError(t, os.WriteFile(deadCorrupt, []byte("{corrupt"), 0o600))
+				require.NoError(t, os.WriteFile(liveCorrupt, []byte("{corrupt"), 0o600))
+
+				d.failInstanceList = true
+				for i := 0; i < reclaimMaxMisses; i++ {
+					r.reconcile([]string{"pod-corrupt-live"})
+				}
+
+				assert.False(t, markerExists("pod-corrupt-dead", "train"), "dead pod corrupt marker removed")
+				assert.True(t, markerExists("pod-corrupt-live", "train"), "live pod corrupt marker preserved")
+			},
+		},
+		{
+			name: "retains marker when DestroyInstance fails on unqueryable card and retries on recovery",
+			run: func(t *testing.T, d *fakeSMLUDriver, r *reclaimer) {
+				stuckInst, err := reserveInstance(d, "pod-stuck", "train", testCard1, testOrdinal1, 25, 16384, logr.Discard())
+				require.NoError(t, err)
+				d.failInstanceList = true
+				d.failDestroy[testCard1] = errors.New("IN_PROBLEM")
+
+				for i := 0; i < reclaimMaxMisses; i++ {
+					r.reconcile(nil)
+				}
+				assert.True(t, d.hasInstance(stuckInst.name))
+				assert.True(t, markerExists("pod-stuck", "train"), "marker retained when DestroyInstance fails")
+
+				delete(d.failDestroy, testCard1)
+				r.reconcile(nil)
+				assert.False(t, d.hasInstance(stuckInst.name), "instance destroyed once card recovers")
+				assert.False(t, markerExists("pod-stuck", "train"), "marker removed once destroy succeeds")
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			d := newFakeDriver()
+			r := newReclaimer(d, deviceplugin.OperatorPodsDir, logr.Discard())
+			tc.run(t, d, r)
+		})
+	}
+}
+
+func Test_reclaim_gcOrphanProfilesFailClosed(t *testing.T) {
+	testCases := []struct {
+		name              string
+		passes            int
+		configureFailures func(d *fakeSMLUDriver)
+		wantDeadReclaimed bool
+	}{
+		{
+			name:   "ListInstances failure in reconcile reclaims dead pod without destroying any profile",
+			passes: reclaimMaxMisses,
+			configureFailures: func(d *fakeSMLUDriver) {
+				d.failInstanceList = true
+			},
+			wantDeadReclaimed: true,
+		},
+		{
+			name:   "ListInstances failure inside gcOrphanProfiles preserves live and orphan profiles",
+			passes: 1,
+			configureFailures: func(d *fakeSMLUDriver) {
+				// Succeed on reconcile's orphan-discovery read (call 1), then fail on
+				// gcOrphanProfiles' read (call 2) while ListProfiles still succeeds.
+				d.failInstanceList = true
+				d.failNthInstanceList = 2
+			},
+			wantDeadReclaimed: false,
+		},
+		{
+			name:   "ListProfiles failure inside gcOrphanProfiles preserves live and orphan profiles",
+			passes: reclaimMaxMisses,
+			configureFailures: func(d *fakeSMLUDriver) {
+				d.failProfileList = true
+			},
+			wantDeadReclaimed: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			d := newFakeDriver()
+			liveInst, err := reserveInstance(d, "pod-live", "train", testCard1, testOrdinal1, 50, 16384, logr.Discard())
+			require.NoError(t, err)
+			deadInst, err := reserveInstance(d, "pod-dead", "train", testCard0, testOrdinal0, 25, 8192, logr.Discard())
+			require.NoError(t, err)
+			orphanProfID, err := d.CreateProfile(testCard0, 10, 4096)
+			require.NoError(t, err)
+			d.destroyedProfs = nil
+			d.listCalls = 0
+
+			tc.configureFailures(d)
+			r := newReclaimer(d, deviceplugin.OperatorPodsDir, logr.Discard())
+
+			for i := 0; i < tc.passes; i++ {
+				r.reconcile([]string{"pod-live"})
+			}
+
+			assert.True(t, d.hasInstance(liveInst.name), "live instance preserved")
+			if tc.wantDeadReclaimed {
+				assert.False(t, d.hasInstance(deadInst.name), "dead instance reclaimed")
+			}
+			assert.Empty(t, d.destroyedProfs, "gcOrphanProfiles must fail closed and destroy zero profiles")
+			_, liveProfExists := d.profiles[profileKey{card: testCard1, profileID: liveInst.profileID}]
+			assert.True(t, liveProfExists, "live profile on sibling card must remain intact")
+			_, orphanProfExists := d.profiles[profileKey{card: testCard0, profileID: orphanProfID}]
+			assert.True(t, orphanProfExists, "orphan profile must not be swept on incomplete data")
 		})
 	}
 }
