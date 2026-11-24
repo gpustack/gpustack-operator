@@ -476,19 +476,16 @@ spec:
       acceleratorType: ${AT_PD}
       replicas: 1
       image: ${MOCK_IMAGE}
-      command: ["sleep", "86400"]
     - name: prefill
       kind: Prefill
       acceleratorType: ${AT_PD}
       replicas: 1
       image: ${MOCK_IMAGE}
-      command: ["sleep", "86400"]
     - name: decode
       kind: Decode
       acceleratorType: ${AT_PD}
       replicas: 1
       image: ${MOCK_IMAGE}
-      command: ["sleep", "86400"]
 EOF
   )"; then
     EPD_SUBMITTED=1
