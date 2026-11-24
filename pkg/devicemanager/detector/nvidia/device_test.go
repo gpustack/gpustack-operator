@@ -446,3 +446,302 @@ func TestAcceleratorUnhealthy(t *testing.T) {
 		})
 	}
 }
+
+// TestUnqueryableCardAndErrorHandling drives DetectAccelerator and MonitorAccelerator against
+// the simulated NVML driver in subprocesses to verify unqueryable-card skipping, enumeration
+// index preservation, non-card-specific error propagation, all-cards-failed errors, and
+// retryable library initialization.
+func TestUnqueryableCardAndErrorHandling(t *testing.T) {
+	if mode := os.Getenv("GPUSTACK_TEST_NVML_MODE"); mode != "" {
+		d := New(device.DetectorOptions{})
+		switch mode {
+		case "skip_single":
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.Equal(t, "GPU-0", groups[0].Accelerators[0].ID)
+			assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+			assert.Equal(t, "GPU-2", groups[0].Accelerators[1].ID)
+			assert.Equal(t, uint32(2), groups[0].Accelerators[1].Index)
+
+			wantUnhealthy0 := os.Getenv("GPUSTACK_TEST_NVML_UNHEALTHY_INDEX") == "0"
+			assert.Equal(t, wantUnhealthy0, groups[0].Accelerators[0].Status.Unhealthy)
+			assert.False(t, groups[0].Accelerators[1].Status.Unhealthy)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			if os.Getenv("GPUSTACK_TEST_NVML_FAIL_STAGE") == "name" || os.Getenv("GPUSTACK_TEST_NVML_FAIL_STAGE") == "pci" {
+				require.Len(t, metrics[0].Accelerators, 3)
+			} else {
+				require.Len(t, metrics[0].Accelerators, 2)
+				assert.Equal(t, "GPU-0", metrics[0].Accelerators[0].ID)
+				assert.Equal(t, "GPU-2", metrics[0].Accelerators[1].ID)
+			}
+		case "fatal_per_card":
+			groups, err := d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			if os.Getenv("GPUSTACK_TEST_NVML_CHECK_MONITOR") == "true" {
+				metrics, err := d.MonitorAccelerator(true)
+				require.Error(t, err)
+				assert.Nil(t, metrics)
+			}
+		case "all_unqueryable":
+			groups, err := d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, metrics)
+		case "count_error":
+			groups, err := d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, metrics)
+		case "transient_init_error":
+			groups, err := d.DetectAccelerator(true)
+			if os.Getenv("GPUSTACK_TEST_NVML_EXPECT_FIRST_ERR") == "true" {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Nil(t, groups)
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 1)
+			assert.Equal(t, "GPU-0", groups[0].Accelerators[0].ID)
+			assert.Equal(t, uint32(0), groups[0].Accelerators[0].Index)
+		case "init_library_not_found":
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			assert.Nil(t, groups)
+
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			assert.Nil(t, metrics)
+		default:
+			t.Fatalf("unknown mode %q", mode)
+		}
+		return
+	}
+
+	dir := compileNVMLFixture(t)
+
+	runCase := func(t *testing.T, extraEnv ...string) {
+		t.Helper()
+		cmd := exec.Command(os.Args[0], "-test.run=^TestUnqueryableCardAndErrorHandling$", "-test.count=1")
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GPUSTACK_TEST_NVML_TOTAL_MIB=81920",
+			"LD_LIBRARY_PATH="+dir,
+			"DYLD_LIBRARY_PATH="+dir,
+		)
+		cmd.Env = append(cmd.Env, extraEnv...)
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+	}
+
+	unqueryableCodes := []struct {
+		name string
+		code nvml.Return
+	}{
+		{name: "GPU_IS_LOST", code: nvml.ERROR_GPU_IS_LOST},
+		{name: "UNKNOWN", code: nvml.ERROR_UNKNOWN},
+		{name: "RESET_REQUIRED", code: nvml.ERROR_RESET_REQUIRED},
+		{name: "INSUFFICIENT_POWER", code: nvml.ERROR_INSUFFICIENT_POWER},
+		{name: "IRQ_ISSUE", code: nvml.ERROR_IRQ_ISSUE},
+	}
+
+	for _, stage := range []string{"handle", "uuid", "pci", "name", "memory"} {
+		for _, ec := range unqueryableCodes {
+			t.Run("skip GPU-1 on "+stage+" with "+ec.name, func(t *testing.T) {
+				runCase(t,
+					"GPUSTACK_TEST_NVML_MODE=skip_single",
+					"GPUSTACK_TEST_NVML_COUNT=3",
+					"GPUSTACK_TEST_NVML_FAIL_STAGE="+stage,
+					"GPUSTACK_TEST_NVML_FAIL_INDEX=1",
+					"GPUSTACK_TEST_NVML_FAIL_ERR="+strconv.Itoa(int(ec.code)),
+				)
+			})
+		}
+	}
+
+	t.Run("preserve unhealthy card retention while skipping lost sibling", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_NVML_MODE=skip_single",
+			"GPUSTACK_TEST_NVML_COUNT=3",
+			"GPUSTACK_TEST_NVML_FAIL_STAGE=handle",
+			"GPUSTACK_TEST_NVML_FAIL_INDEX=1",
+			"GPUSTACK_TEST_NVML_FAIL_ERR="+strconv.Itoa(int(nvml.ERROR_GPU_IS_LOST)),
+			"GPUSTACK_TEST_NVML_UNHEALTHY_INDEX=0",
+		)
+	})
+
+	for _, tc := range []struct {
+		stage        string
+		checkMonitor bool
+	}{
+		{stage: "handle", checkMonitor: true},
+		{stage: "uuid", checkMonitor: true},
+		{stage: "pci", checkMonitor: false},
+		{stage: "name", checkMonitor: false},
+		{stage: "memory", checkMonitor: true},
+	} {
+		t.Run("NO_PERMISSION on "+tc.stage+" fails pass", func(t *testing.T) {
+			runCase(t,
+				"GPUSTACK_TEST_NVML_MODE=fatal_per_card",
+				"GPUSTACK_TEST_NVML_COUNT=2",
+				"GPUSTACK_TEST_NVML_FAIL_STAGE="+tc.stage,
+				"GPUSTACK_TEST_NVML_FAIL_INDEX=1",
+				"GPUSTACK_TEST_NVML_FAIL_ERR="+strconv.Itoa(int(nvml.ERROR_NO_PERMISSION)),
+				"GPUSTACK_TEST_NVML_CHECK_MONITOR="+strconv.FormatBool(tc.checkMonitor),
+			)
+		})
+	}
+
+	t.Run("all GPUs returning GPU_IS_LOST returns error in detect and monitor", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_NVML_MODE=all_unqueryable",
+			"GPUSTACK_TEST_NVML_COUNT=2",
+			"GPUSTACK_TEST_NVML_FAIL_STAGE=handle",
+			"GPUSTACK_TEST_NVML_FAIL_INDEX=all",
+			"GPUSTACK_TEST_NVML_FAIL_ERR="+strconv.Itoa(int(nvml.ERROR_GPU_IS_LOST)),
+		)
+	})
+
+	t.Run("DeviceGetCount returning NO_PERMISSION returns error", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_NVML_MODE=count_error",
+			"GPUSTACK_TEST_NVML_COUNT_ERR="+strconv.Itoa(int(nvml.ERROR_NO_PERMISSION)),
+		)
+	})
+
+	t.Run("transient Init UNINITIALIZED recovers on next DetectAccelerator", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_NVML_MODE=transient_init_error",
+			"GPUSTACK_TEST_NVML_COUNT=1",
+			"GPUSTACK_TEST_NVML_REQUIRE_INIT=true",
+			"GPUSTACK_TEST_NVML_INIT_FAIL_COUNT=1",
+			"GPUSTACK_TEST_NVML_INIT_ERR="+strconv.Itoa(int(nvml.ERROR_UNINITIALIZED)),
+			"GPUSTACK_TEST_NVML_EXPECT_FIRST_ERR=true",
+		)
+	})
+
+	t.Run("transient Init DRIVER_NOT_LOADED recovers on next DetectAccelerator", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_NVML_MODE=transient_init_error",
+			"GPUSTACK_TEST_NVML_COUNT=1",
+			"GPUSTACK_TEST_NVML_REQUIRE_INIT=true",
+			"GPUSTACK_TEST_NVML_INIT_FAIL_COUNT=1",
+			"GPUSTACK_TEST_NVML_INIT_ERR="+strconv.Itoa(int(nvml.ERROR_DRIVER_NOT_LOADED)),
+			"GPUSTACK_TEST_NVML_EXPECT_FIRST_ERR=false",
+		)
+	})
+
+	t.Run("transient Init followed by ALREADY_INITIALIZED succeeds", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_NVML_MODE=transient_init_error",
+			"GPUSTACK_TEST_NVML_COUNT=1",
+			"GPUSTACK_TEST_NVML_REQUIRE_INIT=true",
+			"GPUSTACK_TEST_NVML_INIT_FAIL_COUNT=1",
+			"GPUSTACK_TEST_NVML_INIT_ERR="+strconv.Itoa(int(nvml.ERROR_UNINITIALIZED)),
+			"GPUSTACK_TEST_NVML_INIT_OK_RET="+strconv.Itoa(int(nvml.ERROR_ALREADY_INITIALIZED)),
+			"GPUSTACK_TEST_NVML_EXPECT_FIRST_ERR=true",
+		)
+	})
+
+	t.Run("Init returning LIBRARY_NOT_FOUND with noPciCheck returns nil nil", func(t *testing.T) {
+		runCase(t,
+			"GPUSTACK_TEST_NVML_MODE=init_library_not_found",
+			"GPUSTACK_TEST_NVML_INIT_ERR="+strconv.Itoa(int(nvml.ERROR_LIBRARY_NOT_FOUND)),
+		)
+	})
+}
+
+func TestIsUnqueryableDeviceError(t *testing.T) {
+	testCases := []struct {
+		name string
+		ret  nvml.Return
+		want bool
+	}{
+		{name: "GPU_IS_LOST", ret: nvml.ERROR_GPU_IS_LOST, want: true},
+		{name: "UNKNOWN", ret: nvml.ERROR_UNKNOWN, want: true},
+		{name: "RESET_REQUIRED", ret: nvml.ERROR_RESET_REQUIRED, want: true},
+		{name: "INSUFFICIENT_POWER", ret: nvml.ERROR_INSUFFICIENT_POWER, want: true},
+		{name: "IRQ_ISSUE", ret: nvml.ERROR_IRQ_ISSUE, want: true},
+		{name: "SUCCESS", ret: nvml.SUCCESS, want: false},
+		{name: "NO_PERMISSION", ret: nvml.ERROR_NO_PERMISSION, want: false},
+		{name: "UNINITIALIZED", ret: nvml.ERROR_UNINITIALIZED, want: false},
+		{name: "TIMEOUT", ret: nvml.ERROR_TIMEOUT, want: false},
+		{name: "NOT_SUPPORTED", ret: nvml.ERROR_NOT_SUPPORTED, want: false},
+		{name: "DRIVER_NOT_LOADED", ret: nvml.ERROR_DRIVER_NOT_LOADED, want: false},
+		{name: "LIBRARY_NOT_FOUND", ret: nvml.ERROR_LIBRARY_NOT_FOUND, want: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isUnqueryableDeviceError(tc.ret))
+		})
+	}
+}
+
+func TestClassifyInitOrCountError(t *testing.T) {
+	testCases := []struct {
+		name        string
+		ret         nvml.Return
+		noPciCheck  bool
+		pciDevCount int
+		wantErr     bool
+	}{
+		{name: "success", ret: nvml.SUCCESS, noPciCheck: false, pciDevCount: 1, wantErr: false},
+		{name: "library not found with noPciCheck", ret: nvml.ERROR_LIBRARY_NOT_FOUND, noPciCheck: true, pciDevCount: 1, wantErr: false},
+		{name: "driver not loaded with no pci devices", ret: nvml.ERROR_DRIVER_NOT_LOADED, noPciCheck: false, pciDevCount: 0, wantErr: false},
+		{name: "driver not loaded with pci devices present", ret: nvml.ERROR_DRIVER_NOT_LOADED, noPciCheck: false, pciDevCount: 2, wantErr: true},
+		{name: "library not found with pci devices present", ret: nvml.ERROR_LIBRARY_NOT_FOUND, noPciCheck: false, pciDevCount: 1, wantErr: true},
+		{name: "no permission with noPciCheck", ret: nvml.ERROR_NO_PERMISSION, noPciCheck: true, pciDevCount: 0, wantErr: true},
+		{name: "uninitialized with noPciCheck", ret: nvml.ERROR_UNINITIALIZED, noPciCheck: true, pciDevCount: 0, wantErr: true},
+		{name: "timeout with pci devices", ret: nvml.ERROR_TIMEOUT, noPciCheck: false, pciDevCount: 1, wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := classifyInitOrCountError("initialize NVML", tc.ret, tc.noPciCheck, tc.pciDevCount)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, tc.ret)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestSelectVersionedReturn(t *testing.T) {
+	testCases := []struct {
+		name  string
+		v2Ret nvml.Return
+		v1Ret nvml.Return
+		want  nvml.Return
+	}{
+		{name: "v1 succeeds", v2Ret: nvml.ERROR_NOT_SUPPORTED, v1Ret: nvml.SUCCESS, want: nvml.SUCCESS},
+		{name: "v2 unsupported uses v1 error", v2Ret: nvml.ERROR_NOT_SUPPORTED, v1Ret: nvml.ERROR_GPU_IS_LOST, want: nvml.ERROR_GPU_IS_LOST},
+		{name: "v2 function missing uses v1 error", v2Ret: nvml.ERROR_FUNCTION_NOT_FOUND, v1Ret: nvml.ERROR_NO_PERMISSION, want: nvml.ERROR_NO_PERMISSION},
+		{name: "v2 lost preserved when v1 missing", v2Ret: nvml.ERROR_GPU_IS_LOST, v1Ret: nvml.ERROR_FUNCTION_NOT_FOUND, want: nvml.ERROR_GPU_IS_LOST},
+		{name: "v2 no permission preserved when v1 missing", v2Ret: nvml.ERROR_NO_PERMISSION, v1Ret: nvml.ERROR_FUNCTION_NOT_FOUND, want: nvml.ERROR_NO_PERMISSION},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, selectVersionedReturn(tc.v2Ret, tc.v1Ret))
+		})
+	}
+}
