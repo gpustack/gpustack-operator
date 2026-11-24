@@ -107,7 +107,7 @@ func (s *rdmaServer) allocateContainer(
 		return nil, fmt.Errorf("read the interface inventory: %w", err)
 	}
 
-	snap := s.Reconciler.captureRDMAInterfaceSnapshot(devs)
+	snap := s.captureInterfaceSnapshot(devs)
 	endpoints, err := s.grantedEndpoints(snap, deviceIDs)
 	if err != nil {
 		return nil, err
@@ -137,12 +137,18 @@ func (s *rdmaServer) allocateContainer(
 	// container starts with the names of no HCA and the device nodes of none — a response
 	// kubelet and the container's own startup can read the same way in all three modes.
 	if len(grants) == 0 {
-		return &ContainerAllocateResponse{
+		ctrResp := &ContainerAllocateResponse{
 			Envs: map[string]string{
 				ncclIbHCAEnv:   "",
 				rdmaDevicesEnv: "",
 			},
-		}, nil
+		}
+		if s.containerInjector != nil {
+			if err := s.containerInjector(devs, grants, ctrResp); err != nil {
+				return nil, err
+			}
+		}
+		return ctrResp, nil
 	}
 
 	// The plain key always carries the bare HCA names. The NCCL filter carries them with the
@@ -166,6 +172,12 @@ func (s *rdmaServer) allocateContainer(
 			ncclIbHCAEnv:   nccl,
 			rdmaDevicesEnv: names,
 		},
+	}
+	if s.containerInjector != nil {
+		if err := s.containerInjector(devs, grants, ctrResp); err != nil {
+			return nil, err
+		}
+		return ctrResp, nil
 	}
 
 	// Devices are injected one granted HCA at a time with NewRWDevice, never with NewDevicesIn

@@ -1233,3 +1233,135 @@ func TestRDMAServer_ListAndWatch_PortPinnedHealth(t *testing.T) {
 		}
 	})
 }
+
+func TestRDMAServer_Options(t *testing.T) {
+	const nodeName = "node-rdma-opts"
+
+	t.Run("WithRDMAContainerInjector bypasses host device resolution and decorates granted and withheld responses", func(t *testing.T) {
+		devs := rdmaDevices(nodeName,
+			wholeFunctionIface("ib0", "0", "mlx5_0", nil),
+			wholeFunctionIface("eth1", "1", "mlx5_1", nil),
+		)
+		devs.Spec.Groups = []workercore.DevicesGroup{{
+			ID:           "ascend-910b2",
+			Manufacturer: nodefeature.ManufacturerAscend,
+		}}
+		rec := &DevicesReconciler{NodeName: nodeName, Client: nodeFixture(devs)}
+		rec.applyRDMASelection(RDMAPolicyResolution{
+			Status:   RDMAPolicyResolutionPolicy,
+			Selected: []string{"mlx5_1"},
+			Port:     ptr.To(int32(2)),
+		})
+
+		srv, err := NewRDMAServer(
+			klog.Background(),
+			workercore.DeviceAllocationModeExclusive,
+			rec,
+			nil,
+			WithRDMAContainerInjector(func(_ *workercore.Devices, grants []string, resp *ContainerAllocateResponse) error {
+				resp.Envs["CUSTOM_GRANTS"] = strings.Join(grants, ",")
+				return nil
+			}),
+		)
+		require.NoError(t, err)
+		rs := srv.(*rdmaServer)
+
+		// Mixed grant: mlx5_0 is withheld by policy, mlx5_1 carries port 2 in NCCL_IB_HCA and zero host nodes/mounts.
+		resp, err := rs.Allocate(context.Background(), allocateRequest("ib0:ib0:0000", "eth1:eth1:0000"))
+		require.NoError(t, err)
+		require.Len(t, resp.ContainerResponses, 1)
+		ctr := resp.ContainerResponses[0]
+		assert.Empty(t, ctr.Devices)
+		assert.Empty(t, ctr.Mounts)
+		assert.Equal(t, map[string]string{
+			"NCCL_IB_HCA":           "=mlx5_1:2",
+			"GPUSTACK_RDMA_DEVICES": "mlx5_1",
+			"CUSTOM_GRANTS":         "mlx5_1",
+		}, ctr.Envs)
+
+		// Fully withheld grant still invokes custom injector with empty grants.
+		withheldResp, err := rs.Allocate(context.Background(), allocateRequest("ib0:ib0:0000"))
+		require.NoError(t, err)
+		require.Len(t, withheldResp.ContainerResponses, 1)
+		assert.Equal(t, map[string]string{
+			"NCCL_IB_HCA":           "",
+			"GPUSTACK_RDMA_DEVICES": "",
+			"CUSTOM_GRANTS":         "",
+		}, withheldResp.ContainerResponses[0].Envs)
+	})
+
+	t.Run("WithRDMAContainerInjector propagates injector errors", func(t *testing.T) {
+		rec := &DevicesReconciler{
+			NodeName: nodeName,
+			Client:   nodeFixture(rdmaDevices(nodeName, wholeFunctionIface("ib0", "0", "mlx5_0", nil))),
+		}
+		srv, err := NewRDMAServer(
+			klog.Background(),
+			workercore.DeviceAllocationModeExclusive,
+			rec,
+			WithRDMAContainerInjector(func(*workercore.Devices, []string, *ContainerAllocateResponse) error {
+				return errors.New("injector boom")
+			}),
+		)
+		require.NoError(t, err)
+		_, err = srv.(*rdmaServer).Allocate(context.Background(), allocateRequest("ib0:ib0:0000"))
+		require.ErrorContains(t, err, "injector boom")
+	})
+
+	t.Run("WithRDMAInterfaceInventory acts as fallback when reconciler source is unset and yields when set", func(t *testing.T) {
+		rec := &DevicesReconciler{
+			NodeName: nodeName,
+			Client:   nodeFixture(rdmaDevices(nodeName)),
+		}
+		fallbackInv := func() *device.RDMASnapshot {
+			return &device.RDMASnapshot{
+				Complete: true,
+				Devices: []device.RDMADevice{{
+					Name: "mlx5_fallback",
+					Ports: []device.RDMAPort{{
+						Number:        1,
+						State:         "ACTIVE",
+						PhysicalState: "LinkUp",
+					}},
+				}},
+			}
+		}
+		srv, err := NewRDMAServer(
+			klog.Background(),
+			workercore.DeviceAllocationModeExclusive,
+			rec,
+			WithRDMAInterfaceInventory(fallbackInv),
+			WithRDMAContainerInjector(func(*workercore.Devices, []string, *ContainerAllocateResponse) error {
+				return nil
+			}),
+		)
+		require.NoError(t, err)
+		rs := srv.(*rdmaServer)
+
+		lwResp, err := rs.getListAndWatchResponse(context.Background())
+		require.NoError(t, err)
+		require.Len(t, lwResp.Devices, 1)
+		assert.Equal(t, "mlx5_fallback:mlx5_fallback:0000", lwResp.Devices[0].ID)
+
+		prefResp, err := rs.GetPreferredAllocation(context.Background(), &PreferredAllocationRequest{
+			ContainerRequests: []*ContainerPreferredAllocationRequest{{
+				AvailableDeviceIDs: []string{"mlx5_fallback:mlx5_fallback:0000"},
+				AllocationSize:     1,
+			}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"mlx5_fallback:mlx5_fallback:0000"}, prefResp.ContainerResponses[0].DeviceIDs)
+
+		// When reconciler.RDMAInterfaceInventory is wired, reconciler's inventory takes precedence.
+		rec.RDMAInterfaceInventory = func() *device.RDMASnapshot {
+			return &device.RDMASnapshot{
+				Complete: true,
+				Devices:  []device.RDMADevice{{Name: "mlx5_primary"}},
+			}
+		}
+		lwPrimary, err := rs.getListAndWatchResponse(context.Background())
+		require.NoError(t, err)
+		require.Len(t, lwPrimary.Devices, 1)
+		assert.Equal(t, "mlx5_primary:mlx5_primary:0000", lwPrimary.Devices[0].ID)
+	})
+}

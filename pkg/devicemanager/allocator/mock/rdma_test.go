@@ -12,12 +12,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	kubeletdeviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/devicemanager/mockspec"
+	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
@@ -318,4 +324,344 @@ func TestRDMAServer_InventoryAugmentationExternalOwnerAndStop(t *testing.T) {
 	// Explicit srv.Stop() terminates serving cleanly.
 	srv.Stop()
 	require.NoError(t, <-errCh)
+}
+
+func TestRDMAServer_SelectionPolicyWithholdingAndPinnedPortFormatting(t *testing.T) {
+	const nodeName = "node-rdma-policy-mock"
+
+	baseNode := &core.Node{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   nodeName,
+			UID:    types.UID("uid-" + nodeName),
+			Labels: map[string]string{"rdma-fabric": "ib"},
+		},
+	}
+
+	baseDevs := &workercore.Devices{
+		ObjectMeta: meta.ObjectMeta{Name: nodeName},
+		Spec: workercore.DevicesSpec{
+			Groups: []workercore.DevicesGroup{{
+				ID:           "ascend-910b2",
+				Manufacturer: nodefeature.ManufacturerAscend,
+				Name:         "Ascend 910B2",
+				Memory:       65536,
+			}},
+			Interfaces: []workercore.DeviceInterface{
+				{
+					Name:         "ib0",
+					PciBusID:     "0000:10:00.0",
+					NumaAffinity: "0",
+					RDMA:         true,
+					RDMADevice:   "mlx5_0",
+					Link:         &workercore.DeviceInterfaceLink{State: workercore.DeviceInterfaceLinkStateOK},
+				},
+				{
+					Name:         "eth1",
+					PciBusID:     "0000:11:00.0",
+					NumaAffinity: "1",
+					RDMA:         true,
+					RDMADevice:   "mlx5_1",
+					Link:         &workercore.DeviceInterfaceLink{State: workercore.DeviceInterfaceLinkStateOK},
+				},
+			},
+		},
+	}
+
+	activePorts := []device.RDMAPort{
+		{Number: 1, State: "ACTIVE", PhysicalState: "LinkUp"},
+		{Number: 2, State: "ACTIVE", PhysicalState: "LinkUp"},
+	}
+	specYAML := `
+rdmaDevices:
+  - name: mlx5_0
+    pciBusId: "0000:10:00.0"
+    ports:
+      - number: 1
+        state: ACTIVE
+        physicalState: LinkUp
+      - number: 2
+        state: ACTIVE
+        physicalState: LinkUp
+  - name: mlx5_1
+    pciBusId: "0000:11:00.0"
+    ports:
+      - number: 1
+        state: ACTIVE
+        physicalState: LinkUp
+      - number: 2
+        state: ACTIVE
+        physicalState: LinkUp
+  - name: mlx5_ext
+    pciBusId: "0000:12:00.0"
+    owner: External
+    ports:
+      - number: 1
+        state: ACTIVE
+        physicalState: LinkUp
+`
+
+	cases := []struct {
+		name            string
+		mode            workercore.DeviceAllocationMode
+		useSpecStoreInv bool
+		policies        []workercore.DevicesRDMASelectionPolicy
+		grantIDs        []string
+		wantPreferred   []string
+		wantNCCL        string
+		wantRDMADevs    string
+		wantMockDevs    string
+		wantHealthByID  map[string]string
+	}{
+		{
+			name:            "default no-policy selects owned HCAs and excludes external owner",
+			mode:            workercore.DeviceAllocationModeExclusive,
+			useSpecStoreInv: true,
+			grantIDs:        []string{"ib0:ib0:0000", "eth1:eth1:0000"},
+			wantPreferred:   []string{"ib0:ib0:0000"},
+			wantNCCL:        "=mlx5_0,mlx5_1",
+			wantRDMADevs:    "mlx5_0,mlx5_1",
+			wantMockDevs:    "mlx5_0,mlx5_1",
+			wantHealthByID: map[string]string{
+				"ib0:ib0:0000":   kubeletdeviceplugin.Healthy,
+				"eth1:eth1:0000": kubeletdeviceplugin.Healthy,
+			},
+		},
+		{
+			name: "policy include filters out unselected HCA in mixed grant and preferred allocation",
+			mode: workercore.DeviceAllocationModeShared,
+			policies: []workercore.DevicesRDMASelectionPolicy{{
+				ObjectMeta: meta.ObjectMeta{Name: "select-mlx5-1", UID: "uid-pol-1", Generation: 1},
+				Spec: workercore.DevicesRDMASelectionPolicySpec{
+					NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"rdma-fabric": "ib"}},
+					Include:      []string{"mlx5_1"},
+				},
+			}},
+			grantIDs:      []string{"ib0:ib0:0000", "eth1:eth1:0000"},
+			wantPreferred: []string{"eth1:eth1:0000"},
+			wantNCCL:      "=mlx5_1",
+			wantRDMADevs:  "mlx5_1",
+			wantMockDevs:  "mlx5_1",
+			wantHealthByID: map[string]string{
+				"ib0:ib0:0000":   kubeletdeviceplugin.Unhealthy,
+				"eth1:eth1:0000": kubeletdeviceplugin.Healthy,
+			},
+		},
+		{
+			name: "policy withholding every granted HCA returns empty grant envs without error",
+			mode: workercore.DeviceAllocationModeExclusive,
+			policies: []workercore.DevicesRDMASelectionPolicy{{
+				ObjectMeta: meta.ObjectMeta{Name: "exclude-mlx5-0", UID: "uid-pol-2", Generation: 1},
+				Spec: workercore.DevicesRDMASelectionPolicySpec{
+					NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"rdma-fabric": "ib"}},
+					Exclude:      []string{"mlx5_0"},
+				},
+			}},
+			grantIDs:      []string{"ib0:ib0:0000"},
+			wantPreferred: []string{"eth1:eth1:0000"},
+			wantNCCL:      "",
+			wantRDMADevs:  "",
+			wantMockDevs:  "",
+			wantHealthByID: map[string]string{
+				"ib0:ib0:0000":   kubeletdeviceplugin.Unhealthy,
+				"eth1:eth1:0000": kubeletdeviceplugin.Healthy,
+			},
+		},
+		{
+			name:            "pinned port formats NCCL_IB_HCA as name:port while keeping plain and mock lists bare",
+			mode:            workercore.DeviceAllocationModeShared,
+			useSpecStoreInv: true,
+			policies: []workercore.DevicesRDMASelectionPolicy{{
+				ObjectMeta: meta.ObjectMeta{Name: "pin-port-1", UID: "uid-pol-3", Generation: 1},
+				Spec: workercore.DevicesRDMASelectionPolicySpec{
+					NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"rdma-fabric": "ib"}},
+					Include:      []string{"mlx5_0", "mlx5_1"},
+					Port:         ptr.To(int32(1)),
+				},
+			}},
+			grantIDs:      []string{"ib0:ib0:0000", "eth1:eth1:0000"},
+			wantPreferred: []string{"ib0:ib0:0000"},
+			wantNCCL:      "=mlx5_0:1,mlx5_1:1",
+			wantRDMADevs:  "mlx5_0,mlx5_1",
+			wantMockDevs:  "mlx5_0,mlx5_1",
+			wantHealthByID: map[string]string{
+				"ib0:ib0:0000":   kubeletdeviceplugin.Healthy,
+				"eth1:eth1:0000": kubeletdeviceplugin.Healthy,
+			},
+		},
+		{
+			name: "exclude with pinned port 2 withholds excluded HCA and suffixes surviving HCA with port 2",
+			mode: workercore.DeviceAllocationModeExclusive,
+			policies: []workercore.DevicesRDMASelectionPolicy{{
+				ObjectMeta: meta.ObjectMeta{Name: "exclude-0-port-2", UID: "uid-pol-4", Generation: 1},
+				Spec: workercore.DevicesRDMASelectionPolicySpec{
+					NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"rdma-fabric": "ib"}},
+					Exclude:      []string{"mlx5_0"},
+					Port:         ptr.To(int32(2)),
+				},
+			}},
+			grantIDs:      []string{"ib0:ib0:0000", "eth1:eth1:0000"},
+			wantPreferred: []string{"eth1:eth1:0000"},
+			wantNCCL:      "=mlx5_1:2",
+			wantRDMADevs:  "mlx5_1",
+			wantMockDevs:  "mlx5_1",
+			wantHealthByID: map[string]string{
+				"ib0:ib0:0000":   kubeletdeviceplugin.Unhealthy,
+				"eth1:eth1:0000": kubeletdeviceplugin.Healthy,
+			},
+		},
+		{
+			name: "conflicting policies fail closed withholding all HCAs",
+			mode: workercore.DeviceAllocationModeExclusive,
+			policies: []workercore.DevicesRDMASelectionPolicy{
+				{
+					ObjectMeta: meta.ObjectMeta{Name: "conflict-a", UID: "uid-pol-a", Generation: 1},
+					Spec: workercore.DevicesRDMASelectionPolicySpec{
+						NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"rdma-fabric": "ib"}},
+						Include:      []string{"mlx5_0"},
+					},
+				},
+				{
+					ObjectMeta: meta.ObjectMeta{Name: "conflict-b", UID: "uid-pol-b", Generation: 1},
+					Spec: workercore.DevicesRDMASelectionPolicySpec{
+						NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"rdma-fabric": "ib"}},
+						Include:      []string{"mlx5_1"},
+					},
+				},
+			},
+			grantIDs:      []string{"ib0:ib0:0000", "eth1:eth1:0000"},
+			wantPreferred: nil,
+			wantNCCL:      "",
+			wantRDMADevs:  "",
+			wantMockDevs:  "",
+			wantHealthByID: map[string]string{
+				"ib0:ib0:0000":   kubeletdeviceplugin.Unhealthy,
+				"eth1:eth1:0000": kubeletdeviceplugin.Unhealthy,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			objs := []ctrlcli.Object{baseNode.DeepCopy(), baseDevs.DeepCopy()}
+			for i := range tc.policies {
+				p := tc.policies[i].DeepCopy()
+				objs = append(objs, p)
+			}
+			rec, cli := newFakeReconciler(nodeName, objs...)
+
+			invFn := func() *device.RDMASnapshot {
+				return &device.RDMASnapshot{
+					Revision: "rev-1",
+					Complete: true,
+					Devices: []device.RDMADevice{
+						{Name: "mlx5_0", PciBusID: "0000:10:00.0", Ports: activePorts},
+						{Name: "mlx5_1", PciBusID: "0000:11:00.0", Ports: activePorts},
+						{Name: "mlx5_ext", PciBusID: "0000:12:00.0", Owner: device.RDMADeviceOwnerExternal, Ports: activePorts},
+					},
+				}
+			}
+
+			var mockOpts []Option
+			if tc.useSpecStoreInv {
+				specPath := filepath.Join(t.TempDir(), "rdma-policy.yaml")
+				require.NoError(t, os.WriteFile(specPath, []byte(specYAML), 0o600))
+				store, err := mockspec.NewStore(specPath)
+				require.NoError(t, err)
+				mockOpts = append(mockOpts, WithSpecStore(store, nodeName))
+			} else {
+				rec.RDMAInterfaceInventory = invFn
+			}
+
+			obs := &deviceplugin.RDMASelectionObserver{
+				NodeName:               nodeName,
+				Client:                 cli,
+				RDMAInterfaceInventory: invFn,
+				Reconciler:             rec,
+			}
+			_, err := obs.Reconcile(context.Background(), ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: nodeName},
+			})
+			require.NoError(t, err)
+
+			srv, err := NewRDMAServer(logr.Discard(), tc.mode, rec, mockOpts...)
+			require.NoError(t, err)
+			dpSrv := srv.(kubeletdeviceplugin.DevicePluginServer)
+
+			// Verify ListAndWatch health marks reflect policy eligibility.
+			lwCtx, lwCancel := context.WithCancel(context.Background())
+			sent := make(chan *kubeletdeviceplugin.ListAndWatchResponse, 2)
+			lwDone := make(chan error, 1)
+			go func() {
+				lwDone <- dpSrv.ListAndWatch(&kubeletdeviceplugin.Empty{}, &mockListAndWatchStream{
+					ctx:  lwCtx,
+					sent: sent,
+				})
+			}()
+			var lwResp *kubeletdeviceplugin.ListAndWatchResponse
+			select {
+			case lwResp = <-sent:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for initial ListAndWatch response")
+			}
+			lwCancel()
+			<-lwDone
+
+			gotHealth := make(map[string]string, len(lwResp.Devices))
+			for _, d := range lwResp.Devices {
+				gotHealth[d.ID] = d.Health
+			}
+			for id, wantHealth := range tc.wantHealthByID {
+				assert.Equal(t, wantHealth, gotHealth[id], "device %s health", id)
+			}
+
+			// Verify GetPreferredAllocation honors policy eligibility.
+			prefResp, err := dpSrv.GetPreferredAllocation(context.Background(), &kubeletdeviceplugin.PreferredAllocationRequest{
+				ContainerRequests: []*kubeletdeviceplugin.ContainerPreferredAllocationRequest{{
+					AvailableDeviceIDs: []string{"ib0:ib0:0000", "eth1:eth1:0000"},
+					AllocationSize:     1,
+				}},
+			})
+			require.NoError(t, err)
+			require.Len(t, prefResp.ContainerResponses, 1)
+			assert.Equal(t, tc.wantPreferred, prefResp.ContainerResponses[0].DeviceIDs)
+
+			// Verify Allocate enforces isHCAEligible, formats pinned-port NCCL_IB_HCA, and injects zero host devices/mounts.
+			allocResp, err := dpSrv.Allocate(context.Background(), &kubeletdeviceplugin.AllocateRequest{
+				ContainerRequests: []*kubeletdeviceplugin.ContainerAllocateRequest{{
+					DevicesIds: tc.grantIDs,
+				}},
+			})
+			require.NoError(t, err)
+			require.Len(t, allocResp.ContainerResponses, 1)
+			ctr := allocResp.ContainerResponses[0]
+			assert.Empty(t, ctr.Devices, "mock RDMA must inject zero /dev/infiniband/* device nodes")
+			assert.Empty(t, ctr.Mounts, "mock RDMA must inject zero host mounts")
+			assert.Equal(t, map[string]string{
+				"NCCL_IB_HCA":           tc.wantNCCL,
+				"GPUSTACK_RDMA_DEVICES": tc.wantRDMADevs,
+				EnvMockAllocatedDevices: tc.wantMockDevs,
+				EnvMockAllocationMode:   device.PreflightModeOf(tc.mode),
+				EnvMockManufacturer:     RDMAFamilyName,
+			}, ctr.Envs)
+		})
+	}
+}
+
+type mockListAndWatchStream struct {
+	grpc.ServerStream
+	ctx  context.Context
+	sent chan<- *kubeletdeviceplugin.ListAndWatchResponse
+}
+
+func (m *mockListAndWatchStream) Context() context.Context {
+	return m.ctx
+}
+
+func (m *mockListAndWatchStream) Send(resp *kubeletdeviceplugin.ListAndWatchResponse) error {
+	select {
+	case m.sent <- resp:
+		return nil
+	case <-m.ctx.Done():
+		return m.ctx.Err()
+	}
 }

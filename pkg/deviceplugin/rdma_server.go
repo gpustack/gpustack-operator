@@ -15,10 +15,37 @@ import (
 	deviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/utils/waitx"
 )
+
+// RDMAContainerInjectFunc customizes container device-node, mount, and environment injection for
+// an RDMA Allocate response after eligible HCA grants and standard RDMA environment variables
+// (NCCL_IB_HCA and GPUSTACK_RDMA_DEVICES) have been populated on resp.
+type RDMAContainerInjectFunc func(devs *workercore.Devices, grants []string, resp *ContainerAllocateResponse) error
+
+// RDMAServerOption configures optional behavior on an RDMA device-plugin server constructed by
+// NewRDMAServer.
+type RDMAServerOption func(*rdmaServer)
+
+// WithRDMAContainerInjector overrides host /sys and /dev/infiniband device-node resolution and
+// host driver mounts during Allocate with fn. When unset, Allocate resolves and injects real
+// verbs character devices, rdma_cm, and any required vendor driver mounts.
+func WithRDMAContainerInjector(fn RDMAContainerInjectFunc) RDMAServerOption {
+	return func(s *rdmaServer) {
+		s.containerInjector = fn
+	}
+}
+
+// WithRDMAInterfaceInventory configures a fallback verbs-inventory reader used when the
+// reconciler has no RDMAInterfaceInventory source wired.
+func WithRDMAInterfaceInventory(fn func() *device.RDMASnapshot) RDMAServerOption {
+	return func(s *rdmaServer) {
+		s.inventoryFallback = fn
+	}
+}
 
 // rdmaServer serves one allocation mode's RDMA endpoints over the device-plugin gRPC API, driven
 // by the same reconciler inventory and the same serving lifecycle the accelerator servers use. It
@@ -34,6 +61,9 @@ type rdmaServer struct {
 	ResourceName   core.ResourceName
 	Reconciler     *DevicesReconciler
 
+	containerInjector RDMAContainerInjectFunc
+	inventoryFallback func() *device.RDMASnapshot
+
 	serving
 }
 
@@ -47,17 +77,41 @@ func NewRDMAServer(
 	logger klog.Logger,
 	mode workercore.DeviceAllocationMode,
 	reconciler *DevicesReconciler,
+	opts ...RDMAServerOption,
 ) (Server, error) {
 	name := nodefeature.GetRDMAResourceName(mode)
 	if name == "" {
 		return nil, fmt.Errorf("allocation mode %s serves no RDMA resource", mode)
 	}
-	return &rdmaServer{
+	s := &rdmaServer{
 		Logger:         logger.WithName(strings.ToLower(mode.String())),
 		AllocationMode: mode,
 		ResourceName:   name,
 		Reconciler:     reconciler,
-	}, nil
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s, nil
+}
+
+func (s *rdmaServer) captureInterfaceSnapshot(devs *workercore.Devices) rdmaInterfaceSnapshot {
+	if s.Reconciler != nil && (s.Reconciler.RDMAInterfaceInventory != nil || s.inventoryFallback == nil) {
+		return s.Reconciler.captureRDMAInterfaceSnapshot(devs)
+	}
+	var inv *device.RDMASnapshot
+	if s.inventoryFallback != nil {
+		inv = s.inventoryFallback()
+	}
+	var sel *rdmaAppliedSelection
+	if s.Reconciler != nil {
+		s.Reconciler.rdmaSelectionMutex.RLock()
+		sel = s.Reconciler.rdmaSelection.clone()
+		s.Reconciler.rdmaSelectionMutex.RUnlock()
+	}
+	return captureRDMAInterfaceSnapshotFrom(devs, inv, sel)
 }
 
 // rdmaFamilyName is the first component of the socket base name and the notifier's manufacturer
@@ -177,7 +231,7 @@ func (s *rdmaServer) getListAndWatchResponse(ctx context.Context) (*ListAndWatch
 		topology *deviceplugin.TopologyInfo
 	}
 	resp := &ListAndWatchResponse{}
-	snap := s.Reconciler.captureRDMAInterfaceSnapshot(devs)
+	snap := s.captureInterfaceSnapshot(devs)
 	endpoints := make([]advertisedEndpoint, 0)
 	for i := range snap.interfaces {
 		iface := &snap.interfaces[i]
@@ -279,7 +333,7 @@ func (s *rdmaServer) GetPreferredAllocation(ctx context.Context, req *PreferredA
 	if err != nil {
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "read the interface inventory: %v", err)
 	}
-	snap := s.Reconciler.captureRDMAInterfaceSnapshot(devs)
+	snap := s.captureInterfaceSnapshot(devs)
 	endpoints := s.eligibleRDMAEndpoints(snap)
 
 	resp := &PreferredAllocationResponse{

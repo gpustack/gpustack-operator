@@ -2,6 +2,7 @@ package allocator
 
 import (
 	"context"
+	"errors"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
@@ -81,6 +82,17 @@ func (a *Allocator) Start(ctx context.Context) error {
 	sCtx, sCancel := context.WithCancel(ctx)
 	defer sCancel()
 
+	reportErr := func(labelKey, labelVal string, err error) {
+		if err == nil || (sCtx.Err() != nil && errors.Is(err, context.Canceled)) {
+			return
+		}
+		logger.Error(err, "failed to start allocator", labelKey, labelVal)
+		select {
+		case errCh <- err:
+		case <-sCtx.Done():
+		}
+	}
+
 	createOpts := device.AllocatorOptions{
 		Logger:        logger.V(3),
 		KubeSocket:    a.kubeSocket,
@@ -98,10 +110,7 @@ func (a *Allocator) Start(ctx context.Context) error {
 	if a.rdmaCreator != nil {
 		allocator := a.rdmaCreator(createOpts)
 		gox.Go(func() {
-			if err := allocator.Start(sCtx); err != nil {
-				logger.Error(err, "failed to start allocator", "family", allocator.Name())
-				errCh <- err
-			}
+			reportErr("family", allocator.Name(), allocator.Start(sCtx))
 		})
 		defer allocator.Stop()
 	}
@@ -141,10 +150,7 @@ func (a *Allocator) Start(ctx context.Context) error {
 				allocators[m] = creator(createOpts)
 				allocator := allocators[m]
 				gox.Go(func() {
-					if err := allocator.Start(sCtx); err != nil {
-						logger.Error(err, "failed to start allocator", "manufacturer", m)
-						errCh <- err
-					}
+					reportErr("manufacturer", m, allocator.Start(sCtx))
 				})
 			}
 		}

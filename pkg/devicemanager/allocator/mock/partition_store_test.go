@@ -100,13 +100,14 @@ func TestPartitionStore_PlacementsOverlapConcurrencyAndInspection(t *testing.T) 
 	// - 3g.40gb -> [0, 4) or [4, 8)
 	// - 2g.20gb -> [0, 2), [2, 4), or [4, 6)
 	// - 1g.10gb -> [0, 1)..[6, 7)
-	// Together one 3g.40gb (4 slices), one 2g.20gb (2 slices), and one 1g.10gb (1 slice) fit concurrently!
-	profiles := []string{"3g.40gb", "2g.20gb", "1g.10gb"}
-	results := make([]VirtualPartition, len(profiles))
-	errs := make([]error, len(profiles))
+	// Reserve 3g.40gb and 2g.20gb concurrently (both scheduling orders leave room for 1g.10gb,
+	// avoiding the [0,4)+[4,5) fragmentation order that legitimately blocks 2g.20gb), then add 1g.10gb.
+	concurrentProfiles := []string{"3g.40gb", "2g.20gb"}
+	results := make([]VirtualPartition, 3)
+	errs := make([]error, 3)
 
 	var wg sync.WaitGroup
-	for i, prof := range profiles {
+	for i, prof := range concurrentProfiles {
 		wg.Add(1)
 		go func(idx int, p string) {
 			defer wg.Done()
@@ -125,6 +126,19 @@ func TestPartitionStore_PlacementsOverlapConcurrencyAndInspection(t *testing.T) 
 	}
 	wg.Wait()
 
+	vp1g, rebound1g, err1g := store.Reserve(
+		nodefeature.ManufacturerNVIDIA,
+		"pod-2",
+		"main",
+		grp,
+		acc,
+		"1g.10gb",
+	)
+	assert.False(t, rebound1g)
+	results[2] = vp1g
+	errs[2] = err1g
+
+	profiles := []string{"3g.40gb", "2g.20gb", "1g.10gb"}
 	for i, err := range errs {
 		require.NoError(t, err, "profile %s should fit concurrently", profiles[i])
 		assert.NotEmpty(t, results[i].ID)
