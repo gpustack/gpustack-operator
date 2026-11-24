@@ -67,6 +67,10 @@ const mtmlFixtureSource = `
 
 static int init_calls = 0;
 static int is_initialized = 0;
+static int fake_lib_obj = 0;
+static int fake_dev_objs[16];
+static int fake_mem_objs[16];
+static int fake_gpu_objs[16];
 
 static const char *fixture_env(const char *name) {
     const char *value = getenv(name);
@@ -74,7 +78,7 @@ static const char *fixture_env(const char *name) {
 }
 
 static unsigned int device_index(const MtmlDevice *dev) {
-    return (unsigned int)((uintptr_t)dev - 1U);
+    return (unsigned int)((const int *)dev - fake_dev_objs);
 }
 
 static MtmlReturn maybe_fail_device(const char *stage, unsigned int idx) {
@@ -100,7 +104,7 @@ MtmlReturn mtmlLibraryInit(MtmlLibrary **lib) {
     }
     init_calls++;
     is_initialized = 1;
-    *lib = (MtmlLibrary *)(uintptr_t)1U;
+    *lib = (MtmlLibrary *)&fake_lib_obj;
     return MTML_SUCCESS;
 }
 
@@ -121,7 +125,7 @@ MtmlReturn mtmlLibraryInitDeviceByIndex(const MtmlLibrary *lib, unsigned int ind
     MtmlReturn ret = maybe_fail_device("handle", index);
     if (ret != MTML_SUCCESS)
         return ret;
-    *dev = (MtmlDevice *)(uintptr_t)(index + 1U);
+    *dev = (MtmlDevice *)&fake_dev_objs[index];
     return MTML_SUCCESS;
 }
 
@@ -179,7 +183,7 @@ MtmlReturn mtmlDeviceInitMemory(const MtmlDevice *dev, MtmlMemory **mem) {
     MtmlReturn ret = maybe_fail_device("memory", idx);
     if (ret != MTML_SUCCESS)
         return ret;
-    *mem = (MtmlMemory *)(uintptr_t)(idx + 1U);
+    *mem = (MtmlMemory *)&fake_mem_objs[idx];
     return MTML_SUCCESS;
 }
 
@@ -196,7 +200,10 @@ MtmlReturn mtmlMemoryGetTotal(const MtmlMemory *mem, unsigned long long *total) 
 
 MtmlReturn mtmlDeviceInitGpu(const MtmlDevice *dev, MtmlGpu **gpu) {
     unsigned int idx = device_index(dev);
-    *gpu = (MtmlGpu *)(uintptr_t)(idx + 1U);
+    MtmlReturn ret = maybe_fail_device("gpu", idx);
+    if (ret != MTML_SUCCESS)
+        return ret;
+    *gpu = (MtmlGpu *)&fake_gpu_objs[idx];
     return MTML_SUCCESS;
 }
 
@@ -261,6 +268,13 @@ func TestUnqueryableCardAndErrorHandling(t *testing.T) {
 			metrics, err := d.MonitorAccelerator(true)
 			require.Error(t, err)
 			assert.Nil(t, metrics)
+		case "optional_gpu_handler_error":
+			metrics, err := d.MonitorAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Len(t, metrics[0].Accelerators, 2)
+			assert.Equal(t, "MTT-0", metrics[0].Accelerators[0].ID)
+			assert.Equal(t, "MTT-1", metrics[0].Accelerators[1].ID)
 		case "transient_init_error":
 			groups, err := d.DetectAccelerator(true)
 			require.Error(t, err)
@@ -335,6 +349,20 @@ func TestUnqueryableCardAndErrorHandling(t *testing.T) {
 			"GPUSTACK_TEST_MTML_MODE=count_error",
 			"GPUSTACK_TEST_MTML_COUNT_ERR="+strconv.Itoa(int(mtml.ERROR_NO_PERMISSION)),
 		)
+	})
+
+	t.Run("optional InitGpu error degrades cleanly without dropping card or failing monitor", func(t *testing.T) {
+		for _, ret := range []mtml.Return{mtml.ERROR_NOT_SUPPORTED, mtml.ERROR_RESOURCE_IS_BUSY} {
+			t.Run(ret.String(), func(t *testing.T) {
+				runCase(t,
+					"GPUSTACK_TEST_MTML_MODE=optional_gpu_handler_error",
+					"GPUSTACK_TEST_MTML_COUNT=2",
+					"GPUSTACK_TEST_MTML_FAIL_STAGE=gpu",
+					"GPUSTACK_TEST_MTML_FAIL_INDEX=1",
+					"GPUSTACK_TEST_MTML_FAIL_ERR="+strconv.Itoa(int(ret)),
+				)
+			})
+		}
 	})
 
 	t.Run("transient Init failure recovers on next DetectAccelerator", func(t *testing.T) {

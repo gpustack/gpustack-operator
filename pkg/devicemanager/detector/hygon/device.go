@@ -481,10 +481,6 @@ func (in *hygon) ensureInit() rsmi.Return {
 	in.initMu.Lock()
 	defer in.initMu.Unlock()
 
-	if in.rsmiInit {
-		return rsmi.STATUS_SUCCESS
-	}
-
 	if !in.amdgpuInit {
 		if ret := in.amdgpu.Init(); !ret.IsSuccess() {
 			in.logger.Error(ret, "failed to initialize AMDGPU library")
@@ -492,12 +488,14 @@ func (in *hygon) ensureInit() rsmi.Return {
 			in.amdgpuInit = true
 		}
 	}
-	ret := in.rsmi.Init()
-	if !ret.IsSuccess() {
-		in.logger.Error(ret, "failed to initialize RSMI library")
-		return ret
+	if !in.rsmiInit {
+		ret := in.rsmi.Init()
+		if !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize RSMI library")
+			return ret
+		}
+		in.rsmiInit = true
 	}
-	in.rsmiInit = true
 
 	if !in.hsaInit {
 		if hsaRet := in.hsa.Init(); !hsaRet.IsSuccess() {

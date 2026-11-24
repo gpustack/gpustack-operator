@@ -187,10 +187,12 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 	r.pruneCorruptMarkers(corrupt, live, touched)
 
 	// Orphan GC needs a node-wide live instance snapshot. If enumeration fails, skip only the
-	// orphan sweep and keep existing per-card orphan counters until enumeration recovers.
+	// orphan sweep and keep existing per-card orphan counters until enumeration recovers, while
+	// resetting any card that is live or has unreadable ownership on this pass.
 	instances, lerr := r.driver.ListInstances()
 	if lerr != nil {
 		r.logger.Error(lerr, "reclaim: list mig instances, skipping orphan sweep")
+		resetLiveCardCounters(r.misses, r.inUse, liveOnCard, corrupt)
 		pruneStaleCounters(r.misses, touched, true)
 		pruneStaleCounters(r.inUse, touched, true)
 		return
@@ -227,6 +229,25 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 
 	pruneStaleCounters(r.misses, touched, false)
 	pruneStaleCounters(r.inUse, touched, false)
+}
+
+// resetLiveCardCounters zeroes per-card orphan debounce counters for cards that currently have
+// live claims/markers or unreadable ownership, so a ListInstances failure cannot carry stale
+// idle-card misses across an active window.
+func resetLiveCardCounters(misses, inUse map[string]int, liveOnCard map[string]bool, corrupt []string) {
+	reset := func(counters map[string]int) {
+		for k := range counters {
+			if !strings.HasPrefix(k, cardMissPrefix) {
+				continue
+			}
+			card := strings.TrimPrefix(k, cardMissPrefix)
+			if liveOnCard[card] || ownershipUnknownOnCard(corrupt, card) {
+				counters[k] = 0
+			}
+		}
+	}
+	reset(misses)
+	reset(inUse)
 }
 
 // pruneStaleCounters removes keys not seen in this pass, optionally preserving per-card orphan

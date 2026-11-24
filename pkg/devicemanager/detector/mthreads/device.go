@@ -327,20 +327,21 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 			{
 				gpuHandler, ret := dev.InitGpu()
 				if !ret.IsSuccess() {
-					return handleCardQueryError(logger, i, "initialize gpu handler", ret, &lastUnqueryableErr)
-				}
-				defer func() {
-					_ = gpuHandler.Free()
-				}()
+					logger.V(3).Error(ret, "failed to initialize gpu handler")
+				} else {
+					defer func() {
+						_ = gpuHandler.Free()
+					}()
 
-				coresUtilization, ret = gpuHandler.GetUtilization()
-				if !ret.IsSuccess() {
-					logger.V(3).Error(ret, "failed to get device cores utilization")
-				}
+					coresUtilization, ret = gpuHandler.GetUtilization()
+					if !ret.IsSuccess() {
+						logger.V(3).Error(ret, "failed to get device cores utilization")
+					}
 
-				temperature, ret = gpuHandler.GetTemperature()
-				if !ret.IsSuccess() {
-					logger.V(3).Error(ret, "failed to get device temperature")
+					temperature, ret = gpuHandler.GetTemperature()
+					if !ret.IsSuccess() {
+						logger.V(3).Error(ret, "failed to get device temperature")
+					}
 				}
 
 				powerUsage, ret = dev.GetPowerUsage()

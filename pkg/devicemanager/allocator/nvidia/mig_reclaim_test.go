@@ -1125,6 +1125,70 @@ func TestReclaim_ListInstancesErrorStillReclaimsDeadPods(t *testing.T) {
 	}
 }
 
+func TestReclaim_ListInstancesErrorResetsLiveOrCorruptCardOrphanCounters(t *testing.T) {
+	cases := []struct {
+		name           string
+		setup          func(t *testing.T, base *fakeMigDriver)
+		live           []string
+		wantCard0Miss  int
+		wantCard0InUse int
+		wantCard1Miss  int
+		wantCard1InUse int
+	}{
+		{
+			name: "resets orphan debounce on card with live pod while keeping idle card counters",
+			setup: func(t *testing.T, base *fakeMigDriver) {
+				seedMarkedInstance(t, base, "pod-live", testGPUUUID0, 1)
+			},
+			live:           []string{"pod-live"},
+			wantCard0Miss:  0,
+			wantCard0InUse: 0,
+			wantCard1Miss:  reclaimMaxMisses - 1,
+			wantCard1InUse: 2,
+		},
+		{
+			name: "resets orphan debounce on card with corrupt marker while keeping idle card counters",
+			setup: func(t *testing.T, _ *fakeMigDriver) {
+				writeCorruptMarker(
+					t, deviceplugin.PodWorkDir("pod-corrupt-live", "c"), markerFileName(testGPUUUID0),
+				)
+			},
+			live:           []string{"pod-corrupt-live"},
+			wantCard0Miss:  0,
+			wantCard0InUse: 0,
+			wantCard1Miss:  reclaimMaxMisses - 1,
+			wantCard1InUse: 2,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			base := newFakeMigDriver()
+			c.setup(t, base)
+			drv := &splitListErrorMigDriver{
+				fakeMigDriver: base,
+				listOnlyErr:   errors.New("node-wide list failed"),
+			}
+			r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
+
+			card0Key := cardMissPrefix + testGPUUUID0
+			card1Key := cardMissPrefix + testGPUUUID1
+			r.misses[card0Key] = reclaimMaxMisses - 1
+			r.inUse[card0Key] = 2
+			r.misses[card1Key] = reclaimMaxMisses - 1
+			r.inUse[card1Key] = 2
+
+			r.reconcile(c.live)
+
+			assert.Equal(t, c.wantCard0Miss, r.misses[card0Key])
+			assert.Equal(t, c.wantCard0InUse, r.inUse[card0Key])
+			assert.Equal(t, c.wantCard1Miss, r.misses[card1Key])
+			assert.Equal(t, c.wantCard1InUse, r.inUse[card1Key])
+		})
+	}
+}
+
 func TestReclaim_PartialListInstancesProceedsOnHealthyCards(t *testing.T) {
 	cases := []struct {
 		name          string

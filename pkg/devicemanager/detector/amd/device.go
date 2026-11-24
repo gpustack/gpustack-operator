@@ -33,13 +33,14 @@ func init() {
 }
 
 type amd struct {
-	initMu     sync.Mutex
-	amdgpuInit bool
-	rsmiInit   bool
-	amdsmiInit bool
-	hsaInit    bool
-	amdgpu     *amdgpu.AMDGPU
-	amdsmi     *amdsmi.AMDSMI
+	initMu       sync.Mutex
+	amdgpuInit   bool
+	rsmiInit     bool
+	amdsmiLoaded bool
+	amdsmiInit   bool
+	hsaInit      bool
+	amdgpu       *amdgpu.AMDGPU
+	amdsmi       *amdsmi.AMDSMI
 	// rsmi serves the per-process query alone. AMD SMI is this backend's library for everything
 	// else, but its per-process device membership entry point answers INVAL on a live process id
 	// (measured on ROCm 7.2.0 / AMD SMI 26.2.1), and without membership a row cannot be told from
@@ -435,10 +436,6 @@ func (in *amd) ensureInit() amdsmi.Return {
 	in.initMu.Lock()
 	defer in.initMu.Unlock()
 
-	if in.amdsmiInit {
-		return amdsmi.STATUS_SUCCESS
-	}
-
 	if !in.amdgpuInit {
 		if ret := in.amdgpu.Init(); !ret.IsSuccess() {
 			in.logger.Error(ret, "failed to initialize AMDGPU library")
@@ -454,19 +451,24 @@ func (in *amd) ensureInit() amdsmi.Return {
 	// The order is not free on a newer stack, and amdsmi.New is where it is paid for: ROCm SMI
 	// in the global scope zeroes AMD SMI's socket enumeration, so that library is loaded
 	// RTLD_DEEPBIND.
-	if !in.rsmiInit {
+	if !in.rsmiInit && !in.amdsmiLoaded {
 		if ret := in.rsmi.Init(); !ret.IsSuccess() {
 			in.logger.Error(ret, "failed to initialize ROCm SMI library")
 		} else {
 			in.rsmiInit = true
 		}
 	}
-	ret := in.amdsmi.Init()
-	if !ret.IsSuccess() {
-		in.logger.Error(ret, "failed to initialize AMDSMI library")
-		return ret
+	if !in.amdsmiInit {
+		ret := in.amdsmi.Init()
+		if ret != amdsmi.STATUS_LIBRARY_NOT_FOUND {
+			in.amdsmiLoaded = true
+		}
+		if !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize AMDSMI library")
+			return ret
+		}
+		in.amdsmiInit = true
 	}
-	in.amdsmiInit = true
 
 	if !in.hsaInit {
 		if hsaRet := in.hsa.Init(); !hsaRet.IsSuccess() {
