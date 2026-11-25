@@ -649,13 +649,11 @@ func renderModelDeploymentRouterObjectsWithProxy(
 		routerInput.CandidateLabelKey = modelDeploymentRouterCandidateLabel
 		routerInput.CandidateLabelValue = modelDeploymentEndpointEligibleValue
 	}
-	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
+	if md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
+		md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
 		!modelDeploymentLLMDRouterDisablesKVEvents(md) {
 		engine, _ := ModelDeploymentEngineUpstreamName(md.Spec.Engine.Name)
-		var localDP int32 = 1
-		if len(md.Spec.Roles) > 0 {
-			localDP = ModelDeploymentKVEventsLocalDP(md, &md.Spec.Roles[0])
-		}
+		localDP := ModelDeploymentLLMDRouterKVEventsLocalDP(md)
 		routerInput.KVEvents = router.KVEvents{
 			Engine: engine, Port: inject.VLLMKVEventsPort,
 			ReplayPort: inject.KVEventsReplayPortForLocalDP(localDP), Topic: inject.VLLMKVEventsTopic,

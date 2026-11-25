@@ -86,10 +86,12 @@ Ownership is scoped per `(engine, key)` (`modelDeploymentOwnedKeys`):
   An overlay volume mounting over `/etc/gpustack/kvcache` silently replaces it.
 - **KV events publisher**: Publishing roles open ZMQ publisher `tcp://*:5557` and replay
   `tcp://*:5558` (`tcp://*:<5557+dpSpan>` when global `dpSpan > 1`, reserving
-  `[5557 .. 5557 + 2*dpSpan - 1]` across all DP ranks; `topic: "kv@pod@<spec.model.name>"` on
-  `vLLM`/`vLLM-Ascend` behind `llm-d-router` or `vllm-router` `kv_aware`; `topic: "kv-events"` on
-  `SGLang` *Server*/*Prefill* behind `sgl-router`). Under `llm-d-router`, single-`Pod` `vLLM`
-  multi-DP subscribes to `RankIndex=0` (`5557`) only, and `@` in *`spec.model.name`* is refused.
+  `[5557 .. 5557 + 2*dpSpan - 1]`; `topic: "kv@pod@<spec.model.name>"` on `vLLM`/`vLLM-Ascend`
+  behind `llm-d-router` or `vllm-router` `kv_aware`, `"kv-events"` on `SGLang` behind `sgl-router`).
+- **Router-specific KV-event limits**: Under `sgl-router`, per-role `Service`s carry only the HTTP
+  serving port while publishing `Pod`s expose `5557`/`<replayPort>`. Under `llm-d-router`, single-`Pod`
+  `vLLM` multi-DP subscribes to `RankIndex=0` (`5557`) only, publishing roles share the max
+  publishing DP span for `replaySocketPort`, and `@` in *`spec.model.name`* is refused.
 - **`KVEventsPublishing` condition**: Reports `True/Publishing` when all expected roles publish,
   `True/NotApplicable` for unrouted *Server* roles, `SGLang + llm-d-router`, multi-`Pod` `vLLM` DP
   behind `llm-d-router`, `vllm-router` without `kv_aware`, and frozen `sglang-gateway`,
@@ -172,9 +174,12 @@ Two currency annotations separate user spec edits from operator-internal renderi
 
 - **`sgl-router` `EndpointSlice` discovery**: Per-role `Service`s (`<md>-<role>`) carry
   `modeldeployment.gpustack.ai/role-kind=<kind>` (never stamped on `<md>` or headless replica
-  `Service`s `<md>-<role>-r<n>`), which Kubernetes copies onto role `EndpointSlice` objects. The
-  `<md>-router` `Role` grants `discovery.k8s.io/endpointslices` (`get`, `list`, `watch`). Custom
-  least-privilege operator worker bindings must include `discovery.k8s.io/endpointslices`
+  `Service`s `<md>-<role>-r<n>`) and expose only the single HTTP serving port (omitting
+  `kv-events`/`kv-replay` `ServicePort`s so `EndpointSlice.ports[0]` stays HTTP while `sgl-router`
+  discovers ZMQ ports via `GET /server_info` and dials `Pod` IPs directly).
+- **`sgl-router` RBAC**: Kubernetes copies the `role-kind` label onto role `EndpointSlice` objects,
+  and the `<md>-router` `Role` grants `discovery.k8s.io/endpointslices` (`get`, `list`, `watch`).
+  Custom least-privilege operator worker bindings must include `discovery.k8s.io/endpointslices`
   (`get`, `list`, `watch`) so the controller can create `sgl-router` `Role`s.
 - **Envoy allowlist sidecar listeners**: On `vllm-router`, `sglang-gateway`, and `sgl-router`, Envoy
   listens on `:8000` (inference API allowlist forwarding to loopback `127.0.0.1:8001`) and `:9091`

@@ -157,21 +157,23 @@ omits `VLLM_USE_V2_MODEL_RUNNER` because vLLM-Ascend V2 has no multimodal encode
 
 ### NIXL embedding transfer
 
-`ECCPUConnector` transfers embeddings between `Pod`s over NIXL. The operator sets
-`VLLM_USE_V2_MODEL_RUNNER=1` on both roles and renders an untuned 1 GiB host buffer
-(`ec_cpu_bytes`) in `--ec-transfer-config`.
+`ECCPUConnector` transfers embeddings between `Pod`s over NIXL. The operator defaults
+`VLLM_USE_V2_MODEL_RUNNER=1` on both roles for `vLLM < 0.34.0` (omitted at `>= 0.34.0`, where the
+variable was removed upstream) and renders an untuned 1 GiB host buffer (`ec_cpu_bytes`) in
+`--ec-transfer-config`.
 
-*Encode* binds side-channel port `5601` (`VLLM_EC_SIDE_CHANNEL_HOST` = *`status.podIP`*). Admission
-refuses port `5601` on *Encode* (`ports` or `--port`) under `ECCPUConnector`; `ECExampleConnector`
-does not reserve `5601`.
+*Encode* sets `VLLM_EC_SIDE_CHANNEL_HOST` to *`status.podIP`* and defaults
+`VLLM_EC_SIDE_CHANNEL_PORT=5601` (overridable in *`roles[].env`*, including `0` for an ephemeral
+port). Admission checks HTTP port conflicts on *Encode* (`ports` or `--port`) against the effective
+side-channel port (skipping the check when `0`); `ECExampleConnector` reserves no side-channel port.
 
 ### Operator-owned keys
 
 Admission refuses operator-owned encoder keys in any spelling the engine accepts (see
 [Operator-owned keys](configuration.md#operator-owned-keys)):
 
-- **vLLM**: `--ec-transfer-config`, plus `VLLM_USE_V2_MODEL_RUNNER` and both side-channel variables
-  under `ECCPUConnector`.
+- **vLLM**: `--ec-transfer-config`, plus `VLLM_EC_SIDE_CHANNEL_HOST` under `ECCPUConnector`
+  (`VLLM_USE_V2_MODEL_RUNNER` and `VLLM_EC_SIDE_CHANNEL_PORT` are defaulted, not owned).
 - **SGLang**: `--encoder-only`, `--language-only`, `--encoder-urls` and `--encoder-bootstrap-port`.
 
 Four vLLM *Encode* flags are **defaulted** (user *`extraArgs`* wins): `--enforce-eager`,

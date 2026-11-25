@@ -629,7 +629,12 @@ func renderModelDeploymentRoleService(
 		modelDeploymentEligibilityDecided(md)) {
 		modelDeploymentSelectEligibleEndpoints(svc, md, role)
 	}
-	if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
+	// Omit kv-events/kv-replay ports on sgl-router per-role Services: Kubernetes's EndpointSlice
+	// controller sorts ports by MD5 hash of dump.ForHash(port), placing kv-replay:5558 or
+	// kv-events:5557 ahead of http:8000, while sgl-router@router-v0.1.0 reads EndpointSlice.ports[0]
+	// as the HTTP serving port and discovers ZMQ KV-event ports via HTTP GET /server_info directly.
+	if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) &&
+		(md.Spec.Router == nil || md.Spec.Router.Name != workercore.ModelDeploymentRouterSGL) {
 		for _, port := range inject.KVEventsPortsForLocalDP(ModelDeploymentKVEventsLocalDP(md, role)) {
 			svc.Spec.Ports = append(svc.Spec.Ports, core.ServicePort{
 				Name: port.Name, Protocol: port.Protocol, Port: port.ContainerPort,

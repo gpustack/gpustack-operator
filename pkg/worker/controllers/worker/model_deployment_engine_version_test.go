@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -627,6 +628,165 @@ func TestModelDeploymentMultiDP_KVEventsReplayPort(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("llm-d-router computes ReplayPort stride strictly across KV-event-publishing roles", func(t *testing.T) {
+		qty1 := resource.MustParse("1")
+		qty4 := resource.MustParse("4")
+
+		cases := []struct {
+			name               string
+			roles              []workercore.ModelDeploymentRole
+			expectedLocalDP    int32
+			expectedReplayPort int32
+			publishingRoles    []string
+		}{
+			{
+				name: "EPD Encode(dp=1) Prefill(dp=2) Decode(dp=1) uses replayPort 5559",
+				roles: []workercore.ModelDeploymentRole{
+					{
+						Name:            "encode",
+						Kind:            workercore.ModelDeploymentRoleKindEncode,
+						AcceleratorType: at.Name,
+						Replicas:        1,
+						ReplicaSize:     1,
+						Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+					},
+					{
+						Name:            "prefill",
+						Kind:            workercore.ModelDeploymentRoleKindPrefill,
+						AcceleratorType: at.Name,
+						Replicas:        1,
+						ReplicaSize:     1,
+						ExtraArgs:       []string{"--data-parallel-size", "2"},
+						Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty2)},
+					},
+					{
+						Name:            "decode",
+						Kind:            workercore.ModelDeploymentRoleKindDecode,
+						AcceleratorType: at.Name,
+						Replicas:        1,
+						ReplicaSize:     1,
+						Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+					},
+				},
+				expectedLocalDP:    2,
+				expectedReplayPort: 5559,
+				publishingRoles:    []string{"prefill"},
+			},
+			{
+				name: "PD Decode(dp=4) Prefill(dp=1) uses replayPort 5558",
+				roles: []workercore.ModelDeploymentRole{
+					{
+						Name:            "decode",
+						Kind:            workercore.ModelDeploymentRoleKindDecode,
+						AcceleratorType: at.Name,
+						Replicas:        1,
+						ReplicaSize:     1,
+						ExtraArgs:       []string{"--data-parallel-size", "4"},
+						Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty4)},
+					},
+					{
+						Name:            "prefill",
+						Kind:            workercore.ModelDeploymentRoleKindPrefill,
+						AcceleratorType: at.Name,
+						Replicas:        1,
+						ReplicaSize:     1,
+						Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+					},
+				},
+				expectedLocalDP:    1,
+				expectedReplayPort: 5558,
+				publishingRoles:    []string{"prefill"},
+			},
+			{
+				name: "multi-Server ServerA(dp=1) ServerB(dp=2) agrees on replayPort 5559",
+				roles: []workercore.ModelDeploymentRole{
+					{
+						Name:            "server-a",
+						Kind:            workercore.ModelDeploymentRoleKindServer,
+						AcceleratorType: at.Name,
+						Replicas:        1,
+						ReplicaSize:     1,
+						Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+					},
+					{
+						Name:            "server-b",
+						Kind:            workercore.ModelDeploymentRoleKindServer,
+						AcceleratorType: at.Name,
+						Replicas:        1,
+						ReplicaSize:     1,
+						ExtraArgs:       []string{"--data-parallel-size", "2"},
+						Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty2)},
+					},
+				},
+				expectedLocalDP:    2,
+				expectedReplayPort: 5559,
+				publishingRoles:    []string{"server-a", "server-b"},
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.KVCache = nil
+					md.Spec.Engine.Version = "0.32.0"
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Roles = tc.roles
+				})
+				assert.Equal(t, tc.expectedLocalDP, ModelDeploymentLLMDRouterKVEventsLocalDP(md))
+
+				cli := newModelDeploymentClient(md, at)
+				r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+				pods, err := r.renderModelDeploymentRolePods(context.Background(), md, nil, nil, nil, false)
+				require.NoError(t, err)
+
+				svcs := renderModelDeploymentServices(md, nil, nil)
+				svcByName := map[string]*core.Service{}
+				for _, s := range svcs {
+					svcByName[s.Name] = s
+				}
+
+				routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+				require.NoError(t, err)
+				eppYAML := routerObjs.ConfigMap.Data[modelDeploymentRouterConfigKey]
+				assert.Contains(t, eppYAML, "socketPort: 5557")
+				assert.Contains(t, eppYAML, fmt.Sprintf("replaySocketPort: %d", tc.expectedReplayPort))
+
+				contractByRole := map[string]workercore.ModelDeploymentRouterRoleStatus{}
+				for _, rs := range routerObjs.Contract.Roles {
+					contractByRole[rs.Name] = rs
+				}
+
+				expectedReplayArg := fmt.Sprintf(`"replay_endpoint":"tcp://*:%d"`, tc.expectedReplayPort)
+				for _, roleName := range tc.publishingRoles {
+					pod := pods[roleName][0][0]
+					cmd := strings.Join(pod.Spec.Containers[0].Command, " ")
+					assert.Contains(t, cmd, `"endpoint":"tcp://*:5557"`)
+					assert.Contains(t, cmd, expectedReplayArg)
+					assert.Contains(t, pod.Spec.Containers[0].Ports, core.ContainerPort{
+						Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557,
+					})
+					assert.Contains(t, pod.Spec.Containers[0].Ports, core.ContainerPort{
+						Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: tc.expectedReplayPort,
+					})
+
+					roleSvc := svcByName[md.Name+"-"+roleName]
+					require.NotNil(t, roleSvc)
+					assert.Contains(t, roleSvc.Spec.Ports, core.ServicePort{
+						Name: "kv-replay", Protocol: core.ProtocolTCP,
+						Port: tc.expectedReplayPort, TargetPort: intstr.FromInt32(tc.expectedReplayPort),
+					})
+
+					rs := contractByRole[roleName]
+					require.NotNil(t, rs.KVEvents)
+					assert.Equal(t,
+						fmt.Sprintf("tcp://%s-%s.%s.svc:%d", md.Name, roleName, md.Namespace, tc.expectedReplayPort),
+						rs.KVEvents.ReplayEndpoint,
+					)
+				}
+			})
+		}
+	})
 }
 
 func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
@@ -660,7 +820,7 @@ func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
 		_, err := reconcileModelDeployment(t, cli)
 		require.NoError(t, err)
 
-		// Verify rendered SGLang worker Pod has --kv-events-config with topic "kv-events" and 5557/5558 ports.
+		// Verify rendered SGLang worker Pod has --kv-events-config with topic "kv-events" and 5557/5559 ports (attn-dp-size=2).
 		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 		pods, err := r.renderModelDeploymentRolePods(context.Background(), md, nil, nil, nil, true)
 		require.NoError(t, err)
@@ -668,8 +828,12 @@ func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
 		workerCmd := strings.Join(workerPod.Spec.Containers[0].Command, " ")
 		assert.Contains(t, workerCmd, "--kv-events-config")
 		assert.Contains(t, workerCmd, `"topic":"kv-events"`)
+		assert.Contains(t, workerPod.Spec.Containers[0].Ports, core.ContainerPort{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557})
+		assert.Contains(t, workerPod.Spec.Containers[0].Ports, core.ContainerPort{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5559})
 
 		// Verify Services: ONLY qwen-main has role-kind=server; qwen, qwen-main-r0/r1, and qwen-router do NOT.
+		// sgl-router per-role Services must expose ONLY the HTTP serving port (no 5557/5559) so
+		// Kubernetes EndpointSlice MD5 port sorting never puts a ZMQ port at ports[0].
 		svcList := new(core.ServiceList)
 		require.NoError(t, cli.List(context.Background(), svcList, ctrlcli.InNamespace(md.Namespace)))
 		byName := map[string]*core.Service{}
@@ -684,7 +848,12 @@ func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
 		assert.NotContains(t, byName["qwen"].Labels, modelDeploymentLabelKeyRoleKind)
 		assert.NotContains(t, byName["qwen-main-r0"].Labels, modelDeploymentLabelKeyRoleKind)
 		assert.NotContains(t, byName["qwen-router"].Labels, modelDeploymentLabelKeyRoleKind)
-		assert.Len(t, byName["qwen-main"].Spec.Ports, 3, "role Service exposes http + kv-events + kv-replay")
+		assert.Equal(t, []core.ServicePort{{
+			Name:       modelDeploymentDefaultPortName,
+			Protocol:   core.ProtocolTCP,
+			Port:       modelDeploymentDefaultPort,
+			TargetPort: intstr.FromInt32(modelDeploymentDefaultPort),
+		}}, byName["qwen-main"].Spec.Ports, "sgl-router role Service must expose only the HTTP serving port")
 
 		// Verify Role RBAC grants discovery.k8s.io/endpointslices get,list,watch.
 		roleObj := new(rbac.Role)
@@ -783,6 +952,8 @@ func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
 
 		assert.NotContains(t, pods["decode"][0][0].Spec.Containers[0].Command, "--kv-events-config")
 		assert.NotContains(t, pods["encode"][0][0].Spec.Containers[0].Command, "--kv-events-config")
+		assert.Contains(t, pods["prefill"][0][0].Spec.Containers[0].Ports, core.ContainerPort{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557})
+		assert.Contains(t, pods["prefill"][0][0].Spec.Containers[0].Ports, core.ContainerPort{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558})
 
 		svcs := renderModelDeploymentServices(md, nil, nil)
 		svcByName := map[string]*core.Service{}
@@ -793,6 +964,12 @@ func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
 		assert.Equal(t, "encode", svcByName["qwen-encode"].Labels[modelDeploymentLabelKeyRoleKind])
 		assert.Equal(t, "prefill", svcByName["qwen-prefill"].Labels[modelDeploymentLabelKeyRoleKind])
 		assert.Equal(t, "decode", svcByName["qwen-decode"].Labels[modelDeploymentLabelKeyRoleKind])
+		assert.Equal(t, []core.ServicePort{{
+			Name:       modelDeploymentDefaultPortName,
+			Protocol:   core.ProtocolTCP,
+			Port:       modelDeploymentDefaultPort,
+			TargetPort: intstr.FromInt32(modelDeploymentDefaultPort),
+		}}, svcByName["qwen-prefill"].Spec.Ports, "sgl-router prefill Service must expose only the HTTP serving port")
 
 		routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 		require.NoError(t, err)

@@ -266,6 +266,26 @@ func modelDeploymentLLMDRouterDisablesKVEvents(md *workercore.ModelDeployment) b
 	return false
 }
 
+// ModelDeploymentLLMDRouterKVEventsLocalDP resolves the deployment-wide DP publisher rank span
+// across KV-event-publishing roles for llm-d-router, which accepts a single replaySocketPort in
+// epp.yaml. Non-publishing roles (Encode, Decode, take-over) are excluded.
+func ModelDeploymentLLMDRouterKVEventsLocalDP(md *workercore.ModelDeployment) int32 {
+	if md == nil {
+		return 1
+	}
+	var maxLocalDP int32 = 1
+	for i := range md.Spec.Roles {
+		r := &md.Spec.Roles[i]
+		if !ModelDeploymentRolePublishesKVEvents(md, r) {
+			continue
+		}
+		if dp := ModelDeploymentRoleKVEventsLocalDP(md, r); dp > maxLocalDP {
+			maxLocalDP = dp
+		}
+	}
+	return maxLocalDP
+}
+
 // ModelDeploymentKVEventsLocalDP resolves the effective DP publisher rank span for KV event port
 // selection. Because llm-d-router configures a single deployment-wide replaySocketPort in epp.yaml,
 // roles behind llm-d-router share the maximum DP publisher width across publishing roles.
@@ -276,17 +296,7 @@ func ModelDeploymentKVEventsLocalDP(
 		return 1
 	}
 	if md.Spec.Router != nil && md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD {
-		var maxLocalDP int32 = 1
-		for i := range md.Spec.Roles {
-			r := &md.Spec.Roles[i]
-			if !ModelDeploymentRolePublishesKVEvents(md, r) {
-				continue
-			}
-			if dp := ModelDeploymentRoleKVEventsLocalDP(md, r); dp > maxLocalDP {
-				maxLocalDP = dp
-			}
-		}
-		return maxLocalDP
+		return ModelDeploymentLLMDRouterKVEventsLocalDP(md)
 	}
 	return ModelDeploymentRoleKVEventsLocalDP(md, role)
 }

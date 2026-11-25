@@ -167,14 +167,14 @@ flowchart TD
 
 `KVEvents` publishing is orthogonal to `KVCache` and `KVTransfer`. Publishing activates only for the
 router/engine pairs below, opening ZMQ publisher port `5557` (`kv-events`) and replay port `5558`
-(`kv-replay`, or `5557 + dpSpan` when global `dpSpan > 1`) on the publishing role's `Pod` and
-per-role `Service`.
+(`kv-replay`, or `5557 + dpSpan` when global `dpSpan > 1`) on the publishing role's `Pod` and,
+except under `sgl-router`, its per-role `Service`.
 
 | Router | Engine | Engine Version | Publishing roles | Injected config | Condition (`KVEventsPublishing`) |
 |---|---|---|---|---|---|
 | `llm-d-router` | `vLLM`, `vLLM-Ascend` | All | *Server*, *Prefill* (single-`Pod` DP only) | `--kv-events-config` (`enable_kv_cache_events: true`, `publisher: "zmq"`, `tcp://*:5557`, `tcp://*:<replayPort>`, `buffer_steps: 10000`, `hwm: 100000`, `max_queue_size: 100000`, `topic: "kv@pod@<spec.model.name>"`), ports `5557`/`<replayPort>`; router subscribes with `topicFilter: "kv@"` (*`spec.model.name`* must not contain `@`; multi-`Pod` DP falls back to `approx-prefix-cache-producer`) | `True/Publishing` (`True/NotApplicable` on multi-`Pod` DP) |
 | `llm-d-router` | `SGLang` | All | None | Router uses `approx-prefix-cache-producer` (`llm-d-router@v1.0.0` `token-producer` requires vLLM `/v1/chat/completions/render`, which SGLang does not implement) | `True/NotApplicable` |
-| `sgl-router` | `SGLang` | All | *Server*, *Prefill* (including store-less *Server*) | `--kv-events-config` (`publisher: "zmq"`, `tcp://*:5557`, `tcp://*:<replayPort>`, `topic: "kv-events"`), emitted before `--encoder-urls`, ports `5557`/`<replayPort>` | `True/Publishing` |
+| `sgl-router` | `SGLang` | All | *Server*, *Prefill* (including store-less *Server*) | `--kv-events-config` (`publisher: "zmq"`, `tcp://*:5557`, `tcp://*:<replayPort>`, `topic: "kv-events"`), emitted before `--encoder-urls`, `Pod` ports `5557`/`<replayPort>` (per-role `Service` exposes only the HTTP serving port) | `True/Publishing` |
 | `vllm-router` (default `cache_aware`) | `vLLM`, `vLLM-Ascend` | All | None | No KV events flags or ports | `True/NotApplicable` |
 | `vllm-router` (`kv_aware` active) | `vLLM`, `vLLM-Ascend` | `>= 0.31.0` (`< 0.31.0` refused) | *Server* (`--policy`) or *Prefill* (`--policy` / `--prefill-policy`; never *Decode*) | `--kv-events-config` (`topic: "kv@pod@<spec.model.name>"`, `tcp://*:5557`, `tcp://*:<replayPort>`), `--prefix-caching-hash-algo sha256_cbor` (conditionally Owned), `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0` (conditionally Owned, capacity-neutral), ports `5557`/`<replayPort>` | `True/Publishing` |
 | `sglang-gateway` (deprecated, frozen) | `SGLang` | All | None | None | `True/NotApplicable` |
@@ -184,12 +184,13 @@ per-role `Service`.
   and `max(DataParallel, AttentionDataParallel, DWDPSize, 1)` on `SGLang`, never divided by
   `--nnodes`). Roles with `dpSpan > 1` use `replayPort = 5557 + dpSpan` and reserve
   `[5557 .. 5557 + 2*dpSpan - 1]` so `PUB` and `ROUTER` sockets stay disjoint across every rank.
-- **`llm-d-router` DP and topic limits**: `llm-d-router` passes a single `--endpoint-target-ports`
-  (`RankIndex=0`, port `5557`), so multi-`Pod` `vLLM` DP roles (*External*, *Hybrid*, or multi-node
-  DP) disable KV events (`True/NotApplicable`, `approx-prefix-cache-producer`; use `vllm-router`
-  `kv_aware` for dynamic `GET /kv_event_sources` discovery), and single-`Pod` `vLLM` multi-DP
-  subscribes to rank `0` only. Admission rejects `@` in *`spec.model.name`* when `llm-d-router` KV
-  events are active because `parseTopic` splits `"kv@pod@<model>"` on `@`.
+- **`llm-d-router` DP limits**: `llm-d-router` passes a single `--endpoint-target-ports`
+  (`RankIndex=0`, port `5557`) and one `replaySocketPort` (from the max `dpSpan` across publishing
+  roles, excluding *Encode*/*Decode*). Multi-`Pod` `vLLM` DP disables KV events (`True/NotApplicable`,
+  `approx-prefix-cache-producer`; use `vllm-router` `kv_aware` for `GET /kv_event_sources`), and
+  single-`Pod` multi-DP subscribes to rank `0` only.
+- **`llm-d-router` topic delimiter**: Admission rejects `@` in *`spec.model.name`* when
+  `llm-d-router` KV events are active because `parseTopic` splits `"kv@pod@<model>"` on `@`.
 - **Conditional ownership (`vllm-router` `kv_aware`)**: `--prefix-caching-hash-algo` and
   `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES` are refused in user args/env only on *Server*/*Prefill* roles
   where `kv_aware` is active, and stripped from user env in controller merge.
@@ -223,7 +224,7 @@ Admission enforces a strict engine-router matrix: `sgl-router` and deprecated `s
 | `llm-d-router` | Owned | Managed router | `--endpoint-selector`, `--endpoint-target-ports`, `--config-file`, `--secure-serving=false`, `--grpc-health-port`, `--metrics-endpoint-auth=false` | Mounted config sets `precise-prefix-cache-producer` (`topicFilter: "kv@"`) for `vLLM`/`vLLM-Ascend` and `approx-prefix-cache-producer` for `SGLang`. |
 | `routing-proxy` | Owned | *Decode* sidecar under `llm-d-router` | `--kv-connector=mooncake` + `--mooncake-bootstrap-port=8998` (vLLM Mooncake), `--kv-connector=nixlv2` (vLLM NIXL or Ascend), `--kv-connector=sglang` (SGLang), plus `--ec-connector=ec-nixl` or `ec-example` on vLLM *EPD* | Intercepts *Decode* service port and forwards to engine loopback `:8200`. |
 | `vllm-router` | Owned | Managed router | `--host`, `--port`, `--prometheus-host=0.0.0.0`, `--prometheus-port=9090`, `--kv-connector=mooncake|nixl`, `--service-discovery`, `--service-discovery-namespace`, `--service-discovery-port`, `--selector` (or `--vllm-pd-disaggregation`, `--epd-config`, `--prefill-selector`, `--decode-selector`), optional `--request-timeout-secs` | Runs behind Envoy allowlist sidecar (`:8000` API, `:9091` `/observer/endpoints`). |
-| `sgl-router` | Owned | Managed router (`SGLang`) | `--host`, `--port`, `--model-id=<spec.model.name>`, `--chat-routing=reorg`, `--no-tokenizer` (conditional), `--service-discovery`, `--service-discovery-namespace`, `--selector` (or `--prefill-selector` + `--decode-selector`; no `--pd-disaggregation`, `--service-discovery-port`, or `--prometheus-port`), `--dp-aware` (External DP and multi-DP *PD*), optional `--request-timeout-secs` | Uses Kubernetes `EndpointSlice` discovery (`discovery.k8s.io/endpointslices` `get, list, watch` RBAC; per-role `Service` carries `modeldeployment.gpustack.ai/role-kind`). Runs behind Envoy (`:8000` API, `:9090` `/metrics` proxy, `:9091` `/observer/endpoints` via observer patch). |
+| `sgl-router` | Owned | Managed router (`SGLang`) | `--host`, `--port`, `--model-id=<spec.model.name>`, `--chat-routing=reorg`, `--no-tokenizer` (conditional), `--service-discovery`, `--service-discovery-namespace`, `--selector` (or `--prefill-selector` + `--decode-selector`; no `--pd-disaggregation`, `--service-discovery-port`, or `--prometheus-port`), `--dp-aware` (External DP and multi-DP *PD*), optional `--request-timeout-secs` | Uses Kubernetes `EndpointSlice` discovery (`discovery.k8s.io/endpointslices` `get, list, watch` RBAC; per-role `Service` carries `modeldeployment.gpustack.ai/role-kind` and exposes only the HTTP serving port, while publishing `Pod`s expose `5557`/`<replayPort>`). Runs behind Envoy (`:8000` API, `:9090` `/metrics` proxy, `:9091` `/observer/endpoints` via observer patch). |
 | `sglang-gateway` | Owned | Managed router (`SGLang`, deprecated, frozen at `gateway-v0.3.1`) | `--host`, `--port`, `--prometheus-host=0.0.0.0`, `--prometheus-port=9090`, `--service-discovery`, `--service-discovery-namespace`, `--service-discovery-port`, `--selector` (or `--pd-disaggregation`, `--prefill-selector`, `--decode-selector`), `--dp-aware` (undivided External DP only), optional `--request-timeout-secs` | Frozen; prefer `sgl-router` for new SGLang deployments. |
 
 - **`sgl-router` `--no-tokenizer` omission**: Emitted by default so `sgl-router` starts offline in

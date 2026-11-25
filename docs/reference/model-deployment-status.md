@@ -448,7 +448,7 @@ crashes remains `True`. *Encode* holds no KV cache and produces no cache blocks,
 | Value | Reason | Meaning |
 |---|---|---|
 | `True` | `Publishing` | every producing role is configured to publish |
-| `True` | `NotApplicable` | an unrouted deployment declares only *Server* roles |
+| `True` | `NotApplicable` | no router consumes cache events: unrouted *Server*-only deployments, deprecated `sglang-gateway`, `llm-d-router` with `SGLang` or multi-`Pod` DP `vLLM`, or `vllm-router` without `kv_aware` |
 | `False` | `PublisherDisabled` | a producing role's rendered `Pod`s do not enable publishing |
 | `False` | `NoRouter` | a *prefill/decode* pair has no router to consume events |
 | `Unknown` | `RoleUnmanaged` | a producing role replaced its command line, so the operator cannot inspect what it does |
