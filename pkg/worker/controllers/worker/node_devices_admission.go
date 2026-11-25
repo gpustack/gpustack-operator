@@ -725,7 +725,8 @@ func withoutRoles(demands []familyDemand) []familyDemand {
 func fitExclusiveDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (kueue.CheckState, string) {
 	var fit int32
 	for i := range cards {
-		if budgets[i].whole || budgets[i].shares > 0 || budgets[i].slices > 0 || !cards[i].coveredBy(d) ||
+		if budgets[i].whole || budgets[i].shares > 0 || budgets[i].slices > 0 ||
+			cards[i].capability.Unhealthy || !cards[i].coveredBy(d) ||
 			!cards[i].servesFamily(d.family) || cards[i].remaining < nodefeature.ResourceMaxUnits {
 			continue
 		}
@@ -826,7 +827,7 @@ func fitSlicedDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (
 // shared mode, otherwise one per share of its remaining units.
 func (c cardLedger) freeShares() int32 {
 	const share = nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize
-	if !c.servesFamily(nodefeature.ResourceFamilyShared) ||
+	if c.capability.Unhealthy || !c.servesFamily(nodefeature.ResourceFamilyShared) ||
 		(c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeShared) {
 		return 0
 	}
@@ -834,10 +835,10 @@ func (c cardLedger) freeShares() int32 {
 }
 
 // freeSliceUnits returns the units the card can still give a logical slice before any demand of
-// this Workload is charged: -1 unless it can serve a logical slice, is free or already held in
-// sliced mode, and has a free slot left, otherwise its remaining units.
+// this Workload is charged: -1 unless it is healthy, can serve a logical slice, is free or already
+// held in sliced mode, and has a free slot left, otherwise its remaining units.
 func (c cardLedger) freeSliceUnits() int32 {
-	if !c.servesFamily(nodefeature.ResourceFamilySliced) ||
+	if c.capability.Unhealthy || !c.servesFamily(nodefeature.ResourceFamilySliced) ||
 		(c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeSliced) ||
 		c.freeSlots() <= 0 {
 		return -1
@@ -874,6 +875,9 @@ func fitPartitionDemand(cards []cardLedger, budgets []cardBudget, d familyDemand
 		partitionCards++
 		if partitionProfilesHavePlacements(c.capability.PhysicalSliced.Profiles) {
 			ledgerReady++
+		}
+		if c.capability.Unhealthy {
+			continue
 		}
 		if c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModePartitioned {
 			continue // held whole-card by an exclusive/shared allocation

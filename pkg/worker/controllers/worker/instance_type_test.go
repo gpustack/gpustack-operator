@@ -666,6 +666,59 @@ func TestAcceleratorViews_PartitionProfileLedgerMultiNode(t *testing.T) {
 	}, partitioned.RemainingProfiles, "remainingProfiles")
 }
 
+func TestAcceleratorViews_ExcludesUnhealthyFromRemaining(t *testing.T) {
+	t.Run("unpartitioned unhealthy card keeps Capacity but contributes zero Remaining and OnceMaxRequest", func(t *testing.T) {
+		healthy := unpartitionedCard(cardFree())
+		unhealthy := unpartitionedCard(cardFree())
+		unhealthy.capability.Unhealthy = true
+		dev := nodeDevicesWithCapability("a", healthy, unhealthy)
+
+		exclusive, shared, sliced, _ := getAcceleratorResources([]workercore.Devices{dev}, testAcceleratorKey)
+		wantView(t, exclusive, 1, 1, 2, "exclusive")
+		wantView(t, shared, 1, 10, 20, "shared")
+		wantView(t, sliced, 100, 100, 200, "sliced")
+	})
+
+	t.Run("partitioned unhealthy card keeps Capacity and AllocatedProfiles with zero Remaining", func(t *testing.T) {
+		healthy := catalogPartitionedCard(h100Catalog, cardPartitionedLedger(
+			profileCount("1g.10gb", 7), profileCount("3g.40gb", 2),
+		))
+		unhealthy := catalogPartitionedCard(h100Catalog, cardPartitionedLedgerWithAllocated(
+			[]workercore.AcceleratorProfileCount{profileCount("1g.10gb", 5)},
+			[]workercore.AcceleratorProfileCount{profileCount("1g.10gb", 2)},
+		))
+		unhealthy.capability.Unhealthy = true
+
+		dev := nodeDevicesWithCapability("a", healthy, unhealthy)
+		_, _, _, partitioned := getAcceleratorResources([]workercore.Devices{dev}, testAcceleratorKey)
+		wantView(t, partitioned.InstanceTypeResource, 1, 7, 14, "partitioned")
+		assert.Equal(t, []workercore.AcceleratorProfileCount{profileCount("1g.10gb", 5)}, partitioned.AllocatedProfiles)
+		assert.Equal(t, []workercore.AcceleratorProfileCount{
+			profileCount("1g.10gb", 7), profileCount("1g.20gb", 0), profileCount("2g.20gb", 0),
+			profileCount("3g.40gb", 2), profileCount("4g.40gb", 0), profileCount("7g.80gb", 0),
+		}, partitioned.RemainingProfiles)
+
+		// All partitioned cards unhealthy: onceMaxRequest and remaining drop to zero.
+		allUnhealthy := nodeDevicesWithCapability("a", unhealthy)
+		_, _, _, partDown := getAcceleratorResources([]workercore.Devices{allUnhealthy}, testAcceleratorKey)
+		wantView(t, partDown.InstanceTypeResource, 0, 0, 7, "all-unhealthy partitioned")
+		assert.Equal(t, []workercore.AcceleratorProfileCount{profileCount("1g.10gb", 5)}, partDown.AllocatedProfiles)
+
+		// Idle unhealthy partitioned card with nil RemainingProfiles (PartitionLedgerReady == false)
+		// must not fall back to the static catalog ceiling.
+		idleUnhealthy := catalogPartitionedCard(h100Catalog, cardPartitionedLedgerWithAllocated(nil, nil))
+		idleUnhealthy.capability.Unhealthy = true
+		idleDev := nodeDevicesWithCapability("a", idleUnhealthy)
+		_, _, _, partIdleDown := getAcceleratorResources([]workercore.Devices{idleDev}, testAcceleratorKey)
+		wantView(t, partIdleDown.InstanceTypeResource, 0, 0, 7, "idle unhealthy partitioned")
+		assert.Empty(t, partIdleDown.AllocatedProfiles)
+		assert.Equal(t, []workercore.AcceleratorProfileCount{
+			profileCount("1g.10gb", 0), profileCount("1g.20gb", 0), profileCount("2g.20gb", 0),
+			profileCount("3g.40gb", 0), profileCount("4g.40gb", 0), profileCount("7g.80gb", 0),
+		}, partIdleDown.RemainingProfiles)
+	})
+}
+
 // TestPublishPartitionProfileNames pins the profile-name boundary on the user-facing side of
 // the status. All three partition views are assembled from the Devices ledger, which carries
 // the manufacturer's own spelling, but they are the menu a user reads to pick a profile — and

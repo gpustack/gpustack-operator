@@ -2843,3 +2843,169 @@ func TestNodeDevicesAdmission_ReadsTheNodeTASAssigned(t *testing.T) {
 		})
 	}
 }
+
+func TestFitDemand_ExcludesUnhealthyCards(t *testing.T) {
+	const (
+		whole = nodefeature.ResourceMaxUnits
+		half  = whole / 2
+	)
+	logicalCap := workercore.AcceleratorStatus{
+		LogicalSliced: workercore.AcceleratorLogicalSliced{Count: 10},
+	}
+	unhealthyLogical := logicalCap
+	unhealthyLogical.Unhealthy = true
+
+	partCap := workercore.AcceleratorStatus{
+		PhysicalSliced: workercore.AcceleratorPhysicalSliced{
+			Count: 7,
+			Profiles: []workercore.AcceleratorPhysicalSlicedProfile{{
+				Name:       "1g.10gb",
+				Count:      7,
+				Placements: []workercore.AcceleratorPlacement{{Start: 0, Length: 1}},
+			}},
+		},
+	}
+	unhealthyPart := partCap
+	unhealthyPart.Unhealthy = true
+
+	const flavor = kueue.ResourceFlavorReference("test-flavor")
+	flavors := sets.New(flavor)
+
+	cases := []struct {
+		name        string
+		cards       []cardLedger
+		demand      familyDemand
+		want        kueue.CheckState
+		wantMessage string
+	}{
+		{
+			name: "exclusive skips unhealthy card and retries when healthy count is short",
+			cards: []cardLedger{
+				{flavors: flavors, hostname: "n1", capability: logicalCap, remaining: whole},
+				{flavors: flavors, hostname: "n1", capability: unhealthyLogical, remaining: whole},
+			},
+			demand: familyDemand{flavor: flavor, family: nodefeature.ResourceFamilyExclusive, cards: 2},
+			want:   kueue.CheckStateRetry,
+		},
+		{
+			name: "exclusive succeeds when healthy cards satisfy demand",
+			cards: []cardLedger{
+				{flavors: flavors, hostname: "n1", capability: logicalCap, remaining: whole},
+				{flavors: flavors, hostname: "n1", capability: unhealthyLogical, remaining: whole},
+			},
+			demand: familyDemand{flavor: flavor, family: nodefeature.ResourceFamilyExclusive, cards: 1},
+			want:   kueue.CheckStateReady,
+		},
+		{
+			name: "shared skips unhealthy card",
+			cards: []cardLedger{
+				{flavors: flavors, hostname: "n1", capability: unhealthyLogical, remaining: whole},
+			},
+			demand: familyDemand{
+				flavor:      flavor,
+				family:      nodefeature.ResourceFamilyShared,
+				cards:       1,
+				sharedNeeds: []sharedNeed{{cards: 1, containers: 1}},
+			},
+			want: kueue.CheckStateRetry,
+		},
+		{
+			name: "shared succeeds when healthy sibling satisfies demand",
+			cards: []cardLedger{
+				{flavors: flavors, hostname: "n1", capability: logicalCap, remaining: whole},
+				{flavors: flavors, hostname: "n1", capability: unhealthyLogical, remaining: whole},
+			},
+			demand: familyDemand{
+				flavor:      flavor,
+				family:      nodefeature.ResourceFamilyShared,
+				cards:       1,
+				sharedNeeds: []sharedNeed{{cards: 1, containers: 1}},
+			},
+			want: kueue.CheckStateReady,
+		},
+		{
+			name: "sliced skips unhealthy card",
+			cards: []cardLedger{
+				{flavors: flavors, hostname: "n1", capability: unhealthyLogical, remaining: whole},
+			},
+			demand: familyDemand{flavor: flavor, family: nodefeature.ResourceFamilySliced, cards: 1, unitsPerCard: half},
+			want:   kueue.CheckStateRetry,
+		},
+		{
+			name: "sliced succeeds when healthy sibling satisfies demand",
+			cards: []cardLedger{
+				{flavors: flavors, hostname: "n1", capability: logicalCap, remaining: whole},
+				{flavors: flavors, hostname: "n1", capability: unhealthyLogical, remaining: whole},
+			},
+			demand: familyDemand{flavor: flavor, family: nodefeature.ResourceFamilySliced, cards: 1, unitsPerCard: half},
+			want:   kueue.CheckStateReady,
+		},
+		{
+			name: "partitioned skips unhealthy card even with non-empty remainingProfiles",
+			cards: []cardLedger{
+				{
+					manufacturer:      nodefeature.ManufacturerNVIDIA,
+					flavors:           flavors,
+					hostname:          "n1",
+					capability:        partCap,
+					remainingProfiles: []workercore.AcceleratorProfileCount{{Name: "1g.10gb", Count: 2}},
+				},
+				{
+					manufacturer:      nodefeature.ManufacturerNVIDIA,
+					flavors:           flavors,
+					hostname:          "n1",
+					capability:        unhealthyPart,
+					remainingProfiles: []workercore.AcceleratorProfileCount{{Name: "1g.10gb", Count: 7}},
+				},
+			},
+			demand: familyDemand{flavor: flavor, family: nodefeature.ResourceFamilyPartitioned, cards: 3, profile: "1g.10gb"},
+			want:   kueue.CheckStateRetry,
+		},
+		{
+			name: "partitioned succeeds on healthy sibling count",
+			cards: []cardLedger{
+				{
+					manufacturer:      nodefeature.ManufacturerNVIDIA,
+					flavors:           flavors,
+					hostname:          "n1",
+					capability:        partCap,
+					remainingProfiles: []workercore.AcceleratorProfileCount{{Name: "1g.10gb", Count: 2}},
+				},
+				{
+					manufacturer:      nodefeature.ManufacturerNVIDIA,
+					flavors:           flavors,
+					hostname:          "n1",
+					capability:        unhealthyPart,
+					remainingProfiles: []workercore.AcceleratorProfileCount{{Name: "1g.10gb", Count: 7}},
+				},
+			},
+			demand: familyDemand{flavor: flavor, family: nodefeature.ResourceFamilyPartitioned, cards: 2, profile: "1g.10gb"},
+			want:   kueue.CheckStateReady,
+		},
+		{
+			name: "all partitioned cards unhealthy retries with partition shortage message",
+			cards: []cardLedger{
+				{
+					manufacturer:      nodefeature.ManufacturerNVIDIA,
+					flavors:           flavors,
+					hostname:          "n1",
+					capability:        unhealthyPart,
+					remainingProfiles: []workercore.AcceleratorProfileCount{{Name: "1g.10gb", Count: 7}},
+				},
+			},
+			demand:      familyDemand{flavor: flavor, family: nodefeature.ResourceFamilyPartitioned, cards: 1, profile: "1g.10gb"},
+			want:        kueue.CheckStateRetry,
+			wantMessage: partitionVerdictMessage(kueue.CheckStateRetry, "1g.10gb", nil),
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, msg := fitDemand(c.cards, make([]cardBudget, len(c.cards)), c.demand)
+			assert.Equal(t, c.want, got)
+			if c.wantMessage != "" {
+				assert.Equal(t, c.wantMessage, msg)
+			}
+		})
+	}
+}
