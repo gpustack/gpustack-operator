@@ -269,9 +269,34 @@ func TestVLLMKVEventsTopicForModel(t *testing.T) {
 	assert.Equal(t, int32(5558), KVEventsReplayPortForLocalDP(1))
 	assert.Equal(t, int32(5559), KVEventsReplayPortForLocalDP(2))
 	assert.Equal(t, int32(5561), KVEventsReplayPortForLocalDP(4))
+	assert.Equal(t, VLLMKVEventsPort+KVEventsMaxLocalDP, KVEventsReplayPortForLocalDP(KVEventsMaxLocalDP))
+	assert.Equal(t, int32(0), KVEventsReplayPortForLocalDP(KVEventsMaxLocalDP+1))
 
 	assert.Equal(t, []int32{5557, 5558}, KVEventsReservedPortsForLocalDP(1))
 	assert.Equal(t, []int32{5557, 5558, 5559, 5560}, KVEventsReservedPortsForLocalDP(2))
+	maxPorts := KVEventsReservedPortsForLocalDP(KVEventsMaxLocalDP)
+	require.NotEmpty(t, maxPorts)
+	assert.Equal(t, VLLMKVEventsPort+2*KVEventsMaxLocalDP-1, maxPorts[len(maxPorts)-1])
+	assert.LessOrEqual(t, maxPorts[len(maxPorts)-1], int32(65535))
+	assert.Nil(t, KVEventsReservedPortsForLocalDP(KVEventsMaxLocalDP+1))
+
+	require.NoError(t, ValidateKVEventsLocalDP(KVEventsMaxLocalDP))
+	overflowErr := ValidateKVEventsLocalDP(KVEventsMaxLocalDP + 1)
+	var refusal *RefusalError
+	require.ErrorAs(t, overflowErr, &refusal)
+	assert.Equal(t, ReasonKVEventsPortOverflow, refusal.Reason)
+
+	for _, engine := range []Engine{EngineVLLM, EngineSGLang} {
+		_, err := Render(Input{
+			Engine:          engine,
+			PublishKVEvents: true,
+			KVEventsHost:    "role.ns.svc",
+			KVEventsLocalDP: KVEventsMaxLocalDP + 1,
+		})
+		var renderRefusal *RefusalError
+		require.ErrorAs(t, err, &renderRefusal)
+		assert.Equal(t, ReasonKVEventsPortOverflow, renderRefusal.Reason)
+	}
 
 	legacy := VLLMKVEvents("role.ns.svc")
 	assert.Equal(t, &KVEvents{

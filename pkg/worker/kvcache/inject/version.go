@@ -10,6 +10,8 @@ import (
 
 // runnerTagPattern matches gpustack/runner image tags of the form:
 // {backend}{backend_version}[-{backend_variant}]-{service}{service_version}[-{suffix}].
+// The [XY0-9.]+ class mirrors gpustack/runner to match both HostX.Y/hostX.Y host tags and
+// numeric backend versions such as cuda12.4-vllm0.30.0.
 var runnerTagPattern = regexp.MustCompile(
 	`^(?:(?i:host)|cann|corex|cuda|dtk|hggc|maca|musa|rocm)[XY0-9.]+(?:-[A-Za-z0-9_]+)?-(vllm|sglang)([A-Za-z0-9_.]+)(?:-[A-Za-z0-9_.-]+)?$`,
 )

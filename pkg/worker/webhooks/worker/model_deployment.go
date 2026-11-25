@@ -1372,6 +1372,13 @@ func validateModelDeploymentRolePorts(
 ) field.ErrorList {
 	var errs field.ErrorList
 
+	if modelDeploymentRolePublishesKVEvents(md, role) {
+		localDP := workerctrl.ModelDeploymentKVEventsLocalDP(md, role)
+		if err := inject.ValidateKVEventsLocalDP(localDP); err != nil {
+			errs = append(errs, field.Invalid(rolePath.Child("extraArgs"), localDP, err.Error()))
+		}
+	}
+
 	// The render places these on the same container the role's declared ports describe, and the
 	// declared set is the whole collision surface of a role declaring any: its own --port is held to
 	// the first of them everywhere but on a direct decoder, which reserves nothing. A role declaring

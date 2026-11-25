@@ -94,20 +94,35 @@ func VLLMKVEvents(host string) *KVEvents {
 	return KVEventsForTopic(host, VLLMKVEventsTopic)
 }
 
+// KVEventsMaxLocalDP is the maximum per-Pod DP publisher span whose ZMQ PUB ports
+// [5557 .. 5557+localDP-1] and ROUTER replay ports [5557+localDP .. 5557+2*localDP-1] fit inside
+// the TCP port range [1, 65535] without overlap or overflow.
+const KVEventsMaxLocalDP int32 = (65535 - VLLMKVEventsPort + 1) / 2
+
+// ValidateKVEventsLocalDP refuses a KV event DP publisher span whose ZMQ PUB and ROUTER replay
+// port range overflows TCP port 65535.
+func ValidateKVEventsLocalDP(localDP int32) error {
+	if localDP > KVEventsMaxLocalDP {
+		return newRefusal(ReasonKVEventsPortOverflow,
+			"KV events data-parallel span %d overflows TCP port 65535 (max supported span is %d from base port %d)",
+			localDP, KVEventsMaxLocalDP, VLLMKVEventsPort)
+	}
+	return nil
+}
+
 // KVEventsReplayPortForLocalDP returns the ZMQ ROUTER replay base port for localDP per-Pod
 // publishers. Single-DP workloads (localDP <= 1) keep VLLMKVEventsReplayPort (5558); multi-DP
 // workloads place replay at VLLMKVEventsPort + localDP so rank r's PUB (5557 + r) and replay
-// (5557 + localDP + r) sockets never overlap.
+// (5557 + localDP + r) sockets never overlap. Returns 0 when localDP exceeds KVEventsMaxLocalDP;
+// callers should validate with ValidateKVEventsLocalDP first.
 func KVEventsReplayPortForLocalDP(localDP int32) int32 {
 	if localDP <= 1 {
 		return VLLMKVEventsReplayPort
 	}
-	const maxPort = 65535
-	port := int64(VLLMKVEventsPort) + int64(localDP)
-	if port > maxPort {
-		return maxPort
+	if localDP > KVEventsMaxLocalDP {
+		return 0
 	}
-	return int32(port)
+	return VLLMKVEventsPort + localDP
 }
 
 // KVEventsForTopic returns the dialable event contract paired with the ZMQ publisher's default
@@ -165,19 +180,20 @@ func KVEventsPortsForLocalDP(localDP int32) []core.ContainerPort {
 }
 
 // KVEventsReservedPortsForLocalDP returns every TCP port bound inside the Pod by localDP ZMQ PUB
-// and ROUTER replay publishers: [5557 .. 5557 + 2*max(localDP, 1) - 1], capped at 65535.
+// and ROUTER replay publishers: [5557 .. 5557 + 2*max(localDP, 1) - 1]. Returns nil when localDP
+// exceeds KVEventsMaxLocalDP; callers must validate with ValidateKVEventsLocalDP so overflowing
+// spans are refused rather than understated.
 func KVEventsReservedPortsForLocalDP(localDP int32) []int32 {
 	if localDP < 1 {
 		localDP = 1
 	}
-	const maxPort = 65535
-	end := int64(VLLMKVEventsPort) + 2*int64(localDP) - 1
-	if end > maxPort {
-		end = maxPort
+	if localDP > KVEventsMaxLocalDP {
+		return nil
 	}
-	ports := make([]int32, 0, int(end-int64(VLLMKVEventsPort)+1))
-	for p := int64(VLLMKVEventsPort); p <= end; p++ {
-		ports = append(ports, int32(p))
+	end := VLLMKVEventsPort + 2*localDP - 1
+	ports := make([]int32, 0, int(end-VLLMKVEventsPort+1))
+	for p := VLLMKVEventsPort; p <= end; p++ {
+		ports = append(ports, p)
 	}
 	return ports
 }
@@ -204,6 +220,11 @@ func Render(in Input) (*Result, error) {
 	if in.EngineVersion != "" {
 		if err := ValidateEngineVersion(in.EngineVersion); err != nil {
 			return nil, newRefusal(ReasonEngineVersionInvalid, "%v", err)
+		}
+	}
+	if in.PublishKVEvents {
+		if err := ValidateKVEventsLocalDP(in.KVEventsLocalDP); err != nil {
+			return nil, err
 		}
 	}
 

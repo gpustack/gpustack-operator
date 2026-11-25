@@ -493,6 +493,10 @@ const (
 
 	// ReasonEngineVersionInvalid is a non-empty EngineVersion that fails ValidateEngineVersion.
 	ReasonEngineVersionInvalid Reason = "EngineVersionInvalid"
+
+	// ReasonKVEventsPortOverflow is a KVEventsLocalDP span whose ZMQ PUB and ROUTER replay port
+	// range [VLLMKVEventsPort .. VLLMKVEventsPort + 2*localDP - 1] exceeds TCP port 65535.
+	ReasonKVEventsPortOverflow Reason = "KVEventsPortOverflow"
 )
 
 // RefusalError is a rendering that was declined, carrying the reason a caller branches on and a

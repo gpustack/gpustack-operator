@@ -207,7 +207,8 @@ func ModelDeploymentRoleKVEventsLocalDP(
 // across multiple Pods (External DP, Hybrid DP, or multi-node DP with DataParallel > 1). On such
 // roles, member k >= 1 offsets its ZMQ PUB and replay sockets by global data_parallel_index, while
 // llm-d-router@v1.0.0 with a single --endpoint-target-ports assigns RankIndex=0 and dials only the
-// base port.
+// base port. Unparseable parallelism arguments are refused at admission, so a scan error here
+// returns false conservatively (consistent with ModelDeploymentRoleKVEventsLocalDP).
 func modelDeploymentVLLMMultiPodDP(role *workercore.ModelDeploymentRole) bool {
 	if role == nil || len(role.Command) > 0 {
 		return false

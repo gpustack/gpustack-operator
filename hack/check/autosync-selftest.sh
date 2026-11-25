@@ -1068,6 +1068,27 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
         raise AssertionError("router-preflight-summary.json highlights.base_image_builds mismatch")
     print("PASS  preflight-router.sh separate sglang-gateway/sgl-router staging, freeze skip, and base_image_builds")
 
+    # 1b. Negative: upstream override for frozen sglang-gateway must fail loudly.
+    fix_dir_bad = os.path.join(tmp, "router-fixture-bad-override")
+    shutil.copytree(fix_dir, fix_dir_bad)
+    with open(os.path.join(fix_dir_bad, "upstream.json"), "w", encoding="utf-8") as f:
+        json.dump({"sglang-gateway": "gateway-v0.4.0"}, f)
+    pf_bad_env = {
+        **pf_env,
+        "AUTOSYNC_ROUTER_FIXTURE_DIR": fix_dir_bad,
+    }
+    pf_bad = run(
+        ["bash", os.path.join(root, ".auto-sync/scripts/preflight-router.sh")],
+        cwd=root,
+        env=pf_bad_env,
+        check=False,
+    )
+    if pf_bad.returncode == 0 or "sglang-gateway is frozen" not in pf_bad.stderr:
+        raise AssertionError(
+            f"expected preflight-router.sh to reject sglang-gateway upstream override; rc={pf_bad.returncode}, stderr={pf_bad.stderr!r}"
+        )
+    print("PASS  preflight-router.sh rejects frozen sglang-gateway upstream override")
+
     # 2. validate_router.sh positive + negative freeze & base_image_builds tests.
     def make_candidate_tree(dst: str) -> None:
         for rel in (
@@ -1199,6 +1220,39 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
             f"expected validate_router.sh to reject cross-domain base_image_builds; rc={res_eb.returncode}, stderr={res_eb.stderr!r}"
         )
     print("PASS  validate_router.sh rejects cross-domain extraneous base_image_builds")
+
+    # 2f. Negative: AUTOSYNC_ALLOW_MISSING_STAGED_REPO fallback rejects sgl-router patch missing lib.rs/app.rs hooks.
+    val_stage_nostage = os.path.join(tmp, "val-stage-nostage")
+    os.makedirs(val_stage_nostage, exist_ok=True)
+    shutil.copy2(os.path.join(staging_dir, "router-preflight-report.json"), os.path.join(val_stage_nostage, "router-preflight-report.json"))
+    shutil.copy2(os.path.join(staging_dir, "image-manifests.json"), os.path.join(val_stage_nostage, "image-manifests.json"))
+    cand_bad_fallback = os.path.join(tmp, "cand-router-bad-fallback")
+    shutil.copytree(cand_ok, cand_bad_fallback)
+    with open(
+        os.path.join(cand_bad_fallback, "pack/llm-router/patches/sgl-router/0001-observer-endpoints.patch"),
+        "w",
+        encoding="utf-8",
+    ) as f:
+        f.write("+pub struct ObserverRouter {}\n")
+    res_bf = run(
+        ["bash", os.path.join(root, ".auto-sync/checks/validate_router.sh")],
+        cwd=cand_bad_fallback,
+        env={
+            **os.environ,
+            "AUTOSYNC_STAGE_DIR": val_stage_nostage,
+            "LOOPWRIGHT_BASE_DIR": val_base,
+            "LOOPWRIGHT_CANDIDATE_DIR": cand_bad_fallback,
+            "AUTOSYNC_FAST_SELFTEST": "true",
+            "AUTOSYNC_ALLOW_MISSING_STAGED_REPO": "true",
+            "AUTOSYNC_ROUTER_BUILD_RUNNER": "true",
+        },
+        check=False,
+    )
+    if res_bf.returncode == 0 or "missing observer module/endpoint hooks" not in res_bf.stderr:
+        raise AssertionError(
+            f"expected validate_router.sh fallback to reject truncated sgl-router patch; rc={res_bf.returncode}, stderr={res_bf.stderr!r}"
+        )
+    print("PASS  validate_router.sh missing-stage fallback rejects sgl-router patch without lib.rs/app.rs hooks")
 
     # 3. Cross-domain base_image_builds tests for kv-transfer (mirrored-mooncake, model-transfer, mirrored-modelexpress-server).
     kv_base = os.path.join(tmp, "kv-base")

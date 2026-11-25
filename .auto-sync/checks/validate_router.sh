@@ -179,6 +179,12 @@ apply_staged_patches() {
           return 1
         fi
       fi
+      if [[ "${name}" == "sgl-router" ]]; then
+        if ! grep -q "pub mod observer;" "${patches[@]}" || ! grep -q "/observer/endpoints" "${patches[@]}"; then
+          printf 'FAIL: sgl-router patches missing observer module/endpoint hooks\n' >&2
+          return 1
+        fi
+      fi
       return 0
     fi
     printf 'FAIL: staged upstream repo missing for %s: %s\n' "${name}" "${stage_repo}" >&2

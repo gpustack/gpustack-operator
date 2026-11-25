@@ -567,10 +567,15 @@ func renderModelDeploymentRouterObjectsWithProxy(
 			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
 			modelDeploymentLabelKeyInstance: md.Name,
 		}
-		for i := range roles {
-			if roles[i].Kind != "encode" {
-				routerEndpointLabels[modelDeploymentLabelKeyRoleKind] = roles[i].Kind
-				break
+		// Only undivided deployments use routerEndpointLabels; split PD shapes select prefill
+		// and decode via separate --prefill-selector / --decode-selector flags.
+		if !ModelDeploymentDeclaresBothHalves(md) {
+			encodeKind, _ := ModelDeploymentRoleUpstreamKind(workercore.ModelDeploymentRoleKindEncode)
+			for i := range roles {
+				if roles[i].Kind != encodeKind {
+					routerEndpointLabels[modelDeploymentLabelKeyRoleKind] = roles[i].Kind
+					break
+				}
 			}
 		}
 	}
@@ -659,6 +664,9 @@ func renderModelDeploymentRouterObjectsWithProxy(
 		!modelDeploymentLLMDRouterDisablesKVEvents(md) {
 		engine, _ := ModelDeploymentEngineUpstreamName(md.Spec.Engine.Name)
 		localDP := ModelDeploymentLLMDRouterKVEventsLocalDP(md)
+		if err := inject.ValidateKVEventsLocalDP(localDP); err != nil {
+			return ModelDeploymentRouterObjects{}, err
+		}
 		routerInput.KVEvents = router.KVEvents{
 			Engine: engine, Port: inject.VLLMKVEventsPort,
 			ReplayPort: inject.KVEventsReplayPortForLocalDP(localDP), Topic: inject.VLLMKVEventsTopic,

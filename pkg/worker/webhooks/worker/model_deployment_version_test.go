@@ -1164,6 +1164,15 @@ func TestModelDeploymentWebhook_KVEventsPortReservations(t *testing.T) {
 		sglDP2.Spec.Roles[0].ExtraArgs = []string{"--dp-size", "2"}
 		assert.Equal(t, []int32{5557, 5558, 5559, 5560}, modelDeploymentRouterReservedPorts(sglDP2, &sglDP2.Spec.Roles[0]))
 
+		// DP span exceeding KVEventsMaxLocalDP (29989) is refused at admission instead of clamping at 65535.
+		vllmOverflow := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+		vllmOverflow.Spec.Engine.Version = "0.32.0"
+		vllmOverflow.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		vllmOverflow.Spec.Roles[0].ExtraArgs = []string{"--data-parallel-size", fmt.Sprintf("%d", inject.KVEventsMaxLocalDP+1)}
+		_, err = w.ValidateCreate(context.Background(), vllmOverflow)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "overflows TCP port 65535")
+
 		sglExtDP := sglDP2.DeepCopy()
 		sglExtDP.Spec.Roles[0].ReplicaSize = 2
 		sglExtDP.Spec.Roles[0].Resources = cards(1)

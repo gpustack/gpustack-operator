@@ -308,6 +308,9 @@ else:
     up_vllm, up_vllm_recent = recipe["vllm-router"], [recipe["vllm-router"]]
 
 # sglang-gateway is permanently frozen at its pinned tag (upstream deleted sgl-model-gateway in PR #50732).
+if "sglang-gateway" in upstream_override:
+    print("FAIL: sglang-gateway is frozen; upstream override for it is not supported", file=sys.stderr)
+    raise SystemExit(1)
 up_sglang = recipe["sglang-gateway"]
 up_sglang_recent = [recipe["sglang-gateway"]]
 
