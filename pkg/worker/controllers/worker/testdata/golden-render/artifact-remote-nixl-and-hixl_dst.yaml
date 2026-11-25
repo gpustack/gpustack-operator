@@ -7,7 +7,7 @@ metadata:
     kueue.x-k8s.io/role-hash: ascend-hixl
     model-transfer.gpustack.ai/delivery: Remote
     modeldeployment.gpustack.ai/pod-spec-hash: d21460d504e4bead1d1a5fce4d49f49a4537254ad019f5e1852893ee3598c3fe
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: ascend-hixl
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -245,7 +245,7 @@ metadata:
     kueue.x-k8s.io/role-hash: nvidia-efa
     model-transfer.gpustack.ai/delivery: Remote
     modeldeployment.gpustack.ai/pod-spec-hash: 08eb009f4a776081ddd54a38686586be6efddf7b87be9075baa3ee81f83e57db
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: nvidia-efa
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -486,7 +486,7 @@ metadata:
     kueue.x-k8s.io/role-hash: nvidia-ucx
     model-transfer.gpustack.ai/delivery: Remote
     modeldeployment.gpustack.ai/pod-spec-hash: f6626454bace6b928ca4e79486c39b8bdc1badb336349d8f6ae73301b9e5dd5d
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: nvidia-ucx
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"

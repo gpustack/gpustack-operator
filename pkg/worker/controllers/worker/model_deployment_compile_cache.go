@@ -661,18 +661,15 @@ func modelDeploymentCompileCacheShortFlag(key string) (string, string, bool) {
 }
 
 // modelDeploymentCompileCacheEnvNames are the environment entries that reach what an engine
-// compiles: the switches that choose a compile path, the attention backend they select, the
-// FlashAttention build they resolve, and the architecture list the kernels are generated for.
+// compiles: the switches that choose a compile path and the architecture list the kernels are
+// generated for.
 //
 // Everything else an engine reads through the environment -- a Hub token, a cache root, a proxy
 // -- changes where it reads from, never what it generates, and including it would hand every
 // endpoint change a cold start.
 var modelDeploymentCompileCacheEnvNames = []string{
-	"VLLM_USE_V1",
-	"VLLM_ATTENTION_BACKEND",
 	"VLLM_USE_STANDALONE_COMPILE",
 	"VLLM_USE_MEGA_AOT_ARTIFACT",
-	"VLLM_FLASH_ATTN_VERSION",
 	"SGLANG_ENABLE_TORCH_COMPILE",
 	"TRITON_ATTN_NUM_STAGES",
 	"TORCH_CUDA_ARCH_LIST",

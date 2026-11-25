@@ -465,10 +465,10 @@ func (r *ModelDeploymentReconciler) modelDeploymentPartialGroupMembers(
 	}
 	for index, rendered := range want {
 		if member, present := seated[index]; present &&
-			(!modelDeploymentPodMatchesCurrencyWithLegacy(
+			(!modelDeploymentPodMatchesCurrencyWithLegacyHashes(
 				member,
 				rendered,
-				modelDeploymentDesiredPodLegacyRouterHash(
+				modelDeploymentDesiredPodLegacyHashes(
 					md, replacementRoleByName(md, slot.Role), slot.Ordinal, index, rendered,
 				),
 				modelDeploymentEffectiveMinRenderVersion(md),
@@ -612,9 +612,9 @@ func (r *ModelDeploymentReconciler) replacementAdmitted(
 		standing = append(standing, &members[i])
 	}
 
-	legacyHashes := replacementLegacyRenderHashes(md, replacementRoleByName(md, slot.Role), slot.Ordinal, want)
-	if reason := replacementMembersMatchWithLegacy(
-		want, standing, legacyHashes, modelDeploymentEffectiveMinRenderVersion(md),
+	legacyHashSets := replacementLegacyRenderHashSets(md, replacementRoleByName(md, slot.Role), slot.Ordinal, want)
+	if reason := replacementMembersMatchWithLegacySets(
+		want, standing, legacyHashSets, modelDeploymentEffectiveMinRenderVersion(md),
 	); reason != "" {
 		return false, reason, nil
 	}
@@ -930,6 +930,21 @@ func replacementMembersMatch(want, standing []*core.Pod, minRenderVersion int) s
 func replacementMembersMatchWithLegacy(
 	want, standing []*core.Pod, legacyHashes []string, minRenderVersion int,
 ) string {
+	var sets [][]string
+	if len(legacyHashes) > 0 {
+		sets = make([][]string, len(legacyHashes))
+		for i, h := range legacyHashes {
+			if h != "" {
+				sets[i] = []string{h}
+			}
+		}
+	}
+	return replacementMembersMatchWithLegacySets(want, standing, sets, minRenderVersion)
+}
+
+func replacementMembersMatchWithLegacySets(
+	want, standing []*core.Pod, legacyHashSets [][]string, minRenderVersion int,
+) string {
 	if len(standing) != len(want) {
 		return fmt.Sprintf("the replica holds %d of the %d members it is rendered at",
 			len(standing), len(want))
@@ -949,11 +964,11 @@ func replacementMembersMatchWithLegacy(
 		if !seated {
 			return fmt.Sprintf("no member sits at index %d", index)
 		}
-		var legacyHash string
-		if index < len(legacyHashes) {
-			legacyHash = legacyHashes[index]
+		var legacyHashes []string
+		if index < len(legacyHashSets) {
+			legacyHashes = legacyHashSets[index]
 		}
-		if !modelDeploymentPodMatchesCurrencyWithLegacy(member, rendered, legacyHash, minRenderVersion) {
+		if !modelDeploymentPodMatchesCurrencyWithLegacyHashes(member, rendered, legacyHashes, minRenderVersion) {
 			return fmt.Sprintf("member %s does not carry the render this pass produced", member.Name)
 		}
 	}
@@ -978,16 +993,16 @@ func replacementRoleByName(md *workercore.ModelDeployment, roleName string) *wor
 	return nil
 }
 
-func replacementLegacyRenderHashes(
+func replacementLegacyRenderHashSets(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 	ordinal int, want []*core.Pod,
-) []string {
-	hashes := make([]string, len(want))
+) [][]string {
+	sets := make([][]string, len(want))
 	for index, rendered := range want {
-		hashes[index] = modelDeploymentDesiredPodLegacyRouterHash(md, role, ordinal, index, rendered)
+		sets[index] = modelDeploymentDesiredPodLegacyHashes(md, role, ordinal, index, rendered)
 	}
 
-	return hashes
+	return sets
 }
 
 // replacementQueueName is the LocalQueue a rendered replica submits to, read off the render so
@@ -1019,11 +1034,26 @@ func replacementRenderHashes(want []*core.Pod) []string {
 // the generation without moving any member's render, and treating that as a configuration change
 // would tear down a healthy replacement and rebuild it identically.
 func replacementSuperseded(slot modelDeploymentReplacementSlot, want []*core.Pod) bool {
-	return replacementSupersededWithLegacy(slot, want, nil)
+	return replacementSupersededWithLegacySets(slot, want, nil)
 }
 
 func replacementSupersededWithLegacy(
 	slot modelDeploymentReplacementSlot, want []*core.Pod, legacyHashes []string,
+) bool {
+	var sets [][]string
+	if len(legacyHashes) > 0 {
+		sets = make([][]string, len(legacyHashes))
+		for i, h := range legacyHashes {
+			if h != "" {
+				sets[i] = []string{h}
+			}
+		}
+	}
+	return replacementSupersededWithLegacySets(slot, want, sets)
+}
+
+func replacementSupersededWithLegacySets(
+	slot modelDeploymentReplacementSlot, want []*core.Pod, legacyHashSets [][]string,
 ) bool {
 	if len(slot.MemberHashes) == 0 {
 		// The slot has not recorded its target render yet, so nothing is known to be obsolete.
@@ -1038,9 +1068,9 @@ func replacementSupersededWithLegacy(
 		if slot.MemberHashes[i] == projected[i] {
 			continue
 		}
-		if i < len(legacyHashes) && legacyHashes[i] != "" &&
+		if i < len(legacyHashSets) && len(legacyHashSets[i]) > 0 &&
 			modelDeploymentPodRenderVersion(want[i]) <= modelDeploymentRenderVersion &&
-			slot.MemberHashes[i] == legacyHashes[i] {
+			slices.Contains(legacyHashSets[i], slot.MemberHashes[i]) {
 			continue
 		}
 
@@ -1129,7 +1159,7 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 		return progress, wlErr
 	}
 	if slot.Phase == modelDeploymentReplacementWaitingForAdmission {
-		legacyHashes := replacementLegacyRenderHashes(md, role, slot.Ordinal, want)
+		legacyHashSets := replacementLegacyRenderHashSets(md, role, slot.Ordinal, want)
 		present := sets.New[types.UID]()
 		broken := false
 		for _, member := range standing {
@@ -1137,7 +1167,7 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 			broken = broken || member.DeletionTimestamp != nil
 			seat := modelDeploymentPodMemberIndex(member)
 			if seat >= len(want) ||
-				!modelDeploymentPodMatchesCurrencyWithLegacy(member, want[seat], legacyHashes[seat], minRenderVersion) {
+				!modelDeploymentPodMatchesCurrencyWithLegacyHashes(member, want[seat], legacyHashSets[seat], minRenderVersion) {
 				broken = true
 			} else if len(standing) < len(want) &&
 				modelDeploymentPodRenderVersion(member) != modelDeploymentPodRenderVersion(want[seat]) {
@@ -1156,7 +1186,7 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 		if ownsCurrent && len(standing) < len(want) {
 			broken = true
 		}
-		if broken || replacementSupersededWithLegacy(slot, want, legacyHashes) {
+		if broken || replacementSupersededWithLegacySets(slot, want, legacyHashSets) {
 			next := modelDeploymentReplacementSlot{
 				Role: slot.Role, Ordinal: slot.Ordinal, Phase: modelDeploymentReplacementCleanup,
 				MemberUIDs:  sets.List(present.Union(sets.New(slot.CurrentMemberUIDs...))),

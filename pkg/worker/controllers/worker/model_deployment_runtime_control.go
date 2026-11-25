@@ -238,12 +238,12 @@ func modelDeploymentControllerPodMatchesCurrency(
 	actual, desired *core.Pod,
 	minRenderVersion int,
 ) bool {
-	legacyHash := modelDeploymentDesiredPodLegacyRouterHash(md, role, ordinal, member, desired)
+	legacyHashes := modelDeploymentDesiredPodLegacyHashes(md, role, ordinal, member, desired)
 	var matches bool
-	if legacyHash == "" {
+	if len(legacyHashes) == 0 {
 		matches = modelDeploymentPodMatchesCurrency(actual, desired, minRenderVersion)
 	} else {
-		matches = modelDeploymentPodMatchesCurrencyWithLegacy(actual, desired, legacyHash, minRenderVersion)
+		matches = modelDeploymentPodMatchesCurrencyWithLegacyHashes(actual, desired, legacyHashes, minRenderVersion)
 	}
 	if !matches {
 		return false

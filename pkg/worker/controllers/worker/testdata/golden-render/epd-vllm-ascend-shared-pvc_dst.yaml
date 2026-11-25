@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
     modeldeployment.gpustack.ai/pod-spec-hash: 4e12861b5366f1bfc47eafa1813c4e44934a2da2e47d9c9c1b2ff9017b985453
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
     prometheus.io/port: "8200"
@@ -198,7 +198,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: encode
     modeldeployment.gpustack.ai/pod-spec-hash: 4336aea60da8163fe029ea33cd217ff96cee34fd3a10f0bf92e846fab558f125
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: encode
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -377,8 +377,8 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
-    modeldeployment.gpustack.ai/pod-spec-hash: 6ae2659e49fc38b04755e82bd4b3e30f3768b7a4bddc1d2cba06a3e002ee6329
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/pod-spec-hash: f8e9fba88ae0d9c03da116e9af94f749d32b10bd790c3ca56aa28d1d681e6f70
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -435,6 +435,8 @@ spec:
     - '{"kv_connector":"MooncakeConnectorV1","kv_role":"kv_producer","kv_port":8998,"kv_connector_extra_config":{"prefill":{"tp_size":1,"dp_size":1},"decode":{"tp_size":1,"dp_size":1}}}'
     - --ec-transfer-config
     - '{"ec_connector":"ECExampleConnector","ec_role":"ec_consumer","ec_connector_extra_config":{"shared_storage_path":"/shared/encodings"}}'
+    - --kv-events-config
+    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@Qwen/Qwen2.5-VL-7B-Instruct"}'
     - --host
     - 0.0.0.0
     - --port
@@ -495,6 +497,12 @@ spec:
       protocol: TCP
     - containerPort: 8998
       name: mc-bootstrap
+      protocol: TCP
+    - containerPort: 5557
+      name: kv-events
+      protocol: TCP
+    - containerPort: 5558
+      name: kv-replay
       protocol: TCP
     readinessProbe:
       failureThreshold: 3
@@ -682,6 +690,14 @@ spec:
     port: 8000
     protocol: TCP
     targetPort: 8000
+  - name: kv-events
+    port: 5557
+    protocol: TCP
+    targetPort: 5557
+  - name: kv-replay
+    port: 5558
+    protocol: TCP
+    targetPort: 5558
   selector:
     app.kubernetes.io/component: prefill
     app.kubernetes.io/instance: qwen-vl

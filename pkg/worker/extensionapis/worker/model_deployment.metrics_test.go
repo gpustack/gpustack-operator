@@ -90,6 +90,7 @@ func TestParseModelDeploymentMetrics(t *testing.T) {
 		{name: "router reports workers without proving readiness", body: "# TYPE vllm_router_active_workers gauge\nvllm_router_active_workers 1\n", router: "vllm-router", gauge: "router-reported-workers", wantGauge: 1},
 		{name: "llm-d availability", body: "# TYPE llm_d_epp_ready_endpoints gauge\nllm_d_epp_ready_endpoints{name=\"chat\"} 2\n", router: "llm-d-router", gauge: "router-backends", wantGauge: 2},
 		{name: "SGLang gateway availability", body: "# TYPE smg_worker_pool_size gauge\nsmg_worker_pool_size{worker_type=\"prefill\"} 2\nsmg_worker_pool_size{worker_type=\"decode\"} 3\n", router: "sglang-gateway", gauge: "router-backends", wantGauge: 5},
+		{name: "sgl-router availability and inflight", body: "# TYPE sgl_router_workers gauge\nsgl_router_workers{mode=\"plain\"} 0\nsgl_router_workers{mode=\"prefill\"} 2\nsgl_router_workers{mode=\"decode\"} 3\n# TYPE sgl_router_worker_inflight_requests gauge\nsgl_router_worker_inflight_requests{worker_url=\"http://p0:8000\"} 1\nsgl_router_worker_inflight_requests{worker_url=\"http://d0:8000\"} 4\n", router: "sgl-router", gauge: "router-backends", wantGauge: 5},
 		{name: "malformed exposition", body: "broken{", engine: "vllm", wantErr: true},
 	}
 	for _, tc := range tests {
@@ -1656,4 +1657,134 @@ func metricsHostPort(t *testing.T, server *httptest.Server) (host, port string) 
 	require.NoError(t, err)
 
 	return host, port
+}
+
+func TestModelDeploymentMetricsHandler_SGLRouterWindowsAndScrape(t *testing.T) {
+	t.Run("parses non-infra requests, worker errors, and 5xx responses without counting infra probes", func(t *testing.T) {
+		body := `# TYPE sgl_router_workers gauge
+sgl_router_workers{mode="plain"} 2
+sgl_router_workers{mode="prefill"} 0
+sgl_router_workers{mode="decode"} 0
+# TYPE sgl_router_worker_inflight_requests gauge
+sgl_router_worker_inflight_requests{worker_url="http://w0:8000"} 3
+sgl_router_worker_inflight_requests{worker_url="http://w1:8000"} 1
+# TYPE sgl_router_requests_total counter
+sgl_router_requests_total{route="/metrics",method="GET"} 40
+sgl_router_requests_total{route="/observer/endpoints",method="GET"} 20
+sgl_router_requests_total{route="/health",method="GET"} 10
+sgl_router_requests_total{route="/v1/chat/completions",method="POST"} 7
+# TYPE sgl_router_responses_total counter
+sgl_router_responses_total{route="/metrics",method="GET",status_code="200"} 39
+sgl_router_responses_total{route="/observer/endpoints",method="GET",status_code="503"} 5
+sgl_router_responses_total{route="/v1/chat/completions",method="POST",status_code="200"} 5
+sgl_router_responses_total{route="/v1/chat/completions",method="POST",status_code="503"} 2
+# TYPE sgl_router_worker_requests_total counter
+sgl_router_worker_requests_total{worker_url="http://w0:8000",model_id="m",mode="plain",outcome="success"} 5
+sgl_router_worker_requests_total{worker_url="http://w0:8000",model_id="m",mode="plain",outcome="backpressure"} 1
+sgl_router_worker_requests_total{worker_url="http://w0:8000",model_id="m",mode="plain",outcome="error"} 1
+`
+		got, err := parseModelDeploymentMetrics([]byte(body), "", "sgl-router")
+		require.NoError(t, err)
+		assert.Equal(t, float64(2), got.gauges["router-backends"])
+		assert.Equal(t, float64(4), got.gauges["router-running"])
+		assert.Equal(t, modelDeploymentWindowPair{count: 7}, got.windows["requests"])
+		assert.Equal(t, modelDeploymentWindowPair{count: 2}, got.windows["http-5xx-responses"])
+		assert.Equal(t, modelDeploymentWindowPair{count: 1}, got.windows["worker-errors"])
+	})
+
+	t.Run("idle sgl-router with only infra scrapes is complete and not partial across Envoy and direct ports", func(t *testing.T) {
+		for _, envoySidecar := range []bool{true, false} {
+			name := "direct-port-8000"
+			if envoySidecar {
+				name = "envoy-port-9090"
+			}
+			t.Run(name, func(t *testing.T) {
+				var step atomic.Int32
+				step.Store(1)
+				routerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					n := int(step.Load())
+					fmt.Fprintf(w, `# TYPE sgl_router_workers gauge
+sgl_router_workers{mode="plain"} 1
+sgl_router_workers{mode="prefill"} 0
+sgl_router_workers{mode="decode"} 0
+# TYPE sgl_router_worker_inflight_requests gauge
+sgl_router_worker_inflight_requests{worker_url="http://w0:8000"} 0
+# TYPE sgl_router_requests_total counter
+sgl_router_requests_total{route="/metrics",method="GET"} %d
+sgl_router_requests_total{route="/observer/endpoints",method="GET"} %d
+# TYPE sgl_router_responses_total counter
+sgl_router_responses_total{route="/observer/endpoints",method="GET",status_code="200"} %d
+# TYPE sgl_router_worker_requests_total counter
+`, n, n*2, n*2)
+				}))
+				defer routerSrv.Close()
+				engineSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					name := "sglang_server_busy_first.prom"
+					if step.Load() > 1 {
+						name = "sglang_server_busy_second.prom"
+					}
+					body, err := os.ReadFile("testdata/model_deployment_metrics/" + name)
+					require.NoError(t, err)
+					_, _ = w.Write(body)
+				}))
+				defer engineSrv.Close()
+
+				md := metricsModelDeployment()
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGL}
+
+				engHost, engPort := metricsHostPort(t, engineSrv)
+				engPod := metricsEnginePod(md, "chat-server-0", engHost, engPort)
+
+				rtrHost, rtrPort := metricsHostPort(t, routerSrv)
+				rtrPortNum, err := strconv.Atoi(rtrPort)
+				require.NoError(t, err)
+				deployment := &app.Deployment{ObjectMeta: meta.ObjectMeta{
+					Name: "chat-router", Namespace: md.Namespace, UID: "router-deployment",
+					OwnerReferences: []meta.OwnerReference{{APIVersion: "worker.gpustack.ai/v1alpha1", Kind: "ModelDeployment", Name: md.Name, UID: md.UID, Controller: ptr.To(true)}},
+				}}
+				rs := &app.ReplicaSet{ObjectMeta: meta.ObjectMeta{
+					Name: "chat-router-rs", Namespace: md.Namespace, UID: "router-rs",
+					OwnerReferences: []meta.OwnerReference{{APIVersion: "apps/v1", Kind: "Deployment", Name: deployment.Name, UID: deployment.UID, Controller: ptr.To(true)}},
+				}}
+				rtrPod := metricsEnginePod(md, "chat-router-pod", rtrHost, rtrPort)
+				delete(rtrPod.Labels, "app.kubernetes.io/component")
+				rtrPod.Labels["modeldeployment.gpustack.ai/router"] = workercore.ModelDeploymentRouterSGL
+				rtrPod.OwnerReferences = []meta.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: ptr.To(true)}}
+				if envoySidecar {
+					rtrPod.Spec.Containers = []core.Container{
+						{Name: "envoy", Ports: []core.ContainerPort{{Name: "http", ContainerPort: 8000}, {Name: "metrics", ContainerPort: int32(rtrPortNum)}}},
+						{Name: "router", Ports: []core.ContainerPort{{Name: "http-upstream", ContainerPort: 8001}}},
+					}
+				} else {
+					rtrPod.Spec.Containers = []core.Container{
+						{Name: "router", Ports: []core.ContainerPort{{Name: "http", ContainerPort: int32(rtrPortNum)}}},
+					}
+				}
+
+				cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(md, deployment, rs, rtrPod, engPod).Build()
+				h := &ModelDeploymentMetricsHandler{APIReader: cli, HTTPClient: http.DefaultClient}
+				key := types.NamespacedName{Namespace: md.Namespace, Name: md.Name}
+
+				_, err = h.OnGet(context.Background(), key, ctrlcli.GetOptions{})
+				require.NoError(t, err)
+				step.Store(2)
+				obj, err := h.OnGet(context.Background(), key, ctrlcli.GetOptions{})
+				require.NoError(t, err)
+				res := obj.(*worker.ModelDeploymentMetrics)
+				assert.False(t, res.Partial, "idle sgl-router with live engine must not be partial: %+v", res.Missing)
+
+				var routerGauges []string
+				for _, g := range res.Processing {
+					if g.Scope == "router" {
+						routerGauges = append(routerGauges, g.Name)
+					}
+				}
+				assert.ElementsMatch(t, []string{"router-backends", "router-running"}, routerGauges)
+				for _, tr := range res.Traffic {
+					assert.Equal(t, float64(0), tr.Value, "infra scrapes must not appear as inference traffic (%s)", tr.Name)
+				}
+			})
+		}
+	})
 }

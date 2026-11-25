@@ -685,9 +685,8 @@ func TestModelDeploymentPublishesKVEvents(t *testing.T) {
 		base, &base.Spec.Roles[0], nodefeature.ManufacturerNVIDIA,
 	))
 
-	// The consequence the shared gate exists for: on Ascend the render refuses the event
-	// publisher, so publishing must read false rather than error-loop the reconcile.
-	assert.False(t, modelDeploymentPublishesKVEvents(
+	// vLLM-Ascend behind llm-d-router now publishes ZMQ KV events too.
+	assert.True(t, modelDeploymentPublishesKVEvents(
 		base, &base.Spec.Roles[0], nodefeature.ManufacturerAscend,
 	))
 

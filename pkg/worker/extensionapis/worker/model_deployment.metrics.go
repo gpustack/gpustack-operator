@@ -379,6 +379,9 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 		case "sglang-gateway":
 			metricNames["router-running"] = "smg_worker_requests_active"
 			metricNames["router-backends"] = "smg_worker_pool_size"
+		case workercore.ModelDeploymentRouterSGL:
+			metricNames["router-running"] = "sgl_router_worker_inflight_requests"
+			metricNames["router-backends"] = "sgl_router_workers"
 		}
 	case md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM:
 		metricNames["running"] = "vllm:num_requests_running"
@@ -725,6 +728,15 @@ func modelDeploymentWindowDefinitions(md *workercore.ModelDeployment, router boo
 				{"requests", "smg_router_requests_total", "traffic", "requests/second", false, ""},
 				{"errors", "smg_router_request_errors_total", "traffic", "errors/second", false, "requests"},
 				{"http-5xx-responses", "smg_http_responses_total", "traffic", "responses/second", false, ""},
+			}
+		case workercore.ModelDeploymentRouterSGL:
+			// sgl-router records per-worker request outcomes separately from edge HTTP requests,
+			// and in PD mode one edge request dispatches to both prefill and decode workers, so
+			// worker errors are named apart from edge requests.
+			return []modelDeploymentWindowDefinition{
+				{"requests", "sgl_router_requests_total", "traffic", "requests/second", false, ""},
+				{"worker-errors", "sgl_router_worker_requests_total", "traffic", "errors/second", false, "requests"},
+				{"http-5xx-responses", "sgl_router_responses_total", "traffic", "responses/second", false, "requests"},
 			}
 		}
 	}

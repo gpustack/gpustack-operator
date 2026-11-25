@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
     modeldeployment.gpustack.ai/pod-spec-hash: 1cc7e4b7d0096f52e1e03b7f20d68fc1f79dd2d1cdd780705b1abb2e60472675
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
     prometheus.io/port: "8200"
@@ -184,8 +184,8 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
-    modeldeployment.gpustack.ai/pod-spec-hash: f41246d82cf46d07feb60081a60e26ce7abfef2ddaf74fdddbbc8ff2163c9a3f
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/pod-spec-hash: 26d1220c2db95ec5792216b131b13c48ecdd49916a110f4d6bd09dc8257b92c0
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -222,7 +222,7 @@ spec:
     - --kv-transfer-config
     - '{"kv_connector":"NixlConnector","kv_role":"kv_producer","kv_connector_extra_config":{"backends":["UCX"]}}'
     - --kv-events-config
-    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@"}'
+    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@Qwen/Qwen2.5-72B-Instruct"}'
     - --host
     - 0.0.0.0
     - --port

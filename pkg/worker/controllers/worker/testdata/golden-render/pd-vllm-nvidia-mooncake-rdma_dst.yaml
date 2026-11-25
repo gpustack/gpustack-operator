@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
     modeldeployment.gpustack.ai/pod-spec-hash: 214c68f2b6535b529596e077abf0f798add2c8a53dc0646127f055989f3acefd
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
     prometheus.io/port: "8200"
@@ -183,8 +183,8 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
-    modeldeployment.gpustack.ai/pod-spec-hash: 25b7a6a374dafdf8f55c1fb7261114d397c34effb22d7fd8dbc930fddb6f54e6
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/pod-spec-hash: 5e32be0b18985043cd1e1d16962481fd09f5a8a0cdbba9f78065264c85443bc4
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -221,7 +221,7 @@ spec:
     - --kv-transfer-config
     - '{"kv_connector":"MooncakeConnector","kv_role":"kv_producer","kv_connector_extra_config":{"mooncake_protocol":"rdma"}}'
     - --kv-events-config
-    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@"}'
+    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@Qwen/Qwen2.5-72B-Instruct"}'
     - --host
     - 0.0.0.0
     - --port

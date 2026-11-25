@@ -617,6 +617,11 @@ func renderModelDeploymentRoleService(
 	manufacturers map[string]string, standingMembers []*core.Pod, mixedCommandMode bool,
 ) *core.Service {
 	svc := renderModelDeploymentServiceFor(md, role, md.Name+"-"+role.Name)
+	if md.Spec.Router != nil && md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL {
+		if upstreamKind, ok := ModelDeploymentRoleUpstreamKind(ModelDeploymentEffectiveRoleKind(role)); ok {
+			svc.Labels[modelDeploymentLabelKeyRoleKind] = upstreamKind
+		}
+	}
 	modelDeploymentFrontLeadersOnly(svc, role, len(standingMembers) > 0)
 	modelDeploymentSelectAnsweringMembers(svc, mixedCommandMode)
 	if modelDeploymentEligibilitySelectorActive(md,

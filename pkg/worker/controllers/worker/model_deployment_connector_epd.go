@@ -245,6 +245,28 @@ var modelDeploymentEPDMatrix = []ModelDeploymentEPDRow{
 		Connector:   ModelDeploymentECConnectorSGLangURLs,
 		EngineFloor: ModelDeploymentSGLangEncoderFirst,
 	},
+	{
+		// SGLang EPD behind sgl-router uses the same --encoder-urls prefill->encoder leg.
+		Router:      workercore.ModelDeploymentRouterSGL,
+		Engine:      workercore.ModelDeploymentEngineSGLang,
+		Platform:    nodefeature.ManufacturerAscend,
+		Connector:   ModelDeploymentECConnectorSGLangURLs,
+		EngineFloor: ModelDeploymentSGLangEncoderFirst,
+	},
+	{
+		Router:      workercore.ModelDeploymentRouterSGL,
+		Engine:      workercore.ModelDeploymentEngineSGLang,
+		Platform:    nodefeature.ManufacturerAMD,
+		Connector:   ModelDeploymentECConnectorSGLangURLs,
+		EngineFloor: ModelDeploymentSGLangEncoderFirst,
+	},
+	{
+		Router:      workercore.ModelDeploymentRouterSGL,
+		Engine:      workercore.ModelDeploymentEngineSGLang,
+		Platform:    nodefeature.ManufacturerNVIDIA,
+		Connector:   ModelDeploymentECConnectorSGLangURLs,
+		EngineFloor: ModelDeploymentSGLangEncoderFirst,
+	},
 }
 
 // ModelDeploymentEPDConnector returns the encoder-cache connector this combination runs, or the

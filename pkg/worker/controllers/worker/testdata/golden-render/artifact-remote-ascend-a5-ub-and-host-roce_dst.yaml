@@ -7,7 +7,7 @@ metadata:
     kueue.x-k8s.io/role-hash: ascend-a5-roce
     model-transfer.gpustack.ai/delivery: Remote
     modeldeployment.gpustack.ai/pod-spec-hash: 6b9765305c511c946eb617913cea5e922348fd17951f713a9593560962bbdd25
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: ascend-a5-roce
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -255,7 +255,7 @@ metadata:
     kueue.x-k8s.io/role-hash: ascend-a5-ub
     model-transfer.gpustack.ai/delivery: Remote
     modeldeployment.gpustack.ai/pod-spec-hash: 86bd41c02aa4ed09dd27fa625c96445096f365236de23bbeeca54af15e814a53
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: ascend-a5-ub
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"

@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
     modeldeployment.gpustack.ai/pod-spec-hash: 6b54d6784e5c44470d28e11e918c979d11cf3d9577e5ddec2f4b1d92ab0cbd2b
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
     prometheus.io/port: "8200"
@@ -185,8 +185,8 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
-    modeldeployment.gpustack.ai/pod-spec-hash: 3476e8fd7116b0ae511f6ad0422a9622158c418b92c3a7890f171b5be8db417a
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/pod-spec-hash: 843a58e8fd99aac632363f46e3830a6588c737d999bf24af68f6544a89f23582
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -222,6 +222,8 @@ spec:
     - Qwen/Qwen2.5-72B-Instruct
     - --kv-transfer-config
     - '{"kv_connector":"MooncakeConnectorV1","kv_role":"kv_producer","kv_port":8998,"kv_connector_extra_config":{"prefill":{"tp_size":1,"dp_size":1},"decode":{"tp_size":1,"dp_size":1}}}'
+    - --kv-events-config
+    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@Qwen/Qwen2.5-72B-Instruct"}'
     - --host
     - 0.0.0.0
     - --port
@@ -282,6 +284,12 @@ spec:
       protocol: TCP
     - containerPort: 8998
       name: mc-bootstrap
+      protocol: TCP
+    - containerPort: 5557
+      name: kv-events
+      protocol: TCP
+    - containerPort: 5558
+      name: kv-replay
       protocol: TCP
     readinessProbe:
       failureThreshold: 3
@@ -431,6 +439,14 @@ spec:
     port: 8000
     protocol: TCP
     targetPort: 8000
+  - name: kv-events
+    port: 5557
+    protocol: TCP
+    targetPort: 5557
+  - name: kv-replay
+    port: 5558
+    protocol: TCP
+    targetPort: 5558
   selector:
     app.kubernetes.io/component: prefill
     app.kubernetes.io/instance: qwen

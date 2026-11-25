@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: main
     modeldeployment.gpustack.ai/pod-spec-hash: 734d57a6d488328baa9998ceda4c478b46576e3e6c3fac63590256641d97abfa
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"

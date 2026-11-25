@@ -5,6 +5,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
 )
 
 // ModelDeploymentConditionKVEventsPublishing reports whether every role that produces cache blocks
@@ -48,17 +49,56 @@ func observeModelDeploymentKVEvents(
 		return
 	}
 
+	var kvAware router.VLLMRouterKVAware
+	switch md.Spec.Router.Name {
+	case workercore.ModelDeploymentRouterSGLangGateway:
+		ModelDeploymentConditionKVEventsPublishing.True(holder,
+			modelDeploymentReasonKVEventsNotApplicable,
+			fmt.Sprintf("router %q does not consume cache events", md.Spec.Router.Name))
+		return
+	case workercore.ModelDeploymentRouterLLMD:
+		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang {
+			ModelDeploymentConditionKVEventsPublishing.True(holder,
+				modelDeploymentReasonKVEventsNotApplicable,
+				"SGLang behind llm-d-router uses approximate prefix tracking rather than cache events")
+			return
+		}
+	case workercore.ModelDeploymentRouterSGL:
+	case workercore.ModelDeploymentRouterVLLM:
+		kvAware = router.ParseVLLMRouterKVAware(md.Spec.Router.ExtraArgs, ModelDeploymentDeclaresBothHalves(md))
+		if !kvAware.Any {
+			ModelDeploymentConditionKVEventsPublishing.True(holder,
+				modelDeploymentReasonKVEventsNotApplicable,
+				"vllm-router is not configured with a kv_aware routing policy")
+			return
+		}
+	default:
+		ModelDeploymentConditionKVEventsPublishing.True(holder,
+			modelDeploymentReasonKVEventsNotApplicable,
+			fmt.Sprintf("router %q does not consume cache events", md.Spec.Router.Name))
+		return
+	}
+
+	expected := 0
 	configured := 0
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		// A CONSUMER PUBLISHES NOTHING, AND NEITHER DOES AN ENCODER. An encoder was handed media
-		// and produces embeddings for the prefiller, so it is not a producer whose configuration
-		// this operator failed to find -- counting it reported a healthy encoder deployment as
-		// unconfigured, and named a role that publishes no events at all.
-		if kind := ModelDeploymentEffectiveRoleKind(role); kind == workercore.ModelDeploymentRoleKindDecode ||
-			kind == workercore.ModelDeploymentRoleKindEncode {
+		kind := ModelDeploymentEffectiveRoleKind(role)
+		if kind == workercore.ModelDeploymentRoleKindEncode {
 			continue
 		}
+		switch md.Spec.Router.Name {
+		case workercore.ModelDeploymentRouterVLLM:
+			upstreamKind, ok := ModelDeploymentRoleUpstreamKind(kind)
+			if !ok || !kvAware.ForRoleKind(upstreamKind) {
+				continue
+			}
+		default:
+			if kind == workercore.ModelDeploymentRoleKindDecode {
+				continue
+			}
+		}
+		expected++
 		if len(role.Command) > 0 {
 			ModelDeploymentConditionKVEventsPublishing.Unknown(holder,
 				modelDeploymentReasonKVEventsRoleUnmanaged,
@@ -72,6 +112,12 @@ func observeModelDeploymentKVEvents(
 			return
 		}
 		configured++
+	}
+	if expected == 0 {
+		ModelDeploymentConditionKVEventsPublishing.True(holder,
+			modelDeploymentReasonKVEventsNotApplicable,
+			"no declared role is configured to publish cache events")
+		return
 	}
 
 	ModelDeploymentConditionKVEventsPublishing.True(holder,

@@ -2734,6 +2734,7 @@ func TestModelDeploymentPodSpecHash_CoversEverySpecField(t *testing.T) {
 		"AcceleratorType",
 		"Resources",
 		"Image",
+		"EngineVersion",
 		"ImagePullPolicy",
 		"ImagePullSecrets",
 		"Privileged",
@@ -3330,15 +3331,15 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "5b7f01201b3d9a0ac127182ce99acb8835b2b555d909b17dc9170672ee90b1af",
-		"a sole server role with a synthesized cache connector":                              "64d8a6626350842e125ebc86980bbee5dd0f839c5bfde46dc95ce1c925164bf4",
-		"a take-over role carrying a connector it must be given no part of":                  "8edb212ec09aa8f59888c296b38b13d367e29986de99dbfaf4fafca61eac46e0",
-		"a direct decoder with a native routing sidecar":                                     "1aeaa6db8a371e450a64178418bf50852a81dabb3126ad42c29240185591157e",
-		"a direct decoder with a classic routing sidecar":                                    "d7cea6dac278d8eb9e1f3824bdbd948b3d2552fe442adb37fcadee1ba71638a3",
-		"a role naming no image, which runs the engine's image":                              "5b7f01201b3d9a0ac127182ce99acb8835b2b555d909b17dc9170672ee90b1af",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "c7b74044d2f4e6b41d093ea217b1564c029d5d58968a600344b76af921869892",
-		"the prefill role of a two-role deployment":                                          "5ff43b908c5346e84843c824e52a4f71b26bd10e2b800c9f72f45e2032e46ceb",
-		"the decode role of a two-role deployment":                                           "769841e63bd25f8b09328f2bae3dae0cfc736971e6ac10ad54d3418dc791aba0",
+		"a sole server role": "7ad675fa1d3551c0843ec690f1c0e994bf6df78e192e3341b619eced6cc9f09f",
+		"a sole server role with a synthesized cache connector":                              "41ec47248abc38a498e5821795203467fa339bb30634854fe98dbd9fb05a47b5",
+		"a take-over role carrying a connector it must be given no part of":                  "f3f26080d4924c1a2c7304f8560197b2cc0683b45751552e4c895fabe6376725",
+		"a direct decoder with a native routing sidecar":                                     "5bc842901c67a848db0efedc3fc19b17ecfca45d90d1ae29d188f23c8c104179",
+		"a direct decoder with a classic routing sidecar":                                    "29d2163047c7774fddb6784b8f147693eb90572299d37a9262fed626ca10946d",
+		"a role naming no image, which runs the engine's image":                              "7ad675fa1d3551c0843ec690f1c0e994bf6df78e192e3341b619eced6cc9f09f",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "ad7ceeefffbc4cf541bd6babc80004d8a72d1a4ed8dc981fa6690b5aa02470d7",
+		"the prefill role of a two-role deployment":                                          "3df99cb5b902a54725480a6b4e2530878a9a17d1feed1c4f1efb70f27c59171f",
+		"the decode role of a two-role deployment":                                           "cbadbdca81a66b14e7f4ace397324680dae9b99aa0de122c13c864aa14a3c4c7",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its
@@ -4447,7 +4448,7 @@ func TestRenderModelDeploymentPod_CPUOnlyUnqueuedRole(t *testing.T) {
 }
 
 func TestRenderModelDeploymentPod_UpgradeHashStabilityWithFamily(t *testing.T) {
-	require.Equal(t, 6, modelDeploymentRenderVersion, "render version must stay 6")
+	require.Equal(t, 7, modelDeploymentRenderVersion, "render version must match current baseline")
 
 	storeConnection := func(protocol string) *ModelDeploymentConnectorInput {
 		return &ModelDeploymentConnectorInput{
@@ -5034,8 +5035,8 @@ func TestModelDeploymentPodMatchesCurrencyWithLegacy(t *testing.T) {
 			want:       true,
 		},
 		{
-			name:       "legacy full-router hash is rejected above render version 6",
-			actual:     podWith("legacy-hash", "7"),
+			name:       "legacy full-router hash is rejected above current render version",
+			actual:     podWith("legacy-hash", strconv.Itoa(modelDeploymentRenderVersion+1)),
 			desired:    desired,
 			legacyHash: "legacy-hash",
 			minVersion: 1,
@@ -5705,7 +5706,7 @@ func TestRenderModelDeploymentPod_AscendA5RemoteModelTransfer(t *testing.T) {
 	})
 
 	t.Run("pod-spec-hash stays stable on non-A5 and non-Remote renders and moves across A5 Remote modes", func(t *testing.T) {
-		assert.Equal(t, 6, modelDeploymentRenderVersion)
+		assert.Equal(t, 7, modelDeploymentRenderVersion)
 		md910 := newRenderDeployment(func(md *workercore.ModelDeployment) {
 			md.Spec.KVCache = nil
 			md.Spec.Roles[0].AcceleratorType = "atlas-910b"

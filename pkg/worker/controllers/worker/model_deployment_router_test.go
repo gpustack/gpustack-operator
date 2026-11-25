@@ -1662,9 +1662,9 @@ func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSpli
 		// once more when the default router image advanced to v0.4.0, again at v0.5.0, again
 		// when Envoy replaced its catch-all route with the explicit inference allowlist, and
 		// again when multimodal inference routes were added to that allowlist.
-		"a prefill and decode pair": "993d24783ee7eb8b2723128b83449e4c245764e421a42a2ffff1790dbd3b3d7b",
-		"a sole server role":        "6027867ad79c60c17a77245152808089706917fad34e828bef4f8ac8b4bfa04e",
-		"a router declaring its own image, policy, replicas and extra arguments": "780a89f271a8de5b00e0111b861ebb176b194eac54143664c0fd868acb9498eb",
+		"a prefill and decode pair": "6a61affc57bafcdb296805d8aa88aae765c9679185b9ba5ba6f3747d1e4350e1",
+		"a sole server role":        "ad183e4c88ed7561256c7f7716bb7f7cd77bb5da94a1a5c8aa1e907580db622e",
+		"a router declaring its own image, policy, replicas and extra arguments": "76cf47a9f5b3b126861baa266d70ab6a8bc720d629ecdc8bfaba2b98ba255f4c",
 		"a role whose command the user took over, so it publishes no events":     "4a8d95d2f122997bab1dd8e49f5d03fc2868d552835e496438e5c49a38a6c8ca",
 		"an sglang engine, whose metrics contract differs":                       "af51a8dd3dfad66334f2120f280cbd7578c2cfc0c0a5a652578b30199ae101cc",
 	}

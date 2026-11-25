@@ -376,15 +376,22 @@ func renderModelDeploymentRouterObjectsWithProxy(
 				delete(selector, modelDeploymentMemberIndexLabel)
 			}
 		}
-		// The renderer is handed the SAME map that is published, rather than one built beside it,
-		// because a router configured by argv discovers each role by these labels: two derivations
-		// of one answer would let what a user reads and what the router matches drift apart.
-		roles[i].Selector = maps.Clone(selector)
+		// The renderer is handed the SAME map that is published for Pod-watching routers. For
+		// sgl-router, Kubernetes EndpointSlice discovery matches labels copied from the per-role
+		// Service rather than Pod-only member-index or endpoint-eligible labels, while those Pod
+		// terms narrow endpoints through Service.spec.selector.
+		if md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL {
+			sliceSelector := modelDeploymentSelectorLabels(md, role)
+			sliceSelector[modelDeploymentLabelKeyRoleKind] = roles[i].Kind
+			roles[i].Selector = sliceSelector
+		} else {
+			roles[i].Selector = maps.Clone(selector)
+		}
 		roleStatus := workercore.ModelDeploymentRouterRoleStatus{
 			Name: role.Name, Kind: kind, Selector: selector, Endpoint: modelDeploymentRoleEndpoint(md, role),
 		}
-		if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
-			events := inject.VLLMKVEvents(md.Name + "-" + role.Name + "." + md.Namespace + ".svc")
+		if publish, topic, _ := modelDeploymentKVEventsConfig(md, role); publish {
+			events := inject.KVEventsForTopic(md.Name+"-"+role.Name+"."+md.Namespace+".svc", topic)
 			roleStatus.KVEvents = &workercore.ModelDeploymentRouterKVEvents{
 				Endpoint: events.Endpoint, ReplayEndpoint: events.ReplayEndpoint, Topic: events.Topic,
 			}
@@ -541,15 +548,29 @@ func renderModelDeploymentRouterObjectsWithProxy(
 	listenPort := modelDeploymentRouterHTTPPort
 	if requireAllowlistProxy &&
 		(md.Spec.Router.Name == workercore.ModelDeploymentRouterVLLM ||
-			md.Spec.Router.Name == workercore.ModelDeploymentRouterSGLang) {
+			md.Spec.Router.Name == workercore.ModelDeploymentRouterSGLang ||
+			md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL) {
 		listenHost = modelDeploymentRouterUpstreamLoopbackHost
 		listenPort = modelDeploymentRouterUpstreamLoopbackPort
+	}
+	routerEndpointLabels := endpointLabels
+	if md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL {
+		routerEndpointLabels = map[string]string{
+			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
+			modelDeploymentLabelKeyInstance: md.Name,
+		}
+		for i := range roles {
+			if roles[i].Kind != "encode" {
+				routerEndpointLabels[modelDeploymentLabelKeyRoleKind] = roles[i].Kind
+				break
+			}
+		}
 	}
 	routerInput := router.Input{
 		Roles: roles, Metrics: metrics, ModelName: md.Spec.Model.Name,
 		TokenizerEndpoint: modelDeploymentRoleEndpoint(md, modelDeploymentTokenizerRole(md)),
 		Namespace:         md.Namespace, EndpointSelector: endpointSelector,
-		EndpointLabels:          endpointLabels,
+		EndpointLabels:          routerEndpointLabels,
 		EncoderURLs:             encoderURLs,
 		ListenHost:              listenHost,
 		ListenPort:              listenPort,
@@ -560,6 +581,7 @@ func renderModelDeploymentRouterObjectsWithProxy(
 		// The handshake follows the transfer backend and the pool hardware the pair runs,
 		// resolved in one place so the router and the engine halves cannot disagree.
 		KVConnector: modelDeploymentVLLMRouterKVConnector(md, manufacturers),
+		ExtraArgs:   md.Spec.Router.ExtraArgs,
 	}
 	// THE SGLANG EXTERNAL DP SHAPE NAMES ITS WIDTH TO THE GATEWAY. The gateway's --dp-aware fans
 	// its worker registration out per dp member, which is the one-worker-per-member contract the
@@ -625,7 +647,11 @@ func renderModelDeploymentRouterObjectsWithProxy(
 	// ConfigMap, and rendering an empty one would leave an object whose absence and whose emptiness
 	// a reader cannot tell apart, plus a config hash taken over nothing.
 	var configMap *core.ConfigMap
-	annotations := modelDeploymentMetricsAnnotations(modelDeploymentRouterMetricsPort, core.URISchemeHTTP)
+	metricsPort := modelDeploymentRouterMetricsPort
+	if md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL && !requireAllowlistProxy {
+		metricsPort = modelDeploymentRouterHTTPPort
+	}
+	annotations := modelDeploymentMetricsAnnotations(metricsPort, core.URISchemeHTTP)
 	if len(workload.Config) > 0 {
 		configMap = &core.ConfigMap{
 			ObjectMeta: meta.ObjectMeta{Name: name, Namespace: md.Namespace, Labels: maps.Clone(labels)},
@@ -669,9 +695,21 @@ func renderModelDeploymentRouterObjectsWithProxy(
 
 	serviceAccount := &core.ServiceAccount{ObjectMeta: meta.ObjectMeta{Name: name, Namespace: md.Namespace, Labels: maps.Clone(labels)}}
 	note(serviceAccount)
+	roleRules := []rbac.PolicyRule{{
+		APIGroups: []string{""},
+		Resources: []string{"pods"},
+		Verbs:     []string{"get", "list", "watch"},
+	}}
+	if md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL {
+		roleRules = []rbac.PolicyRule{{
+			APIGroups: []string{"discovery.k8s.io"},
+			Resources: []string{"endpointslices"},
+			Verbs:     []string{"get", "list", "watch"},
+		}}
+	}
 	role := &rbac.Role{
 		ObjectMeta: meta.ObjectMeta{Name: name, Namespace: md.Namespace, Labels: maps.Clone(labels)},
-		Rules:      []rbac.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch"}}},
+		Rules:      roleRules,
 	}
 	note(role)
 	roleBinding := &rbac.RoleBinding{
@@ -746,7 +784,7 @@ func renderModelDeploymentRouterWorkload(
 	switch md.Spec.Router.Name {
 	case workercore.ModelDeploymentRouterLLMD:
 		return renderModelDeploymentLLMDRouterWorkload(ctx, md, in), nil
-	case workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentRouterSGLang:
+	case workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentRouterSGLang, workercore.ModelDeploymentRouterSGL:
 		return renderModelDeploymentArgvRouterWorkload(ctx, md, in), nil
 	default:
 		return modelDeploymentRouterWorkload{},
@@ -770,8 +808,13 @@ func renderModelDeploymentArgvRouterWorkload(
 	// is written against: a key the operator owns is refused there, so anything surviving to here
 	// names something the operator did not set.
 	args := slices.Concat(in.Rendered.Arguments, md.Spec.Router.ExtraArgs)
+	isSGLRouter := md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL
 
 	if !in.RequireAllowlistProxy {
+		ports := []core.ContainerPort{{Name: "http", ContainerPort: modelDeploymentRouterHTTPPort}}
+		if !isSGLRouter {
+			ports = append(ports, core.ContainerPort{Name: "metrics", ContainerPort: modelDeploymentRouterMetricsPort})
+		}
 		return modelDeploymentRouterWorkload{
 			Containers: []core.Container{{
 				// The command comes from the render beside the arguments, because the image holds three
@@ -779,10 +822,7 @@ func renderModelDeploymentArgvRouterWorkload(
 				// own CMD position, where the first flag is read as the program name.
 				Name: "router", Image: image, Command: in.Rendered.Command, Args: args,
 				ImagePullPolicy: kvcache.ResolvePullPolicy(md.Spec.Router.ImagePullPolicy, image),
-				Ports: []core.ContainerPort{
-					{Name: "http", ContainerPort: modelDeploymentRouterHTTPPort},
-					{Name: "metrics", ContainerPort: modelDeploymentRouterMetricsPort},
-				},
+				Ports:           ports,
 				// The router answers on the port the Service targets, so a TCP probe on it is the same
 				// question the Service asks. There is no second process to gate on, unlike the picker
 				// whose readiness is its own gRPC health server behind a proxy.
@@ -793,21 +833,32 @@ func renderModelDeploymentArgvRouterWorkload(
 		}
 	}
 
+	envoyConfig := renderModelDeploymentRouterLoopbackEnvoyConfig(md.Spec.Router.RequestTimeoutSeconds)
+	envoyContainer := renderModelDeploymentRouterEnvoyContainer(ctx, md)
+	routerPorts := []core.ContainerPort{
+		{Name: "http-upstream", ContainerPort: modelDeploymentRouterUpstreamLoopbackPort},
+		{Name: "metrics", ContainerPort: modelDeploymentRouterMetricsPort},
+	}
+	if isSGLRouter {
+		envoyConfig = renderModelDeploymentRouterSGLLoopbackEnvoyConfig(md.Spec.Router.RequestTimeoutSeconds)
+		envoyContainer.Ports = append(envoyContainer.Ports,
+			core.ContainerPort{Name: "metrics", ContainerPort: modelDeploymentRouterMetricsPort},
+		)
+		routerPorts = []core.ContainerPort{
+			{Name: "http-upstream", ContainerPort: modelDeploymentRouterUpstreamLoopbackPort},
+		}
+	}
+
 	return modelDeploymentRouterWorkload{
 		Config: map[string]string{
-			modelDeploymentRouterEnvoyConfigKey: renderModelDeploymentRouterLoopbackEnvoyConfig(
-				md.Spec.Router.RequestTimeoutSeconds,
-			),
+			modelDeploymentRouterEnvoyConfigKey: envoyConfig,
 		},
 		Containers: []core.Container{
-			renderModelDeploymentRouterEnvoyContainer(ctx, md),
+			envoyContainer,
 			{
 				Name: "router", Image: image, Command: in.Rendered.Command, Args: args,
 				ImagePullPolicy: kvcache.ResolvePullPolicy(md.Spec.Router.ImagePullPolicy, image),
-				Ports: []core.ContainerPort{
-					{Name: "http-upstream", ContainerPort: modelDeploymentRouterUpstreamLoopbackPort},
-					{Name: "metrics", ContainerPort: modelDeploymentRouterMetricsPort},
-				},
+				Ports:           routerPorts,
 				// The router binds 127.0.0.1:8001 behind the Envoy allowlist sidecar, so a bare TCP probe on
 				// 8001 dials <PodIP>:8001 from kubelet and always fails with connection refused. Probe
 				// GET /observer/endpoints through Envoy's :9091 observer listener, which forwards straight to
@@ -1023,6 +1074,28 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
 			case apierrors.IsNotFound(err):
 			default:
 				return err
+			}
+		}
+		if !retained && md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL {
+			for i := range md.Spec.Roles {
+				svc := new(core.Service)
+				svcErr := r.Client.Get(ctx, ctrlcli.ObjectKey{
+					Namespace: md.Namespace,
+					Name:      md.Name + "-" + md.Spec.Roles[i].Name,
+				}, svc)
+				switch {
+				case svcErr == nil:
+					if svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue ||
+						svc.Annotations[modelDeploymentEligibilityActiveAnnotation] == modelDeploymentEndpointEligibleValue {
+						retained = true
+					}
+				case apierrors.IsNotFound(svcErr):
+				default:
+					return svcErr
+				}
+				if retained {
+					break
+				}
 			}
 		}
 
@@ -1262,6 +1335,7 @@ func renderModelDeploymentRouterEnvoyConfig(timeoutSeconds *int32) string {
 		timeoutSeconds,
 		true,
 		false,
+		false,
 		modelDeploymentRouterEnvoyLLMDHTTPFilters,
 		modelDeploymentRouterEnvoyLLMDClusters,
 	)
@@ -1277,13 +1351,29 @@ func renderModelDeploymentRouterLoopbackEnvoyConfig(timeoutSeconds *int32) strin
 		timeoutSeconds,
 		false,
 		true,
+		false,
+		modelDeploymentRouterEnvoyLoopbackHTTPFilters,
+		modelDeploymentRouterEnvoyLoopbackClusters,
+	)
+}
+
+// renderModelDeploymentRouterSGLLoopbackEnvoyConfig renders the Envoy sidecar configuration that
+// fronts sgl-router on 0.0.0.0:8000, exposes GET /observer/endpoints on 0.0.0.0:9091, and exposes
+// GET /metrics on 0.0.0.0:9090 because sgl-router serves Prometheus metrics on its main HTTP server.
+func renderModelDeploymentRouterSGLLoopbackEnvoyConfig(timeoutSeconds *int32) string {
+	return buildModelDeploymentRouterEnvoyConfig(
+		modelDeploymentRouterEnvoyLoopbackCluster,
+		timeoutSeconds,
+		false,
+		true,
+		true,
 		modelDeploymentRouterEnvoyLoopbackHTTPFilters,
 		modelDeploymentRouterEnvoyLoopbackClusters,
 	)
 }
 
 func buildModelDeploymentRouterEnvoyConfig(
-	cluster string, timeoutSeconds *int32, disableExtProcOnDeny, includeObserverListener bool, httpFilters, clusters string,
+	cluster string, timeoutSeconds *int32, disableExtProcOnDeny, includeObserverListener, includeMetricsListener bool, httpFilters, clusters string,
 ) string {
 	timeout := modelDeploymentRouterDefaultRouteTimeout
 	if timeoutSeconds != nil {
@@ -1301,6 +1391,13 @@ func buildModelDeploymentRouterEnvoyConfig(
 			modelDeploymentRouterEnvoyObserverListener,
 			"__OBSERVER_PROXY_PORT__",
 			strconvx.Itoa(modelDeploymentRouterObserverProxyPort),
+		))
+	}
+	if includeMetricsListener {
+		b.WriteString(strings.ReplaceAll(
+			modelDeploymentRouterEnvoyMetricsListener,
+			"__METRICS_PROXY_PORT__",
+			strconvx.Itoa(modelDeploymentRouterMetricsPort),
 		))
 	}
 	b.WriteString("  clusters:\n")
@@ -1474,6 +1571,41 @@ const modelDeploymentRouterEnvoyObserverListener = `  - name: observer
               routes:
               - match:
                   path: "/observer/endpoints"
+                  headers:
+                  - name: ":method"
+                    string_match: {exact: "GET"}
+                route: {cluster: router_upstream, timeout: 5s}
+              - match: {prefix: "/"}
+                direct_response: {status: 403}
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+`
+
+// modelDeploymentRouterEnvoyMetricsListener binds 0.0.0.0:__METRICS_PROXY_PORT__ inside the
+// sgl-router Pod so Prometheus scrapes GET /metrics on :9090 without exposing /metrics on the
+// client-facing :8000 listener.
+const modelDeploymentRouterEnvoyMetricsListener = `  - name: metrics
+    address:
+      socket_address: {address: 0.0.0.0, port_value: __METRICS_PROXY_PORT__}
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: router_metrics
+          normalize_path: true
+          merge_slashes: true
+          path_with_escaped_slashes_action: REJECT_REQUEST
+          route_config:
+            name: router_metrics
+            virtual_hosts:
+            - name: metrics
+              domains: ["*"]
+              routes:
+              - match:
+                  path: "/metrics"
                   headers:
                   - name: ":method"
                     string_match: {exact: "GET"}

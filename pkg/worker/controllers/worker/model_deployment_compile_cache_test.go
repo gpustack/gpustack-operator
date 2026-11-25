@@ -734,13 +734,6 @@ func TestModelDeploymentCompileCacheCompilationFactorsIsolateTheCache(t *testing
 			},
 		},
 		{
-			name: "the attention backend chosen through the environment",
-			mutate: func(in *ModelDeploymentCompileCacheInput) {
-				in.Role.ExtraArgs = []string{"--dtype", "bfloat16", "--max-model-len", "4096"}
-				in.Role.Env = []workercore.ModelDeploymentEnvVar{{Name: "VLLM_ATTENTION_BACKEND", Value: "FLASH_ATTN"}}
-			},
-		},
-		{
 			name: "the architecture list the kernels are built for",
 			mutate: func(in *ModelDeploymentCompileCacheInput) {
 				in.Role.ExtraArgs = []string{"--dtype", "bfloat16", "--max-model-len", "4096"}
@@ -896,9 +889,9 @@ func TestModelDeploymentCompileCacheEnvironmentAffectsTheCache(t *testing.T) {
 			wantIn: true,
 		},
 		{
-			name:   "the engine generation",
+			name:   "the engine generation retired in vLLM",
 			env:    []workercore.ModelDeploymentEnvVar{{Name: "VLLM_USE_V1", Value: "0"}},
-			wantIn: true,
+			wantIn: false,
 		},
 		{
 			name:   "the mega AOT artifact switch",
@@ -906,9 +899,9 @@ func TestModelDeploymentCompileCacheEnvironmentAffectsTheCache(t *testing.T) {
 			wantIn: true,
 		},
 		{
-			name:   "the FlashAttention build",
+			name:   "the FlashAttention build retired in vLLM",
 			env:    []workercore.ModelDeploymentEnvVar{{Name: "VLLM_FLASH_ATTN_VERSION", Value: "3"}},
-			wantIn: true,
+			wantIn: false,
 		},
 		{
 			name:   "the SGLang torch compile switch",
@@ -938,8 +931,8 @@ func TestModelDeploymentCompileCacheEnvironmentAffectsTheCache(t *testing.T) {
 		{
 			name: "a repeated environment name is read the way the runtime applies it",
 			env: []workercore.ModelDeploymentEnvVar{
-				{Name: "VLLM_ATTENTION_BACKEND", Value: "FLASH_ATTN"},
-				{Name: "VLLM_ATTENTION_BACKEND", Value: "TRITON_ATTN"},
+				{Name: "TRITON_ATTN_NUM_STAGES", Value: "2"},
+				{Name: "TRITON_ATTN_NUM_STAGES", Value: "3"},
 			},
 			wantIn: true,
 		},
@@ -1083,5 +1076,22 @@ func TestModelDeploymentCompileCacheFlagTableRowsAreDistinct(t *testing.T) {
 			"%q is not a short flag", short)
 		_, known := modelDeploymentCompileCacheFlagTable[alias]
 		assert.True(t, known, "the alias %q names no row in the table", alias)
+	}
+}
+
+func TestModelDeploymentCompileCacheRetiredVLLMEnvVarsAreIgnored(t *testing.T) {
+	baseline, err := BuildModelDeploymentCompileCacheSubPath(newCompileCacheInput())
+	require.NoError(t, err)
+
+	for _, name := range []string{"VLLM_USE_V1", "VLLM_ATTENTION_BACKEND", "VLLM_FLASH_ATTN_VERSION"} {
+		t.Run(name, func(t *testing.T) {
+			got, err := BuildModelDeploymentCompileCacheSubPath(newCompileCacheInput(
+				func(in *ModelDeploymentCompileCacheInput) {
+					in.Role.Env = []workercore.ModelDeploymentEnvVar{{Name: name, Value: "1"}}
+				},
+			))
+			require.NoError(t, err)
+			assert.Equal(t, baseline, got)
+		})
 	}
 }

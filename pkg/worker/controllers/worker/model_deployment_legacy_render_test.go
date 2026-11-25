@@ -11,11 +11,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	app "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	node "k8s.io/api/node/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	ctrlrecord "k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
@@ -191,10 +195,12 @@ func legacyRenderEntryForPods(pods []*core.Pod, rendered string) legacyRenderFix
 	}
 }
 
-// checkLegacyRenderFixture compares a shape's rendered Pods against its recorded fixture, byte for
-// byte, and names the file and a line diff when they disagree. With -update it records instead.
+// checkLegacyRenderFixture compares a shape's rendered Pods against its recorded fixture when at
+// the same renderVersion, or verifies standing-Pod currency and zero-rollout reconciliation when
+// modelDeploymentRenderVersion advances past the frozen legacy-render baseline.
 func checkLegacyRenderFixture(
-	t *testing.T, name string, pods []*core.Pod, manifest *legacyRenderVersionManifest,
+	t *testing.T, name string, md *workercore.ModelDeployment, objs []ctrlcli.Object,
+	pods []*core.Pod, manifest *legacyRenderVersionManifest,
 ) {
 	t.Helper()
 
@@ -212,6 +218,121 @@ func checkLegacyRenderFixture(
 	recorded, err := os.ReadFile(path)
 	require.NoError(t, err, "the recording is the contract; regenerate it with -update")
 	expected := string(recorded)
+
+	if manifest.RenderVersion < modelDeploymentRenderVersion {
+		var recordedPods []*core.Pod
+		require.NoError(t, json.Unmarshal(recorded, &recordedPods))
+		require.Equal(t, manifest.Fixtures[name], legacyRenderEntryForPods(recordedPods, expected),
+			"frozen legacy-render fixture %s must stay untouched in synchronization with version.json", path)
+		require.Len(t, recordedPods, len(pods))
+
+		minRV := modelDeploymentEffectiveMinRenderVersion(md)
+		seedObjs := append([]ctrlcli.Object{md.DeepCopy()}, objs...)
+		expectedUIDs := make([]types.UID, 0, len(recordedPods))
+		for i := range recordedPods {
+			role := &md.Spec.Roles[i]
+			assert.True(t,
+				modelDeploymentControllerPodMatchesCurrency(md, role, 0, 0, recordedPods[i], pods[i], minRV),
+				"standing v%d Pod for %s role %q must remain current under renderVersion %d",
+				manifest.RenderVersion, name, role.Name, modelDeploymentRenderVersion,
+			)
+
+			live := recordedPods[i].DeepCopy()
+			live.Name = live.GenerateName + "0-0"
+			live.UID = types.UID("legacy-uid-" + name + "-" + role.Name)
+			live.Spec.NodeName = "node-0"
+			live.Status.Phase = core.PodRunning
+			live.Status.PodIP = "10.244.0.10"
+			live.Status.Conditions = []core.PodCondition{{
+				Type: core.PodReady, Status: core.ConditionTrue,
+			}}
+			live.Status.ContainerStatuses = []core.ContainerStatus{{
+				Name: modelDeploymentMainContainerName, Ready: true,
+			}}
+			expectedUIDs = append(expectedUIDs, live.UID)
+			seedObjs = append(seedObjs, live)
+			if live.Labels["kueue.x-k8s.io/pod-group-name"] != "" {
+				seedObjs = append(seedObjs, admittedReplicaWorkload([]*core.Pod{live}, true))
+			}
+		}
+		if md.Spec.KVCache != nil {
+			kvObjs := goldenKVCacheFixtures(md.Spec.KVCache.PoolRef.Name, "TCP")
+			for _, obj := range kvObjs {
+				if binding, ok := obj.(*workercore.KVCachePoolBinding); ok {
+					binding.Namespace = md.Namespace
+					binding.Spec.Domain.Name = "team-a-shared"
+					binding.Spec.Domain.Dtype = ""
+				}
+			}
+			seedObjs = append(seedObjs, kvObjs...)
+		}
+
+		cli := newModelDeploymentClient(seedObjs...)
+		reconciler := &ModelDeploymentReconciler{
+			Client:    cli,
+			APIReader: cli,
+			Recorder:  ctrlrecord.NewFakeRecorder(64),
+		}
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: md.Namespace, Name: md.Name}}
+		_, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		var afterPods core.PodList
+		require.NoError(t, cli.List(context.Background(), &afterPods, ctrlcli.InNamespace(md.Namespace)))
+		gotUIDs := make([]types.UID, 0, len(afterPods.Items))
+		for i := range afterPods.Items {
+			assert.Nil(t, afterPods.Items[i].DeletionTimestamp,
+				"standing v%d Pod %s in %s must not be deleted on upgrade", manifest.RenderVersion, afterPods.Items[i].Name, name)
+			gotUIDs = append(gotUIDs, afterPods.Items[i].UID)
+		}
+		assert.ElementsMatch(t, expectedUIDs, gotUIDs,
+			"all standing v%d Pods in %s must survive upgrade reconciliation with zero rollout", manifest.RenderVersion, name)
+
+		// Also verify steady-state routed v6 Pods that already carry sentinel env vars when the
+		// router Deployment is Ready survive post-isolation reconciliation with zero rollout.
+		if md.Spec.Router != nil {
+			var deps app.DeploymentList
+			require.NoError(t, cli.List(context.Background(), &deps, ctrlcli.InNamespace(md.Namespace)))
+			for i := range deps.Items {
+				dep := deps.Items[i].DeepCopy()
+				desired := ptr.Deref(dep.Spec.Replicas, 1)
+				dep.Status.ObservedGeneration = dep.Generation
+				dep.Status.Replicas = desired
+				dep.Status.UpdatedReplicas = desired
+				dep.Status.ReadyReplicas = desired
+				require.NoError(t, cli.Status().Update(context.Background(), dep))
+			}
+			sentinelDesired, renderErr := reconciler.renderModelDeploymentPods(context.Background(), md, nil, nil, nil)
+			require.NoError(t, renderErr)
+			for i := range afterPods.Items {
+				pod := afterPods.Items[i].DeepCopy()
+				roleName := modelDeploymentPodRole(pod)
+				if wantCtr, ok := modelDeploymentDrainContainerOf(sentinelDesired[roleName][0][0], modelDeploymentMainContainerName); ok {
+					for ci := range pod.Spec.Containers {
+						if pod.Spec.Containers[ci].Name == modelDeploymentMainContainerName {
+							pod.Spec.Containers[ci].Env = wantCtr.Env
+						}
+					}
+				}
+				require.NoError(t, cli.Update(context.Background(), pod))
+			}
+			_, err = reconciler.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+
+			var steadyPods core.PodList
+			require.NoError(t, cli.List(context.Background(), &steadyPods, ctrlcli.InNamespace(md.Namespace)))
+			steadyUIDs := make([]types.UID, 0, len(steadyPods.Items))
+			for i := range steadyPods.Items {
+				assert.Nil(t, steadyPods.Items[i].DeletionTimestamp,
+					"steady-state v%d Pod %s in %s must not be deleted on upgrade", manifest.RenderVersion, steadyPods.Items[i].Name, name)
+				steadyUIDs = append(steadyUIDs, steadyPods.Items[i].UID)
+			}
+			assert.ElementsMatch(t, expectedUIDs, steadyUIDs,
+				"steady-state v%d Pods in %s must survive post-isolation upgrade reconciliation with zero rollout", manifest.RenderVersion, name)
+		}
+		return
+	}
+
 	if expected != rendered && manifest.RenderVersion == modelDeploymentRenderVersion {
 		require.Equal(t, expected, rendered,
 			"rendered Pod bytes for %s changed while modelDeploymentRenderVersion (%d) matches %s; "+
@@ -326,8 +447,10 @@ func TestModelDeploymentLegacyRender_GoldenPods(t *testing.T) {
 		rawManifest, err := os.ReadFile(manifestPath)
 		require.NoError(t, err, "the version manifest is the contract; regenerate it with -update")
 		require.NoError(t, json.Unmarshal(rawManifest, &manifest))
-		assert.Equal(t, modelDeploymentRenderVersion, manifest.RenderVersion,
-			"modelDeploymentRenderVersion changed without updating %s; run with -update", manifestPath)
+		assert.Equal(t, 6, manifest.RenderVersion,
+			"testdata/legacy-render/version.json must remain frozen at renderVersion=6")
+		assert.Equal(t, 7, modelDeploymentRenderVersion,
+			"modelDeploymentRenderVersion must advance to 7 while preserving v6 legacy-render currency")
 		assert.Equal(t, modelDeploymentMinSupportedRenderVersion, manifest.MinSupportedRenderVersion,
 			"modelDeploymentMinSupportedRenderVersion changed without updating %s; run with -update", manifestPath)
 	}
@@ -341,7 +464,7 @@ func TestModelDeploymentLegacyRender_GoldenPods(t *testing.T) {
 			pods := renderLegacyDeploymentPods(t, md, objs, tc.connection)
 			require.NotEmpty(t, pods)
 
-			checkLegacyRenderFixture(t, tc.name, pods, &manifest)
+			checkLegacyRenderFixture(t, tc.name, md, objs, pods, &manifest)
 		})
 	}
 

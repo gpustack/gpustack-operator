@@ -7,7 +7,7 @@ metadata:
     kueue.x-k8s.io/role-hash: main
     kvcache.gpustack.ai/client-config: '{"metadata_server":"P2PHANDSHAKE","master_server_address":"shared-kv-master.gpustack-system.svc:50051","protocol":"ascend","device_name":"","mode":"standalone-store","global_segment_size":0,"local_buffer_size":134217728,"tenant_id":"chat"}'
     modeldeployment.gpustack.ai/pod-spec-hash: ec48ecf950ad7a1821ffc965da0a40362e455d1324d75d6a53d4422ec2d72657
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"

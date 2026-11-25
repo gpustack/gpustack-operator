@@ -2525,7 +2525,8 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 		// block has therefore become a term below that excludes the KV terms alone, so a leg the
 		// operator owns is configured while the store the operator does not own is left alone.
 		kvTransfer := modelDeploymentUsesKVTransfer(md, role)
-		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, manufacturer)
+		publishKVEvents, kvEventsTopic, kvEventsUseCBORHash := modelDeploymentKVEventsConfig(md, role)
+		engineVersion := ModelDeploymentEffectiveEngineVersion(md, role)
 		routingSidecar := modelDeploymentFrontsDecodeWithSidecar(md, role)
 		roleKind := ModelDeploymentEffectiveRoleKind(role)
 		// The encoder stage is the row's answer for this combination, taken once per role because
@@ -2626,6 +2627,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 				roleConnection = *connection
 			}
 			roleConnection.Engine = md.Spec.Engine.Name
+			roleConnection.EngineVersion = engineVersion
 			roleConnection.Manufacturer = manufacturer
 			roleConnection.AcceleratorFamily = family
 			roleConnection.AscendHostRoCE = ascendHostRoCE
@@ -2652,6 +2654,8 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 				roleConnection.CachePrefix = weights.KVIdentity
 			}
 			roleConnection.PublishKVEvents = publishKVEvents
+			roleConnection.KVEventsTopic = kvEventsTopic
+			roleConnection.KVEventsUseCBORHash = kvEventsUseCBORHash
 			if roleConnection.PublishKVEvents {
 				roleConnection.KVEventsHost = md.Name + "-" + role.Name + "." + md.Namespace + ".svc"
 			}
@@ -2675,6 +2679,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 			// refuses should keep doing rather than fail over a field nothing consumes.
 			connector, err := SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
 				Engine:            md.Spec.Engine.Name,
+				EngineVersion:     engineVersion,
 				Manufacturer:      manufacturer,
 				AcceleratorFamily: family,
 				Kind:              role.Kind,

@@ -303,7 +303,7 @@ if prefill, decode := in.Parallelism.Prefill.orOne(), in.Parallelism.Decode.orOn
       Acceptance: `vllm.go` appends `leg.DefaultedEnv` to `result.DefaultedEnv`; `VLLM_USE_V2_MODEL_RUNNER` and `VLLM_EC_SIDE_CHANNEL_PORT` are removed from `EncoderCacheOwnedKeys` and emitted as Defaulted (`VLLM_USE_V2_MODEL_RUNNER=1` only for `< 0.34.0` / legacy, omitted at `>= 0.34.0`; `VLLM_EC_SIDE_CHANNEL_PORT=5601`); Ascend P/D renders `MooncakeConnectorV2` (Pull mode) with divisibility check `max(tp_p, tp_d) % min(tp_p, tp_d) == 0` at `>= 0.30.0` and keeps `MooncakeConnectorV1` + `tp_p >= tp_d` below `0.30.0` / legacy; `llm-d-router` KV event topic is `"kv@<model>"`; `inject.Render` allows `EngineVLLMAscend` and store-less `EngineSGLang` KV events (placing SGLang `--kv-events-config` before `--encoder-urls`); `vllm-router` `kv_aware` injects `--prefix-caching-hash-algo sha256_cbor` and `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0`; `MOONCAKE_STANDALONE_STORAGE` comment in `sglang.go` is updated.
       Verify: `go test -v ./pkg/worker/kvcache/inject/...`
 
-- [ ] **T6 · Controller orchestration, `renderVersion=7` currency protection, and router/metrics wiring**
+- [x] **T6 · Controller orchestration, `renderVersion=7` currency protection, and router/metrics wiring**
       Blocked by: T2, T3, T4
       Owns: `pkg/worker/controllers/worker/model_deployment*.go`, `pkg/worker/controllers/worker/testdata/**`, `pkg/worker/extensionapis/worker/model_deployment.metrics*.go`
       Gate: review

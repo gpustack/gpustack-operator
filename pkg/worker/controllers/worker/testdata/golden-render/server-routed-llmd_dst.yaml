@@ -5,8 +5,8 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: main
-    modeldeployment.gpustack.ai/pod-spec-hash: 7dc3a4d864ff45da0c448bf39e2e3ff7c29659fd08e26a610b9893096abd046f
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/pod-spec-hash: b10678eea53ed27ce2077e85d87b283ae0a8a6b23045692d2de46896977cb817
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -41,7 +41,7 @@ spec:
     - serve
     - Qwen/Qwen2.5-72B-Instruct
     - --kv-events-config
-    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@"}'
+    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@Qwen/Qwen2.5-72B-Instruct"}'
     - --host
     - 0.0.0.0
     - --port
