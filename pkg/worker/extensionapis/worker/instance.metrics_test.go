@@ -885,7 +885,7 @@ func TestSelectDeviceManagerPod(t *testing.T) {
 	t.Run("accepts mock pod as fallback when manufacturer-specific pod is absent", func(t *testing.T) {
 		mockPod := metricsTestDMPod()
 		mockPod.Name = "dm-mock-abc"
-		mockPod.Labels[deviceplugin.ManufacturerLabelKey] = "mock"
+		mockPod.Labels[deviceplugin.ManufacturerLabelKey] = deviceplugin.ManufacturerMock
 		mockPod.Status.PodIP = "10.0.0.11"
 
 		got := selectDeviceManagerPod([]core.Pod{*amdPod(), *mockPod}, "nvidia")

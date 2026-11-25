@@ -312,7 +312,7 @@ func selectDeviceManagerPod(pods []core.Pod, manufacturer string) *core.Pod {
 		if manufacturer == "" || pod.Labels[deviceplugin.ManufacturerLabelKey] == manufacturer {
 			return pod
 		}
-		if mockFallback == nil && pod.Labels[deviceplugin.ManufacturerLabelKey] == "mock" {
+		if mockFallback == nil && pod.Labels[deviceplugin.ManufacturerLabelKey] == deviceplugin.ManufacturerMock {
 			mockFallback = pod
 		}
 	}
