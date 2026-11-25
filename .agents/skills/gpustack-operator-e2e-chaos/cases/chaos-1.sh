@@ -164,7 +164,7 @@ if [[ "$HAS_NV" -eq 0 ]]; then
 fi
 
 build_storm_spec() {
-  printf 'default:\n  preset: %s\n  count: 4\nnodes:\n' "$PRIMARY_PRESET"
+  printf 'default:\n  groups: []\nnodes:\n'
   local idx node
   for ((idx = 0; idx < NODE_COUNT; idx++)); do
     node="${MOCK_DM_NODES[$idx]}"

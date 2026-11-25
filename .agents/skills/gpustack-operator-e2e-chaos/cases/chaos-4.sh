@@ -143,7 +143,7 @@ NS_CREATED=1
 # ===================================================================================================
 render_c4_spec() {
   local b_count="$1"
-  printf 'default:\n  preset: %s\n  count: 4\nnodes:\n' "$PRESET"
+  printf 'default:\n  groups: []\nnodes:\n'
   if [[ "$NODE_B" != "$NODE_A" ]]; then
     if [[ "$HAS_NV_MIG" -eq 1 ]]; then
       cat <<EOF

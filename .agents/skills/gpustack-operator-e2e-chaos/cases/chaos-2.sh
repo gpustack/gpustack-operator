@@ -126,7 +126,7 @@ NS_CREATED=1
 render_chaos2_spec() {
   local node_a_body="$1"
   local node_b_body="${2:-}"
-  printf 'default:\n  preset: %s\n  count: 4\nnodes:\n  "%s":\n%s\n' "$PRESET" "$NODE_A" "$node_a_body"
+  printf 'default:\n  groups: []\nnodes:\n  "%s":\n%s\n' "$NODE_A" "$node_a_body"
   if [[ -n "$NODE_B" && -n "$node_b_body" ]]; then
     printf '  "%s":\n%s\n' "$NODE_B" "$node_b_body"
   fi
@@ -405,6 +405,13 @@ fi
 # Step 6 — Full clean recovery across all nodes and active load verification
 # ===================================================================================================
 mock_dm_apply_spec "$NS" "$MOCK_DM_CM" "$MOCK_DM_KEY" "$(render_chaos2_spec "$BASE_BODY" "$BASE_BODY")"
+
+# Release shared background load on NODE_B (which holds 1 card in Shared mode and therefore
+# lowers NODE_B's exclusive allocatable from 4 to 3) while keeping chaos-c2-ex-1 Running on NODE_A.
+if [[ -n "$NODE_B" ]]; then
+  kubectl -n "$TEST_NS" delete pod chaos-c2-nodeb-load-1 chaos-c2-nodeb-load-2 \
+    --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true
+fi
 
 rec_ok=1
 mock_dm_wait_devices "$NS" "$NODE_A" "$base_jq" "$CHAOS_TIMEOUT" || rec_ok=0

@@ -25,8 +25,8 @@ usage() {
 Usage: gen-kind-mock.sh [options]
 
 Generate a kind.x-k8s.io/v1alpha4 Cluster configuration with 1 control-plane node and N worker
-nodes carrying strictly nested topology.kubernetes.io/{region,zone,rack} labels via
-kubeadmConfigPatches (nodeRegistration.kubeletExtraArgs.node-labels) and Kind node labels.
+nodes carrying strictly nested topology.kubernetes.io/{region,zone} and topology.gpustack.ai/rack
+labels via Kind node labels (allowed by kubelet NodeRestriction at join time).
 
 Options:
   --name <cluster>         Kind cluster name (default: gpustack-mock)
@@ -161,7 +161,7 @@ render_cluster_yaml() {
             enable-aggregator-routing: "true"
 EOF
 
-  local i zone_num local_rack rack_num zone_val rack_val node_labels_csv
+  local i zone_num local_rack rack_num zone_val rack_val
   for ((i = 1; i <= WORKERS; i++)); do
     zone_num=$(( ((i - 1) % ZONES) + 1 ))
     local_rack=$(( (((i - 1) / ZONES) % RACKS_PER_ZONE) + 1 ))
@@ -169,7 +169,6 @@ EOF
     rack_num=$(( ((zone_num - 1) * RACKS_PER_ZONE) + local_rack ))
     zone_val="zone-${zone_num}"
     rack_val="rack-${rack_num}"
-    node_labels_csv="topology.kubernetes.io/region=${REGION},topology.kubernetes.io/zone=${zone_val},topology.kubernetes.io/rack=${rack_val}"
 
     printf '  - role: worker\n'
     if [[ -n "$NODE_IMAGE" ]]; then
@@ -178,15 +177,7 @@ EOF
     printf '    labels:\n'
     printf '      topology.kubernetes.io/region: "%s"\n' "$REGION"
     printf '      topology.kubernetes.io/zone: "%s"\n' "$zone_val"
-    printf '      topology.kubernetes.io/rack: "%s"\n' "$rack_val"
-    cat <<EOF
-    kubeadmConfigPatches:
-      - |
-        kind: JoinConfiguration
-        nodeRegistration:
-          kubeletExtraArgs:
-            node-labels: "${node_labels_csv}"
-EOF
+    printf '      topology.gpustack.ai/rack: "%s"\n' "$rack_val"
   done
 }
 

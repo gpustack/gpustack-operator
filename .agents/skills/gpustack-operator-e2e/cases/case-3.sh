@@ -448,8 +448,7 @@ echo "[case-3] === Phase B1: multi-vendor Mock Detector + Allocator env + four-v
 if [ "$MULTI_MFR" -eq 1 ]; then
   SPEC_B1="$(cat <<EOF
 default:
-  preset: amd-mi300x
-  count: 1
+  groups: []
 nodes:
   ${NODE_A}:
     presets:
@@ -462,8 +461,7 @@ EOF
 else
   SPEC_B1="$(cat <<EOF
 default:
-  preset: nvidia-h100
-  count: 1
+  groups: []
 nodes:
   ${NODE_A}:
     preset: nvidia-h100
@@ -643,8 +641,7 @@ echo
 echo "[case-3] === Phase B2: AdmissionCheck over-admit hold & release ==="
 SPEC_B2="$(cat <<EOF
 default:
-  preset: amd-mi300x
-  count: 1
+  groups: []
 nodes:
   ${NODE_A}:
     preset: nvidia-h100
@@ -743,8 +740,7 @@ echo
 echo "[case-3] === Phase B3: cross-mode exclusion (EX/SH/SL) ==="
 SPEC_B3="$(cat <<EOF
 default:
-  preset: amd-mi300x
-  count: 1
+  groups: []
 nodes:
   ${NODE_A}:
     preset: nvidia-h100
@@ -899,8 +895,7 @@ wait_fit_label() {
 if [ -n "$NODE_B" ]; then
   SPEC_B4="$(cat <<EOF
 default:
-  preset: amd-mi300x
-  count: 1
+  groups: []
 nodes:
   ${NODE_A}:
     preset: nvidia-h100
@@ -1013,8 +1008,7 @@ echo "[case-3] === Phase B5: accelerated CPU-manufacturer awareness ==="
 # 2-card aware Instance fits cleanly on both 16-30Gi developer Kind/K3s hosts and full clusters.
 SPEC_B5="$(cat <<EOF
 default:
-  preset: amd-mi300x
-  count: 1
+  groups: []
 nodes:
   ${NODE_A}:
     preset: nvidia-gb10

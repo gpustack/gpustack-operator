@@ -127,10 +127,6 @@ fi
 
 TARGET_NODE="$MOCK_DM_PRIMARY_NODE"
 DEFAULT_BLOCK="  groups: []"
-if mock_dm_manufacturer_allowed amd; then
-  DEFAULT_BLOCK="  preset: amd-mi300x
-  count: 1"
-fi
 echo "[case-5] target node=${TARGET_NODE} cm=${MOCK_DM_CM}/${MOCK_DM_KEY}"
 
 pod_phase() { kubectl -n default get pod "$1" -o jsonpath='{.status.phase}' 2>/dev/null; }

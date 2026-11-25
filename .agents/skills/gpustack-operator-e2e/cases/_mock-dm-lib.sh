@@ -102,7 +102,8 @@ mock_dm_detect_env() {
     --argjson pods "$pods_json" '
       def schedulable($n):
         (any(($n.status.conditions // [])[]; .type == "Ready" and .status == "True"))
-        and (($n.spec.unschedulable // false) | not);
+        and (($n.spec.unschedulable // false) | not)
+        and (all(($n.spec.taints // [])[]; (.effect // "") != "NoSchedule" and (.effect // "") != "NoExecute"));
       ([($nodes.items // [])[] | select(schedulable(.)) | .metadata.name]) as $ready_nodes
       | ([($devs.items // [])[]
           | select((.metadata.annotations["device.gpustack.ai/mock"] // "") == "true")
