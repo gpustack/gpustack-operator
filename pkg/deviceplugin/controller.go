@@ -1696,6 +1696,15 @@ func foldPhysicalLedger(
 			if len(profiles) == 0 {
 				continue
 			}
+			res := Resource{Group: grp.ID, Device: acc.ID}
+			dst := &status.Groups[i].Accelerators[j]
+			dst.AllocatedProfiles = device.ProfileCountSlice(allocated[res])
+			if acc.Status.Unhealthy {
+				// An unhealthy card cannot host new partitions, so it advertises zero remaining
+				// profiles while keeping its live AllocatedProfiles intact.
+				dst.RemainingProfiles = nil
+				continue
+			}
 			possible := make(map[string][]workercore.AcceleratorPlacement, len(profiles))
 			for k := range profiles {
 				p := &profiles[k]
@@ -1703,9 +1712,6 @@ func foldPhysicalLedger(
 					possible[p.Name] = p.Placements
 				}
 			}
-			res := Resource{Group: grp.ID, Device: acc.ID}
-			dst := &status.Groups[i].Accelerators[j]
-			dst.AllocatedProfiles = device.ProfileCountSlice(allocated[res])
 			dst.RemainingProfiles = device.ProfileCountSlice(device.ComputeRemainingProfiles(occupied[res], possible))
 		}
 	}
