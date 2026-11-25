@@ -148,14 +148,6 @@ func (in *hygon) detectCardMigProfiles(pciBusID string, logger klog.Logger) (mig
 			return migCardCapability{}, uRet
 		}
 	}
-	if len(profiles) == 0 {
-		if queryErr := errors.Join(probeErr, placementErr); queryErr != nil {
-			var qRet dmi.Return
-			if errors.As(queryErr, &qRet) {
-				return migCardCapability{}, qRet
-			}
-		}
-	}
 
 	return migCardCapability{
 		sliced: physicalSliced(profiles),

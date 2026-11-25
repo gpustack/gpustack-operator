@@ -811,7 +811,7 @@ func TestMigCardFaultIsolation(t *testing.T) {
 			assert.False(t, groups[0].Accelerators[1].Status.Unhealthy)
 			assert.Equal(t, int32(4), groups[0].Accelerators[1].Status.PhysicalSliced.Count)
 
-		case "dmi_handle_fatal", "dmi_profile_fatal":
+		case "dmi_handle_fatal":
 			t.Setenv("GPUSTACK_TEST_DMI_FAIL_STAGE", os.Getenv("GPUSTACK_TEST_DMI_MIG_FAIL_STAGE"))
 			t.Setenv("GPUSTACK_TEST_DMI_FAIL_INDEX", "1")
 			t.Setenv("GPUSTACK_TEST_DMI_FAIL_ERR", os.Getenv("GPUSTACK_TEST_DMI_MIG_FAIL_ERR"))
@@ -829,6 +829,21 @@ func TestMigCardFaultIsolation(t *testing.T) {
 			require.Len(t, groups[0].Accelerators, 2)
 			assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
 			assert.Equal(t, int32(4), groups[0].Accelerators[1].Status.PhysicalSliced.Count)
+
+		case "dmi_profile_non_unqueryable":
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_STAGE", os.Getenv("GPUSTACK_TEST_DMI_MIG_FAIL_STAGE"))
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_ERR", os.Getenv("GPUSTACK_TEST_DMI_MIG_FAIL_ERR"))
+
+			// Non-unqueryable DMI profile probe errors log and publish a short inventory
+			// instead of aborting whole-node detection.
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.Equal(t, int32(4), groups[0].Accelerators[0].Status.PhysicalSliced.Count)
+			assert.Zero(t, groups[0].Accelerators[1].Status.PhysicalSliced.Count)
+			assert.Zero(t, groups[0].Accelerators[1].Status.LogicalSliced.Count)
 
 		default:
 			t.Fatalf("unknown scenario %q", scenario)
@@ -885,8 +900,8 @@ func TestMigCardFaultIsolation(t *testing.T) {
 			errCode:  dmi.ERROR_NO_PERMISSION,
 		},
 		{
-			name:     "fatal DMI profile probe fails detect pass",
-			scenario: "dmi_profile_fatal",
+			name:     "non-unqueryable DMI profile probe publishes short inventory without aborting detect pass",
+			scenario: "dmi_profile_non_unqueryable",
 			stage:    "profile",
 			errCode:  dmi.ERROR_NO_PERMISSION,
 		},
