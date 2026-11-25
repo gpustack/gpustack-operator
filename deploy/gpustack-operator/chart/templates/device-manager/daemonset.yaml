@@ -8,6 +8,9 @@
 {{- $mock := $root.Values.deviceManager.mock }}
 {{- $mockConfigMap := required "deviceManager.mock.configMapName is required when deviceManager.mock.enabled is true" $mock.configMapName }}
 {{- $mockKey := $mock.configMapKey | default "devices.yaml" }}
+{{- if or (contains "/" $mockKey) (contains ".." $mockKey) (not (regexMatch "^[A-Za-z0-9._-]+$" $mockKey)) }}
+{{- fail "deviceManager.mock.configMapKey must be a plain ConfigMap key matching ^[A-Za-z0-9._-]+$ without path separators or '..'" }}
+{{- end }}
 {{- $mockManufacturers := $mock.manufacturers | default list }}
 ---
 apiVersion: apps/v1
@@ -104,10 +107,16 @@ spec:
               value: {{ $name | quote }}
             - name: GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS
               value: {{ $root.Values.ledgerReleaseTerminatedPods | quote }}
-            {{- range $manu := (keys $root.Values.global.manufacturers | sortAlpha) }}
+            {{- $envManus := keys $root.Values.global.manufacturers | sortAlpha }}
+            {{- if $mockManufacturers }}
+            {{- $envManus = $mockManufacturers | uniq | sortAlpha }}
+            {{- end }}
+            {{- range $manu := $envManus }}
+            {{- with (index $root.Values.global.manufacturers $manu) }}
             {{- with (include "gpustack-operator.manufacturer.env"
-                  (dict "name" $manu "identity" (index $root.Values.global.manufacturers $manu)) | trim) }}
+                  (dict "name" $manu "identity" .) | trim) }}
             {{- . | nindent 12 }}
+            {{- end }}
             {{- end }}
             {{- end }}
           ports:

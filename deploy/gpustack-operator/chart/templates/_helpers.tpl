@@ -388,6 +388,17 @@ Takes a dict of "name" (the manufacturer) and "identity" (its row).
 {{- end -}}
 
 {{/*
+Report whether this release suppresses vendor RuntimeClass creation and worker RuntimeClass
+injection because the CPU-only mock device-manager is enabled with omitRuntimeClass=true.
+Returns "true" when suppressed and "" otherwise, matching gpustack-operator.certmanager.enabled.
+*/}}
+{{- define "gpustack-operator.deviceManager.omitRuntimeClass" -}}
+{{- if and .Values.deviceManager.enabled .Values.deviceManager.mock.enabled .Values.deviceManager.mock.omitRuntimeClass -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
 Resolve whether this release's serving certificates are issued by cert-manager. One answer for
 every component that needs one — the worker and the vendored Kueue alike, whose templates a patch
 has call this through a helper of their own. Returns "true" when enabled and "" (empty) otherwise,

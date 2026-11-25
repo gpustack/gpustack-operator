@@ -1,4 +1,4 @@
-{{- if and .Values.deviceManager.enabled .Values.deviceManager.createRuntimeClasses (not (and .Values.deviceManager.mock.enabled .Values.deviceManager.mock.omitRuntimeClass)) }}
+{{- if and .Values.deviceManager.enabled .Values.deviceManager.createRuntimeClasses (not (include "gpustack-operator.deviceManager.omitRuntimeClass" .)) }}
 {{- range $manu := (keys .Values.global.manufacturers | sortAlpha) }}
 {{- /*
   Creating a class is NOT gated on runtimeName. runtimeName is only the class the operator will USE
