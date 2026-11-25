@@ -112,11 +112,12 @@ spec:
             {{- $envManus = $mockManufacturers | uniq | sortAlpha }}
             {{- end }}
             {{- range $manu := $envManus }}
-            {{- with (index $root.Values.global.manufacturers $manu) }}
-            {{- with (include "gpustack-operator.manufacturer.env"
-                  (dict "name" $manu "identity" .) | trim) }}
-            {{- . | nindent 12 }}
+            {{- if not (hasKey $root.Values.global.manufacturers $manu) }}
+            {{- fail (printf "deviceManager.mock.manufacturers entry %q is missing from global.manufacturers" $manu) }}
             {{- end }}
+            {{- with (include "gpustack-operator.manufacturer.env"
+                  (dict "name" $manu "identity" (index $root.Values.global.manufacturers $manu)) | trim) }}
+            {{- . | nindent 12 }}
             {{- end }}
             {{- end }}
           ports:
