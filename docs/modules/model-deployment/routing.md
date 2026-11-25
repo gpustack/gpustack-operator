@@ -55,9 +55,8 @@ or `sgl-router` for SGLang because `llm-d-router` has no policy switch
   must include `discovery.k8s.io/endpointslices` (`get`, `list`, `watch`).
 - **`sgl-router` tokenizer default**: The operator emits `--no-tokenizer` by default so `sgl-router`
   starts offline in air-gapped clusters without calling Hugging Face Hub. It omits `--no-tokenizer`
-  automatically when *`spec.router.extraArgs`* supplies `--tokenizer-path`, `--bucket-config`,
-  `--filter prefix_cache`, or sets `--policy`/`--prefill-policy`/`--decode-policy` to `cache_aware`,
-  `score_policy`, or `fused_score`.
+  automatically when *`spec.router.extraArgs`* supplies `--tokenizer-path` or sets `--policy` to
+  `cache_aware` (`power_of_two` and `session_aware` keep `--no-tokenizer`).
 - **`llm-d-router` SGLang limitation**: On `llm-d-router@v1.0.0`, `SGLang` stays on
   `approx-prefix-cache-producer` with no KV events because upstream `precise-prefix-cache-producer`
   requires vLLM's `/v1/chat/completions/render` endpoint. Use `sgl-router` for SGLang KV events.
@@ -102,11 +101,13 @@ media requests through *Encode* first, and routes text-only requests straight to
 ## Default routing policies
 
 `vllm-router` and `sglang-gateway` default to `cache_aware` (logging
-`policy: CacheAware { cache_threshold: 0.3, ... }`); `llm-d-router` uses its fixed scoring profile:
+`policy: CacheAware { cache_threshold: 0.3, ... }`), `sgl-router` defaults to `power_of_two` under
+`--chat-routing=reorg`, and `llm-d-router` uses its fixed scoring profile:
 
 | Router | Default | Replica selection |
 |---|---|---|
 | `vllm-router` | `cache_aware` | Longest matching prefix above `--cache-threshold` (`0.3`), else smallest tree; switches to least-loaded when load gap exceeds `--balance-abs-threshold` (`64`) and `--balance-rel-threshold` (`1.5×`) |
+| `sgl-router` | `power_of_two` | Picks the less-loaded of two sampled workers under `--chat-routing=reorg` (override with `--policy cache_aware` or `--policy session_aware`) |
 | `sglang-gateway` | `cache_aware` | Same algorithm and three defaults |
 | `llm-d-router` | Fixed profile | Highest sum of prefix match (weight `3`, omitted on *Decode*), queue depth (`2`) and KV utilization (`2`) |
 
@@ -161,14 +162,15 @@ Admission validates `kv_aware` version requirements on `vllm-router` but does no
 | Router | Accepted `--policy` values |
 |---|---|
 | `vllm-router` | `random`, `round_robin`, `cache_aware`, `kv_aware` (`vLLM >= 0.31.0`), `power_of_two`, `consistent_hash`, `rendezvous_hash` |
-| `sgl-router` | `random`, `round_robin`, `cache_aware`, `power_of_two`, `score_policy`, `fused_score` (prefix-cache policies omit `--no-tokenizer`) |
+| `sgl-router` | `power_of_two` (default), `cache_aware` (omits `--no-tokenizer`), `session_aware` (under `--chat-routing=reorg`, `--decode-policy` accepts `power_of_two` only and `--filter` accepts `overloaded` only) |
 | `sglang-gateway` (deprecated) | `random`, `round_robin`, `cache_aware`, `power_of_two`, `prefix_hash`, `manual` |
 
-- **`vllm-router` `kv_aware` (`>= 0.31.0`)**: `--policy`, `--prefill-policy`, or `--decode-policy`
-  set to `kv_aware` enables `--kv-events-config` (`topic: "kv@<model>"`),
-  `--prefix-caching-hash-algo sha256_cbor`, `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0`, and ports
-  `5557`/`5558` on matching roles (including *Decode*). Shared `KVCachePool` domains must use
-  matching hash algorithms for cross-deployment prefix hits.
+- **`vllm-router` `kv_aware` (`>= 0.31.0`)**: `--policy` on *Server*, or `--policy` /
+  `--prefill-policy` on *PD* *Prefill*, set to `kv_aware` enables `--kv-events-config`
+  (`topic: "kv@pod@<model>"`), `--prefix-caching-hash-algo sha256_cbor`,
+  `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0`, and ZMQ event/replay ports on *Server*/*Prefill* (*Decode*
+  never subscribes to KV events). Shared `KVCachePool` domains must use matching hash algorithms for
+  cross-deployment prefix hits.
 
 ### Fixed scoring profile
 

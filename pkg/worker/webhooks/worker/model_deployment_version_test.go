@@ -628,30 +628,44 @@ func TestModelDeploymentWebhook_VLLMRouterKVAware(t *testing.T) {
 			},
 		},
 		{
-			name: "PD decode-only kv_aware enforces >= 0.31.0 on decode",
+			name: "PD decode-only kv_aware never gates decode version or decode hash overrides",
 			md: func() *workercore.ModelDeployment {
-				return makePD("0.30.0", "0.30.0", []string{"--decode-policy", "kv_aware"})
-			},
-			wantField: "spec.roles[1].engineVersion",
-			wantMsg:   `kv_aware routing on role "decode" requires vLLM >= 0.31.0`,
-		},
-		{
-			name: "PD --policy kv_aware inherits onto decode and refuses decode hash override",
-			md: func() *workercore.ModelDeployment {
-				md := makePD("0.32.0", "0.32.0", []string{"--policy", "kv_aware"})
+				md := makePD("0.30.0", "0.30.0", []string{"--decode-policy", "kv_aware"})
 				md.Spec.Roles[1].ExtraArgs = []string{"--prefix-caching-hash-algo=sha256"}
+				md.Spec.Roles[1].Env = []workercore.ModelDeploymentEnvVar{
+					{Name: "VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES", Value: "1"},
+				}
 				return md
 			},
-			wantField: "spec.roles[1].extraArgs[0]",
+		},
+		{
+			name: "PD --policy kv_aware exempts decode (< 0.31.0 and hash override allowed)",
+			md: func() *workercore.ModelDeployment {
+				md := makePD("0.32.0", "0.29.0", []string{"--policy", "kv_aware"})
+				md.Spec.Roles[1].ExtraArgs = []string{"--prefix-caching-hash-algo=sha256"}
+				md.Spec.Roles[1].Env = []workercore.ModelDeploymentEnvVar{
+					{Name: "VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES", Value: "1"},
+				}
+				return md
+			},
+		},
+		{
+			name: "PD --policy kv_aware enforces >= 0.31.0 on prefill",
+			md: func() *workercore.ModelDeployment {
+				return makePD("0.30.0", "0.32.0", []string{"--policy", "kv_aware"})
+			},
+			wantField: "spec.roles[0].engineVersion",
+			wantMsg:   `kv_aware routing on role "prefill" requires vLLM >= 0.31.0`,
+		},
+		{
+			name: "PD --policy kv_aware refuses prefill hash override",
+			md: func() *workercore.ModelDeployment {
+				md := makePD("0.32.0", "0.29.0", []string{"--policy", "kv_aware"})
+				md.Spec.Roles[0].ExtraArgs = []string{"--prefix-caching-hash-algo=sha256"}
+				return md
+			},
+			wantField: "spec.roles[0].extraArgs[0]",
 			wantMsg:   "is set by the operator for engine",
-		},
-		{
-			name: "PD --policy kv_aware with --decode-policy cache_aware exempts decode",
-			md: func() *workercore.ModelDeployment {
-				md := makePD("0.32.0", "0.29.0", []string{"--policy", "kv_aware", "--decode-policy", "cache_aware"})
-				md.Spec.Roles[1].ExtraArgs = []string{"--prefix-caching-hash-algo=sha256"}
-				return md
-			},
 		},
 		{
 			name: "DeletionTimestamp short-circuits kv_aware checks",
@@ -762,6 +776,70 @@ func TestModelDeploymentWebhook_AscendPDMixedV1V2Guard(t *testing.T) {
 				md.DeletionTimestamp = &now
 				return md
 			},
+		},
+		{
+			name: "Ascend multi-role P/D catches mismatch on earlier prefill-a (0.29.0) before prefill-b (0.30.0)",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill-a"
+						r.Kind = workercore.ModelDeploymentRoleKindPrefill
+						r.AcceleratorType = "ascend-8x"
+						r.EngineVersion = "0.29.0"
+						r.Resources = cards(1)
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill-b"
+						r.Kind = workercore.ModelDeploymentRoleKindPrefill
+						r.AcceleratorType = "ascend-8x"
+						r.EngineVersion = "0.30.0"
+						r.Resources = cards(1)
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode"
+						r.Kind = workercore.ModelDeploymentRoleKindDecode
+						r.AcceleratorType = "ascend-8x"
+						r.EngineVersion = "0.30.0"
+						r.Resources = cards(1)
+					}),
+				)
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			},
+			wantErr:    `across roles "prefill-a" (0.29.0) and "decode" (0.30.0)`,
+			wantFields: []string{"spec.roles[1].kind", "spec.roles"},
+		},
+		{
+			name: "Ascend multi-role P/D catches mismatch on earlier decode-a (0.29.0) before decode-b (0.30.0)",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill"
+						r.Kind = workercore.ModelDeploymentRoleKindPrefill
+						r.AcceleratorType = "ascend-8x"
+						r.EngineVersion = "0.30.0"
+						r.Resources = cards(1)
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode-a"
+						r.Kind = workercore.ModelDeploymentRoleKindDecode
+						r.AcceleratorType = "ascend-8x"
+						r.EngineVersion = "0.29.0"
+						r.Resources = cards(1)
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode-b"
+						r.Kind = workercore.ModelDeploymentRoleKindDecode
+						r.AcceleratorType = "ascend-8x"
+						r.EngineVersion = "0.30.0"
+						r.Resources = cards(1)
+					}),
+				)
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			},
+			wantErr:    `across roles "prefill" (0.30.0) and "decode-a" (0.29.0)`,
+			wantFields: []string{"spec.roles[2].kind", "spec.roles"},
 		},
 	}
 
@@ -923,7 +1001,7 @@ func TestModelDeploymentWebhook_KVEventsPortReservations(t *testing.T) {
 			},
 		},
 		{
-			name:       "vllm-router PD --decode-policy kv_aware reserves on Decode only",
+			name:       "vllm-router PD --decode-policy kv_aware reserves on no role",
 			engine:     workercore.ModelDeploymentEngineVLLM,
 			routerName: workercore.ModelDeploymentRouterVLLM,
 			routerArgs: []string{"--decode-policy", "kv_aware"},
@@ -933,11 +1011,11 @@ func TestModelDeploymentWebhook_KVEventsPortReservations(t *testing.T) {
 			},
 			wantReserved: map[string]bool{
 				"Prefill": false,
-				"Decode":  true,
+				"Decode":  false,
 			},
 		},
 		{
-			name:       "vllm-router EPD --policy kv_aware reserves on Prefill and Decode, not Encode",
+			name:       "vllm-router EPD --policy kv_aware reserves on Prefill only, not Encode or Decode",
 			engine:     workercore.ModelDeploymentEngineVLLM,
 			routerName: workercore.ModelDeploymentRouterVLLM,
 			routerArgs: []string{"--policy=kv_aware"},
@@ -949,7 +1027,7 @@ func TestModelDeploymentWebhook_KVEventsPortReservations(t *testing.T) {
 			wantReserved: map[string]bool{
 				"Encode":  false,
 				"Prefill": true,
-				"Decode":  true,
+				"Decode":  false,
 			},
 		},
 	}
@@ -991,7 +1069,7 @@ func TestModelDeploymentWebhook_KVEventsPortReservations(t *testing.T) {
 		assert.Contains(t, err.Error(), "which the operator reserves")
 	})
 
-	t.Run("vllm-router --decode-policy kv_aware admission refuses --port=5558 on Decode", func(t *testing.T) {
+	t.Run("vllm-router --policy kv_aware refuses --port=5558 on Prefill and allows --port=5558 on Decode", func(t *testing.T) {
 		t.Parallel()
 		w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingAcceleratorType("h20-8x", 8)})
 		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
@@ -1011,12 +1089,52 @@ func TestModelDeploymentWebhook_KVEventsPortReservations(t *testing.T) {
 		md.Spec.Engine.Version = "0.32.0"
 		md.Spec.Router = &workercore.ModelDeploymentRouter{
 			Name:      workercore.ModelDeploymentRouterVLLM,
-			ExtraArgs: []string{"--decode-policy", "kv_aware"},
+			ExtraArgs: []string{"--policy", "kv_aware"},
 		}
 		_, err := w.ValidateCreate(context.Background(), md)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), `role "decode" passes --port=5558`)
-		assert.Contains(t, err.Error(), "which the operator reserves")
+		assert.Contains(t, err.Error(), `role "prefill" passes --port=5558`)
+		assert.NotContains(t, err.Error(), `role "decode" passes --port=5558`)
+
+		// With --decode-policy kv_aware alone, neither role publishes KV events so --port=5558 is allowed on both.
+		mdDecodeOnly := md.DeepCopy()
+		mdDecodeOnly.Spec.Router.ExtraArgs = []string{"--decode-policy", "kv_aware"}
+		_, err = w.ValidateCreate(context.Background(), mdDecodeOnly)
+		assert.NoError(t, err)
+	})
+
+	t.Run("single-Pod multi-DP reserves 5557..5560 while External DP keeps 5557..5558", func(t *testing.T) {
+		t.Parallel()
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingAcceleratorType("h20-8x", 8)})
+
+		// vLLM single-Pod --data-parallel-size 2 reserves 5557..5560.
+		vllmDP2 := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+		vllmDP2.Spec.Engine.Version = "0.32.0"
+		vllmDP2.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		vllmDP2.Spec.Roles[0].Resources = cards(2)
+		vllmDP2.Spec.Roles[0].ExtraArgs = []string{"--data-parallel-size", "2"}
+		assert.Equal(t, []int32{5557, 5558, 5559, 5560}, modelDeploymentRouterReservedPorts(vllmDP2, &vllmDP2.Spec.Roles[0]))
+		vllmDP2.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 5560, Protocol: core.ProtocolTCP}}
+		_, err := w.ValidateCreate(context.Background(), vllmDP2)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "declares port 5560, which the operator reserves")
+
+		// SGLang single-Pod --dp-size 2 reserves 5557..5560.
+		sglDP2 := modelDeployment(workercore.ModelDeploymentEngineSGLang)
+		sglDP2.Spec.Engine.Image = "gpustack/runner:cuda13.0-sglang0.5.23"
+		sglDP2.Spec.Engine.Version = "0.5.23"
+		sglDP2.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGL}
+		sglDP2.Spec.Roles[0].Resources = cards(2)
+		sglDP2.Spec.Roles[0].ExtraArgs = []string{"--dp-size", "2"}
+		assert.Equal(t, []int32{5557, 5558, 5559, 5560}, modelDeploymentRouterReservedPorts(sglDP2, &sglDP2.Spec.Roles[0]))
+
+		// SGLang External DP (--attn-dp-size 2 --nnodes 2) runs 1 rank per Pod and reserves only 5557..5558.
+		sglExtDP := sglDP2.DeepCopy()
+		sglExtDP.Spec.Roles[0].ReplicaSize = 2
+		sglExtDP.Spec.Roles[0].Resources = cards(1)
+		sglExtDP.Spec.Roles[0].ExtraArgs = []string{"--attn-dp-size", "2", "--nnodes", "2"}
+		sglExtDP.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{{Name: "SGLANG_RUST_SERVER", Value: "1"}}
+		assert.Equal(t, []int32{5557, 5558}, modelDeploymentRouterReservedPorts(sglExtDP, &sglExtDP.Spec.Roles[0]))
 	})
 
 	t.Run("DeletionTimestamp skips new vllm-router and sgl-router KV event reservations", func(t *testing.T) {

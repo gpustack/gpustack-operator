@@ -10141,7 +10141,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentEngine(ref common.Refere
 					},
 					"version": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Version is the inference engine release version the deployment runs by default, such as \"0.34.0\" or \"0.5.23\".\n\n  - When omitted on creation or when Image changes, admission derives it from standard\n    gpustack/runner image tags. Custom or digest-only images require an explicit value.\n  - It is editable alongside Image. A role that overrides Image may also declare its own\n    EngineVersion; otherwise roles inherit this value.",
+							Description: "Version is the inference engine release version the deployment runs by default, such as \"0.34.0\" or \"0.5.23\".\n\n  - When omitted on creation (or cleared when changing Image), admission derives it from\n    standard gpustack/runner image tags. Custom or digest-only images require an explicit\n    value.\n  - It is editable alongside Image. A role that overrides Image may also declare its own\n    EngineVersion; otherwise roles inherit this value.",
 							MaxLength:   ptr.To[int64](64),
 							Type:        []string{"string"},
 							Format:      "",
@@ -11114,7 +11114,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"engineVersion": {
 						SchemaProps: spec.SchemaProps{
-							Description: "EngineVersion overrides the deployment's engine version for this role, such as \"0.32.0\".\n\n  - When omitted and Image is empty, the role inherits spec.engine.version.\n  - When Image overrides the deployment image with a standard gpustack/runner tag,\n    admission derives this field automatically on creation or when Image changes.\n  - Custom or digest-only role images require an explicit value.",
+							Description: "EngineVersion overrides the deployment's engine version for this role, such as \"0.32.0\".\n\n  - When omitted and Image is empty, the role inherits spec.engine.version.\n  - When Image overrides the deployment image: when omitted on creation (or cleared when\n    changing Image), admission derives it from standard gpustack/runner image tags.\n  - Custom or digest-only role images require an explicit value.",
 							MaxLength:   ptr.To[int64](64),
 							Type:        []string{"string"},
 							Format:      "",

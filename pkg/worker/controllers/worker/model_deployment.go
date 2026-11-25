@@ -2658,6 +2658,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 			roleConnection.KVEventsUseCBORHash = kvEventsUseCBORHash
 			if roleConnection.PublishKVEvents {
 				roleConnection.KVEventsHost = md.Name + "-" + role.Name + "." + md.Namespace + ".svc"
+				roleConnection.KVEventsLocalDP = ModelDeploymentKVEventsLocalDP(md, role)
 			}
 
 			connector, err := SynthesizeModelDeploymentConnector(roleConnection)

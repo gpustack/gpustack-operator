@@ -630,7 +630,7 @@ func renderModelDeploymentRoleService(
 		modelDeploymentSelectEligibleEndpoints(svc, md, role)
 	}
 	if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
-		for _, port := range inject.KVEventsPorts() {
+		for _, port := range inject.KVEventsPortsForLocalDP(ModelDeploymentKVEventsLocalDP(md, role)) {
 			svc.Spec.Ports = append(svc.Spec.Ports, core.ServicePort{
 				Name: port.Name, Protocol: port.Protocol, Port: port.ContainerPort,
 				TargetPort: intstr.FromInt32(port.ContainerPort),

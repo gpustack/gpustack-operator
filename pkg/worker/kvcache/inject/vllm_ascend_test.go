@@ -426,9 +426,9 @@ func TestRender_VLLMAscendEPDAndKVEvents(t *testing.T) {
 
 	evIdx := slices.Index(result.Args, vllmKVEventsConfigArg)
 	require.GreaterOrEqual(t, evIdx, 0)
-	assert.Contains(t, result.Args[evIdx+1], `"topic":"kv@Qwen/Qwen2.5-VL-7B"`)
+	assert.Contains(t, result.Args[evIdx+1], `"topic":"kv@pod@Qwen/Qwen2.5-VL-7B"`)
 	require.NotNil(t, result.KVEvents)
-	assert.Equal(t, "kv@Qwen/Qwen2.5-VL-7B", result.KVEvents.Topic)
+	assert.Equal(t, "kv@pod@Qwen/Qwen2.5-VL-7B", result.KVEvents.Topic)
 
 	_, err = Render(Input{
 		Engine:          EngineVLLMAscend,

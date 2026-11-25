@@ -153,7 +153,7 @@ func TestModelDeploymentEffectiveEngineVersion_AndSpecHash(t *testing.T) {
 					assert.Contains(t, cmd, `"kv_connector":"`+tc.wantConnector+`"`)
 				}
 				prefillCmd := strings.Join(pods["prefill"][0][0].Spec.Containers[0].Command, " ")
-				assert.Contains(t, prefillCmd, `"topic":"kv@Qwen/Qwen2.5-72B-Instruct"`)
+				assert.Contains(t, prefillCmd, `"topic":"kv@pod@Qwen/Qwen2.5-72B-Instruct"`)
 			})
 		}
 	})
@@ -356,7 +356,7 @@ func TestModelDeploymentVLLMRouterKVAware_WiringHashAndScalerGate(t *testing.T) 
 	prefillPod := prefillKVPods["prefill"][0][0]
 	decodePod := prefillKVPods["decode"][0][0]
 	prefillCmd := strings.Join(prefillPod.Spec.Containers[0].Command, " ")
-	assert.Contains(t, prefillCmd, `"topic":"kv@Qwen/Qwen2.5-72B-Instruct"`)
+	assert.Contains(t, prefillCmd, `"topic":"kv@pod@Qwen/Qwen2.5-72B-Instruct"`)
 	assert.Contains(t, prefillCmd, "--prefix-caching-hash-algo sha256_cbor")
 	assert.True(t, hasContainerPort(prefillPod, 5557))
 	assert.True(t, hasContainerPort(prefillPod, 5558))
@@ -378,36 +378,42 @@ func TestModelDeploymentVLLMRouterKVAware_WiringHashAndScalerGate(t *testing.T) 
 		"enabling --prefill-policy kv_aware must NOT roll decode",
 	)
 
-	// 3. --decode-policy kv_aware: Decode gets KV events, ports 5557/5558 on Pod & Service,
-	//    status.router.roles[1].kvEvents.topic, and passes scaler operator env gate!
-	mdDecodeKV, decodeKVPods := renderPDPods(t, []string{"--decode-policy=kv_aware"}, userOverride)
-	decKVPod := decodeKVPods["decode"][0][0]
-	decKVCmd := strings.Join(decKVPod.Spec.Containers[0].Command, " ")
-	assert.Contains(t, decKVCmd, `"topic":"kv@Qwen/Qwen2.5-72B-Instruct"`)
-	assert.Contains(t, decKVCmd, "--prefix-caching-hash-algo sha256_cbor")
-	assert.True(t, hasContainerPort(decKVPod, 5557))
-	assert.True(t, hasContainerPort(decKVPod, 5558))
+	// 3. --policy=kv_aware and --decode-policy=kv_aware in PD mode: vllm-router@v0.1.17 subscribes
+	//    to Prefill workers only and never queries KV placement on Decode, so Decode never gets KV
+	//    events, ports 5557/5558, sha256_cbor, or status.router.roles[decode].kvEvents.
+	mdPolicyKV, policyKVPods := renderPDPods(t, []string{"--policy=kv_aware"}, userOverride)
+	polDecPod := policyKVPods["decode"][0][0]
+	polDecCmd := strings.Join(polDecPod.Spec.Containers[0].Command, " ")
+	assert.NotContains(t, polDecCmd, "--kv-events-config")
+	assert.NotContains(t, polDecCmd, inject.VLLMPrefixCachingHashAlgoArg)
+	assert.False(t, hasContainerPort(polDecPod, 5557))
+	assert.False(t, hasContainerPort(polDecPod, 5558))
+	assert.Equal(t,
+		basePods["decode"][0][0].Annotations[modelDeploymentPodSpecHashAnnotation],
+		polDecPod.Annotations[modelDeploymentPodSpecHashAnnotation],
+		"enabling --policy=kv_aware must NOT roll decode",
+	)
+
+	polSvcs := renderModelDeploymentServices(mdPolicyKV, nil, nil)
+	assert.Len(t, polSvcs[1].Spec.Ports, 3, "prefill Service exposes 8000 + 5557 + 5558 under --policy=kv_aware")
+	assert.Len(t, polSvcs[2].Spec.Ports, 1, "decode Service never exposes KV event ports")
+
+	routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), mdPolicyKV, nil, false)
+	require.NoError(t, err)
+	require.Len(t, routerObjs.Contract.Roles, 2)
+	require.NotNil(t, routerObjs.Contract.Roles[0].KVEvents)
+	assert.Equal(t, "kv@pod@Qwen/Qwen2.5-72B-Instruct", routerObjs.Contract.Roles[0].KVEvents.Topic)
+	assert.Nil(t, routerObjs.Contract.Roles[1].KVEvents)
+
+	_, decodeKVPods := renderPDPods(t, []string{"--decode-policy=kv_aware"}, userOverride)
 	assert.Equal(t,
 		basePods["prefill"][0][0].Annotations[modelDeploymentPodSpecHashAnnotation],
 		decodeKVPods["prefill"][0][0].Annotations[modelDeploymentPodSpecHashAnnotation],
-		"enabling --decode-policy kv_aware alone must NOT roll prefill",
 	)
-	assert.NotEqual(t,
+	assert.Equal(t,
 		basePods["decode"][0][0].Annotations[modelDeploymentPodSpecHashAnnotation],
-		decKVPod.Annotations[modelDeploymentPodSpecHashAnnotation],
-		"enabling --decode-policy kv_aware must roll decode",
+		decodeKVPods["decode"][0][0].Annotations[modelDeploymentPodSpecHashAnnotation],
 	)
-
-	decSvcs := renderModelDeploymentServices(mdDecodeKV, nil, nil)
-	assert.Len(t, decSvcs[1].Spec.Ports, 1, "prefill Service omits KV event ports when only decode is kv_aware")
-	assert.Len(t, decSvcs[2].Spec.Ports, 3, "decode Service exposes 8000 + 5557 + 5558 when decode is kv_aware")
-
-	routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), mdDecodeKV, nil, false)
-	require.NoError(t, err)
-	require.Len(t, routerObjs.Contract.Roles, 2)
-	assert.Nil(t, routerObjs.Contract.Roles[0].KVEvents)
-	require.NotNil(t, routerObjs.Contract.Roles[1].KVEvents)
-	assert.Equal(t, "kv@Qwen/Qwen2.5-72B-Instruct", routerObjs.Contract.Roles[1].KVEvents.Topic)
 
 	// Verify scaler operator env gate accepts VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES on kv_aware roles.
 	mdPrefillClean, _ := renderPDPods(t, []string{"--policy=kv_aware"}, nil)
@@ -418,6 +424,85 @@ func TestModelDeploymentVLLMRouterKVAware_WiringHashAndScalerGate(t *testing.T) 
 		))
 	}
 	_ = mdPrefillKV
+}
+
+func TestModelDeploymentMultiDP_KVEventsReplayPort(t *testing.T) {
+	at := newRenderAcceleratorType()
+	qty2 := resource.MustParse("2")
+
+	t.Run("vLLM single-Pod --data-parallel-size 2 offsets replay port to 5559 on Pod, Service, and llm-d-router epp.yaml", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Engine.Version = "0.32.0"
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			md.Spec.Roles = []workercore.ModelDeploymentRole{{
+				Name:            "server",
+				Kind:            workercore.ModelDeploymentRoleKindServer,
+				AcceleratorType: at.Name,
+				Replicas:        1,
+				ReplicaSize:     1,
+				ExtraArgs:       []string{"--data-parallel-size", "2"},
+				Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty2)},
+			}}
+		})
+
+		cli := newModelDeploymentClient(md, at)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+		pods, err := r.renderModelDeploymentRolePods(context.Background(), md, nil, nil, nil, false)
+		require.NoError(t, err)
+		pod := pods["server"][0][0]
+		cmd := strings.Join(pod.Spec.Containers[0].Command, " ")
+		assert.Contains(t, cmd, `"endpoint":"tcp://*:5557"`)
+		assert.Contains(t, cmd, `"replay_endpoint":"tcp://*:5559"`)
+		assert.Contains(t, cmd, `"topic":"kv@pod@Qwen/Qwen2.5-72B-Instruct"`)
+		assert.Contains(t, pod.Spec.Containers[0].Ports, core.ContainerPort{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557})
+		assert.Contains(t, pod.Spec.Containers[0].Ports, core.ContainerPort{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5559})
+
+		svcs := renderModelDeploymentServices(md, nil, nil)
+		assert.Contains(t, svcs[1].Spec.Ports, core.ServicePort{
+			Name: "kv-replay", Protocol: core.ProtocolTCP, Port: 5559, TargetPort: intstr.FromInt32(5559),
+		})
+
+		routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+		require.NoError(t, err)
+		assert.Contains(t, routerObjs.ConfigMap.Data[modelDeploymentRouterConfigKey], "socketPort: 5557")
+		assert.Contains(t, routerObjs.ConfigMap.Data[modelDeploymentRouterConfigKey], "replaySocketPort: 5559")
+		assert.Contains(t, routerObjs.ConfigMap.Data[modelDeploymentRouterConfigKey], "topicFilter: kv@")
+		require.NotNil(t, routerObjs.Contract.Roles[0].KVEvents)
+		assert.Equal(t, "tcp://qwen-server.team-a.svc:5559", routerObjs.Contract.Roles[0].KVEvents.ReplayEndpoint)
+	})
+
+	t.Run("SGLang single-Pod --dp-size 2 and --attn-dp-size 2 offset replay port to 5559", func(t *testing.T) {
+		for _, extraArgs := range [][]string{{"--dp-size", "2"}, {"--attn-dp-size", "2"}} {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.KVCache = nil
+				md.Spec.Engine = workercore.ModelDeploymentEngine{
+					Name:    workercore.ModelDeploymentEngineSGLang,
+					Image:   "gpustack/runner:cuda13.0-sglang0.5.23",
+					Version: "0.5.23",
+				}
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGL}
+				md.Spec.Roles = []workercore.ModelDeploymentRole{{
+					Name:            "server",
+					Kind:            workercore.ModelDeploymentRoleKindServer,
+					AcceleratorType: at.Name,
+					Replicas:        1,
+					ReplicaSize:     1,
+					ExtraArgs:       extraArgs,
+					Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty2)},
+				}}
+			})
+			cli := newModelDeploymentClient(md, at)
+			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+			pods, err := r.renderModelDeploymentRolePods(context.Background(), md, nil, nil, nil, true)
+			require.NoError(t, err)
+			pod := pods["server"][0][0]
+			cmd := strings.Join(pod.Spec.Containers[0].Command, " ")
+			assert.Contains(t, cmd, `"endpoint":"tcp://*:5557"`)
+			assert.Contains(t, cmd, `"replay_endpoint":"tcp://*:5559"`)
+			assert.Contains(t, pod.Spec.Containers[0].Ports, core.ContainerPort{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5559})
+		}
+	})
 }
 
 func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {

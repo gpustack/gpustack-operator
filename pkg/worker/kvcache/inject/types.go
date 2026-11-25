@@ -335,6 +335,12 @@ type Input struct {
 	// vllm-router kv_aware. Ignored when PublishKVEvents is false or on SGLang.
 	KVEventsUseCBORHash bool
 
+	// KVEventsLocalDP is the number of per-Pod data-parallel or attention-DP KV event publishers
+	// running inside the container network namespace. Zero or 1 uses VLLMKVEventsReplayPort
+	// (5558); values > 1 place replay_endpoint at VLLMKVEventsPort + KVEventsLocalDP so rank r's
+	// ZMQ PUB (5557 + r) and ZMQ ROUTER replay (5557 + localDP + r) sockets never collide.
+	KVEventsLocalDP int32
+
 	// EncoderURLs are the addresses of the deployment's encoder replicas, one per replica or per
 	// replica Service, in the engine's own spelling. It is what makes a deployment a three-role one,
 	// and only a prefill half reads it.

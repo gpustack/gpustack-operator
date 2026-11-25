@@ -201,7 +201,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
     kvcache.gpustack.ai/client-config: '{"metadata_server":"P2PHANDSHAKE","master_server_address":"shared-kv-master.gpustack-system.svc:50051","protocol":"ascend","device_name":"","mode":"standalone-store","global_segment_size":0,"local_buffer_size":134217728,"tenant_id":"chat"}'
-    modeldeployment.gpustack.ai/pod-spec-hash: 6a5f53547e6bc2e580ed84e2d648b4e2c0e36c2b48580db3f21f152ab994049f
+    modeldeployment.gpustack.ai/pod-spec-hash: 772825531dab0893b27c657cb58f2f8335395ea898b8938f77dae17e6e677cab
     modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
@@ -241,7 +241,7 @@ spec:
     - --kv-cache-dtype
     - bfloat16
     - --kv-events-config
-    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@Qwen/Qwen2.5-72B-Instruct"}'
+    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@pod@Qwen/Qwen2.5-72B-Instruct"}'
     - --host
     - 0.0.0.0
     - --port

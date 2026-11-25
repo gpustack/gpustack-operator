@@ -607,6 +607,12 @@ def validate_proposal_builds(
         raise SystemExit(
             f"FAIL: {proposal_path} base_image_builds missing required build recommendation(s): {missing_str}"
         )
+    extra = sorted(seen_keys - expected_keys)
+    if extra:
+        extra_str = ", ".join(f"{r}(target={t or 'default'})" for r, t in extra)
+        raise SystemExit(
+            f"FAIL: {proposal_path} base_image_builds has unexpected build recommendation(s): {extra_str}"
+        )
     return expected
 
 

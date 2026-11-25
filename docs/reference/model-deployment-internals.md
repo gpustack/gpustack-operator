@@ -64,8 +64,9 @@ Ownership is scoped per `(engine, key)` (`modelDeploymentOwnedKeys`):
   flag keep running on their own value (later on argv) until updated; deletion finalizer removal is
   exempt.
 - **Conditional `vllm-router` `kv_aware` keys**: When `vllm-router` activates `kv_aware` on a managed
-  `vLLM` role (`>= 0.31.0`), `--prefix-caching-hash-algo` and `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES`
-  are owned on that role (refused at admission and stripped during user env merge).
+  `vLLM` *Server* or *Prefill* role (`>= 0.31.0`; *Decode* never subscribes to KV events),
+  `--prefix-caching-hash-algo` and `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES` are owned on that role
+  (refused at admission and stripped during user env merge).
   `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES` is listed in `modelDeploymentScalerCapacityNeutralEnvNames`.
 - **Demoted EC env vars**: `VLLM_USE_V2_MODEL_RUNNER` (emitted as `1` only for `< 0.34.0` or legacy
   empty version) and `VLLM_EC_SIDE_CHANNEL_PORT` (defaulted to `5601`) are Defaulted, not owned.
@@ -84,8 +85,10 @@ Ownership is scoped per `(engine, key)` (`modelDeploymentOwnedKeys`):
   projection of `Pod` annotation `kvcache.gpustack.ai/client-config` (no `ConfigMap` created).
   An overlay volume mounting over `/etc/gpustack/kvcache` silently replaces it.
 - **KV events publisher**: Publishing roles open ZMQ publisher `tcp://*:5557` and replay
-  `tcp://*:5558` (`topic: "kv@<spec.model.name>"` on `vLLM`/`vLLM-Ascend` behind `llm-d-router` or
-  `vllm-router` `kv_aware`; `topic: "kv-events"` on `SGLang` *Server*/*Prefill* behind `sgl-router`).
+  `tcp://*:5558` (`tcp://*:<5557+localDP>` when per-`Pod` `localDP > 1`, reserving
+  `[5557 .. 5557 + 2*localDP - 1]` across local DP ranks; `topic: "kv@pod@<spec.model.name>"` on
+  `vLLM`/`vLLM-Ascend` behind `llm-d-router` or `vllm-router` `kv_aware`; `topic: "kv-events"` on
+  `SGLang` *Server*/*Prefill* behind `sgl-router`).
 - **`KVEventsPublishing` condition**: Reports `True/Publishing` when all expected roles publish,
   `True/NotApplicable` for unrouted *Server* roles, `SGLang + llm-d-router`, `vllm-router` without
   `kv_aware`, and frozen `sglang-gateway`, `Unknown/RoleUnmanaged` when an expected role sets
@@ -211,7 +214,7 @@ engine version backfill; validating for the rules below) plus CRD schema checks 
 | Owned key in *`extraArgs`* or *`env`* (including `kv_aware` conditional keys and router owned flags) | Key, engine/router, and *`roles[].command`* alternative |
 | `--kv-cache-dtype` in *`extraArgs`* with *`spec.kvCache`* | Binding `dtype` ownership and ways out |
 | `--port` mismatching first *`ports`* entry | Both values and source fields (managed direct decoder exempt; stored roles checked on edit) |
-| Reserved listener port collision (ZMQ `5557`/`5558` on all publishing roles including `kv_aware` *Decode*, NIXL `8998`, bootstrap `8998`, SGLang encoder bootstrap `8997`) | Port, source field, reserved set (take-over *`command`* exempt) |
+| Reserved listener port collision (ZMQ `[5557 .. 5557 + 2*localDP - 1]` on all publishing *Server*/*Prefill* roles, NIXL `8998`, bootstrap `8998`, SGLang encoder bootstrap `8997`) | Port, source field, reserved set (take-over *`command`* exempt) |
 | Unparseable parallel degree flag or malformed `VLLM_DP_SIZE` | Role, flag, and *`roles[].command`* alternative |
 | Declared per-member parallel width exceeding card request | Card count and derived degrees (*`size`* does not cover per-member width) |
 | Removed `template` field on role | Strict schema decoding refusal |

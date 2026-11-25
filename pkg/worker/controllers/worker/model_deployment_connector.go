@@ -109,6 +109,10 @@ type ModelDeploymentConnectorInput struct {
 	// VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0 for vllm-router kv_aware roles.
 	KVEventsUseCBORHash bool
 
+	// KVEventsLocalDP is the role's effective per-Pod DP publisher width used to offset the ZMQ
+	// replay port above all local PUB sockets when > 1.
+	KVEventsLocalDP int32
+
 	// KVTransfer composes point-to-point P/D transfer with the shared store. The two are
 	// orthogonal inputs and both may be on at once; neither is a branch that excludes the other.
 	KVTransfer bool
@@ -257,6 +261,7 @@ type modelDeploymentConnectorBinding struct {
 	KVEventsHost           string                 `json:"kvEventsHost,omitempty"`
 	KVEventsTopic          string                 `json:"kvEventsTopic,omitempty"`
 	KVEventsUseCBORHash    bool                   `json:"kvEventsUseCBORHash,omitempty"`
+	KVEventsReplayPort     int32                  `json:"kvEventsReplayPort,omitempty"`
 	RoutingSidecar         bool                   `json:"routingSidecar,omitempty"`
 	Disaggregated          bool                   `json:"disaggregated,omitempty"`
 	Parallelism            inject.ParallelismPair `json:"parallelism,omitempty"`
@@ -903,6 +908,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		KVEventsHost:        in.KVEventsHost,
 		KVEventsTopic:       in.KVEventsTopic,
 		KVEventsUseCBORHash: in.KVEventsUseCBORHash,
+		KVEventsLocalDP:     in.KVEventsLocalDP,
 		KVTransfer:          in.KVTransfer,
 		// The renderer owns the unset default; only a declared API value is mapped here.
 		KVTransferProtocol: kvTransferProtocol,
@@ -959,8 +965,12 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		domainFingerprint, cachePrefixFingerprint = "", ""
 	}
 	kvEventsTopicFingerprint := ""
+	var kvEventsReplayPortFingerprint int32
 	if res.KVEvents != nil {
 		kvEventsTopicFingerprint = res.KVEvents.Topic
+		if replayPort := inject.KVEventsReplayPortForLocalDP(in.KVEventsLocalDP); replayPort != inject.VLLMKVEventsReplayPort {
+			kvEventsReplayPortFingerprint = replayPort
+		}
 	}
 
 	return ModelDeploymentConnectorRender{
@@ -997,6 +1007,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 			KVEventsHost:           in.KVEventsHost,
 			KVEventsTopic:          kvEventsTopicFingerprint,
 			KVEventsUseCBORHash:    in.PublishKVEvents && in.KVEventsUseCBORHash,
+			KVEventsReplayPort:     kvEventsReplayPortFingerprint,
 			RoutingSidecar:         in.RoutingSidecar,
 			Disaggregated:          in.Disaggregated && (role == inject.RolePrefill || role == inject.RoleDecode),
 			Parallelism:            parallelism,

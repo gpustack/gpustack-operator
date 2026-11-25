@@ -683,11 +683,12 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 	if topic == "" {
 		topic = VLLMKVEventsTopic
 	}
+	replayPort := KVEventsReplayPortForLocalDP(in.KVEventsLocalDP)
 	eventsDoc, err := json.Marshal(vllmKVEventsConfig{
 		EnableKVCacheEvents: true,
 		Publisher:           "zmq",
 		Endpoint:            fmt.Sprintf("tcp://*:%d", VLLMKVEventsPort),
-		ReplayEndpoint:      fmt.Sprintf("tcp://*:%d", VLLMKVEventsReplayPort),
+		ReplayEndpoint:      fmt.Sprintf("tcp://*:%d", replayPort),
 		BufferSteps:         10_000,
 		HWM:                 100_000,
 		MaxQueueSize:        100_000,
@@ -704,8 +705,8 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 			Value: "0",
 		})
 	}
-	result.Ports = append(result.Ports, KVEventsPorts()...)
-	result.KVEvents = KVEventsForTopic(in.KVEventsHost, topic)
+	result.Ports = append(result.Ports, KVEventsPortsForLocalDP(in.KVEventsLocalDP)...)
+	result.KVEvents = KVEventsForTopicAndLocalDP(in.KVEventsHost, topic, in.KVEventsLocalDP)
 
 	return result, nil
 }

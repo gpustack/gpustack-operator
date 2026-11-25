@@ -132,8 +132,8 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// EngineVersion overrides the deployment's engine version for this role, such as "0.32.0".
 	//
 	// - When omitted and Image is empty, the role inherits spec.engine.version.
-	// - When Image overrides the deployment image with a standard gpustack/runner tag,
-	// admission derives this field automatically on creation or when Image changes.
+	// - When Image overrides the deployment image: when omitted on creation (or cleared when
+	// changing Image), admission derives it from standard gpustack/runner image tags.
 	// - Custom or digest-only role images require an explicit value.
 	//
 	EngineVersion *string `json:"engineVersion,omitempty"`

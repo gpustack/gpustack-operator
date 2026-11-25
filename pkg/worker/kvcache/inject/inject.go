@@ -94,23 +94,46 @@ func VLLMKVEvents(host string) *KVEvents {
 	return KVEventsForTopic(host, VLLMKVEventsTopic)
 }
 
-// KVEventsForTopic returns the dialable event contract paired with the ZMQ publisher's fixed ports
-// and the given topic.
+// KVEventsReplayPortForLocalDP returns the ZMQ ROUTER replay base port for localDP per-Pod
+// publishers. Single-DP workloads (localDP <= 1) keep VLLMKVEventsReplayPort (5558); multi-DP
+// workloads place replay at VLLMKVEventsPort + localDP so rank r's PUB (5557 + r) and replay
+// (5557 + localDP + r) sockets never overlap.
+func KVEventsReplayPortForLocalDP(localDP int32) int32 {
+	if localDP <= 1 {
+		return VLLMKVEventsReplayPort
+	}
+	const maxPort = 65535
+	port := int64(VLLMKVEventsPort) + int64(localDP)
+	if port > maxPort {
+		return maxPort
+	}
+	return int32(port)
+}
+
+// KVEventsForTopic returns the dialable event contract paired with the ZMQ publisher's default
+// single-DP ports and the given topic.
 func KVEventsForTopic(host, topic string) *KVEvents {
+	return KVEventsForTopicAndLocalDP(host, topic, 1)
+}
+
+// KVEventsForTopicAndLocalDP returns the dialable event contract paired with VLLMKVEventsPort,
+// KVEventsReplayPortForLocalDP(localDP), and the given topic.
+func KVEventsForTopicAndLocalDP(host, topic string, localDP int32) *KVEvents {
 	return &KVEvents{
 		Endpoint:       fmt.Sprintf("tcp://%s:%d", host, VLLMKVEventsPort),
-		ReplayEndpoint: fmt.Sprintf("tcp://%s:%d", host, VLLMKVEventsReplayPort),
+		ReplayEndpoint: fmt.Sprintf("tcp://%s:%d", host, KVEventsReplayPortForLocalDP(localDP)),
 		Topic:          topic,
 	}
 }
 
-// VLLMKVEventsTopicForModel returns the vLLM / vLLM-Ascend KV event publisher topic for model.
+// VLLMKVEventsTopicForModel returns the 3-segment vLLM / vLLM-Ascend KV event publisher topic
+// ("kv@pod@<model>") expected by llm-d-router parseTopic and vllm-router /kv_event_sources.
 // An empty model falls back to VLLMKVEventsTopic ("kv@").
 func VLLMKVEventsTopicForModel(model string) string {
 	if model == "" {
 		return VLLMKVEventsTopic
 	}
-	return VLLMKVEventsTopic + model
+	return VLLMKVEventsTopic + "pod@" + model
 }
 
 // engineVersionAtLeast reports whether version satisfies minimum under CompareEngineVersion.
@@ -127,12 +150,36 @@ func engineVersionAtLeast(version, minimum string) (bool, error) {
 	return ok, nil
 }
 
-// KVEventsPorts returns the ports used by the vLLM ZMQ publisher and its replay endpoint.
+// KVEventsPorts returns the container ports used by a single-DP ZMQ publisher and replay endpoint.
 func KVEventsPorts() []core.ContainerPort {
+	return KVEventsPortsForLocalDP(1)
+}
+
+// KVEventsPortsForLocalDP returns the base ZMQ publisher and replay container ports for localDP
+// per-Pod publishers.
+func KVEventsPortsForLocalDP(localDP int32) []core.ContainerPort {
 	return []core.ContainerPort{
 		{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: VLLMKVEventsPort},
-		{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: VLLMKVEventsReplayPort},
+		{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: KVEventsReplayPortForLocalDP(localDP)},
 	}
+}
+
+// KVEventsReservedPortsForLocalDP returns every TCP port bound inside the Pod by localDP ZMQ PUB
+// and ROUTER replay publishers: [5557 .. 5557 + 2*max(localDP, 1) - 1], capped at 65535.
+func KVEventsReservedPortsForLocalDP(localDP int32) []int32 {
+	if localDP < 1 {
+		localDP = 1
+	}
+	const maxPort = 65535
+	end := int64(VLLMKVEventsPort) + 2*int64(localDP) - 1
+	if end > maxPort {
+		end = maxPort
+	}
+	ports := make([]int32, 0, int(end-int64(VLLMKVEventsPort)+1))
+	for p := int64(VLLMKVEventsPort); p <= end; p++ {
+		ports = append(ports, int32(p))
+	}
+	return ports
 }
 
 // cachePrefixSeparators are the characters vLLM and SGLang join a store key's parts with.

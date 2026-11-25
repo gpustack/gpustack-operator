@@ -5578,7 +5578,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													},
 												},
 												"version": {
-													Description: "Version is the inference engine release version the deployment runs by default, such as\n\"0.34.0\" or \"0.5.23\".\n- When omitted on creation or when Image changes, admission derives it from standard\ngpustack/runner image tags. Custom or digest-only images require an explicit value.\n- It is editable alongside Image. A role that overrides Image may also declare its own\nEngineVersion; otherwise roles inherit this value.",
+													Description: "Version is the inference engine release version the deployment runs by default, such as\n\"0.34.0\" or \"0.5.23\".\n- When omitted on creation (or cleared when changing Image), admission derives it from\nstandard gpustack/runner image tags. Custom or digest-only images require an explicit\nvalue.\n- It is editable alongside Image. A role that overrides Image may also declare its own\nEngineVersion; otherwise roles inherit this value.",
 													Type:        "string",
 													MaxLength:   ptr.To[int64](64),
 												},
@@ -5841,7 +5841,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															XListType: ptr.To[string]("atomic"),
 														},
 														"engineVersion": {
-															Description: "EngineVersion overrides the deployment's engine version for this role, such as \"0.32.0\".\n- When omitted and Image is empty, the role inherits spec.engine.version.\n- When Image overrides the deployment image with a standard gpustack/runner tag,\nadmission derives this field automatically on creation or when Image changes.\n- Custom or digest-only role images require an explicit value.",
+															Description: "EngineVersion overrides the deployment's engine version for this role, such as \"0.32.0\".\n- When omitted and Image is empty, the role inherits spec.engine.version.\n- When Image overrides the deployment image: when omitted on creation (or cleared when\nchanging Image), admission derives it from standard gpustack/runner image tags.\n- Custom or digest-only role images require an explicit value.",
 															Type:        "string",
 															MaxLength:   ptr.To[int64](64),
 														},

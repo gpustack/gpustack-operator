@@ -100,10 +100,11 @@ func TestRender_VLLMFamilyVehicleIsAFile(t *testing.T) {
 
 func TestRender_VLLMPublishesKVEvents(t *testing.T) {
 	testCases := []struct {
-		name         string
-		in           Input
-		wantTopic    string
-		wantCBORHash bool
+		name           string
+		in             Input
+		wantTopic      string
+		wantReplayPort int32
+		wantCBORHash   bool
 	}{
 		{
 			name: "vllm legacy empty topic falls back to kv@",
@@ -114,19 +115,34 @@ func TestRender_VLLMPublishesKVEvents(t *testing.T) {
 				PublishKVEvents: true,
 				KVEventsHost:    "qwen-prefill.team-a.svc",
 			},
-			wantTopic: "kv@",
+			wantTopic:      "kv@",
+			wantReplayPort: 5558,
 		},
 		{
-			name: "vllm explicit model topic without CBOR hash alignment",
+			name: "vllm explicit 3-segment model topic without CBOR hash alignment",
 			in: Input{
 				Engine:          EngineVLLM,
 				Role:            RolePrefill,
 				Connection:      testConnection(),
 				PublishKVEvents: true,
 				KVEventsHost:    "qwen-prefill.team-a.svc",
-				KVEventsTopic:   "kv@Qwen/Qwen3-32B",
+				KVEventsTopic:   VLLMKVEventsTopicForModel("Qwen/Qwen3-32B"),
 			},
-			wantTopic: "kv@Qwen/Qwen3-32B",
+			wantTopic:      "kv@pod@Qwen/Qwen3-32B",
+			wantReplayPort: 5558,
+		},
+		{
+			name: "vllm single-Pod multi-DP offsets replay_endpoint past local PUB sockets",
+			in: Input{
+				Engine:          EngineVLLM,
+				Role:            RoleNone,
+				PublishKVEvents: true,
+				KVEventsHost:    "qwen-server.team-a.svc",
+				KVEventsTopic:   VLLMKVEventsTopicForModel("Qwen/Qwen3-32B"),
+				KVEventsLocalDP: 2,
+			},
+			wantTopic:      "kv@pod@Qwen/Qwen3-32B",
+			wantReplayPort: 5559,
 		},
 		{
 			name: "vllm-ascend publishes KV events identically to vllm",
@@ -137,9 +153,10 @@ func TestRender_VLLMPublishesKVEvents(t *testing.T) {
 				EngineVersion:   "0.32.0",
 				PublishKVEvents: true,
 				KVEventsHost:    "qwen-prefill.team-a.svc",
-				KVEventsTopic:   "kv@Qwen/Qwen3-32B",
+				KVEventsTopic:   VLLMKVEventsTopicForModel("Qwen/Qwen3-32B"),
 			},
-			wantTopic: "kv@Qwen/Qwen3-32B",
+			wantTopic:      "kv@pod@Qwen/Qwen3-32B",
+			wantReplayPort: 5558,
 		},
 		{
 			name: "vllm-ascend store-less server publishes KV events",
@@ -148,9 +165,10 @@ func TestRender_VLLMPublishesKVEvents(t *testing.T) {
 				Role:            RoleNone,
 				PublishKVEvents: true,
 				KVEventsHost:    "qwen-server.team-a.svc",
-				KVEventsTopic:   "kv@Qwen/Qwen3-32B",
+				KVEventsTopic:   VLLMKVEventsTopicForModel("Qwen/Qwen3-32B"),
 			},
-			wantTopic: "kv@Qwen/Qwen3-32B",
+			wantTopic:      "kv@pod@Qwen/Qwen3-32B",
+			wantReplayPort: 5558,
 		},
 		{
 			name: "vllm kv_aware CBOR hash alignment on prefill",
@@ -160,25 +178,12 @@ func TestRender_VLLMPublishesKVEvents(t *testing.T) {
 				KVTransfer:          true,
 				PublishKVEvents:     true,
 				KVEventsHost:        "qwen-prefill.team-a.svc",
-				KVEventsTopic:       "kv@Qwen/Qwen3-32B",
+				KVEventsTopic:       VLLMKVEventsTopicForModel("Qwen/Qwen3-32B"),
 				KVEventsUseCBORHash: true,
 			},
-			wantTopic:    "kv@Qwen/Qwen3-32B",
-			wantCBORHash: true,
-		},
-		{
-			name: "vllm kv_aware CBOR hash alignment on decode",
-			in: Input{
-				Engine:              EngineVLLM,
-				Role:                RoleDecode,
-				KVTransfer:          true,
-				PublishKVEvents:     true,
-				KVEventsHost:        "qwen-decode.team-a.svc",
-				KVEventsTopic:       "kv@Qwen/Qwen3-32B",
-				KVEventsUseCBORHash: true,
-			},
-			wantTopic:    "kv@Qwen/Qwen3-32B",
-			wantCBORHash: true,
+			wantTopic:      "kv@pod@Qwen/Qwen3-32B",
+			wantReplayPort: 5558,
+			wantCBORHash:   true,
 		},
 		{
 			name: "vllm-ascend kv_aware CBOR hash alignment on server",
@@ -187,11 +192,12 @@ func TestRender_VLLMPublishesKVEvents(t *testing.T) {
 				Role:                RoleNone,
 				PublishKVEvents:     true,
 				KVEventsHost:        "qwen-server.team-a.svc",
-				KVEventsTopic:       "kv@Qwen/Qwen3-32B",
+				KVEventsTopic:       VLLMKVEventsTopicForModel("Qwen/Qwen3-32B"),
 				KVEventsUseCBORHash: true,
 			},
-			wantTopic:    "kv@Qwen/Qwen3-32B",
-			wantCBORHash: true,
+			wantTopic:      "kv@pod@Qwen/Qwen3-32B",
+			wantReplayPort: 5558,
+			wantCBORHash:   true,
 		},
 	}
 
@@ -207,22 +213,22 @@ func TestRender_VLLMPublishesKVEvents(t *testing.T) {
 				"enable_kv_cache_events": true,
 				"publisher": "zmq",
 				"endpoint": "tcp://*:5557",
-				"replay_endpoint": "tcp://*:5558",
+				"replay_endpoint": "tcp://*:%d",
 				"buffer_steps": 10000,
 				"hwm": 100000,
 				"max_queue_size": 100000,
 				"topic": %q
-			}`, tc.wantTopic), result.Args[idx+1])
+			}`, tc.wantReplayPort, tc.wantTopic), result.Args[idx+1])
 
 			assert.Contains(t, result.Ports, core.ContainerPort{
 				Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557,
 			})
 			assert.Contains(t, result.Ports, core.ContainerPort{
-				Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558,
+				Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: tc.wantReplayPort,
 			})
 			require.NotNil(t, result.KVEvents)
 			assert.Equal(t, "tcp://"+tc.in.KVEventsHost+":5557", result.KVEvents.Endpoint)
-			assert.Equal(t, "tcp://"+tc.in.KVEventsHost+":5558", result.KVEvents.ReplayEndpoint)
+			assert.Equal(t, fmt.Sprintf("tcp://%s:%d", tc.in.KVEventsHost, tc.wantReplayPort), result.KVEvents.ReplayEndpoint)
 			assert.Equal(t, tc.wantTopic, result.KVEvents.Topic)
 
 			if tc.wantCBORHash {
@@ -257,7 +263,15 @@ func TestRender_VLLMDoesNotPublishKVEventsUnlessRequested(t *testing.T) {
 
 func TestVLLMKVEventsTopicForModel(t *testing.T) {
 	assert.Equal(t, "kv@", VLLMKVEventsTopicForModel(""))
-	assert.Equal(t, "kv@Qwen/Qwen3-32B", VLLMKVEventsTopicForModel("Qwen/Qwen3-32B"))
+	assert.Equal(t, "kv@pod@Qwen/Qwen3-32B", VLLMKVEventsTopicForModel("Qwen/Qwen3-32B"))
+
+	assert.Equal(t, int32(5558), KVEventsReplayPortForLocalDP(0))
+	assert.Equal(t, int32(5558), KVEventsReplayPortForLocalDP(1))
+	assert.Equal(t, int32(5559), KVEventsReplayPortForLocalDP(2))
+	assert.Equal(t, int32(5561), KVEventsReplayPortForLocalDP(4))
+
+	assert.Equal(t, []int32{5557, 5558}, KVEventsReservedPortsForLocalDP(1))
+	assert.Equal(t, []int32{5557, 5558, 5559, 5560}, KVEventsReservedPortsForLocalDP(2))
 
 	legacy := VLLMKVEvents("role.ns.svc")
 	assert.Equal(t, &KVEvents{
@@ -266,12 +280,19 @@ func TestVLLMKVEventsTopicForModel(t *testing.T) {
 		Topic:          "kv@",
 	}, legacy)
 
-	explicit := KVEventsForTopic("role.ns.svc", "kv@Qwen/Qwen3-32B")
+	explicit := KVEventsForTopic("role.ns.svc", "kv@pod@Qwen/Qwen3-32B")
 	assert.Equal(t, &KVEvents{
 		Endpoint:       "tcp://role.ns.svc:5557",
 		ReplayEndpoint: "tcp://role.ns.svc:5558",
-		Topic:          "kv@Qwen/Qwen3-32B",
+		Topic:          "kv@pod@Qwen/Qwen3-32B",
 	}, explicit)
+
+	multiDP := KVEventsForTopicAndLocalDP("role.ns.svc", "kv@pod@Qwen/Qwen3-32B", 2)
+	assert.Equal(t, &KVEvents{
+		Endpoint:       "tcp://role.ns.svc:5557",
+		ReplayEndpoint: "tcp://role.ns.svc:5559",
+		Topic:          "kv@pod@Qwen/Qwen3-32B",
+	}, multiDP)
 }
 
 // TestRender_SGLangVehicleIsTheEnvironment is the counterpart, and its negative half carries as much

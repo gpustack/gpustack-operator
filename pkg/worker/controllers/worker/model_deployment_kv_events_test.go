@@ -96,7 +96,7 @@ func TestObserveModelDeploymentKVEventsPublishing(t *testing.T) {
 			status: meta.ConditionTrue, reason: modelDeploymentReasonKVEventsPublishing,
 		},
 		{
-			name: "vllm_router_pd_decode_kv_aware_flags_unmanaged_decode",
+			name: "vllm_router_pd_decode_kv_aware_not_applicable",
 			deployment: routedModelDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Router = &workercore.ModelDeploymentRouter{
 					Name:      workercore.ModelDeploymentRouterVLLM,
@@ -104,15 +104,16 @@ func TestObserveModelDeploymentKVEventsPublishing(t *testing.T) {
 				}
 				md.Spec.Roles[1].Command = []string{"/bin/custom-decode"}
 			}),
-			status: meta.ConditionUnknown, reason: modelDeploymentReasonKVEventsRoleUnmanaged,
+			status: meta.ConditionTrue, reason: modelDeploymentReasonKVEventsNotApplicable,
 		},
 		{
-			name: "vllm_router_pd_both_kv_aware_publishes",
+			name: "vllm_router_pd_policy_kv_aware_publishes_on_prefill_only",
 			deployment: routedModelDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Router = &workercore.ModelDeploymentRouter{
 					Name:      workercore.ModelDeploymentRouterVLLM,
 					ExtraArgs: []string{"--policy=kv_aware"},
 				}
+				md.Spec.Roles[1].Command = []string{"/bin/custom-decode"}
 			}),
 			status: meta.ConditionTrue, reason: modelDeploymentReasonKVEventsPublishing,
 		},

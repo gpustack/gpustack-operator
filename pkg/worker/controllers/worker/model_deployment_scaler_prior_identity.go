@@ -999,6 +999,7 @@ func modelDeploymentScalerConnectorRender(
 		}
 		if in.PublishKVEvents {
 			in.KVEventsHost = target.Name + "-" + role.Name + "." + target.Namespace + ".svc"
+			in.KVEventsLocalDP = ModelDeploymentKVEventsLocalDP(target, role)
 		}
 		return SynthesizeModelDeploymentConnector(in)
 	}

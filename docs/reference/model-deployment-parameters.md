@@ -31,7 +31,7 @@ line's milestone; legacy CRs with an empty stored version stay on the `< 0.30.0`
 | Axis | Engine | Before | At/after | Threshold |
 |---|---|---|---|---|
 | `KVTransfer` | `vLLM-Ascend` | `MooncakeConnectorV1` (`prefill tp_size >= decode tp_size`) | `MooncakeConnectorV2` Pull mode (`max(tp_p, tp_d) % min(tp_p, tp_d) == 0`; mixed V1/V2 pairs refused) | `>= 0.30.0` |
-| `KVEvents` | `vLLM`, `vLLM-Ascend` | `vllm-router` `kv_aware` refused at admission | `vllm-router` `kv_aware` admitted; emits `--kv-events-config`, `--prefix-caching-hash-algo sha256_cbor`, `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0`, ports `5557`/`5558` | `>= 0.31.0` |
+| `KVEvents` | `vLLM`, `vLLM-Ascend` | `vllm-router` `kv_aware` refused at admission | `vllm-router` `kv_aware` admitted on *Server*/*Prefill*; emits `--kv-events-config`, `--prefix-caching-hash-algo sha256_cbor`, `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0`, ZMQ event/replay ports | `>= 0.31.0` |
 | `ECTransfer` | `vLLM` (`ECCPUConnector`) | Defaulted `VLLM_USE_V2_MODEL_RUNNER=1` emitted | `VLLM_USE_V2_MODEL_RUNNER` omitted (removed upstream in `v0.34.0`) | `>= 0.34.0` |
 | `ECTransfer` | `vLLM` (`ECCPUConnector` `Encode`) | Defaulted `VLLM_EC_SIDE_CHANNEL_PORT=5601` (matches upstream default `5601`) | Defaulted `VLLM_EC_SIDE_CHANNEL_PORT=5601` (pins port because upstream default changed to `0`); user override including `0` accepted | `>= 0.34.0` |
 | Legacy CR | `vLLM`, `vLLM-Ascend` | Stored version empty: keeps `< 0.30.0` baseline (`MooncakeConnectorV1`, defaulted `VLLM_USE_V2_MODEL_RUNNER=1`) without in-memory tag re-parsing | Explicit or backfilled version governs all gates above | Empty vs set |
@@ -167,20 +167,25 @@ flowchart TD
 
 `KVEvents` publishing is orthogonal to `KVCache` and `KVTransfer`. Publishing activates only for the
 router/engine pairs below, opening ZMQ publisher port `5557` (`kv-events`) and replay port `5558`
-(`kv-replay`) on the publishing role's `Pod` and per-role `Service`.
+(`kv-replay`, or `5557 + localDP` when per-`Pod` `localDP > 1`) on the publishing role's `Pod` and
+per-role `Service`.
 
 | Router | Engine | Engine Version | Publishing roles | Injected config | Condition (`KVEventsPublishing`) |
 |---|---|---|---|---|---|
-| `llm-d-router` | `vLLM`, `vLLM-Ascend` | All | *Server*, *Prefill* | `--kv-events-config` (`enable_kv_cache_events: true`, `publisher: "zmq"`, `tcp://*:5557`, `tcp://*:5558`, `buffer_steps: 10000`, `hwm: 100000`, `max_queue_size: 100000`, `topic: "kv@<spec.model.name>"`), ports `5557`/`5558`; router subscribes with `topicFilter: "kv@"` | `True/Publishing` |
+| `llm-d-router` | `vLLM`, `vLLM-Ascend` | All | *Server*, *Prefill* | `--kv-events-config` (`enable_kv_cache_events: true`, `publisher: "zmq"`, `tcp://*:5557`, `tcp://*:<replayPort>`, `buffer_steps: 10000`, `hwm: 100000`, `max_queue_size: 100000`, `topic: "kv@pod@<spec.model.name>"`), ports `5557`/`<replayPort>`; router subscribes with `topicFilter: "kv@"` | `True/Publishing` |
 | `llm-d-router` | `SGLang` | All | None | Router uses `approx-prefix-cache-producer` (`llm-d-router@v1.0.0` `token-producer` requires vLLM `/v1/chat/completions/render`, which SGLang does not implement) | `True/NotApplicable` |
-| `sgl-router` | `SGLang` | All | *Server*, *Prefill* (including store-less *Server*) | `--kv-events-config` (`publisher: "zmq"`, `tcp://*:5557`, `tcp://*:5558`, `topic: "kv-events"`), emitted before `--encoder-urls`, ports `5557`/`5558` | `True/Publishing` |
+| `sgl-router` | `SGLang` | All | *Server*, *Prefill* (including store-less *Server*) | `--kv-events-config` (`publisher: "zmq"`, `tcp://*:5557`, `tcp://*:<replayPort>`, `topic: "kv-events"`), emitted before `--encoder-urls`, ports `5557`/`<replayPort>` | `True/Publishing` |
 | `vllm-router` (default `cache_aware`) | `vLLM`, `vLLM-Ascend` | All | None | No KV events flags or ports | `True/NotApplicable` |
-| `vllm-router` (`kv_aware` active) | `vLLM`, `vLLM-Ascend` | `>= 0.31.0` (`< 0.31.0` refused) | Roles matching `--policy`, `--prefill-policy`, or `--decode-policy` (including *Decode*) | `--kv-events-config` (`topic: "kv@<spec.model.name>"`), `--prefix-caching-hash-algo sha256_cbor` (conditionally Owned), `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0` (conditionally Owned, capacity-neutral), ports `5557`/`5558` | `True/Publishing` |
+| `vllm-router` (`kv_aware` active) | `vLLM`, `vLLM-Ascend` | `>= 0.31.0` (`< 0.31.0` refused) | *Server* (`--policy`) or *Prefill* (`--policy` / `--prefill-policy`; never *Decode*) | `--kv-events-config` (`topic: "kv@pod@<spec.model.name>"`, `tcp://*:5557`, `tcp://*:<replayPort>`), `--prefix-caching-hash-algo sha256_cbor` (conditionally Owned), `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0` (conditionally Owned, capacity-neutral), ports `5557`/`<replayPort>` | `True/Publishing` |
 | `sglang-gateway` (deprecated, frozen) | `SGLang` | All | None | None | `True/NotApplicable` |
 
+- **Single-`Pod` multi-DP port stride**: Both engines offset `endpoint` and `replay_endpoint` by
+  `+ dp_rank` (`0..localDP-1`). Single-DP roles (`localDP <= 1`, including multi-`Pod` *External DP*)
+  use `replayPort = 5558`; single-`Pod` multi-DP roles (`localDP > 1`) use `replayPort = 5557 + localDP`
+  and admission reserves `[5557 .. 5557 + 2*localDP - 1]` so no rank's `PUB` or `ROUTER` socket collides.
 - **Conditional ownership (`vllm-router` `kv_aware`)**: `--prefix-caching-hash-algo` and
-  `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES` are refused in user args/env only on roles where `kv_aware`
-  is active, and stripped from user env in controller merge.
+  `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES` are refused in user args/env only on *Server*/*Prefill* roles
+  where `kv_aware` is active, and stripped from user env in controller merge.
 - **Shared `KVCachePool` caveat**: Enabling `kv_aware` switches prefix-caching hashes to
   `sha256_cbor`. Deployments sharing one `KVCachePool` reuse domain must use the same prefix hash
   algorithm if cross-deployment cache hits are expected.
@@ -216,9 +221,9 @@ Admission enforces a strict engine-router matrix: `sgl-router` and deprecated `s
 
 - **`sgl-router` `--no-tokenizer` omission**: Emitted by default so `sgl-router` starts offline in
   air-gapped clusters without calling Hugging Face Hub. Automatically omitted when
-  *`spec.router.extraArgs`* supplies `--tokenizer-path`, `--bucket-config`, `--filter prefix_cache`,
-  or sets `--policy`/`--prefill-policy`/`--decode-policy` to `cache_aware`, `score_policy`, or
-  `fused_score`.
+  *`spec.router.extraArgs`* supplies `--tokenizer-path` or sets `--policy` to `cache_aware` (under
+  operator-owned `--chat-routing=reorg`, `--policy` accepts `power_of_two`, `cache_aware`, and
+  `session_aware`; `--decode-policy` accepts `power_of_two`; `--filter` accepts `overloaded`).
 
 ## Weight delivery parameters
 

@@ -493,18 +493,19 @@ func renderSGLang(in Input) (*Result, error) {
 		if topic == "" {
 			topic = SGLangKVEventsTopic
 		}
+		replayPort := KVEventsReplayPortForLocalDP(in.KVEventsLocalDP)
 		eventsDoc, err := json.Marshal(sglangKVEventsConfig{
 			Publisher:      "zmq",
 			Endpoint:       fmt.Sprintf("tcp://*:%d", VLLMKVEventsPort),
-			ReplayEndpoint: fmt.Sprintf("tcp://*:%d", VLLMKVEventsReplayPort),
+			ReplayEndpoint: fmt.Sprintf("tcp://*:%d", replayPort),
 			Topic:          topic,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("marshal the SGLang KV event configuration: %w", err)
 		}
 		result.Args = append(result.Args, sglangKVEventsConfigArg, string(eventsDoc))
-		result.Ports = append(result.Ports, KVEventsPorts()...)
-		result.KVEvents = KVEventsForTopic(in.KVEventsHost, topic)
+		result.Ports = append(result.Ports, KVEventsPortsForLocalDP(in.KVEventsLocalDP)...)
+		result.KVEvents = KVEventsForTopicAndLocalDP(in.KVEventsHost, topic, in.KVEventsLocalDP)
 	}
 
 	// THE ENCODER LEG IS THE THIRD STAGE, AND IT IS WRITTEN LAST because the address flag takes a

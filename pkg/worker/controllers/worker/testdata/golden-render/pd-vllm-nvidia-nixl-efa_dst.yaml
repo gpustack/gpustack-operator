@@ -191,7 +191,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
-    modeldeployment.gpustack.ai/pod-spec-hash: 216b6dd4b5d41a7fb9085ace0679d204a24643dbc54be0a217f3e7f6219a7b66
+    modeldeployment.gpustack.ai/pod-spec-hash: 24d10d62671a489b715a5496b0f7a4b161031018200add8ee6f08a8156c53e41
     modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
@@ -229,7 +229,7 @@ spec:
     - --kv-transfer-config
     - '{"kv_connector":"NixlConnector","kv_role":"kv_producer","kv_connector_extra_config":{"backends":["LIBFABRIC"]}}'
     - --kv-events-config
-    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@Qwen/Qwen2.5-72B-Instruct"}'
+    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@pod@Qwen/Qwen2.5-72B-Instruct"}'
     - --host
     - 0.0.0.0
     - --port

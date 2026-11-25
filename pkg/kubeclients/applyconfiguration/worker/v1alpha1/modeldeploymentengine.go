@@ -33,8 +33,9 @@ type ModelDeploymentEngineApplyConfiguration struct {
 	// Version is the inference engine release version the deployment runs by default, such as
 	// "0.34.0" or "0.5.23".
 	//
-	// - When omitted on creation or when Image changes, admission derives it from standard
-	// gpustack/runner image tags. Custom or digest-only images require an explicit value.
+	// - When omitted on creation (or cleared when changing Image), admission derives it from
+	// standard gpustack/runner image tags. Custom or digest-only images require an explicit
+	// value.
 	// - It is editable alongside Image. A role that overrides Image may also declare its own
 	// EngineVersion; otherwise roles inherit this value.
 	//

@@ -1480,11 +1480,13 @@ func modelDeploymentRouterReservedPorts(
 		if md.Spec.Router == nil {
 			break
 		}
-		// Reserve KV-event publisher and replay ports for every managed vLLM role that publishes
-		// KV events: llm-d-router Server/Prefill (all platforms including Ascend) and vllm-router
-		// roles where kv_aware routing is active (including Decode when configured).
+		// Reserve all ZMQ KV-event publisher and replay ports bound by local DP ranks on managed
+		// vLLM roles that publish KV events: llm-d-router Server/Prefill and vllm-router kv_aware
+		// Server/Prefill roles.
 		if modelDeploymentRolePublishesKVEvents(md, role) {
-			reserved = append(reserved, inject.VLLMKVEventsPort, inject.VLLMKVEventsReplayPort)
+			reserved = append(reserved,
+				inject.KVEventsReservedPortsForLocalDP(workerctrl.ModelDeploymentKVEventsLocalDP(md, role))...,
+			)
 		}
 		// The Mooncake bootstrap server runs on the prefiller alone, and UNDER EVERY ROUTER rather
 		// than one. On every vendor the leg renders under whichever router is named, so the
@@ -1513,10 +1515,13 @@ func modelDeploymentRouterReservedPorts(
 			}
 		}
 	case workercore.ModelDeploymentEngineSGLang:
-		// Reserve KV-event publisher and replay ports for managed SGLang Server/Prefill roles
-		// fronted by sgl-router (excluding Decode, Encode, and frozen sglang-gateway).
+		// Reserve all ZMQ KV-event publisher and replay ports bound by local DP ranks on managed
+		// SGLang Server/Prefill roles fronted by sgl-router (excluding Decode, Encode, and frozen
+		// sglang-gateway).
 		if modelDeploymentRolePublishesKVEvents(md, role) {
-			reserved = append(reserved, inject.VLLMKVEventsPort, inject.VLLMKVEventsReplayPort)
+			reserved = append(reserved,
+				inject.KVEventsReservedPortsForLocalDP(workerctrl.ModelDeploymentKVEventsLocalDP(md, role))...,
+			)
 		}
 		// SGLang's bootstrap registry follows the ROLE and not any router, because naming the split
 		// is what it means to be one half on this engine. It renders on a declared pair, so the

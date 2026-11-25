@@ -3548,8 +3548,9 @@ message ModelDeploymentEngine {
   // Version is the inference engine release version the deployment runs by default, such as
   // "0.34.0" or "0.5.23".
   //
-  //   - When omitted on creation or when Image changes, admission derives it from standard
-  //     gpustack/runner image tags. Custom or digest-only images require an explicit value.
+  //   - When omitted on creation (or cleared when changing Image), admission derives it from
+  //     standard gpustack/runner image tags. Custom or digest-only images require an explicit
+  //     value.
   //   - It is editable alongside Image. A role that overrides Image may also declare its own
   //     EngineVersion; otherwise roles inherit this value.
   //
@@ -4312,8 +4313,8 @@ message ModelDeploymentRole {
   // EngineVersion overrides the deployment's engine version for this role, such as "0.32.0".
   //
   //   - When omitted and Image is empty, the role inherits spec.engine.version.
-  //   - When Image overrides the deployment image with a standard gpustack/runner tag,
-  //     admission derives this field automatically on creation or when Image changes.
+  //   - When Image overrides the deployment image: when omitted on creation (or cleared when
+  //     changing Image), admission derives it from standard gpustack/runner image tags.
   //   - Custom or digest-only role images require an explicit value.
   //
   // +optional

@@ -9,24 +9,12 @@ AGAINST: sgl-project/sglang router-v0.1.0 (commit
 WHEN TO REMOVE: when upstream sgl-router ships a native read-only membership
 endpoint matching the operator observer wire contract.
 
-diff --git a/sgl-router/src/lib.rs b/sgl-router/src/lib.rs
-index 118f64e6d9e7ab457ad1612fb0423b54902dbbf9..385f4b6709d3e454bb5ad51bb7e7a705b2bd42f3 100644
---- a/sgl-router/src/lib.rs
-+++ b/sgl-router/src/lib.rs
-@@ -9,6 +9,7 @@ pub mod buckets_reorg;
- pub mod config;
- pub mod discovery;
- pub mod health;
-+pub mod observer;
- pub(crate) mod off_worker;
- pub mod policies;
- pub mod policies_reorg;
 diff --git a/sgl-router/src/observer.rs b/sgl-router/src/observer.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..6f79759eaae3864457e4d5f1f951d9455a2ff484
+index 0000000000000000000000000000000000000000..8b5b1d0cce48387c8a7c948330dc3506e86d9e6d
 --- /dev/null
 +++ b/sgl-router/src/observer.rs
-@@ -0,0 +1,298 @@
+@@ -0,0 +1,357 @@
 +// SPDX-FileCopyrightText: Copyright (c) 2026 The SGLang Authors
 +// SPDX-License-Identifier: Apache-2.0
 +
@@ -141,7 +129,11 @@ index 0000000000000000000000000000000000000000..6f79759eaae3864457e4d5f1f951d945
 +        let worker_id = worker.id.0.clone();
 +        // Single-lock read-only snapshot matching WorkerRegistry::healthy_workers_for.
 +        let cb = worker.breaker.snapshot();
-+        let healthy = !worker.awaiting_bootstrap_port();
++        let serves_model = worker
++            .model_ids
++            .iter()
++            .any(|m| m.0 == ctx.config.model.id);
++        let healthy = serves_model && !worker.awaiting_bootstrap_port();
 +        let circuit_open = cb.state_code == 1 && !cb.admit;
 +        let in_selection = healthy && cb.admit;
 +        ordered.insert(
@@ -266,7 +258,7 @@ index 0000000000000000000000000000000000000000..6f79759eaae3864457e4d5f1f951d945
 +                    id: WorkerId("w-plain".into()),
 +                    url: "http://10.0.0.1:8000".into(),
 +                    mode: WorkerMode::Plain,
-+                    model_ids: vec![ModelId("m".into())],
++                    model_ids: vec![ModelId("stub-model".into())],
 +                    ..Default::default()
 +                },
 +                Some(cb_cfg),
@@ -311,7 +303,7 @@ index 0000000000000000000000000000000000000000..6f79759eaae3864457e4d5f1f951d945
 +                id: WorkerId("p-1".into()),
 +                url: "http://10.0.0.2:8000".into(),
 +                mode: WorkerMode::Prefill,
-+                model_ids: vec![ModelId("m".into())],
++                model_ids: vec![ModelId("stub-model".into())],
 +                bootstrap_port: None,
 +                ..Default::default()
 +            })
@@ -324,25 +316,59 @@ index 0000000000000000000000000000000000000000..6f79759eaae3864457e4d5f1f951d945
 +        assert_eq!(w["selection"]["circuit_open"], false);
 +        assert_eq!(w["selection"]["in_selection"], false);
 +    }
++
++    #[tokio::test]
++    async fn workers_with_empty_or_mismatched_model_ids_are_not_in_selection() {
++        let ctx = Arc::new(AppContext::stub());
++        ctx.registry
++            .add(WorkerSpec {
++                id: WorkerId("w-empty".into()),
++                url: "http://10.0.0.1:8000".into(),
++                mode: WorkerMode::Plain,
++                model_ids: vec![],
++                ..Default::default()
++            })
++            .unwrap();
++        ctx.registry
++            .add(WorkerSpec {
++                id: WorkerId("w-mismatch".into()),
++                url: "http://10.0.0.2:8000".into(),
++                mode: WorkerMode::Plain,
++                model_ids: vec![ModelId("other-model".into())],
++                ..Default::default()
++            })
++            .unwrap();
++        ctx.registry
++            .add(WorkerSpec {
++                id: WorkerId("w-match".into()),
++                url: "http://10.0.0.3:8000".into(),
++                mode: WorkerMode::Plain,
++                model_ids: vec![ModelId("stub-model".into())],
++                ..Default::default()
++            })
++            .unwrap();
++
++        let (status, body) = fetch_observer(Arc::clone(&ctx)).await;
++        assert_eq!(status, StatusCode::OK);
++        let workers = body["workers"].as_array().unwrap();
++        assert_eq!(workers.len(), 3);
++
++        assert_eq!(workers[0]["worker_id"], "w-empty");
++        assert_eq!(workers[0]["selection"]["registered"], true);
++        assert_eq!(workers[0]["selection"]["healthy"], false);
++        assert_eq!(workers[0]["selection"]["circuit_open"], false);
++        assert_eq!(workers[0]["selection"]["in_selection"], false);
++
++        assert_eq!(workers[1]["worker_id"], "w-mismatch");
++        assert_eq!(workers[1]["selection"]["registered"], true);
++        assert_eq!(workers[1]["selection"]["healthy"], false);
++        assert_eq!(workers[1]["selection"]["circuit_open"], false);
++        assert_eq!(workers[1]["selection"]["in_selection"], false);
++
++        assert_eq!(workers[2]["worker_id"], "w-match");
++        assert_eq!(workers[2]["selection"]["registered"], true);
++        assert_eq!(workers[2]["selection"]["healthy"], true);
++        assert_eq!(workers[2]["selection"]["circuit_open"], false);
++        assert_eq!(workers[2]["selection"]["in_selection"], true);
++    }
 +}
-diff --git a/sgl-router/src/server/app.rs b/sgl-router/src/server/app.rs
-index 6ff8661f8626dc3f011354fbee8958f10dfe54ea..547def97b3b5d461807527ed1bd5c816fa7499a1 100644
---- a/sgl-router/src/server/app.rs
-+++ b/sgl-router/src/server/app.rs
-@@ -33,6 +33,7 @@ fn is_infra_path(path: &str) -> bool {
-             | "/readiness"
-             | "/health_generate"
-             | "/metrics"
-+            | "/observer/endpoints"
-     )
- }
- 
-@@ -224,6 +225,8 @@ pub fn build_router_with_body_limit(ctx: Arc<AppContext>, max_body_bytes: usize)
-         .route("/liveness", get(crate::server::routes::health::healthz))
-         .route("/readiness", get(crate::server::routes::health::readyz))
-         .route("/metrics", get(crate::server::routes::metrics::metrics))
-+        // Read-only external observation of pool membership (see src/observer.rs).
-+        .route("/observer/endpoints", get(crate::observer::observer_endpoints))
-         .route(
-             "/v1/models",
-             get(crate::server::routes::models::list_models),

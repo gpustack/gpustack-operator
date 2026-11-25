@@ -2346,6 +2346,7 @@ func modelDeploymentBindingHash(
 			v6Conn.KVEventsHost = ""
 			v6Conn.KVEventsTopic = ""
 			v6Conn.KVEventsUseCBORHash = false
+			v6Conn.KVEventsReplayPort = 0
 			legacyBindingHashes = append(legacyBindingHashes, hashSubject(&v6Conn))
 			if kubemeta.DeepEqual(v6Conn, modelDeploymentConnectorBinding{}) {
 				legacyBindingHashes = append(legacyBindingHashes, hashSubject(nil))
@@ -2354,6 +2355,7 @@ func modelDeploymentBindingHash(
 			v6Conn := *connector
 			v6Conn.KVEventsTopic = ""
 			v6Conn.KVEventsUseCBORHash = false
+			v6Conn.KVEventsReplayPort = 0
 			legacyBindingHashes = append(legacyBindingHashes, hashSubject(&v6Conn))
 		}
 		if len(legacyBindingHashes) > 0 {

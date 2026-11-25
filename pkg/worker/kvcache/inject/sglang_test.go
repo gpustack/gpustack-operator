@@ -1,6 +1,7 @@
 package inject
 
 import (
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -644,9 +645,10 @@ func TestRender_SGLangDisaggregationBackendsFollowTheInput(t *testing.T) {
 
 func TestRender_SGLangKVEvents(t *testing.T) {
 	testCases := []struct {
-		name      string
-		in        Input
-		wantTopic string
+		name           string
+		in             Input
+		wantTopic      string
+		wantReplayPort int32
 	}{
 		{
 			name: "store-less single-role server publishes KV events with default topic",
@@ -656,7 +658,20 @@ func TestRender_SGLangKVEvents(t *testing.T) {
 				PublishKVEvents: true,
 				KVEventsHost:    "qwen-server.team-a.svc",
 			},
-			wantTopic: "kv-events",
+			wantTopic:      "kv-events",
+			wantReplayPort: 5558,
+		},
+		{
+			name: "single-Pod multi-DP offsets replay_endpoint to 5559",
+			in: Input{
+				Engine:          EngineSGLang,
+				Role:            RoleNone,
+				PublishKVEvents: true,
+				KVEventsHost:    "qwen-server.team-a.svc",
+				KVEventsLocalDP: 2,
+			},
+			wantTopic:      "kv-events",
+			wantReplayPort: 5559,
 		},
 		{
 			name: "store-backed server publishes KV events with explicit topic",
@@ -668,7 +683,8 @@ func TestRender_SGLangKVEvents(t *testing.T) {
 				KVEventsHost:    "qwen-server.team-a.svc",
 				KVEventsTopic:   "custom-events",
 			},
-			wantTopic: "custom-events",
+			wantTopic:      "custom-events",
+			wantReplayPort: 5558,
 		},
 		{
 			name: "PD prefill publishes KV events alongside disaggregation args",
@@ -680,7 +696,8 @@ func TestRender_SGLangKVEvents(t *testing.T) {
 				PublishKVEvents: true,
 				KVEventsHost:    "qwen-prefill.team-a.svc",
 			},
-			wantTopic: "kv-events",
+			wantTopic:      "kv-events",
+			wantReplayPort: 5558,
 		},
 		{
 			name: "EPD prefill places --kv-events-config before --encoder-urls",
@@ -694,7 +711,8 @@ func TestRender_SGLangKVEvents(t *testing.T) {
 				PublishKVEvents: true,
 				KVEventsHost:    "qwen-prefill.team-a.svc",
 			},
-			wantTopic: "kv-events",
+			wantTopic:      "kv-events",
+			wantReplayPort: 5558,
 		},
 		{
 			name: "SGLang ignores vLLM CBOR hash alignment flag",
@@ -705,7 +723,8 @@ func TestRender_SGLangKVEvents(t *testing.T) {
 				KVEventsHost:        "qwen-server.team-a.svc",
 				KVEventsUseCBORHash: true,
 			},
-			wantTopic: "kv-events",
+			wantTopic:      "kv-events",
+			wantReplayPort: 5558,
 		},
 	}
 
@@ -717,12 +736,12 @@ func TestRender_SGLangKVEvents(t *testing.T) {
 			evIdx := indexOfArg(result.Args, "--kv-events-config")
 			require.GreaterOrEqual(t, evIdx, 0, "expected --kv-events-config in %v", result.Args)
 			require.Less(t, evIdx+1, len(result.Args))
-			assert.JSONEq(t, `{
+			assert.JSONEq(t, fmt.Sprintf(`{
 				"publisher": "zmq",
 				"endpoint": "tcp://*:5557",
-				"replay_endpoint": "tcp://*:5558",
-				"topic": "`+tc.wantTopic+`"
-			}`, result.Args[evIdx+1])
+				"replay_endpoint": "tcp://*:%d",
+				"topic": %q
+			}`, tc.wantReplayPort, tc.wantTopic), result.Args[evIdx+1])
 
 			if len(tc.in.EncoderURLs) > 0 {
 				encIdx := indexOfArg(result.Args, "--encoder-urls")
@@ -734,11 +753,11 @@ func TestRender_SGLangKVEvents(t *testing.T) {
 				Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557,
 			})
 			assert.Contains(t, result.Ports, core.ContainerPort{
-				Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558,
+				Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: tc.wantReplayPort,
 			})
 			require.NotNil(t, result.KVEvents)
 			assert.Equal(t, "tcp://"+tc.in.KVEventsHost+":5557", result.KVEvents.Endpoint)
-			assert.Equal(t, "tcp://"+tc.in.KVEventsHost+":5558", result.KVEvents.ReplayEndpoint)
+			assert.Equal(t, fmt.Sprintf("tcp://%s:%d", tc.in.KVEventsHost, tc.wantReplayPort), result.KVEvents.ReplayEndpoint)
 			assert.Equal(t, tc.wantTopic, result.KVEvents.Topic)
 
 			assert.NotContains(t, result.Args, "--prefix-caching-hash-algo")

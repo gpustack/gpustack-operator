@@ -391,7 +391,9 @@ func renderModelDeploymentRouterObjectsWithProxy(
 			Name: role.Name, Kind: kind, Selector: selector, Endpoint: modelDeploymentRoleEndpoint(md, role),
 		}
 		if publish, topic, _ := modelDeploymentKVEventsConfig(md, role); publish {
-			events := inject.KVEventsForTopic(md.Name+"-"+role.Name+"."+md.Namespace+".svc", topic)
+			events := inject.KVEventsForTopicAndLocalDP(
+				md.Name+"-"+role.Name+"."+md.Namespace+".svc", topic, ModelDeploymentKVEventsLocalDP(md, role),
+			)
 			roleStatus.KVEvents = &workercore.ModelDeploymentRouterKVEvents{
 				Endpoint: events.Endpoint, ReplayEndpoint: events.ReplayEndpoint, Topic: events.Topic,
 			}
@@ -618,9 +620,13 @@ func renderModelDeploymentRouterObjectsWithProxy(
 	}
 	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
 		engine, _ := ModelDeploymentEngineUpstreamName(md.Spec.Engine.Name)
+		var localDP int32 = 1
+		if len(md.Spec.Roles) > 0 {
+			localDP = ModelDeploymentKVEventsLocalDP(md, &md.Spec.Roles[0])
+		}
 		routerInput.KVEvents = router.KVEvents{
 			Engine: engine, Port: inject.VLLMKVEventsPort,
-			ReplayPort: inject.VLLMKVEventsReplayPort, Topic: inject.VLLMKVEventsTopic,
+			ReplayPort: inject.KVEventsReplayPortForLocalDP(localDP), Topic: inject.VLLMKVEventsTopic,
 		}
 	}
 	rendered, err := router.Render(md.Spec.Router.Name, routerInput)

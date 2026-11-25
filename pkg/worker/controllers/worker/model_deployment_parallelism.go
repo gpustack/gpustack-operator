@@ -166,6 +166,84 @@ func ParseModelDeploymentDeclaredParallelism(
 	return reading.declared, err
 }
 
+// ModelDeploymentRoleKVEventsLocalDP returns the per-Pod count of ZMQ KV event publishers run by
+// a managed role so multi-DP workloads offset replay_endpoint past all local PUB sockets.
+// External-DP roles (1 rank per Pod) and unreadable or take-over command lines return 1.
+func ModelDeploymentRoleKVEventsLocalDP(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) int32 {
+	if md == nil || role == nil || len(role.Command) > 0 {
+		return 1
+	}
+	reading, err := scanModelDeploymentParallelism(md.Spec.Engine.Name, role.ExtraArgs, role.Env)
+	if err != nil {
+		return 1
+	}
+	clamp := func(n int) int32 {
+		if n <= 1 {
+			return 1
+		}
+		if n > math.MaxInt32 {
+			return math.MaxInt32
+		}
+		return int32(n)
+	}
+
+	switch md.Spec.Engine.Name {
+	case workercore.ModelDeploymentEngineVLLM:
+		loadBalance, _ := modelDeploymentLoadBalance(
+			md.Spec.Engine.Name, ModelDeploymentEffectiveRoleKind(role), role.Env, reading.declared,
+		)
+		if loadBalance == workercore.ModelDeploymentLoadBalanceExternal {
+			return 1
+		}
+		if reading.present[modelDeploymentSlotDataParallelLocal] {
+			return clamp(reading.declared.DataParallelLocal)
+		}
+		if slices.Contains(reading.declared.Wiring, "--nnodes") && reading.declared.NodeCount > 1 {
+			return clamp((reading.declared.DataParallel + reading.declared.NodeCount - 1) / reading.declared.NodeCount)
+		}
+		return clamp(reading.declared.DataParallel)
+	case workercore.ModelDeploymentEngineSGLang:
+		total := max(
+			reading.declared.DataParallel,
+			reading.declared.AttentionDataParallel,
+			reading.declared.DWDPSize,
+		)
+		if slices.Contains(reading.declared.Wiring, "--nnodes") && reading.declared.NodeCount > 1 {
+			return clamp((total + reading.declared.NodeCount - 1) / reading.declared.NodeCount)
+		}
+		return clamp(total)
+	default:
+		return 1
+	}
+}
+
+// ModelDeploymentKVEventsLocalDP resolves the effective local DP publisher width for KV event
+// port selection. Because llm-d-router configures a single deployment-wide replaySocketPort in
+// epp.yaml, roles behind llm-d-router share the maximum local DP width across publishing roles.
+func ModelDeploymentKVEventsLocalDP(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) int32 {
+	if md == nil || role == nil {
+		return 1
+	}
+	if md.Spec.Router != nil && md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD {
+		var maxLocalDP int32 = 1
+		for i := range md.Spec.Roles {
+			r := &md.Spec.Roles[i]
+			if !ModelDeploymentRolePublishesKVEvents(md, r) {
+				continue
+			}
+			if dp := ModelDeploymentRoleKVEventsLocalDP(md, r); dp > maxLocalDP {
+				maxLocalDP = dp
+			}
+		}
+		return maxLocalDP
+	}
+	return ModelDeploymentRoleKVEventsLocalDP(md, role)
+}
+
 // modelDeploymentParallelReading is what one argument stream yields: the numeric books the
 // transfer document reads, plus the presence record the status read needs — which degrees the
 // stream itself declared.

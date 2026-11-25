@@ -169,7 +169,7 @@ router paths:
 
 | Router path | `--enable-scale-out` status | Configuration path |
 |---|---|---|
-| `llm-d-router` + `vLLM` / `vLLM-Ascend` | Required on `>= 0.30.0` (non-*Encode*) | Publishes KV events (`kv@<model>`) on *Server* and *Prefill* |
+| `llm-d-router` + `vLLM` / `vLLM-Ascend` | Required on `>= 0.30.0` (non-*Encode*) | Publishes KV events (`kv@pod@<model>`) on *Server* and *Prefill* |
 | `vllm-router` + `vLLM` / `vLLM-Ascend` | Not established | Uses router *PD* mode and selectors; `kv_aware` (`>= 0.31.0`) enables KV events; *encode/prefill/decode (EPD)* renders [`--epd-config`](routing.md#encode-stage-routing) |
 | `sgl-router` + `SGLang` | Not applicable | Uses `EndpointSlice` selectors, SGLang native disaggregation flags, and native KV events (`kv-events`) on *Server* and *Prefill*; *EPD* uses `--encoder-urls` |
 | `sglang-gateway` + `SGLang` (deprecated) | Not applicable | Frozen at `gateway-v0.3.1`; uses `--pd-disaggregation` and SGLang native disaggregation flags |

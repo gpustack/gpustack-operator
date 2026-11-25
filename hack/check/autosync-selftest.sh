@@ -1177,6 +1177,29 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
         )
     print("PASS  validate_router.sh rejects missing base_image_builds when pack/llm-router changes")
 
+    # 2e. Negative: cross-domain extraneous base_image_builds entry on router must fail validate_router.sh.
+    cand_extra_builds = os.path.join(tmp, "cand-router-extra-builds")
+    shutil.copytree(cand_ok, cand_extra_builds)
+    prop_eb = os.path.join(cand_extra_builds, ".auto-sync/proposals/router.json")
+    pdoc_eb = read_json(prop_eb)
+    pdoc_eb["base_image_builds"] = pf_builds + [
+        {
+            "repository": "gpustack/mirrored-mooncake",
+            "target": "",
+            "recommended_tag": "0.3.15-cpu",
+            "reason": "extraneous cross-domain entry",
+            "command": 'gh workflow run "Base Image" -f repository=mirrored-mooncake -f tag=0.3.15-cpu',
+        }
+    ]
+    with open(prop_eb, "w", encoding="utf-8") as f:
+        json.dump(pdoc_eb, f, indent=2)
+    res_eb = run_validate_router(cand_extra_builds)
+    if res_eb.returncode == 0 or "unexpected build recommendation" not in res_eb.stderr:
+        raise AssertionError(
+            f"expected validate_router.sh to reject cross-domain base_image_builds; rc={res_eb.returncode}, stderr={res_eb.stderr!r}"
+        )
+    print("PASS  validate_router.sh rejects cross-domain extraneous base_image_builds")
+
     # 3. Cross-domain base_image_builds tests for kv-transfer (mirrored-mooncake, model-transfer, mirrored-modelexpress-server).
     kv_base = os.path.join(tmp, "kv-base")
     kv_cand = os.path.join(tmp, "kv-cand")
@@ -1265,6 +1288,18 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
             raise AssertionError(f"unexpected error for missing cann target: {exc}")
     else:
         raise AssertionError("expected validate_proposal_builds to reject missing cann target")
+
+    # Negative: extraneous cross-domain entry on kv-transfer fails validation.
+    kv_pdoc["base_image_builds"] = kv_builds + pf_builds
+    with open(kv_prop, "w", encoding="utf-8") as f:
+        json.dump(kv_pdoc, f, indent=2)
+    try:
+        validate_proposal_builds(kv_base, kv_cand, kv_prop, "kv-transfer")
+    except SystemExit as exc:
+        if "unexpected build recommendation" not in str(exc):
+            raise AssertionError(f"unexpected error for extraneous router build in kv-transfer: {exc}")
+    else:
+        raise AssertionError("expected validate_proposal_builds to reject cross-domain router entry in kv-transfer")
 
     # Negative: non-empty base_image_builds when no pack/* files changed must fail.
     kv_pdoc["base_image_builds"] = kv_builds

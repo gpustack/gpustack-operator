@@ -249,23 +249,6 @@ func validateModelDeploymentAscendPDVersionPair(
 		return nil
 	}
 
-	var prefill, decode *workercore.ModelDeploymentRole
-	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
-		if len(role.Command) > 0 {
-			continue
-		}
-		switch workerctrl.ModelDeploymentEffectiveRoleKind(role) {
-		case workercore.ModelDeploymentRoleKindPrefill:
-			prefill = role
-		case workercore.ModelDeploymentRoleKindDecode:
-			decode = role
-		}
-	}
-	if prefill == nil || decode == nil {
-		return nil
-	}
-
 	isAscend := func(role *workercore.ModelDeploymentRole) bool {
 		if role.AcceleratorType == "" {
 			return false
@@ -273,7 +256,21 @@ func validateModelDeploymentAscendPDVersionPair(
 		accType := seen[role.AcceleratorType]
 		return accType != nil && accType.Status.Detail.Manufacturer == nodefeature.ManufacturerAscend
 	}
-	if !isAscend(prefill) || !isAscend(decode) {
+
+	var prefills, decodes []*workercore.ModelDeploymentRole
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if len(role.Command) > 0 || !isAscend(role) {
+			continue
+		}
+		switch workerctrl.ModelDeploymentEffectiveRoleKind(role) {
+		case workercore.ModelDeploymentRoleKindPrefill:
+			prefills = append(prefills, role)
+		case workercore.ModelDeploymentRoleKindDecode:
+			decodes = append(decodes, role)
+		}
+	}
+	if len(prefills) == 0 || len(decodes) == 0 {
 		return nil
 	}
 
@@ -287,32 +284,41 @@ func validateModelDeploymentAscendPDVersionPair(
 		}
 		return atLeast, true
 	}
-
-	prefillVer := workerctrl.ModelDeploymentEffectiveEngineVersion(md, prefill)
-	decodeVer := workerctrl.ModelDeploymentEffectiveEngineVersion(md, decode)
-	prefillV2, prefillOK := isV2(prefillVer)
-	decodeV2, decodeOK := isV2(decodeVer)
-	if !prefillOK || !decodeOK || prefillV2 == decodeV2 {
-		return nil
-	}
-
 	displayVer := func(ver string) string {
 		if ver == "" {
 			return "<unset>"
 		}
 		return ver
 	}
-	return field.ErrorList{field.Invalid(
-		field.NewPath("spec", "roles"),
-		fmt.Sprintf("%s=%s, %s=%s", prefill.Name, displayVer(prefillVer), decode.Name, displayVer(decodeVer)),
-		fmt.Sprintf(
-			"Ascend prefill/decode pair cannot mix MooncakeConnectorV1 (< %s) and "+
-				"MooncakeConnectorV2 (>= %s) across roles %q (%s) and %q (%s); "+
-				"align both roles on the same connector generation",
-			inject.VLLMAscendMooncakeV2MinVersion, inject.VLLMAscendMooncakeV2MinVersion,
-			prefill.Name, displayVer(prefillVer), decode.Name, displayVer(decodeVer),
-		),
-	)}
+
+	var errs field.ErrorList
+	for _, prefill := range prefills {
+		prefillVer := workerctrl.ModelDeploymentEffectiveEngineVersion(md, prefill)
+		prefillV2, prefillOK := isV2(prefillVer)
+		if !prefillOK {
+			continue
+		}
+		for _, decode := range decodes {
+			decodeVer := workerctrl.ModelDeploymentEffectiveEngineVersion(md, decode)
+			decodeV2, decodeOK := isV2(decodeVer)
+			if !decodeOK || prefillV2 == decodeV2 {
+				continue
+			}
+			errs = append(errs, field.Invalid(
+				field.NewPath("spec", "roles"),
+				fmt.Sprintf("%s=%s, %s=%s", prefill.Name, displayVer(prefillVer), decode.Name, displayVer(decodeVer)),
+				fmt.Sprintf(
+					"Ascend prefill/decode pair cannot mix MooncakeConnectorV1 (< %s) and "+
+						"MooncakeConnectorV2 (>= %s) across roles %q (%s) and %q (%s); "+
+						"align both roles on the same connector generation",
+					inject.VLLMAscendMooncakeV2MinVersion, inject.VLLMAscendMooncakeV2MinVersion,
+					prefill.Name, displayVer(prefillVer), decode.Name, displayVer(decodeVer),
+				),
+			))
+		}
+	}
+
+	return errs
 }
 
 // modelDeploymentRolePublishesKVEvents reports whether the operator synthesizes ZMQ KV-event

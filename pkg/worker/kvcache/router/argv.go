@@ -41,11 +41,8 @@ const (
 	argvRouterChatRoutingArg   = "--chat-routing"
 	argvRouterNoTokenizerArg   = "--no-tokenizer"
 	argvRouterTokenizerPathArg = "--tokenizer-path"
-	argvRouterBucketConfigArg  = "--bucket-config"
 	argvRouterPolicyArg        = "--policy"
 	argvRouterPrefillPolicyArg = "--prefill-policy"
-	argvRouterDecodePolicyArg  = "--decode-policy"
-	argvRouterFilterArg        = "--filter"
 
 	// argvRouterBindAddress is what replaces a loopback default. Only the vLLM router has one -- it
 	// binds its API (`vllm-project/router@v0.1.15:src/main.rs:98-99`, `CliArgs::host`) and its
@@ -436,15 +433,15 @@ func (k VLLMRouterKVAware) ForRoleKind(kind string) bool {
 	}
 }
 
-// ParseVLLMRouterKVAware resolves effective kv_aware activation from vllm-router extraArgs
-// across --policy, --prefill-policy, and --decode-policy using last-wins precedence.
+// ParseVLLMRouterKVAware resolves effective kv_aware KV-event subscriber activation from
+// vllm-router extraArgs across --policy and --prefill-policy using last-wins precedence.
+// In disaggregated P/D mode, vllm-router@v0.1.17 starts PdKvState only for prefill workers and
+// never queries KV placement or /kv_event_sources on Decode, so Decode is always false.
 func ParseVLLMRouterKVAware(extraArgs []string, disaggregated bool) VLLMRouterKVAware {
 	var (
 		policy        string
 		prefillPolicy string
 		prefillSet    bool
-		decodePolicy  string
-		decodeSet     bool
 	)
 	visitArgvFlags(extraArgs, func(name, value string, hasValue bool) {
 		if !hasValue {
@@ -456,9 +453,6 @@ func ParseVLLMRouterKVAware(extraArgs []string, disaggregated bool) VLLMRouterKV
 		case argvRouterPrefillPolicyArg:
 			prefillPolicy = value
 			prefillSet = true
-		case argvRouterDecodePolicyArg:
-			decodePolicy = value
-			decodeSet = true
 		}
 	})
 
@@ -468,59 +462,32 @@ func ParseVLLMRouterKVAware(extraArgs []string, disaggregated bool) VLLMRouterKV
 	}
 
 	prefill := (prefillSet && prefillPolicy == "kv_aware") || (!prefillSet && policy == "kv_aware")
-	decode := (decodeSet && decodePolicy == "kv_aware") || (!decodeSet && policy == "kv_aware")
 	return VLLMRouterKVAware{
 		Prefill: prefill,
-		Decode:  decode,
-		Any:     prefill || decode,
+		Decode:  false,
+		Any:     prefill,
 	}
 }
 
+// sglRouterNeedsTokenizer reports whether sgl-router extraArgs require loading a tokenizer under
+// --chat-routing=reorg: either an explicit --tokenizer-path (which conflicts with --no-tokenizer)
+// or --policy=cache_aware (the only reorg policy whose needs_request_tokens() returns true).
 func sglRouterNeedsTokenizer(extraArgs []string) bool {
 	var (
-		needsTokenizer       bool
-		hasPrefixCacheFilter bool
-		policy               string
-		prefillPolicy        string
-		decodePolicy         string
+		hasTokenizerPath bool
+		policy           string
 	)
 	visitArgvFlags(extraArgs, func(name, value string, hasValue bool) {
 		switch name {
-		case argvRouterTokenizerPathArg, argvRouterBucketConfigArg:
-			needsTokenizer = true
+		case argvRouterTokenizerPathArg:
+			hasTokenizerPath = true
 		case argvRouterPolicyArg:
 			if hasValue {
 				policy = value
 			}
-		case argvRouterPrefillPolicyArg:
-			if hasValue {
-				prefillPolicy = value
-			}
-		case argvRouterDecodePolicyArg:
-			if hasValue {
-				decodePolicy = value
-			}
-		case argvRouterFilterArg:
-			if !hasValue {
-				return
-			}
-			for _, item := range strings.Split(value, ",") {
-				if strings.TrimSpace(item) == "prefix_cache" {
-					hasPrefixCacheFilter = true
-				}
-			}
 		}
 	})
-	if needsTokenizer || hasPrefixCacheFilter {
-		return true
-	}
-	for _, p := range []string{policy, prefillPolicy, decodePolicy} {
-		switch p {
-		case "cache_aware", "score_policy", "fused_score":
-			return true
-		}
-	}
-	return false
+	return hasTokenizerPath || policy == "cache_aware"
 }
 
 // visitArgvFlags iterates long CLI options before any "--" stop token, resolving both
