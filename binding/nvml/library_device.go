@@ -456,7 +456,7 @@ func (l Device) CreateGpuInstance(info *GpuInstanceProfileInfo) (GpuInstance, Re
 		return GpuInstance{}, ERROR_INVALID_ARGUMENT
 	}
 
-	if l.so.Lookup("nvmlDeviceCreateGpuInstance") != nil {
+	if l.so.Lookup("nvmlDeviceCreateGpuInstance") != nil || l.so.Lookup("nvmlGpuInstanceGetInfo") != nil {
 		return GpuInstance{}, ERROR_FUNCTION_NOT_FOUND
 	}
 	var gpuInstance nvmlGpuInstance
@@ -465,23 +465,7 @@ func (l Device) CreateGpuInstance(info *GpuInstanceProfileInfo) (GpuInstance, Re
 		return GpuInstance{}, ret
 	}
 
-	if l.so.Lookup("nvmlGpuInstanceGetInfo") != nil {
-		return GpuInstance{}, ERROR_FUNCTION_NOT_FOUND
-	}
-	var gpuInstanceInfo nvmlGpuInstanceInfo
-	ret = nvmlGpuInstanceGetInfo(gpuInstance, &gpuInstanceInfo)
-	if !ret.IsSuccess() {
-		return GpuInstance{}, ret
-	}
-
-	return GpuInstance{
-		device:               l.handle,
-		gpuInstanceId:        gpuInstanceInfo.Id,
-		gpuInstanceProfileId: gpuInstanceInfo.ProfileId,
-		gpuInstancePlacement: gpuInstanceInfo.Placement,
-		gpuInstance:          gpuInstance,
-		so:                   l.so,
-	}, ret
+	return l.newGpuInstance(gpuInstance)
 }
 
 // CreateGpuInstanceWithPlacement creates a GPU instance on the device using the specified GPU instance profile information and placement,
@@ -491,7 +475,7 @@ func (l Device) CreateGpuInstanceWithPlacement(info *GpuInstanceProfileInfo, pla
 		return GpuInstance{}, ERROR_INVALID_ARGUMENT
 	}
 
-	if l.so.Lookup("nvmlDeviceCreateGpuInstanceWithPlacement") != nil {
+	if l.so.Lookup("nvmlDeviceCreateGpuInstanceWithPlacement") != nil || l.so.Lookup("nvmlGpuInstanceGetInfo") != nil {
 		return GpuInstance{}, ERROR_FUNCTION_NOT_FOUND
 	}
 	var gpuInstance nvmlGpuInstance
@@ -500,12 +484,16 @@ func (l Device) CreateGpuInstanceWithPlacement(info *GpuInstanceProfileInfo, pla
 		return GpuInstance{}, ret
 	}
 
-	if l.so.Lookup("nvmlGpuInstanceGetInfo") != nil {
-		return GpuInstance{}, ERROR_FUNCTION_NOT_FOUND
-	}
+	return l.newGpuInstance(gpuInstance)
+}
+
+func (l Device) newGpuInstance(gpuInstance nvmlGpuInstance) (GpuInstance, Return) {
 	var gpuInstanceInfo nvmlGpuInstanceInfo
-	ret = nvmlGpuInstanceGetInfo(gpuInstance, &gpuInstanceInfo)
+	ret := nvmlGpuInstanceGetInfo(gpuInstance, &gpuInstanceInfo)
 	if !ret.IsSuccess() {
+		if l.so.Lookup("nvmlGpuInstanceDestroy") == nil {
+			_ = nvmlGpuInstanceDestroy(gpuInstance)
+		}
 		return GpuInstance{}, ret
 	}
 
@@ -728,7 +716,7 @@ func (l GpuInstance) CreateComputeInstance(info *ComputeInstanceProfileInfo) (Co
 		return ComputeInstance{}, ERROR_INVALID_ARGUMENT
 	}
 
-	if l.so.Lookup("nvmlGpuInstanceCreateComputeInstance") != nil {
+	if l.so.Lookup("nvmlGpuInstanceCreateComputeInstance") != nil || !l.hasComputeInstanceGetInfo() {
 		return ComputeInstance{}, ERROR_FUNCTION_NOT_FOUND
 	}
 	var computeInstance nvmlComputeInstance
@@ -737,22 +725,7 @@ func (l GpuInstance) CreateComputeInstance(info *ComputeInstanceProfileInfo) (Co
 		return ComputeInstance{}, ret
 	}
 
-	if l.so.Lookup("nvmlComputeInstanceGetInfo") != nil {
-		return ComputeInstance{}, ERROR_FUNCTION_NOT_FOUND
-	}
-	var computeInstanceInfo nvmlComputeInstanceInfo
-	ret = nvmlComputeInstanceGetInfo(computeInstance, &computeInstanceInfo)
-	if !ret.IsSuccess() {
-		return ComputeInstance{}, ret
-	}
-
-	return ComputeInstance{
-		GpuInstance:              l,
-		computeInstanceId:        computeInstanceInfo.Id,
-		computeInstanceProfileId: computeInstanceInfo.ProfileId,
-		computeInstancePlacement: computeInstanceInfo.Placement,
-		computeInstance:          computeInstance,
-	}, ret
+	return l.newComputeInstance(computeInstance)
 }
 
 // CreateComputeInstanceWithPlacement creates a compute instance associated with the GPU instance using the specified profile information and placement.
@@ -761,7 +734,7 @@ func (l GpuInstance) CreateComputeInstanceWithPlacement(info *ComputeInstancePro
 		return ComputeInstance{}, ERROR_INVALID_ARGUMENT
 	}
 
-	if l.so.Lookup("nvmlGpuInstanceCreateComputeInstanceWithPlacement") != nil {
+	if l.so.Lookup("nvmlGpuInstanceCreateComputeInstanceWithPlacement") != nil || !l.hasComputeInstanceGetInfo() {
 		return ComputeInstance{}, ERROR_FUNCTION_NOT_FOUND
 	}
 	var computeInstance nvmlComputeInstance
@@ -770,12 +743,31 @@ func (l GpuInstance) CreateComputeInstanceWithPlacement(info *ComputeInstancePro
 		return ComputeInstance{}, ret
 	}
 
-	if l.so.Lookup("nvmlComputeInstanceGetInfo") != nil {
-		return ComputeInstance{}, ERROR_FUNCTION_NOT_FOUND
+	return l.newComputeInstance(computeInstance)
+}
+
+func (l GpuInstance) hasComputeInstanceGetInfo() bool {
+	return l.so.Lookup("nvmlComputeInstanceGetInfo_v2") == nil || l.so.Lookup("nvmlComputeInstanceGetInfo") == nil
+}
+
+func (l GpuInstance) newComputeInstance(computeInstance nvmlComputeInstance) (ComputeInstance, Return) {
+	var (
+		computeInstanceInfo nvmlComputeInstanceInfo
+		ret                 Return
+	)
+	hasV1 := l.so.Lookup("nvmlComputeInstanceGetInfo") == nil
+	if l.so.Lookup("nvmlComputeInstanceGetInfo_v2") == nil {
+		ret = nvmlComputeInstanceGetInfo_v2(computeInstance, &computeInstanceInfo)
+		if hasV1 && (ret == ERROR_NOT_SUPPORTED || ret == ERROR_ARGUMENT_VERSION_MISMATCH || ret == ERROR_FUNCTION_NOT_FOUND) {
+			ret = nvmlComputeInstanceGetInfo(computeInstance, &computeInstanceInfo)
+		}
+	} else {
+		ret = nvmlComputeInstanceGetInfo(computeInstance, &computeInstanceInfo)
 	}
-	var computeInstanceInfo nvmlComputeInstanceInfo
-	ret = nvmlComputeInstanceGetInfo(computeInstance, &computeInstanceInfo)
 	if !ret.IsSuccess() {
+		if l.so.Lookup("nvmlComputeInstanceDestroy") == nil {
+			_ = nvmlComputeInstanceDestroy(computeInstance)
+		}
 		return ComputeInstance{}, ret
 	}
 
