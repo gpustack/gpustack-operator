@@ -1,6 +1,6 @@
 # Migrating from v0.5.x
 
-Releases starting at v0.6.x ([unified-pool refactor](https://github.com/gpustack/gpustack-operator/blob/0225c67cbfc51eb01390ef50e647b3c8d8a3ad91/specs/2026-06-29-instancetype-unified-pool-refactor.md))
+Releases starting at v0.6.x ([unified-pool refactor](https://github.com/gpustack/gpustack-operator/blob/e556ef41bf6388bbe2ea3a8eba8757d6303f1cd9/specs/2026-06-29-instancetype-unified-pool-refactor.md))
 rename the scheduling objects managed by GPUStack Operator and remove the Kueue `Cohort` layer.
 Running workload `Pod`s continue uninterrupted, while an in-place `helm upgrade` leaves v0.5.x
 scheduling objects behind as orphans. Commands below use `0.6.0` as the example target version;
