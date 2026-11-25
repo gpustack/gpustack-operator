@@ -1,7 +1,6 @@
 # Spec: KV Events Alignment, Engine Version Resolution, and Parameter Reference Overhaul
 
-Status: Built
-Blocked on: End-of-build review and PR merge via `my-ship` (lifts to `Shipped` when opening the pull request).
+Status: Shipped
 Type: Feature
 
 ## Summary
