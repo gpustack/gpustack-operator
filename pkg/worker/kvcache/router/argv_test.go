@@ -147,7 +147,7 @@ func TestRenderArgv_ListenHostOverridesAPIBindOnly(t *testing.T) {
 		},
 		{
 			name:           "sglang default bind host",
-			router:         SGLang,
+			router:         SGLangGateway,
 			roles:          []Role{serverRole()},
 			listenPort:     8000,
 			wantHostArg:    "--host=0.0.0.0",
@@ -156,7 +156,7 @@ func TestRenderArgv_ListenHostOverridesAPIBindOnly(t *testing.T) {
 		},
 		{
 			name:           "sglang loopback api with external metrics",
-			router:         SGLang,
+			router:         SGLangGateway,
 			roles:          []Role{prefillRole(), decodeRole()},
 			listenHost:     "127.0.0.1",
 			listenPort:     8001,
@@ -201,14 +201,14 @@ func TestRenderSGLang_RendersDPAwareOnlyForTheExternalDPShape(t *testing.T) {
 	}{
 		{
 			name:                      "the external dp shape at width two carries the flag",
-			router:                    SGLang,
+			router:                    SGLangGateway,
 			attentionDataParallelSize: 2,
 			roles:                     []Role{serverRole()},
 			wantDPAware:               true,
 		},
 		{
 			name:                      "a width of one has no subordinate member to register",
-			router:                    SGLang,
+			router:                    SGLangGateway,
 			attentionDataParallelSize: 1,
 			roles:                     []Role{serverRole()},
 			wantDPAware:               false,
@@ -222,7 +222,7 @@ func TestRenderSGLang_RendersDPAwareOnlyForTheExternalDPShape(t *testing.T) {
 		},
 		{
 			name:                      "the disaggregated shape names its halves by their own selectors",
-			router:                    SGLang,
+			router:                    SGLangGateway,
 			attentionDataParallelSize: 2,
 			roles:                     []Role{prefillRole(), decodeRole()},
 			wantDPAware:               false,
@@ -406,7 +406,7 @@ func TestRenderArgv_TheGatewayIsTheVLLMRouterMinusItsOwnTwoFlags(t *testing.T) {
 
 	vllm, err := Render(VLLM, in)
 	require.NoError(t, err)
-	gateway, err := Render(SGLang, in)
+	gateway, err := Render(SGLangGateway, in)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"--kv-connector=mooncake", "--vllm-pd-disaggregation"},
@@ -428,7 +428,7 @@ func TestRenderArgv_TheGatewayNamesNoModel(t *testing.T) {
 	in := vllmInput(serverRole())
 	in.ModelName = "Qwen/Qwen2.5-72B-Instruct"
 
-	gateway, err := Render(SGLang, in)
+	gateway, err := Render(SGLangGateway, in)
 	require.NoError(t, err)
 
 	for _, arg := range gateway.Arguments {
@@ -504,7 +504,7 @@ func TestRenderArgv_WithoutAnEncoderTheArgvIsTheGoldenOne(t *testing.T) {
 		},
 		{
 			name:    "sglang-gateway",
-			router:  SGLang,
+			router:  SGLangGateway,
 			command: []string{"sgl-model-gateway"},
 			args: []string{
 				"--host=0.0.0.0",
@@ -558,7 +558,7 @@ func TestRenderArgv_AnEncoderReachesNoSelector(t *testing.T) {
 		{name: "encoder middle", roles: []Role{prefillRole(), encodeRole(), decodeRole()}},
 		{name: "encoder last", roles: []Role{prefillRole(), decodeRole(), encodeRole()}},
 	}
-	for _, router := range []string{VLLM, SGLang} {
+	for _, router := range []string{VLLM, SGLangGateway} {
 		for _, order := range orders {
 			t.Run(router+"/"+order.name, func(t *testing.T) {
 				in := vllmInput(order.roles...)
@@ -614,7 +614,7 @@ func TestRenderArgv_AnEncoderWithACustomPortIsStillInNoSelector(t *testing.T) {
 	in := vllmInput(encodeRole(), prefillRole(), decodeRole())
 	in.DiscoveryPort = 9123
 
-	output, err := Render(SGLang, in)
+	output, err := Render(SGLangGateway, in)
 	require.NoError(t, err)
 
 	assert.Contains(t, output.Arguments, "--service-discovery-port=9123")
@@ -648,7 +648,7 @@ func TestRenderArgv_AnUnpairedEncoderIsRefused(t *testing.T) {
 		},
 		{
 			name:   "encoder beside a server on the gateway",
-			router: SGLang,
+			router: SGLangGateway,
 			roles:  []Role{encodeRole(), serverRole()},
 			wantErr: "render sglang-gateway: a deployment-wide selector would offer the encode role as a backend, " +
 				"so a deployment holding one needs a prefill and a decode role beside it",
@@ -791,9 +791,9 @@ func TestRenderArgv_TheGatewayTakesNoEncoderStage(t *testing.T) {
 	withEncoder := vllmInput(encodeRole(), prefillRole(), decodeRole())
 	withEncoder.EncoderURLs = []string{"http://qwen-encode.team-a.svc:8000"}
 
-	gatewayWith, err := Render(SGLang, withEncoder)
+	gatewayWith, err := Render(SGLangGateway, withEncoder)
 	require.NoError(t, err)
-	gatewayWithout, err := Render(SGLang, vllmInput(prefillRole(), decodeRole()))
+	gatewayWithout, err := Render(SGLangGateway, vllmInput(prefillRole(), decodeRole()))
 	require.NoError(t, err)
 
 	assert.Equal(t, gatewayWithout.Arguments, gatewayWith.Arguments,
@@ -811,7 +811,7 @@ func TestRenderArgv_TheGatewayTakesNoEncoderStage(t *testing.T) {
 // failing on its own, so a future edit that renders the stage unconditionally cannot hide behind
 // a frozen list nobody re-reads.
 func TestRenderArgv_NoEncoderRoleNoEncoderStage(t *testing.T) {
-	for _, name := range []string{VLLM, SGLang} {
+	for _, name := range []string{VLLM, SGLangGateway} {
 		t.Run(name, func(t *testing.T) {
 			output, err := Render(name, vllmInput(prefillRole(), decodeRole()))
 			require.NoError(t, err)
@@ -865,4 +865,339 @@ func selectorEntries(args []string) map[string][]string {
 	}
 
 	return entries
+}
+
+func TestRenderSGL_ShapesAndFlags(t *testing.T) {
+	timeout := int32(120)
+	cases := []struct {
+		name     string
+		input    func() Input
+		wantArgs []string
+		omitArgs []string
+		wantErr  string
+	}{
+		{
+			name: "undivided server with model id and timeout",
+			input: func() Input {
+				in := vllmInput(serverRole())
+				in.ModelName = "Qwen/Qwen3-8B"
+				in.RequestTimeoutSeconds = &timeout
+				return in
+			},
+			wantArgs: []string{
+				"--host=0.0.0.0",
+				"--port=8000",
+				"--model-id=Qwen/Qwen3-8B",
+				"--chat-routing=reorg",
+				"--no-tokenizer",
+				"--request-timeout-secs=120",
+				"--service-discovery",
+				"--service-discovery-namespace=team-a",
+				"--selector",
+				"app.kubernetes.io/instance=qwen",
+				"member-index=0",
+			},
+			omitArgs: []string{
+				"--prometheus-host=0.0.0.0",
+				"--prometheus-port=9090",
+				"--service-discovery-port=8000",
+				"--pd-disaggregation",
+				"--dp-aware",
+			},
+		},
+		{
+			name: "undivided server with empty model name omits model-id",
+			input: func() Input {
+				return vllmInput(serverRole())
+			},
+			wantArgs: []string{
+				"--host=0.0.0.0",
+				"--port=8000",
+				"--chat-routing=reorg",
+				"--no-tokenizer",
+				"--service-discovery",
+				"--service-discovery-namespace=team-a",
+				"--selector",
+				"app.kubernetes.io/instance=qwen",
+				"member-index=0",
+			},
+		},
+		{
+			name: "external dp undivided server sets dp-aware",
+			input: func() Input {
+				in := vllmInput(serverRole())
+				in.ModelName = "Qwen/Qwen3-8B"
+				in.AttentionDataParallelSize = 2
+				return in
+			},
+			wantArgs: []string{
+				"--dp-aware",
+				"--selector",
+			},
+		},
+		{
+			name: "disaggregated pd uses prefill and decode selectors without pd-disaggregation",
+			input: func() Input {
+				in := vllmInput(prefillRole(), decodeRole())
+				in.ModelName = "Qwen/Qwen3-8B"
+				in.ListenHost = "127.0.0.1"
+				in.ListenPort = 8001
+				return in
+			},
+			wantArgs: []string{
+				"--host=127.0.0.1",
+				"--port=8001",
+				"--model-id=Qwen/Qwen3-8B",
+				"--chat-routing=reorg",
+				"--no-tokenizer",
+				"--service-discovery",
+				"--service-discovery-namespace=team-a",
+				"--prefill-selector",
+				"app.kubernetes.io/instance=qwen",
+				"component=prefill",
+				"member-index=0",
+				"--decode-selector",
+				"app.kubernetes.io/instance=qwen",
+				"component=decode",
+				"member-index=0",
+			},
+			omitArgs: []string{
+				"--pd-disaggregation",
+				"--selector",
+				"--service-discovery-port=8000",
+				"--prometheus-port=9090",
+			},
+		},
+		{
+			name: "epd ignores encode role in selectors and ignores encoder urls",
+			input: func() Input {
+				in := vllmInput(encodeRole(), prefillRole(), decodeRole())
+				in.ModelName = "Qwen/Qwen3-VL-8B"
+				in.EncoderURLs = []string{"http://qwen-encode.team-a.svc:8000"}
+				return in
+			},
+			wantArgs: []string{
+				"--prefill-selector",
+				"--decode-selector",
+			},
+			omitArgs: []string{
+				"component=encode",
+				"--epd-config",
+				"--pd-disaggregation",
+			},
+		},
+		{
+			name: "unpaired encode role is refused",
+			input: func() Input {
+				return vllmInput(encodeRole(), serverRole())
+			},
+			wantErr: "render sgl-router: a deployment-wide selector would offer the encode role as a backend, " +
+				"so a deployment holding one needs a prefill and a decode role beside it",
+		},
+		{
+			name: "missing namespace is refused",
+			input: func() Input {
+				in := vllmInput(serverRole())
+				in.Namespace = ""
+				return in
+			},
+			wantErr: "render sgl-router: no discovery namespace",
+		},
+		{
+			name: "missing endpoint labels in undivided mode is refused",
+			input: func() Input {
+				in := vllmInput(serverRole())
+				in.EndpointLabels = nil
+				return in
+			},
+			wantErr: "render sgl-router: no endpoint labels to discover by",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := Render(SGL, tc.input())
+			if tc.wantErr != "" {
+				require.EqualError(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, []string{"sgl-router"}, out.Command)
+			assert.Empty(t, out.Document)
+			for _, arg := range tc.wantArgs {
+				assert.Contains(t, out.Arguments, arg)
+			}
+			for _, arg := range tc.omitArgs {
+				assert.NotContains(t, out.Arguments, arg)
+			}
+		})
+	}
+}
+
+func TestRenderSGL_NoTokenizerOmission(t *testing.T) {
+	cases := []struct {
+		name            string
+		extraArgs       []string
+		wantNoTokenizer bool
+	}{
+		{name: "no extra args emits no-tokenizer", extraArgs: nil, wantNoTokenizer: true},
+		{name: "default power_of_two keeps no-tokenizer", extraArgs: []string{"--policy", "power_of_two"}, wantNoTokenizer: true},
+		{name: "tokenizer-path equals omits no-tokenizer", extraArgs: []string{"--tokenizer-path=/models/tok.json"}, wantNoTokenizer: false},
+		{name: "tokenizer-path two-token omits no-tokenizer", extraArgs: []string{"--tokenizer-path", "/models/tok.json"}, wantNoTokenizer: false},
+		{name: "policy cache_aware equals omits no-tokenizer", extraArgs: []string{"--policy=cache_aware"}, wantNoTokenizer: false},
+		{name: "policy cache_aware two-token omits no-tokenizer", extraArgs: []string{"--policy", "cache_aware"}, wantNoTokenizer: false},
+		{name: "policy score_policy omits no-tokenizer", extraArgs: []string{"--policy", "score_policy"}, wantNoTokenizer: false},
+		{name: "policy fused_score omits no-tokenizer", extraArgs: []string{"--policy=fused_score"}, wantNoTokenizer: false},
+		{name: "policy cache_aware overridden back to power_of_two keeps no-tokenizer", extraArgs: []string{"--policy=cache_aware", "--policy", "power_of_two"}, wantNoTokenizer: true},
+		{name: "prefill-policy cache_aware omits no-tokenizer", extraArgs: []string{"--prefill-policy", "cache_aware"}, wantNoTokenizer: false},
+		{name: "decode-policy cache_aware overridden to power_of_two keeps no-tokenizer", extraArgs: []string{"--decode-policy=cache_aware", "--decode-policy=power_of_two"}, wantNoTokenizer: true},
+		{name: "filter prefix_cache two-token omits no-tokenizer", extraArgs: []string{"--filter", "prefix_cache"}, wantNoTokenizer: false},
+		{name: "filter comma-delimited prefix_cache omits no-tokenizer", extraArgs: []string{"--filter=overloaded,prefix_cache"}, wantNoTokenizer: false},
+		{name: "filter overloaded only keeps no-tokenizer", extraArgs: []string{"--filter=overloaded", "--max-inflight-requests=8"}, wantNoTokenizer: true},
+		{name: "bucket-config omits no-tokenizer", extraArgs: []string{"--bucket-config=/etc/buckets.json"}, wantNoTokenizer: false},
+		{name: "flags after double-dash stop token are ignored", extraArgs: []string{"--", "--policy", "cache_aware"}, wantNoTokenizer: true},
+		{name: "trailing flag without value keeps no-tokenizer", extraArgs: []string{"--policy"}, wantNoTokenizer: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := vllmInput(serverRole())
+			in.ModelName = "Qwen/Qwen3-8B"
+			in.ExtraArgs = tc.extraArgs
+			out, err := Render(SGL, in)
+			require.NoError(t, err)
+			if tc.wantNoTokenizer {
+				assert.Contains(t, out.Arguments, "--no-tokenizer")
+			} else {
+				assert.NotContains(t, out.Arguments, "--no-tokenizer")
+			}
+		})
+	}
+}
+
+func TestSGLOwnedFlags(t *testing.T) {
+	owned := SGLOwnedFlags()
+	assert.Contains(t, owned, "--host")
+	assert.Contains(t, owned, "--port")
+	assert.Contains(t, owned, "--model-id")
+	assert.Contains(t, owned, "--chat-routing")
+	assert.Contains(t, owned, "--no-tokenizer")
+	assert.Contains(t, owned, "--service-discovery")
+	assert.Contains(t, owned, "--service-discovery-namespace")
+	assert.Contains(t, owned, "--selector")
+	assert.Contains(t, owned, "--prefill-selector")
+	assert.Contains(t, owned, "--decode-selector")
+	assert.Contains(t, owned, "--dp-aware")
+	assert.NotContains(t, owned, "--pd-disaggregation")
+	assert.NotContains(t, owned, "--service-discovery-port")
+	assert.NotContains(t, owned, "--prometheus-host")
+	assert.NotContains(t, owned, "--prometheus-port")
+}
+
+func TestParseVLLMRouterKVAware(t *testing.T) {
+	cases := []struct {
+		name          string
+		extraArgs     []string
+		disaggregated bool
+		want          VLLMRouterKVAware
+	}{
+		{
+			name:          "empty undivided",
+			disaggregated: false,
+			want:          VLLMRouterKVAware{},
+		},
+		{
+			name:          "undivided policy kv_aware two-token",
+			extraArgs:     []string{"--policy", "kv_aware"},
+			disaggregated: false,
+			want:          VLLMRouterKVAware{Server: true, Any: true},
+		},
+		{
+			name:          "undivided policy kv_aware equals",
+			extraArgs:     []string{"--policy=kv_aware"},
+			disaggregated: false,
+			want:          VLLMRouterKVAware{Server: true, Any: true},
+		},
+		{
+			name:          "undivided kv_aware overridden to cache_aware",
+			extraArgs:     []string{"--policy=kv_aware", "--policy", "cache_aware"},
+			disaggregated: false,
+			want:          VLLMRouterKVAware{},
+		},
+		{
+			name:          "undivided ignores prefill-policy and decode-policy",
+			extraArgs:     []string{"--prefill-policy", "kv_aware", "--decode-policy=kv_aware"},
+			disaggregated: false,
+			want:          VLLMRouterKVAware{},
+		},
+		{
+			name:          "disaggregated policy kv_aware applies to both when role policies unset",
+			extraArgs:     []string{"--policy", "kv_aware"},
+			disaggregated: true,
+			want:          VLLMRouterKVAware{Prefill: true, Decode: true, Any: true},
+		},
+		{
+			name:          "disaggregated prefill-policy kv_aware only",
+			extraArgs:     []string{"--prefill-policy=kv_aware"},
+			disaggregated: true,
+			want:          VLLMRouterKVAware{Prefill: true, Any: true},
+		},
+		{
+			name:          "disaggregated decode-policy kv_aware only",
+			extraArgs:     []string{"--decode-policy", "kv_aware"},
+			disaggregated: true,
+			want:          VLLMRouterKVAware{Decode: true, Any: true},
+		},
+		{
+			name:          "disaggregated policy kv_aware with decode override to round_robin",
+			extraArgs:     []string{"--policy=kv_aware", "--decode-policy", "round_robin"},
+			disaggregated: true,
+			want:          VLLMRouterKVAware{Prefill: true, Any: true},
+		},
+		{
+			name:          "disaggregated policy kv_aware with both overrides off",
+			extraArgs:     []string{"--policy=kv_aware", "--prefill-policy=cache_aware", "--decode-policy=power_of_two"},
+			disaggregated: true,
+			want:          VLLMRouterKVAware{},
+		},
+		{
+			name:          "disaggregated prefill-policy override kv_aware with default policy",
+			extraArgs:     []string{"--policy=cache_aware", "--prefill-policy", "kv_aware"},
+			disaggregated: true,
+			want:          VLLMRouterKVAware{Prefill: true, Any: true},
+		},
+		{
+			name:          "repeated prefill-policy last wins",
+			extraArgs:     []string{"--prefill-policy=kv_aware", "--prefill-policy", "cache_aware"},
+			disaggregated: true,
+			want:          VLLMRouterKVAware{},
+		},
+		{
+			name:          "trailing flag without value ignored",
+			extraArgs:     []string{"--policy"},
+			disaggregated: false,
+			want:          VLLMRouterKVAware{},
+		},
+		{
+			name:          "double-dash stop token halts parsing",
+			extraArgs:     []string{"--policy=cache_aware", "--", "--policy=kv_aware"},
+			disaggregated: false,
+			want:          VLLMRouterKVAware{},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseVLLMRouterKVAware(tc.extraArgs, tc.disaggregated)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestVLLMRouterKVAware_ForRoleKind(t *testing.T) {
+	kv := VLLMRouterKVAware{Server: true, Prefill: false, Decode: true, Any: true}
+	assert.True(t, kv.ForRoleKind("server"))
+	assert.False(t, kv.ForRoleKind("prefill"))
+	assert.True(t, kv.ForRoleKind("decode"))
+	assert.False(t, kv.ForRoleKind("encode"))
 }

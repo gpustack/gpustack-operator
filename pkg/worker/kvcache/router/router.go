@@ -3,6 +3,7 @@ package router
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 
 	"sigs.k8s.io/yaml"
@@ -12,9 +13,10 @@ import (
 // here rather than imported because the refusal messages interpolate them, and a package that took
 // them from the API would make this renderer depend on the type it exists to stay independent of.
 const (
-	LLMD   = "llm-d-router"
-	VLLM   = "vllm-router"
-	SGLang = "sglang-gateway"
+	LLMD          = "llm-d-router"
+	VLLM          = "vllm-router"
+	SGL           = "sgl-router"
+	SGLangGateway = "sglang-gateway"
 )
 
 // Role is one stable class of model-server endpoints visible to a router.
@@ -143,6 +145,10 @@ type Input struct {
 	// Absent leaves the renderer's own value; an explicit zero disables splitting, which is what
 	// the upstream decider does with it.
 	DisaggregationThreshold *int32
+
+	// ExtraArgs holds user-supplied router CLI arguments inspected by argv renderers that
+	// adapt default flags such as sgl-router --no-tokenizer.
+	ExtraArgs []string
 }
 
 // roleKindDecode is the decoder's kind as this package receives it.
@@ -284,9 +290,10 @@ func Render(name string, input Input) (Output, error) {
 }
 
 var renderers = map[string]func(Input) (Output, error){
-	LLMD:   renderLLMD,
-	VLLM:   argvRenderer(VLLM),
-	SGLang: argvRenderer(SGLang),
+	LLMD:          renderLLMD,
+	VLLM:          argvRenderer(VLLM),
+	SGL:           argvRenderer(SGL),
+	SGLangGateway: argvRenderer(SGLangGateway),
 }
 
 func renderLLMD(input Input) (Output, error) {
@@ -296,6 +303,9 @@ func renderLLMD(input Input) (Output, error) {
 		kinds[role.Kind] = role.RoleLabelKey
 		selectors[role.Kind] = role.Selector
 	}
+	// Preserve raw role label keys before dropping the SGLang encoder stage so KV event
+	// publisher exclusions still exclude encode Pods if precise KV events are ever enabled.
+	publisherKinds := maps.Clone(kinds)
 
 	// SGLang's prefiller dials the encoder itself through its encoder URLs, so the router sees the
 	// encoder and the prefiller as one stage: encode plus prefill, then decode. The encoder is
@@ -407,7 +417,7 @@ func renderLLMD(input Input) (Output, error) {
 		// in the set is a subscriber dialing a socket the engine never opens.
 		publisherSelector := input.EndpointSelector
 		for _, kind := range []string{roleKindDecode, roleKindEncode} {
-			key, ok := kinds[kind]
+			key, ok := publisherKinds[kind]
 			if !ok {
 				continue
 			}

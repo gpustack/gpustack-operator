@@ -524,3 +524,29 @@ func TestRenderLLMD_SGLangAlwaysSplitDeciderTakesNoParameters(t *testing.T) {
 	}
 	assert.True(t, found)
 }
+
+func TestRenderLLMD_SGLangEPDWithKVEventsExcludesEncodeFromPublisherSelector(t *testing.T) {
+	input := epdInput()
+	input.Metrics.Engine = "sglang"
+	input.KVEvents = KVEvents{Engine: "sglang", Port: 5557, ReplayPort: 5558, Topic: "kv@"}
+
+	output, err := Render(LLMD, input)
+	require.NoError(t, err)
+	document := parseLLMDDocument(t, output.Document)
+
+	var selector string
+	for _, plugin := range document.Plugins {
+		if plugin.Type != "precise-prefix-cache-producer" {
+			continue
+		}
+		events, ok := plugin.Parameters["kvEventsConfig"].(map[string]any)
+		require.True(t, ok)
+		discovery, ok := events["podDiscoveryConfig"].(map[string]any)
+		require.True(t, ok)
+		selector, _ = discovery["podLabelSelector"].(string)
+	}
+	assert.Contains(t, selector, "modeldeployment.gpustack.ai/role-kind!=decode")
+	assert.Contains(t, selector, "modeldeployment.gpustack.ai/role-kind!=encode")
+	_, encodeProfile := document.lookupProfile("encode")
+	assert.False(t, encodeProfile)
+}
