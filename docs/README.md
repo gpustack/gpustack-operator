@@ -267,7 +267,7 @@
 | Page | Description |
 | --- | --- |
 | [Development](contribute/development.md) | Build, generate, test, and lint the repository |
-| [Local Cluster Setup](contribute/local-cluster-setup.md) | Provision a local kind cluster for tests |
+| [Local Cluster Setup](contribute/local-cluster-setup.md) | Provision a local kind cluster and CPU-only mock devices for tests |
 | [Internals](contribute/internals.md) | Review startup order, bindings, and naming limits |
 
 ## Conventions
