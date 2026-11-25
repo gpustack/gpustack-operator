@@ -30,6 +30,15 @@ type ModelDeploymentEngineApplyConfiguration struct {
 	// taken from a request that named no image still carries an empty one.
 	//
 	Image *string `json:"image,omitempty"`
+	// Version is the inference engine release version the deployment runs by default, such as
+	// "0.34.0" or "0.5.23".
+	//
+	// - When omitted on creation or when Image changes, admission derives it from standard
+	// gpustack/runner image tags. Custom or digest-only images require an explicit value.
+	// - It is editable alongside Image. A role that overrides Image may also declare its own
+	// EngineVersion; otherwise roles inherit this value.
+	//
+	Version *string `json:"version,omitempty"`
 }
 
 // ModelDeploymentEngineApplyConfiguration constructs a declarative configuration of the ModelDeploymentEngine type for use with
@@ -51,5 +60,13 @@ func (b *ModelDeploymentEngineApplyConfiguration) WithName(value string) *ModelD
 // If called multiple times, the Image field is set to the value of the last call.
 func (b *ModelDeploymentEngineApplyConfiguration) WithImage(value string) *ModelDeploymentEngineApplyConfiguration {
 	b.Image = &value
+	return b
+}
+
+// WithVersion sets the Version field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Version field is set to the value of the last call.
+func (b *ModelDeploymentEngineApplyConfiguration) WithVersion(value string) *ModelDeploymentEngineApplyConfiguration {
+	b.Version = &value
 	return b
 }

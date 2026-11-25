@@ -41,10 +41,12 @@ type ModelDeploymentRouterApplyConfiguration struct {
 	// of work rather than a constant.
 	//
 	// A VALUE IS ALSO ENGINE-MATCHED, and the match is a separate rule rather than something this
-	// enum can express: "vllm-router" and "sglang-gateway" are each one project's own router for
-	// its own engine, so each is refused in front of the other's. "llm-d-router" takes either
-	// engine, because upstream carries a handshake connector and a metrics configuration for each
-	// of them.
+	// enum can express: "vllm-router" accepts vLLM only, "sgl-router" and deprecated
+	// "sglang-gateway" accept SGLang only, and "llm-d-router" accepts both engines.
+	//
+	// "sglang-gateway" is deprecated and frozen at gateway-v0.3.1 because upstream removed
+	// sgl-model-gateway; new SGLang deployments should use "sgl-router" and existing deployments
+	// should migrate to "sgl-router".
 	//
 	Name *string `json:"name,omitempty"`
 	// Replicas is how many router Pods to run. Absent means one.

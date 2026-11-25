@@ -42,7 +42,8 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// one prefiller and one decoder would describe a pairer rather than this field.
 	//
 	// Both llm-d-router and vllm-router support vLLM prefill/decode transfer across Ascend and
-	// non-Ascend pools. sglang-gateway is only valid when engine.name is SGLang.
+	// non-Ascend pools. sgl-router and deprecated sglang-gateway are only valid when engine.name
+	// is SGLang.
 	//
 	// Absent means no router, and that stays a supported shape rather than a broken one: the roles are
 	// individually addressable through their own Services either way, so a deployment written before

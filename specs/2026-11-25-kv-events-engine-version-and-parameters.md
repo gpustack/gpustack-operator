@@ -269,7 +269,7 @@ if prefill, decode := in.Parallelism.Prefill.orOne(), in.Parallelism.Decode.orOn
 
 ### Implementation Plan
 
-- [ ] **T1 · Engine version API, runner tag parser, and version comparator**
+- [x] **T1 · Engine version API, runner tag parser, and version comparator**
       Blocked by: None
       Owns: `api/worker/v1alpha1/model_deployment.go`, `api/worker/v1alpha1/zz_generated.*`, `api/worker/v1alpha1/generated.*`, `api/worker/v1/model_deployment.go`, `api/worker/v1/zz_generated.*`, `api/worker/v1/generated.*`, `deploy/gpustack-operator/chart/crds/**`, `pkg/worker/kvcache/inject/version.go`, `pkg/worker/kvcache/inject/version_test.go`
       Gate: review
