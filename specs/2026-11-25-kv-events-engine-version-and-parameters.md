@@ -289,7 +289,7 @@ if prefill, decode := in.Parallelism.Prefill.orOne(), in.Parallelism.Decode.orOn
       Acceptance: `pack/llm-router/Dockerfile` pins frozen `SGLANG_GATEWAY_VERSION=gateway-v0.3.1`, adds `ARG SGL_ROUTER_VERSION=router-v0.1.0` and `sgl-router-builder` (`git sparse-checkout set sgl-router rust`, `cargo build --release --locked --bin sgl-router`), and applies `pack/llm-router/patches/sgl-router/0001-observer-endpoints.patch` cleanly against upstream `router-v0.1.0` exposing `GET /observer/endpoints` in the exact `parseRouterObservationView` JSON schema; `.auto-sync/` stages `sglang-gateway` and `sgl-router` in separate directories, tracks `router-v*` for `sgl-router`, refuses any candidate modifying `SGLANG_GATEWAY_VERSION` or `pack/llm-router/patches/sglang-gateway/`, and includes a shared `Base Image` build-recommendation check (`base_image_builds`) that lists affected `pack/*` images, targets, recommended tags, and `gh workflow run "Base Image"` commands whenever `pack/*/Dockerfile` (or sibling `patches/`) changes in `router` or `kv-transfer` domains.
       Verify: `bash hack/check/autosync-selftest.sh && make lint`
 
-- [ ] **T2 · Admission webhook defaulting, version & matrix validation, and port reservations**
+- [x] **T2 · Admission webhook defaulting, version & matrix validation, and port reservations**
       Blocked by: T1, T4
       Owns: `pkg/worker/webhooks/worker/model_deployment*.go`
       Gate: review

@@ -43,6 +43,7 @@ func runtimeControlMD(engine string, mutate func(*workercore.ModelDeployment)) *
 	md.Spec.Roles[0].Resources = cards(1)
 	if engine == workercore.ModelDeploymentEngineSGLang {
 		md.Spec.Engine.Image = "lmsysorg/sglang:v0.5.0"
+		md.Spec.Engine.Version = "0.5.0"
 	}
 	if mutate != nil {
 		mutate(md)

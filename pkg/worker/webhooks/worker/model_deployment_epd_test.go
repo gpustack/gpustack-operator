@@ -79,8 +79,9 @@ func epdDeployment(mutate func(*workercore.ModelDeployment)) *workercore.ModelDe
 		Spec: workercore.ModelDeploymentSpec{
 			Model: workercore.ModelDeploymentModel{Name: "Qwen/Qwen3-VL-8B-Instruct"},
 			Engine: workercore.ModelDeploymentEngine{
-				Name:  workercore.ModelDeploymentEngineVLLM,
-				Image: "vllm/vllm-openai:v0.30.0",
+				Name:    workercore.ModelDeploymentEngineVLLM,
+				Image:   "vllm/vllm-openai:v0.30.0",
+				Version: "0.30.0",
 			},
 			Router: &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD},
 			Roles: []workercore.ModelDeploymentRole{
@@ -154,6 +155,7 @@ func epdSGLangLeg(router, acceleratorType string) func(*workercore.ModelDeployme
 		md.Spec.Router.Name = router
 		md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 		md.Spec.Engine.Image = "lmsysorg/sglang:v0.5.18"
+		md.Spec.Engine.Version = "0.5.18"
 		for i := range md.Spec.Roles {
 			md.Spec.Roles[i].AcceleratorType = acceleratorType
 			// The address leg mounts no claim, because no directory carries it.
@@ -837,12 +839,15 @@ func TestModelDeploymentWebhook_SideChannelPortIsOrdinaryOnTheSharedRow(t *testi
 // ends disagree.
 func TestModelDeploymentWebhook_EncoderKeysAreOwnedOnEveryRoleThatRendersThem(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		key  string
+		name        string
+		key         string
+		val         string
+		wantRefused bool
 	}{
-		{name: "the transfer document", key: "--ec-transfer-config"},
-		{name: "the side channel bind address", key: "VLLM_EC_SIDE_CHANNEL_HOST"},
-		{name: "the side channel port", key: "VLLM_EC_SIDE_CHANNEL_PORT"},
+		{name: "the transfer document", key: "--ec-transfer-config", wantRefused: true},
+		{name: "the side channel bind address", key: "VLLM_EC_SIDE_CHANNEL_HOST", val: "127.0.0.1", wantRefused: true},
+		{name: "the side channel port is defaulted and allowed", key: "VLLM_EC_SIDE_CHANNEL_PORT", val: "5602", wantRefused: false},
+		{name: "the v2 model runner flag is defaulted and allowed", key: "VLLM_USE_V2_MODEL_RUNNER", val: "1", wantRefused: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newModelDeploymentWebhookWith(epdPlatformTypes())
@@ -850,20 +855,23 @@ func TestModelDeploymentWebhook_EncoderKeysAreOwnedOnEveryRoleThatRendersThem(t 
 				// THE CLAIM STAYS. This fixture is built for the shared-volume row, and dropping
 				// the claim would fail the shared-volume rule as well -- so the object would be
 				// invalid for a second reason and `require.Error` would be satisfied by the wrong
-				// refusal. Only the owned key is meant to be wrong here, and the assertion below
-				// says so rather than leaving it to the reader.
+				// refusal. Only the key under test is meant to be exercised here.
 				for i := range md.Spec.Roles {
 					if tc.key == "--ec-transfer-config" {
 						md.Spec.Roles[i].ExtraArgs = []string{tc.key, "{}"}
 						continue
 					}
 					md.Spec.Roles[i].Env = []workercore.ModelDeploymentEnvVar{
-						{Name: tc.key, Value: "1"},
+						{Name: tc.key, Value: tc.val},
 					}
 				}
 			})
 
 			_, err := w.ValidateCreate(context.Background(), md)
+			if !tc.wantRefused {
+				assert.NoError(t, err, "%s is defaulted rather than owned and must be allowed", tc.key)
+				return
+			}
 			require.Error(t, err, "%s is set by the operator and must not be supplied", tc.key)
 			assert.Contains(t, err.Error(), "is set by the operator")
 			assert.NotContains(t, err.Error(), "shared claim",

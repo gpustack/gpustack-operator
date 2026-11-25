@@ -51,7 +51,7 @@ func modelDeployment(engine string, roles ...workercore.ModelDeploymentRole) *wo
 		Spec: workercore.ModelDeploymentSpec{
 			Model: workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
 			Engine: workercore.ModelDeploymentEngine{
-				Name: engine, Image: "vllm/vllm-openai:v0.25.1",
+				Name: engine, Image: "vllm/vllm-openai:v0.25.1", Version: "0.25.1",
 			},
 			KVCache: &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
 			Roles:   roles,
@@ -4593,6 +4593,17 @@ func TestValidateModelDeploymentRouter_EngineMatched(t *testing.T) {
 			router:      workercore.ModelDeploymentRouterSGLang,
 			wantMessage: `router "sglang-gateway" does not front engine "vLLM"`,
 		},
+		{
+			name:   "sgl-router takes its own engine",
+			engine: workercore.ModelDeploymentEngineSGLang,
+			router: workercore.ModelDeploymentRouterSGL,
+		},
+		{
+			name:        "sgl-router does not front vllm",
+			engine:      workercore.ModelDeploymentEngineVLLM,
+			router:      workercore.ModelDeploymentRouterSGL,
+			wantMessage: `router "sgl-router" does not front engine "vLLM"`,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -4740,6 +4751,7 @@ func TestValidateModelDeploymentRouter_MetricsTableIsThePickersAlone(t *testing.
 	for _, name := range []string{
 		workercore.ModelDeploymentRouterVLLM,
 		workercore.ModelDeploymentRouterSGLang,
+		workercore.ModelDeploymentRouterSGL,
 	} {
 		t.Run("the "+name+" never reaches it", func(t *testing.T) {
 			md := modelDeployment(unknownEngine)
@@ -4788,6 +4800,11 @@ func TestValidateModelDeploymentRouter_ThresholdIsThePickersAlone(t *testing.T) 
 		},
 		{
 			name: "nor does the gateway", router: workercore.ModelDeploymentRouterSGLang,
+			engine: workercore.ModelDeploymentEngineSGLang, threshold: ptr.To(int32(8)),
+			refused: true,
+		},
+		{
+			name: "nor does sgl-router", router: workercore.ModelDeploymentRouterSGL,
 			engine: workercore.ModelDeploymentEngineSGLang, threshold: ptr.To(int32(8)),
 			refused: true,
 		},

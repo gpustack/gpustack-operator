@@ -161,6 +161,12 @@ func (r *ModelDeploymentWebhook) Default(ctx context.Context, obj runtime.Object
 		return nil
 	}
 
+	old, isUpdate, err := oldModelDeploymentFromAdmissionContext(ctx)
+	if err != nil {
+		return err
+	}
+	defaultModelDeploymentEngineVersions(old, md, isUpdate)
+
 	// Roles may each name a DIFFERENT AcceleratorType, so each is defaulted against the type it names
 	// and the reads are memoized rather than assumed to be one. That is no longer a defense against
 	// running before validation -- it is the shape: a deployment's roles are admitted as a set
@@ -877,6 +883,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	errs = append(errs, validateModelDeploymentRoleReservedListenPorts(nil, md)...)
 	errs = append(errs, validateModelDeploymentServedModelNames(nil, md)...)
 	errs = append(errs, validateModelDeploymentKVCacheDtype(md, workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx))...)
+	errs = append(errs, validateModelDeploymentEngineVersions(nil, md)...)
 
 	typeErrs, err := r.validateRoleResourcesAgainstAcceleratorTypes(ctx, nil, md)
 	if err != nil {
@@ -938,6 +945,7 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	errs = append(errs, validateModelDeploymentRoleReservedListenPorts(old, md)...)
 	errs = append(errs, validateModelDeploymentServedModelNames(old, md)...)
 	errs = append(errs, validateModelDeploymentKVCacheDtype(md, workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx))...)
+	errs = append(errs, validateModelDeploymentEngineVersions(old, md)...)
 	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
 	errs = append(errs, validateModelDeploymentRouterName(md, old)...)
 
@@ -1154,6 +1162,7 @@ func validateModelDeployment(
 	errs = append(errs, validateModelDeploymentRoleKinds(md)...)
 	errs = append(errs, validateModelDeploymentRoleTopology(md)...)
 	errs = append(errs, validateModelDeploymentRouter(md)...)
+	errs = append(errs, validateModelDeploymentVLLMRouterKVAware(md)...)
 	errs = append(errs, validateModelDeploymentExternalDPRouter(md)...)
 
 	return errs
@@ -1228,7 +1237,7 @@ var modelDeploymentRouterOwnedArgs = map[string][]string{
 	// engine's name. The lists are written out rather than derived from each other, because what
 	// makes an entry correct is a flag existing in one upstream program, and two programs that
 	// happen to agree today are not one program.
-	workercore.ModelDeploymentRouterSGLang: {
+	workercore.ModelDeploymentRouterSGLangGateway: {
 		"--host",
 		"--port",
 		"--prometheus-host",
@@ -1241,6 +1250,7 @@ var modelDeploymentRouterOwnedArgs = map[string][]string{
 		"--decode-selector",
 		"--pd-disaggregation",
 	},
+	workercore.ModelDeploymentRouterSGL: router.SGLOwnedFlags(),
 }
 
 // modelDeploymentRouterEngines is which engine each router may front.
@@ -1258,7 +1268,10 @@ var modelDeploymentRouterEngines = map[string][]string{
 	workercore.ModelDeploymentRouterVLLM: {
 		workercore.ModelDeploymentEngineVLLM,
 	},
-	workercore.ModelDeploymentRouterSGLang: {
+	workercore.ModelDeploymentRouterSGLangGateway: {
+		workercore.ModelDeploymentEngineSGLang,
+	},
+	workercore.ModelDeploymentRouterSGL: {
 		workercore.ModelDeploymentEngineSGLang,
 	},
 }
@@ -1466,17 +1479,15 @@ func modelDeploymentRouterReservedPorts(
 	switch md.Spec.Engine.Name {
 	case workercore.ModelDeploymentEngineVLLM:
 		// Both listeners below render only under a router, so an unrouted vLLM role reserves
-		// nothing: the event publisher feeds one router's data layer, and the transfer leg that
-		// carries the bootstrap server follows a routed pair.
+		// nothing: the event publisher feeds a router's prefix-cache view, and the transfer leg
+		// that carries the bootstrap server follows a routed pair.
 		if md.Spec.Router == nil {
 			break
 		}
-		// The event publisher and its replay socket feed the picker's data layer, so they exist
-		// under that router alone -- and not on a decoder, which consumes rather than publishes, nor
-		// on an encoder, which keeps no KV cache to publish events about at all.
-		if md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
-			kind != workercore.ModelDeploymentRoleKindDecode &&
-			kind != workercore.ModelDeploymentRoleKindEncode {
+		// Reserve KV-event publisher and replay ports for every managed vLLM role that publishes
+		// KV events: llm-d-router Server/Prefill (all platforms including Ascend) and vllm-router
+		// roles where kv_aware routing is active (including Decode when configured).
+		if modelDeploymentRolePublishesKVEvents(md, role) {
 			reserved = append(reserved, inject.VLLMKVEventsPort, inject.VLLMKVEventsReplayPort)
 		}
 		// The Mooncake bootstrap server runs on the prefiller alone, and UNDER EVERY ROUTER rather
@@ -1506,6 +1517,11 @@ func modelDeploymentRouterReservedPorts(
 			}
 		}
 	case workercore.ModelDeploymentEngineSGLang:
+		// Reserve KV-event publisher and replay ports for managed SGLang Server/Prefill roles
+		// fronted by sgl-router (excluding Decode, Encode, and frozen sglang-gateway).
+		if modelDeploymentRolePublishesKVEvents(md, role) {
+			reserved = append(reserved, inject.VLLMKVEventsPort, inject.VLLMKVEventsReplayPort)
+		}
 		// SGLang's bootstrap registry follows the ROLE and not any router, because naming the split
 		// is what it means to be one half on this engine. It renders on a declared pair, so the
 		// reservation reads the same rule. It also renders only where the render can synthesize a
@@ -2763,6 +2779,7 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstAcceleratorTypes(
 	}
 
 	errs = append(errs, validateModelDeploymentKVTransferBackendAgainstAcceleratorTypes(md, seen)...)
+	errs = append(errs, validateModelDeploymentAscendPDVersionPair(md, seen)...)
 	errs = append(errs, validateModelDeploymentRuntimeControlAgainstAcceleratorTypes(md, seen)...)
 
 	return append(errs, validateModelDeploymentPairCannotShareOneAccelerator(md, seen, rolesPath)...), nil

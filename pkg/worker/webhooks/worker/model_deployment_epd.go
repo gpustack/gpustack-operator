@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -343,6 +344,8 @@ func (r *ModelDeploymentWebhook) modelDeploymentEPDPlatform(
 //
 // A ROLE NAMING NEITHER SERVES ON THE DEFAULT, which is not this number, so there is nothing to
 // refuse.
+const modelDeploymentVLLMECSideChannelPortEnv = "VLLM_EC_SIDE_CHANNEL_PORT"
+
 func validateModelDeploymentEPDSideChannelPort(
 	md *workercore.ModelDeployment, row workerctrl.ModelDeploymentEPDRow,
 ) field.ErrorList {
@@ -357,12 +360,39 @@ func validateModelDeploymentEPDSideChannelPort(
 
 	role := &md.Spec.Roles[encodeIdx]
 	rolesPath := field.NewPath("spec", "roles").Index(encodeIdx)
+
+	sideChannelPort := inject.VLLMECSideChannelPort
+	envIdx := -1
+	for i := range role.Env {
+		if role.Env[i].Name == modelDeploymentVLLMECSideChannelPortEnv {
+			envIdx = i
+		}
+	}
+	if envIdx >= 0 {
+		env := &role.Env[envIdx]
+		if env.Value != "" {
+			parsed, err := strconv.ParseInt(env.Value, 10, 32)
+			if err != nil || parsed < 0 || parsed > 65535 {
+				return field.ErrorList{field.Invalid(
+					rolesPath.Child("env").Index(envIdx).Child("value"),
+					env.Value,
+					fmt.Sprintf("%s must be 0 (ephemeral) or a valid TCP port (1-65535), got %q",
+						modelDeploymentVLLMECSideChannelPortEnv, env.Value),
+				)}
+			}
+			if parsed == 0 {
+				return nil
+			}
+			sideChannelPort = int32(parsed)
+		}
+	}
+
 	refusal := func(path *field.Path, value any) field.ErrorList {
 		return field.ErrorList{field.Invalid(path, value, fmt.Sprintf(
 			"role %q serves HTTP on port %d, which is the port %s binds its side channel on: the "+
 				"engine would serve on the socket every consumer dials for embeddings, and one of "+
 				"the two fails to bind",
-			role.Name, inject.VLLMECSideChannelPort, row.Connector,
+			role.Name, sideChannelPort, row.Connector,
 		))}
 	}
 
@@ -370,13 +400,13 @@ func validateModelDeploymentEPDSideChannelPort(
 	// declares a port, the flag is held to it rather than consulted.
 	var errs field.ErrorList
 	for _, port := range role.Ports {
-		if port.Port == inject.VLLMECSideChannelPort {
+		if port.Port == sideChannelPort {
 			errs = append(errs, refusal(rolesPath.Child("ports"), port.Port)...)
 		}
 	}
 
 	if listen, ok := workerctrl.ModelDeploymentRoleListenPort(md.Spec.Engine.Name, role); ok &&
-		listen == inject.VLLMECSideChannelPort {
+		listen == sideChannelPort {
 		errs = append(errs, refusal(rolesPath.Child("extraArgs"),
 			fmt.Sprintf("--port=%d", listen))...)
 	}
