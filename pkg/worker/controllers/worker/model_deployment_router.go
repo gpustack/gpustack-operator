@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 
@@ -591,20 +592,50 @@ func renderModelDeploymentRouterObjectsWithProxy(
 	// first external role the declaration carries decides the width: a deployment declaring more
 	// than one such role is outside the validated shapes, and the later roles are not read.
 	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang {
-		for i := range md.Spec.Roles {
-			if !modelDeploymentRoleExternalDP(md, &md.Spec.Roles[i]) {
-				continue
-			}
-			reading, err := scanModelDeploymentParallelism(
-				md.Spec.Engine.Name, md.Spec.Roles[i].ExtraArgs, md.Spec.Roles[i].Env,
-			)
-			if err != nil {
-				return ModelDeploymentRouterObjects{}, fmt.Errorf(
-					"read the external-dp width the router renders: %w", err,
+		if md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL &&
+			ModelDeploymentDeclaresBothHalves(md) {
+			for i := range md.Spec.Roles {
+				role := &md.Spec.Roles[i]
+				if len(role.Command) > 0 {
+					continue
+				}
+				kind := ModelDeploymentEffectiveRoleKind(role)
+				if kind != workercore.ModelDeploymentRoleKindPrefill &&
+					kind != workercore.ModelDeploymentRoleKindDecode {
+					continue
+				}
+				reading, err := scanModelDeploymentParallelism(
+					md.Spec.Engine.Name, role.ExtraArgs, role.Env,
 				)
+				if err != nil {
+					return ModelDeploymentRouterObjects{}, fmt.Errorf(
+						"read the pd dp width the router renders: %w", err,
+					)
+				}
+				dpWidth := max(reading.declared.AttentionDataParallel, reading.declared.DataParallel)
+				if dpWidth >= 2 {
+					clamped := int32(min(dpWidth, math.MaxInt32))
+					if clamped > routerInput.AttentionDataParallelSize {
+						routerInput.AttentionDataParallelSize = clamped
+					}
+				}
 			}
-			routerInput.AttentionDataParallelSize = int32(reading.declared.AttentionDataParallel)
-			break
+		} else {
+			for i := range md.Spec.Roles {
+				if !modelDeploymentRoleExternalDP(md, &md.Spec.Roles[i]) {
+					continue
+				}
+				reading, err := scanModelDeploymentParallelism(
+					md.Spec.Engine.Name, md.Spec.Roles[i].ExtraArgs, md.Spec.Roles[i].Env,
+				)
+				if err != nil {
+					return ModelDeploymentRouterObjects{}, fmt.Errorf(
+						"read the external-dp width the router renders: %w", err,
+					)
+				}
+				routerInput.AttentionDataParallelSize = int32(reading.declared.AttentionDataParallel)
+				break
+			}
 		}
 	}
 	if stageFiltered {
@@ -618,7 +649,8 @@ func renderModelDeploymentRouterObjectsWithProxy(
 		routerInput.CandidateLabelKey = modelDeploymentRouterCandidateLabel
 		routerInput.CandidateLabelValue = modelDeploymentEndpointEligibleValue
 	}
-	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
+		!modelDeploymentLLMDRouterDisablesKVEvents(md) {
 		engine, _ := ModelDeploymentEngineUpstreamName(md.Spec.Engine.Name)
 		var localDP int32 = 1
 		if len(md.Spec.Roles) > 0 {

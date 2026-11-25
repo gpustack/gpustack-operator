@@ -969,6 +969,24 @@ func TestRenderSGL_ShapesAndFlags(t *testing.T) {
 			},
 		},
 		{
+			name: "disaggregated pd with attention dp sets dp-aware",
+			input: func() Input {
+				in := vllmInput(prefillRole(), decodeRole())
+				in.ModelName = "Qwen/Qwen3-8B"
+				in.AttentionDataParallelSize = 2
+				return in
+			},
+			wantArgs: []string{
+				"--dp-aware",
+				"--prefill-selector",
+				"--decode-selector",
+			},
+			omitArgs: []string{
+				"--pd-disaggregation",
+				"--selector",
+			},
+		},
+		{
 			name: "epd ignores encode role in selectors and ignores encoder urls",
 			input: func() Input {
 				in := vllmInput(encodeRole(), prefillRole(), decodeRole())
@@ -1046,6 +1064,9 @@ func TestRenderSGL_NoTokenizerOmission(t *testing.T) {
 		{name: "reorg session_aware equals keeps no-tokenizer", extraArgs: []string{"--policy=session_aware"}, wantNoTokenizer: true},
 		{name: "tokenizer-path equals omits no-tokenizer", extraArgs: []string{"--tokenizer-path=/models/tok.json"}, wantNoTokenizer: false},
 		{name: "tokenizer-path two-token omits no-tokenizer", extraArgs: []string{"--tokenizer-path", "/models/tok.json"}, wantNoTokenizer: false},
+		{name: "bucket-config equals omits no-tokenizer", extraArgs: []string{"--bucket-config=/etc/router/buckets.json"}, wantNoTokenizer: false},
+		{name: "bucket-config two-token omits no-tokenizer", extraArgs: []string{"--bucket-config", "/etc/router/buckets.json"}, wantNoTokenizer: false},
+		{name: "bucket-config after double-dash stop token is ignored", extraArgs: []string{"--", "--bucket-config", "/etc/router/buckets.json"}, wantNoTokenizer: true},
 		{name: "policy cache_aware equals omits no-tokenizer", extraArgs: []string{"--policy=cache_aware"}, wantNoTokenizer: false},
 		{name: "policy cache_aware two-token omits no-tokenizer", extraArgs: []string{"--policy", "cache_aware"}, wantNoTokenizer: false},
 		{name: "policy cache_aware overridden back to power_of_two keeps no-tokenizer", extraArgs: []string{"--policy=cache_aware", "--policy", "power_of_two"}, wantNoTokenizer: true},

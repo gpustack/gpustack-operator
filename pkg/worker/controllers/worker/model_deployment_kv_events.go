@@ -63,6 +63,12 @@ func observeModelDeploymentKVEvents(
 				"SGLang behind llm-d-router uses approximate prefix tracking rather than cache events")
 			return
 		}
+		if modelDeploymentLLMDRouterDisablesKVEvents(md) {
+			ModelDeploymentConditionKVEventsPublishing.True(holder,
+				modelDeploymentReasonKVEventsNotApplicable,
+				"multi-Pod vLLM data-parallel roles behind llm-d-router use approximate prefix tracking rather than cache events")
+			return
+		}
 	case workercore.ModelDeploymentRouterSGL:
 	case workercore.ModelDeploymentRouterVLLM:
 		kvAware = router.ParseVLLMRouterKVAware(md.Spec.Router.ExtraArgs, ModelDeploymentDeclaresBothHalves(md))

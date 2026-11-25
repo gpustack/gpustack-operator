@@ -114,12 +114,13 @@ const (
 	// with the current controller without replacing running Pods.
 	modelDeploymentMinSupportedRenderVersion = 1
 
-	// modelDeploymentDefaultPort is the port a replica serves on when the role names
+	// ModelDeploymentDefaultPort is the port a replica serves on when the role names
 	// none, and it is RENDERED INTO THE ENGINE'S OWN LISTEN ARGUMENT rather than left to the engine
 	// to pick, because the supported engines do not agree on a default. vLLM opens 8000 on every
 	// interface; SGLang opens 30000 on the loopback address alone, which neither a Service endpoint
 	// nor a kubelet probe can reach.
-	modelDeploymentDefaultPort int32 = 8000
+	ModelDeploymentDefaultPort int32 = 8000
+	modelDeploymentDefaultPort       = ModelDeploymentDefaultPort
 	// modelDeploymentDefaultPortName names that port on the container and on the Service fronting it.
 	modelDeploymentDefaultPortName = "http"
 	// A managed decoder's routing proxy owns the serving port, while vLLM listens behind it here.

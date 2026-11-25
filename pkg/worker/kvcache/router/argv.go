@@ -41,6 +41,7 @@ const (
 	argvRouterChatRoutingArg   = "--chat-routing"
 	argvRouterNoTokenizerArg   = "--no-tokenizer"
 	argvRouterTokenizerPathArg = "--tokenizer-path"
+	argvRouterBucketConfigArg  = "--bucket-config"
 	argvRouterPolicyArg        = "--policy"
 	argvRouterPrefillPolicyArg = "--prefill-policy"
 
@@ -470,24 +471,28 @@ func ParseVLLMRouterKVAware(extraArgs []string, disaggregated bool) VLLMRouterKV
 }
 
 // sglRouterNeedsTokenizer reports whether sgl-router extraArgs require loading a tokenizer under
-// --chat-routing=reorg: either an explicit --tokenizer-path (which conflicts with --no-tokenizer)
-// or --policy=cache_aware (the only reorg policy whose needs_request_tokens() returns true).
+// --chat-routing=reorg: an explicit --tokenizer-path (which conflicts with --no-tokenizer),
+// --bucket-config (whose buckets may define token length limits or group cache_aware policies),
+// or --policy=cache_aware (the only top-level reorg policy whose needs_request_tokens() returns true).
 func sglRouterNeedsTokenizer(extraArgs []string) bool {
 	var (
 		hasTokenizerPath bool
+		hasBucketConfig  bool
 		policy           string
 	)
 	visitArgvFlags(extraArgs, func(name, value string, hasValue bool) {
 		switch name {
 		case argvRouterTokenizerPathArg:
 			hasTokenizerPath = true
+		case argvRouterBucketConfigArg:
+			hasBucketConfig = true
 		case argvRouterPolicyArg:
 			if hasValue {
 				policy = value
 			}
 		}
 	})
-	return hasTokenizerPath || policy == "cache_aware"
+	return hasTokenizerPath || hasBucketConfig || policy == "cache_aware"
 }
 
 // visitArgvFlags iterates long CLI options before any "--" stop token, resolving both

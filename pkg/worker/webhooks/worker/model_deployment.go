@@ -1158,6 +1158,7 @@ func validateModelDeployment(
 	errs = append(errs, validateModelDeploymentRoleKinds(md)...)
 	errs = append(errs, validateModelDeploymentRoleTopology(md)...)
 	errs = append(errs, validateModelDeploymentRouter(md)...)
+	errs = append(errs, validateModelDeploymentLLMDRouterKVEventsModelName(md)...)
 	errs = append(errs, validateModelDeploymentVLLMRouterKVAware(md)...)
 	errs = append(errs, validateModelDeploymentExternalDPRouter(md)...)
 

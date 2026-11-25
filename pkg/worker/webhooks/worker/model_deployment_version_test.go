@@ -1103,7 +1103,7 @@ func TestModelDeploymentWebhook_KVEventsPortReservations(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("single-Pod multi-DP reserves 5557..5560 while External DP keeps 5557..5558", func(t *testing.T) {
+	t.Run("multi-DP reserves full global rank span [5557..5557+2*total-1] across vLLM and SGLang while llm-d-router skips multi-Pod vLLM DP", func(t *testing.T) {
 		t.Parallel()
 		w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingAcceleratorType("h20-8x", 8)})
 
@@ -1119,7 +1119,43 @@ func TestModelDeploymentWebhook_KVEventsPortReservations(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "declares port 5560, which the operator reserves")
 
-		// SGLang single-Pod --dp-size 2 reserves 5557..5560.
+		// vLLM External DP (--data-parallel-size 4 --data-parallel-rank $(GPUSTACK_MEMBER_INDEX), replicaSize: 4)
+		// and Hybrid DP (--data-parallel-size 4 --data-parallel-size-local 2 --data-parallel-hybrid-lb):
+		// reserve 5557..5564 under vllm-router kv_aware, and reserve nothing under llm-d-router (NotApplicable).
+		for _, shape := range []struct {
+			name        string
+			replicaSize int32
+			extraArgs   []string
+		}{
+			{
+				name:        "External DP",
+				replicaSize: 4,
+				extraArgs:   []string{"--data-parallel-size", "4", "--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)"},
+			},
+			{
+				name:        "Hybrid DP",
+				replicaSize: 2,
+				extraArgs:   []string{"--data-parallel-size", "4", "--data-parallel-size-local", "2", "--data-parallel-hybrid-lb"},
+			},
+		} {
+			vllmKVAware := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+			vllmKVAware.Spec.Engine.Version = "0.32.0"
+			vllmKVAware.Spec.Router = &workercore.ModelDeploymentRouter{
+				Name:      workercore.ModelDeploymentRouterVLLM,
+				ExtraArgs: []string{"--policy=kv_aware"},
+			}
+			vllmKVAware.Spec.Roles[0].ReplicaSize = shape.replicaSize
+			vllmKVAware.Spec.Roles[0].Resources = cards(2)
+			vllmKVAware.Spec.Roles[0].ExtraArgs = shape.extraArgs
+			assert.Equal(t, []int32{5557, 5558, 5559, 5560, 5561, 5562, 5563, 5564},
+				modelDeploymentRouterReservedPorts(vllmKVAware, &vllmKVAware.Spec.Roles[0]), shape.name)
+
+			vllmLLMD := vllmKVAware.DeepCopy()
+			vllmLLMD.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			assert.Empty(t, modelDeploymentRouterReservedPorts(vllmLLMD, &vllmLLMD.Spec.Roles[0]), shape.name)
+		}
+
+		// SGLang single-Pod --dp-size 2 and External DP --attn-dp-size 2 --nnodes 2 both reserve 5557..5560.
 		sglDP2 := modelDeployment(workercore.ModelDeploymentEngineSGLang)
 		sglDP2.Spec.Engine.Image = "gpustack/runner:cuda13.0-sglang0.5.23"
 		sglDP2.Spec.Engine.Version = "0.5.23"
@@ -1128,13 +1164,20 @@ func TestModelDeploymentWebhook_KVEventsPortReservations(t *testing.T) {
 		sglDP2.Spec.Roles[0].ExtraArgs = []string{"--dp-size", "2"}
 		assert.Equal(t, []int32{5557, 5558, 5559, 5560}, modelDeploymentRouterReservedPorts(sglDP2, &sglDP2.Spec.Roles[0]))
 
-		// SGLang External DP (--attn-dp-size 2 --nnodes 2) runs 1 rank per Pod and reserves only 5557..5558.
 		sglExtDP := sglDP2.DeepCopy()
 		sglExtDP.Spec.Roles[0].ReplicaSize = 2
 		sglExtDP.Spec.Roles[0].Resources = cards(1)
 		sglExtDP.Spec.Roles[0].ExtraArgs = []string{"--attn-dp-size", "2", "--nnodes", "2"}
 		sglExtDP.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{{Name: "SGLANG_RUST_SERVER", Value: "1"}}
-		assert.Equal(t, []int32{5557, 5558}, modelDeploymentRouterReservedPorts(sglExtDP, &sglExtDP.Spec.Roles[0]))
+		assert.Equal(t, []int32{5557, 5558, 5559, 5560}, modelDeploymentRouterReservedPorts(sglExtDP, &sglExtDP.Spec.Roles[0]))
+
+		// SGLang --dp-size 4 --nnodes 2 --pp-size 2 reserves 5557..5564 (never divides 4 by nnodes=2).
+		sglPP := sglDP2.DeepCopy()
+		sglPP.Spec.Roles[0].ReplicaSize = 2
+		sglPP.Spec.Roles[0].Resources = cards(4)
+		sglPP.Spec.Roles[0].ExtraArgs = []string{"--dp-size", "4", "--nnodes", "2", "--pp-size", "2"}
+		assert.Equal(t, []int32{5557, 5558, 5559, 5560, 5561, 5562, 5563, 5564},
+			modelDeploymentRouterReservedPorts(sglPP, &sglPP.Spec.Roles[0]))
 	})
 
 	t.Run("DeletionTimestamp skips new vllm-router and sgl-router KV event reservations", func(t *testing.T) {
@@ -1232,6 +1275,12 @@ func TestModelDeploymentWebhook_EPDSideChannelPortOverrides(t *testing.T) {
 			wantMsg:   "must be 0 (ephemeral) or a valid TCP port (1-65535)",
 		},
 		{
+			name:      "explicit 8000 refuses default HTTP port 8000 when ports and --port are omitted",
+			env:       []workercore.ModelDeploymentEnvVar{{Name: "VLLM_EC_SIDE_CHANNEL_PORT", Value: "8000"}},
+			wantField: "spec.roles[0].env[0].value",
+			wantMsg:   "serves HTTP on port 8000",
+		},
+		{
 			name: "last env entry wins when duplicated",
 			env: []workercore.ModelDeploymentEnvVar{
 				{Name: "VLLM_EC_SIDE_CHANNEL_PORT", Value: fmt.Sprintf("%d", inject.VLLMECSideChannelPort)},
@@ -1265,6 +1314,124 @@ func TestModelDeploymentWebhook_EPDSideChannelPortOverrides(t *testing.T) {
 				}
 				assert.Contains(t, fields, tc.wantField)
 			}
+		})
+	}
+
+	t.Run("full admission rejects Encode omitting ports and --port with VLLM_EC_SIDE_CHANNEL_PORT=8000", func(t *testing.T) {
+		t.Parallel()
+		w := newModelDeploymentWebhookWith(epdPlatformTypes())
+		md := epdNetworkRowDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Engine.Version = "0.34.0"
+			enc := epdRoleByName(md, "encode")
+			enc.Ports = nil
+			enc.ExtraArgs = nil
+			enc.Env = []workercore.ModelDeploymentEnvVar{{Name: "VLLM_EC_SIDE_CHANNEL_PORT", Value: "8000"}}
+		})
+		_, err := w.ValidateCreate(context.Background(), md)
+		require.Error(t, err)
+		assertInvalidField(t, err, "spec.roles[0].env[0].value")
+		assert.Contains(t, err.Error(), "serves HTTP on port 8000")
+	})
+}
+
+func TestModelDeploymentWebhook_LLMDRouterModelNameAtSign(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		md        func() *workercore.ModelDeployment
+		wantField string
+		wantMsg   string
+	}{
+		{
+			name: "llm-d-router + managed vLLM Server rejects @ in spec.model.name",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+				md.Spec.Model.Name = "org/qwen3@fp8"
+				md.Spec.Engine.Version = "0.32.0"
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.Roles[0].Resources = cards(1)
+				return md
+			},
+			wantField: "spec.model.name",
+			wantMsg:   `must not contain "@" when llm-d-router KV cache events are enabled`,
+		},
+		{
+			name: "llm-d-router + SGLang allows @ in spec.model.name (KV events NotApplicable)",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineSGLang)
+				md.Spec.Model.Name = "org/qwen3@fp8"
+				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-sglang0.5.23"
+				md.Spec.Engine.Version = "0.5.23"
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.Roles[0].Resources = cards(1)
+				return md
+			},
+		},
+		{
+			name: "llm-d-router + unmanaged vLLM role allows @ in spec.model.name",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+				md.Spec.Model.Name = "org/qwen3@fp8"
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.Roles[0].Command = []string{"vllm", "serve", "org/qwen3@fp8"}
+				md.Spec.Roles[0].Resources = cards(1)
+				return md
+			},
+		},
+		{
+			name: "llm-d-router + multi-Pod vLLM External DP allows @ in spec.model.name (KV events disabled)",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+				md.Spec.Model.Name = "org/qwen3@fp8"
+				md.Spec.Engine.Version = "0.32.0"
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.Roles[0].ReplicaSize = 2
+				md.Spec.Roles[0].Resources = cards(1)
+				md.Spec.Roles[0].ExtraArgs = []string{"--data-parallel-size", "2", "--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)"}
+				return md
+			},
+		},
+		{
+			name: "vllm-router kv_aware allows @ in spec.model.name",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+				md.Spec.Model.Name = "org/qwen3@fp8"
+				md.Spec.Engine.Version = "0.32.0"
+				md.Spec.Router = &workercore.ModelDeploymentRouter{
+					Name:      workercore.ModelDeploymentRouterVLLM,
+					ExtraArgs: []string{"--policy=kv_aware"},
+				}
+				md.Spec.Roles[0].Resources = cards(1)
+				return md
+			},
+		},
+		{
+			name: "DeletionTimestamp short-circuits @ check",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+				now := meta.Now()
+				md.DeletionTimestamp = &now
+				md.Spec.Model.Name = "org/qwen3@fp8"
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.Roles[0].Resources = cards(1)
+				return md
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingAcceleratorType("h20-8x", 8)})
+			_, err := w.ValidateCreate(context.Background(), tc.md())
+			if tc.wantMsg == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantMsg)
+			assertInvalidField(t, err, tc.wantField)
 		})
 	}
 }

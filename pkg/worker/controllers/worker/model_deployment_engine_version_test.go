@@ -503,6 +503,130 @@ func TestModelDeploymentMultiDP_KVEventsReplayPort(t *testing.T) {
 			assert.Contains(t, pod.Spec.Containers[0].Ports, core.ContainerPort{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5559})
 		}
 	})
+
+	t.Run("SGLang --dp-size 4 --nnodes 2 --pp-size 2 keeps full global DP span (replay 5561) without dividing by nnodes", func(t *testing.T) {
+		qty4 := resource.MustParse("4")
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Engine = workercore.ModelDeploymentEngine{
+				Name:    workercore.ModelDeploymentEngineSGLang,
+				Image:   "gpustack/runner:cuda13.0-sglang0.5.23",
+				Version: "0.5.23",
+			}
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGL}
+			md.Spec.Roles = []workercore.ModelDeploymentRole{{
+				Name:            "server",
+				Kind:            workercore.ModelDeploymentRoleKindServer,
+				AcceleratorType: at.Name,
+				Replicas:        1,
+				ReplicaSize:     2,
+				ExtraArgs:       []string{"--dp-size", "4", "--nnodes", "2", "--pp-size", "2"},
+				Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty4)},
+			}}
+		})
+		assert.Equal(t, int32(4), ModelDeploymentKVEventsLocalDP(md, &md.Spec.Roles[0]))
+
+		cli := newModelDeploymentClient(md, at)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+		pods, err := r.renderModelDeploymentRolePods(context.Background(), md, nil, nil, nil, true)
+		require.NoError(t, err)
+		pod := pods["server"][0][0]
+		cmd := strings.Join(pod.Spec.Containers[0].Command, " ")
+		assert.Contains(t, cmd, `"endpoint":"tcp://*:5557"`)
+		assert.Contains(t, cmd, `"replay_endpoint":"tcp://*:5561"`)
+		assert.Contains(t, pod.Spec.Containers[0].Ports, core.ContainerPort{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5561})
+
+		routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+		require.NoError(t, err)
+		require.NotNil(t, routerObjs.Contract.Roles[0].KVEvents)
+		assert.Equal(t, "tcp://qwen-server.team-a.svc:5561", routerObjs.Contract.Roles[0].KVEvents.ReplayEndpoint)
+	})
+
+	t.Run("vLLM External DP and Hybrid DP offset replay to 5561 under vllm-router kv_aware and report NotApplicable under llm-d-router", func(t *testing.T) {
+		shapes := []struct {
+			name        string
+			replicaSize int32
+			extraArgs   []string
+		}{
+			{
+				name:        "External DP",
+				replicaSize: 4,
+				extraArgs:   []string{"--data-parallel-size", "4", "--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)"},
+			},
+			{
+				name:        "Hybrid DP",
+				replicaSize: 2,
+				extraArgs:   []string{"--data-parallel-size", "4", "--data-parallel-size-local", "2", "--data-parallel-hybrid-lb"},
+			},
+		}
+		for _, shape := range shapes {
+			t.Run(shape.name, func(t *testing.T) {
+				// 1. vllm-router kv_aware: publishes KV events with replay_endpoint tcp://*:5561.
+				mdKVAware := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.KVCache = nil
+					md.Spec.Engine.Version = "0.32.0"
+					md.Spec.Router = &workercore.ModelDeploymentRouter{
+						Name:      workercore.ModelDeploymentRouterVLLM,
+						ExtraArgs: []string{"--policy=kv_aware"},
+					}
+					md.Spec.Roles = []workercore.ModelDeploymentRole{{
+						Name:            "server",
+						Kind:            workercore.ModelDeploymentRoleKindServer,
+						AcceleratorType: at.Name,
+						Replicas:        1,
+						ReplicaSize:     shape.replicaSize,
+						ExtraArgs:       shape.extraArgs,
+						Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty2)},
+					}}
+				})
+				assert.True(t, ModelDeploymentRolePublishesKVEvents(mdKVAware, &mdKVAware.Spec.Roles[0]))
+				assert.Equal(t, int32(4), ModelDeploymentKVEventsLocalDP(mdKVAware, &mdKVAware.Spec.Roles[0]))
+
+				cliKV := newModelDeploymentClient(mdKVAware, at)
+				rKV := &ModelDeploymentReconciler{Client: cliKV, APIReader: cliKV}
+				podsKV, err := rKV.renderModelDeploymentRolePods(context.Background(), mdKVAware, nil, nil, nil, false)
+				require.NoError(t, err)
+				podKV := podsKV["server"][0][0]
+				cmdKV := strings.Join(podKV.Spec.Containers[0].Command, " ")
+				assert.Contains(t, cmdKV, `"endpoint":"tcp://*:5557"`)
+				assert.Contains(t, cmdKV, `"replay_endpoint":"tcp://*:5561"`)
+				assert.Contains(t, podKV.Spec.Containers[0].Ports, core.ContainerPort{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5561})
+
+				holderKV := new(workercore.ModelDeployment)
+				observeModelDeploymentKVEvents(mdKVAware, holderKV, nil)
+				assert.Equal(t, "True", ModelDeploymentConditionKVEventsPublishing.GetStatus(holderKV))
+				assert.Equal(t, modelDeploymentReasonKVEventsPublishing, ModelDeploymentConditionKVEventsPublishing.GetReason(holderKV))
+
+				// 2. llm-d-router: disables broken single-rank ZMQ subscriptions (NotApplicable).
+				mdLLMD := mdKVAware.DeepCopy()
+				mdLLMD.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				assert.False(t, ModelDeploymentRolePublishesKVEvents(mdLLMD, &mdLLMD.Spec.Roles[0]))
+
+				cliLLMD := newModelDeploymentClient(mdLLMD, at)
+				rLLMD := &ModelDeploymentReconciler{Client: cliLLMD, APIReader: cliLLMD}
+				podsLLMD, err := rLLMD.renderModelDeploymentRolePods(context.Background(), mdLLMD, nil, nil, nil, false)
+				require.NoError(t, err)
+				podLLMD := podsLLMD["server"][0][0]
+				cmdLLMD := strings.Join(podLLMD.Spec.Containers[0].Command, " ")
+				assert.NotContains(t, cmdLLMD, "--kv-events-config")
+				for _, p := range podLLMD.Spec.Containers[0].Ports {
+					assert.NotEqual(t, int32(5557), p.ContainerPort)
+					assert.NotEqual(t, int32(5561), p.ContainerPort)
+				}
+
+				routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), mdLLMD, nil, false)
+				require.NoError(t, err)
+				assert.Contains(t, routerObjs.ConfigMap.Data[modelDeploymentRouterConfigKey], "approx-prefix-cache-producer")
+				assert.NotContains(t, routerObjs.ConfigMap.Data[modelDeploymentRouterConfigKey], "precise-prefix-cache-producer")
+				assert.Nil(t, routerObjs.Contract.Roles[0].KVEvents)
+
+				holderLLMD := new(workercore.ModelDeployment)
+				observeModelDeploymentKVEvents(mdLLMD, holderLLMD, nil)
+				assert.Equal(t, "True", ModelDeploymentConditionKVEventsPublishing.GetStatus(holderLLMD))
+				assert.Equal(t, modelDeploymentReasonKVEventsNotApplicable, ModelDeploymentConditionKVEventsPublishing.GetReason(holderLLMD))
+			})
+		}
+	})
 }
 
 func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
@@ -678,6 +802,14 @@ func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
 		assert.Contains(t, args, modelDeploymentLabelKeyRoleKind+"=prefill")
 		assert.Contains(t, args, modelDeploymentLabelKeyRoleKind+"=decode")
 		assert.NotContains(t, args, modelDeploymentLabelKeyRoleKind+"=encode")
+		assert.NotContains(t, args, "--dp-aware")
+
+		// When a PD role declares attention DP (--attn-dp-size >= 2 or --dp-size >= 2), sgl-router emits --dp-aware.
+		mdPDDP := md.DeepCopy()
+		mdPDDP.Spec.Roles[2].ExtraArgs = []string{"--tp-size", "2", "--attn-dp-size", "2"}
+		routerObjsDP, err := renderModelDeploymentRouterObjects(context.Background(), mdPDDP, nil, false)
+		require.NoError(t, err)
+		assert.Contains(t, routerContainerArgs(routerObjsDP.Deployment.Spec.Template.Spec.Containers), "--dp-aware")
 	})
 
 	t.Run("role Service retains endpoint-eligible=true and role-kind across quiet reconciles", func(t *testing.T) {

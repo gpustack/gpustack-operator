@@ -2,6 +2,7 @@ package worker
 
 import (
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation/field"
 
@@ -331,4 +332,35 @@ func modelDeploymentRolePublishesKVEvents(
 	}
 
 	return workerctrl.ModelDeploymentRolePublishesKVEvents(md, role)
+}
+
+// validateModelDeploymentLLMDRouterKVEventsModelName refuses "@" in spec.model.name when
+// llm-d-router KV event publishing is active, because llm-d-router@v1.0.0 parseTopic splits
+// "kv@pod@<model>" on "@" using strings.Split and discards model matching when len(parts) != 3.
+func validateModelDeploymentLLMDRouterKVEventsModelName(md *workercore.ModelDeployment) field.ErrorList {
+	if md.DeletionTimestamp != nil ||
+		md.Spec.Router == nil ||
+		md.Spec.Router.Name != workercore.ModelDeploymentRouterLLMD ||
+		!strings.Contains(md.Spec.Model.Name, "@") {
+		return nil
+	}
+
+	publishes := false
+	for i := range md.Spec.Roles {
+		if workerctrl.ModelDeploymentRolePublishesKVEvents(md, &md.Spec.Roles[i]) {
+			publishes = true
+			break
+		}
+	}
+	if !publishes {
+		return nil
+	}
+
+	return field.ErrorList{field.Invalid(
+		field.NewPath("spec", "model", "name"),
+		md.Spec.Model.Name,
+		`must not contain "@" when llm-d-router KV cache events are enabled: `+
+			`llm-d-router splits KV event topics ("kv@pod@<model>") on "@" and `+
+			`drops model matching when extra "@" segments are present`,
+	)}
 }

@@ -1135,7 +1135,8 @@ func modelDeploymentKVEventsConfig(
 	switch md.Spec.Router.Name {
 	case workercore.ModelDeploymentRouterLLMD:
 		if md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM ||
-			kind == workercore.ModelDeploymentRoleKindDecode {
+			kind == workercore.ModelDeploymentRoleKindDecode ||
+			modelDeploymentLLMDRouterDisablesKVEvents(md) {
 			return false, "", false
 		}
 		return true, inject.VLLMKVEventsTopicForModel(md.Spec.Model.Name), false

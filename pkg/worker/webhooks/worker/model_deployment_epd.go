@@ -340,8 +340,8 @@ func (r *ModelDeploymentWebhook) modelDeploymentEPDPlatform(
 // than joining `modelDeploymentRouterReservedPorts`, which is vendor-blind by construction and would
 // have to over-claim the shared row.
 //
-// A ROLE NAMING NEITHER SERVES ON THE DEFAULT, which is not this number, so there is nothing to
-// refuse.
+// A ROLE NAMING NEITHER SERVES ON THE DEFAULT HTTP PORT (8000), which collides when
+// VLLM_EC_SIDE_CHANNEL_PORT overrides the side channel onto 8000.
 func validateModelDeploymentEPDSideChannelPort(
 	md *workercore.ModelDeployment, row workerctrl.ModelDeploymentEPDRow,
 ) field.ErrorList {
@@ -387,10 +387,16 @@ func validateModelDeploymentEPDSideChannelPort(
 		}
 	}
 
-	if listen, ok := workerctrl.ModelDeploymentRoleListenPort(md.Spec.Engine.Name, role); ok &&
-		listen == sideChannelPort {
+	listen, hasListen := workerctrl.ModelDeploymentRoleListenPort(md.Spec.Engine.Name, role)
+	if hasListen && listen == sideChannelPort {
 		errs = append(errs, refusal(rolesPath.Child("extraArgs"),
 			fmt.Sprintf("--port=%d", listen))...)
+	}
+	if len(role.Ports) == 0 && !hasListen && sideChannelPort == workerctrl.ModelDeploymentDefaultPort && envIdx >= 0 {
+		errs = append(errs, refusal(
+			rolesPath.Child("env").Index(envIdx).Child("value"),
+			role.Env[envIdx].Value,
+		)...)
 	}
 
 	return errs

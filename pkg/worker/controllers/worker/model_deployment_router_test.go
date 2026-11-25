@@ -996,7 +996,7 @@ const (
 	mixedServerCandidateSelector = "app.kubernetes.io/name=model-deployment," +
 		"app.kubernetes.io/instance=qwen,modeldeployment.gpustack.ai/router-candidate=true," +
 		"!modeldeployment.gpustack.ai/router"
-	mixedServerCandidateHash = "bc2b19fd4e4b9bc9d7f0841ad6f1f19daf6c8045b0d007074594d4f57056c6e3"
+	mixedServerCandidateHash = "586078904f6f3f4e8ed236891744f588b30d7d854c248e8e1f263ff99584e037"
 )
 
 func TestRenderModelDeploymentRouterObjects_MixedServerRolesRenderTheCandidateUnion(t *testing.T) {

@@ -228,9 +228,21 @@ apply_staged_patches() {
     fi
   elif [[ "${name}" == "sgl-router" ]]; then
     local observer_rs="${tmp_tree}/sgl-router/src/observer.rs"
+    local lib_rs="${tmp_tree}/sgl-router/src/lib.rs"
+    local app_rs="${tmp_tree}/sgl-router/src/server/app.rs"
     if [[ ! -f "${observer_rs}" ]] || ! grep -q "struct ObserverRouter" "${observer_rs}"; then
       printf 'FAIL: struct ObserverRouter missing in %s after applying sgl-router patches\n' \
         "sgl-router/src/observer.rs" >&2
+      return 1
+    fi
+    if [[ ! -f "${lib_rs}" ]] || ! grep -q "pub mod observer;" "${lib_rs}"; then
+      printf 'FAIL: pub mod observer; missing in %s after applying sgl-router patches\n' \
+        "sgl-router/src/lib.rs" >&2
+      return 1
+    fi
+    if [[ ! -f "${app_rs}" ]] || ! grep -q "/observer/endpoints" "${app_rs}"; then
+      printf 'FAIL: /observer/endpoints missing in %s after applying sgl-router patches\n' \
+        "sgl-router/src/server/app.rs" >&2
       return 1
     fi
   fi

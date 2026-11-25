@@ -5,7 +5,7 @@
     {
       "path": ".auto-sync/checks",
       "kind": "directory",
-      "sha256": "fe86940c0029045795c2a4af90fca9a1e823317851e05e9150a3ba2fcdd45006"
+      "sha256": "94ad9c6d94e490496512baed5dfcd1ba37733118a2cbe1f19d21f8b270519ef1"
     },
     {
       "path": ".auto-sync/instructions/router.md",

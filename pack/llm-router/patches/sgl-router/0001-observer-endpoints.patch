@@ -1,20 +1,21 @@
-Expose read-only GET /observer/endpoints returning native sgl-router worker
-registry membership and single-lock circuit-breaker snapshots without mutating
-routing state, claiming half-open probe slots, or emitting routing metrics.
-
-AGAINST: sgl-project/sglang router-v0.1.0 (commit
-7fed639806be1b03ef4eaba3fc4ad2117a8f2be4). Applied from the sparse clone root
-(/src) against sgl-router/ and rust/.
-
-WHEN TO REMOVE: when upstream sgl-router ships a native read-only membership
-endpoint matching the operator observer wire contract.
-
+diff --git a/sgl-router/src/lib.rs b/sgl-router/src/lib.rs
+index 118f64e6d9e7ab457ad1612fb0423b54902dbbf9..385f4b6709d3e454bb5ad51bb7e7a705b2bd42f3 100644
+--- a/sgl-router/src/lib.rs
++++ b/sgl-router/src/lib.rs
+@@ -9,6 +9,7 @@ pub mod buckets_reorg;
+ pub mod config;
+ pub mod discovery;
+ pub mod health;
++pub mod observer;
+ pub(crate) mod off_worker;
+ pub mod policies;
+ pub mod policies_reorg;
 diff --git a/sgl-router/src/observer.rs b/sgl-router/src/observer.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..8b5b1d0cce48387c8a7c948330dc3506e86d9e6d
+index 0000000000000000000000000000000000000000..3930f544da5ee14a37f2d2402681ed48c9c8b08b
 --- /dev/null
 +++ b/sgl-router/src/observer.rs
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,465 @@
 +// SPDX-FileCopyrightText: Copyright (c) 2026 The SGLang Authors
 +// SPDX-License-Identifier: Apache-2.0
 +
@@ -122,20 +123,29 @@ index 0000000000000000000000000000000000000000..8b5b1d0cce48387c8a7c948330dc3506
 +}
 +
 +fn collect_workers(ctx: &AppContext) -> Vec<ObserverWorker> {
++    // Take single-lock read-only snapshots first so pool-wide fail-open mirrors
++    // WorkerRegistry::healthy_workers_for without resetting circuit breakers.
++    let snapshots: Vec<_> = ctx
++        .registry
++        .all()
++        .into_iter()
++        .map(|worker| {
++            let cb = worker.breaker.snapshot();
++            let healthy = worker.model_ids.iter().any(|m| m.0 == ctx.config.model.id)
++                && !worker.awaiting_bootstrap_port();
++            (worker, healthy, cb)
++        })
++        .collect();
++    let all_eligible_tripped =
++        snapshots.iter().any(|(_, h, _)| *h) && !snapshots.iter().any(|(_, h, cb)| *h && cb.admit);
++
 +    // Sort deterministically by (url, worker_id) so consecutive revisions are comparable.
 +    let mut ordered: BTreeMap<(String, String), ObserverWorker> = BTreeMap::new();
-+    for worker in ctx.registry.all() {
++    for (worker, healthy, cb) in snapshots {
 +        let url = worker.url.clone();
 +        let worker_id = worker.id.0.clone();
-+        // Single-lock read-only snapshot matching WorkerRegistry::healthy_workers_for.
-+        let cb = worker.breaker.snapshot();
-+        let serves_model = worker
-+            .model_ids
-+            .iter()
-+            .any(|m| m.0 == ctx.config.model.id);
-+        let healthy = serves_model && !worker.awaiting_bootstrap_port();
 +        let circuit_open = cb.state_code == 1 && !cb.admit;
-+        let in_selection = healthy && cb.admit;
++        let in_selection = healthy && (cb.admit || all_eligible_tripped);
 +        ordered.insert(
 +            (url.clone(), worker_id.clone()),
 +            ObserverWorker {
@@ -252,19 +262,24 @@ index 0000000000000000000000000000000000000000..8b5b1d0cce48387c8a7c948330dc3506
 +            threshold: NonZeroU32::new(1).unwrap(),
 +            cool_down: Duration::from_secs(10),
 +        };
-+        ctx.registry
-+            .add_with_cb(
-+                WorkerSpec {
-+                    id: WorkerId("w-plain".into()),
-+                    url: "http://10.0.0.1:8000".into(),
-+                    mode: WorkerMode::Plain,
-+                    model_ids: vec![ModelId("stub-model".into())],
-+                    ..Default::default()
-+                },
-+                Some(cb_cfg),
-+                WireProtocol::default(),
-+            )
-+            .unwrap();
++        for (id, url) in [
++            ("w-plain", "http://10.0.0.1:8000"),
++            ("w-peer", "http://10.0.0.2:8000"),
++        ] {
++            ctx.registry
++                .add_with_cb(
++                    WorkerSpec {
++                        id: WorkerId(id.into()),
++                        url: url.into(),
++                        mode: WorkerMode::Plain,
++                        model_ids: vec![ModelId("stub-model".into())],
++                        ..Default::default()
++                    },
++                    Some(cb_cfg.clone()),
++                    WireProtocol::default(),
++                )
++                .unwrap();
++        }
 +
 +        let (status, body) = fetch_observer(Arc::clone(&ctx)).await;
 +        assert_eq!(status, StatusCode::OK);
@@ -279,12 +294,14 @@ index 0000000000000000000000000000000000000000..8b5b1d0cce48387c8a7c948330dc3506
 +        assert_eq!(w["selection"]["circuit_open"], false);
 +        assert_eq!(w["selection"]["in_selection"], true);
 +
-+        // Open breaker: observer sees circuit_open=true, in_selection=false.
++        // Open breaker while peer remains healthy: observer sees circuit_open=true, in_selection=false.
 +        let worker = ctx.registry.get(&WorkerId("w-plain".into())).unwrap();
 +        worker.breaker.record_failure();
 +        let (_, body) = fetch_observer(Arc::clone(&ctx)).await;
 +        assert_eq!(body["workers"][0]["selection"]["circuit_open"], true);
 +        assert_eq!(body["workers"][0]["selection"]["in_selection"], false);
++        assert_eq!(body["workers"][1]["selection"]["circuit_open"], false);
++        assert_eq!(body["workers"][1]["selection"]["in_selection"], true);
 +        assert_eq!(worker.breaker.snapshot().state_code, 1);
 +
 +        // Past cooldown: observer reports admit without mutating Open -> HalfOpen.
@@ -293,6 +310,98 @@ index 0000000000000000000000000000000000000000..8b5b1d0cce48387c8a7c948330dc3506
 +        assert_eq!(body["workers"][0]["selection"]["circuit_open"], false);
 +        assert_eq!(body["workers"][0]["selection"]["in_selection"], true);
 +        assert_eq!(worker.breaker.snapshot().state_code, 1);
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn all_eligible_breakers_open_fails_open_without_mutating_breakers() {
++        let ctx = Arc::new(AppContext::stub());
++        let cb_cfg = CircuitBreakerConfig {
++            threshold: NonZeroU32::new(1).unwrap(),
++            cool_down: Duration::from_secs(10),
++        };
++        // PD pool: two eligible workers (prefill with bootstrap_port + decode), plus an
++        // ineligible worker with empty model_ids and a prefill awaiting bootstrap_port.
++        ctx.registry
++            .add_with_cb(
++                WorkerSpec {
++                    id: WorkerId("p-ready".into()),
++                    url: "http://10.0.0.1:8000".into(),
++                    mode: WorkerMode::Prefill,
++                    model_ids: vec![ModelId("stub-model".into())],
++                    bootstrap_port: Some(8998),
++                    ..Default::default()
++                },
++                Some(cb_cfg.clone()),
++                WireProtocol::default(),
++            )
++            .unwrap();
++        ctx.registry
++            .add_with_cb(
++                WorkerSpec {
++                    id: WorkerId("d-ready".into()),
++                    url: "http://10.0.0.2:8000".into(),
++                    mode: WorkerMode::Decode,
++                    model_ids: vec![ModelId("stub-model".into())],
++                    ..Default::default()
++                },
++                Some(cb_cfg.clone()),
++                WireProtocol::default(),
++            )
++            .unwrap();
++        ctx.registry
++            .add_with_cb(
++                WorkerSpec {
++                    id: WorkerId("d-empty".into()),
++                    url: "http://10.0.0.3:8000".into(),
++                    mode: WorkerMode::Decode,
++                    model_ids: vec![],
++                    ..Default::default()
++                },
++                Some(cb_cfg.clone()),
++                WireProtocol::default(),
++            )
++            .unwrap();
++        ctx.registry
++            .add_with_cb(
++                WorkerSpec {
++                    id: WorkerId("p-awaiting".into()),
++                    url: "http://10.0.0.4:8000".into(),
++                    mode: WorkerMode::Prefill,
++                    model_ids: vec![ModelId("stub-model".into())],
++                    bootstrap_port: None,
++                    ..Default::default()
++                },
++                Some(cb_cfg),
++                WireProtocol::default(),
++            )
++            .unwrap();
++
++        let p_ready = ctx.registry.get(&WorkerId("p-ready".into())).unwrap();
++        let d_ready = ctx.registry.get(&WorkerId("d-ready".into())).unwrap();
++        p_ready.breaker.record_failure();
++        d_ready.breaker.record_failure();
++
++        let (status, body) = fetch_observer(Arc::clone(&ctx)).await;
++        assert_eq!(status, StatusCode::OK);
++        let workers = body["workers"].as_array().unwrap();
++        assert_eq!(workers.len(), 4);
++
++        for idx in [0, 1] {
++            assert_eq!(workers[idx]["selection"]["healthy"], true);
++            assert_eq!(workers[idx]["selection"]["circuit_open"], true);
++            assert_eq!(workers[idx]["selection"]["in_selection"], true);
++        }
++        // Ineligible workers must remain excluded from selection during fail-open.
++        assert_eq!(workers[2]["worker_id"], "d-empty");
++        assert_eq!(workers[2]["selection"]["healthy"], false);
++        assert_eq!(workers[2]["selection"]["in_selection"], false);
++        assert_eq!(workers[3]["worker_id"], "p-awaiting");
++        assert_eq!(workers[3]["selection"]["healthy"], false);
++        assert_eq!(workers[3]["selection"]["in_selection"], false);
++
++        // Breakers stay Open (read-only snapshot, no reset side effect).
++        assert_eq!(p_ready.breaker.snapshot().state_code, 1);
++        assert_eq!(d_ready.breaker.snapshot().state_code, 1);
 +    }
 +
 +    #[tokio::test]
@@ -372,3 +481,27 @@ index 0000000000000000000000000000000000000000..8b5b1d0cce48387c8a7c948330dc3506
 +        assert_eq!(workers[2]["selection"]["in_selection"], true);
 +    }
 +}
+diff --git a/sgl-router/src/server/app.rs b/sgl-router/src/server/app.rs
+index 6ff8661f8626dc3f011354fbee8958f10dfe54ea..9ecf629b93df7870ef079982ce34aadf204e8bf6 100644
+--- a/sgl-router/src/server/app.rs
++++ b/sgl-router/src/server/app.rs
+@@ -33,6 +33,7 @@ fn is_infra_path(path: &str) -> bool {
+             | "/readiness"
+             | "/health_generate"
+             | "/metrics"
++            | "/observer/endpoints"
+     )
+ }
+ 
+@@ -224,6 +225,11 @@ pub fn build_router_with_body_limit(ctx: Arc<AppContext>, max_body_bytes: usize)
+         .route("/liveness", get(crate::server::routes::health::healthz))
+         .route("/readiness", get(crate::server::routes::health::readyz))
+         .route("/metrics", get(crate::server::routes::metrics::metrics))
++        // Read-only external observation of pool membership (see src/observer.rs).
++        .route(
++            "/observer/endpoints",
++            get(crate::observer::observer_endpoints),
++        )
+         .route(
+             "/v1/models",
+             get(crate::server::routes::models::list_models),

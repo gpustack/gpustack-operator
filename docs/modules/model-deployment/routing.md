@@ -55,14 +55,15 @@ or `sgl-router` for SGLang because `llm-d-router` has no policy switch
   must include `discovery.k8s.io/endpointslices` (`get`, `list`, `watch`).
 - **`sgl-router` tokenizer default**: The operator emits `--no-tokenizer` by default so `sgl-router`
   starts offline in air-gapped clusters without calling Hugging Face Hub. It omits `--no-tokenizer`
-  automatically when *`spec.router.extraArgs`* supplies `--tokenizer-path` or sets `--policy` to
-  `cache_aware` (`power_of_two` and `session_aware` keep `--no-tokenizer`).
+  automatically when *`spec.router.extraArgs`* supplies `--tokenizer-path`, `--bucket-config`, or
+  sets `--policy` to `cache_aware` (`power_of_two` and `session_aware` keep `--no-tokenizer`).
 - **`llm-d-router` SGLang limitation**: On `llm-d-router@v1.0.0`, `SGLang` stays on
   `approx-prefix-cache-producer` with no KV events because upstream `precise-prefix-cache-producer`
   requires vLLM's `/v1/chat/completions/render` endpoint. Use `sgl-router` for SGLang KV events.
-- **SGLang `--dp-aware` registration**: For SGLang *External DP*, the operator renders `--dp-aware`
-  on `sgl-router` (including *PD*) and `sglang-gateway` (undivided only) to register one logical
-  worker per attention-DP rank.
+- **SGLang `--dp-aware` routing**: The operator renders `--dp-aware` on `sgl-router` for SGLang
+  *External DP* and multi-DP *PD* (`--attn-dp-size >= 2` or `--dp-size >= 2` on *Prefill* or
+  *Decode*) to select DP ranks per worker, and on `sglang-gateway` (undivided *External DP* only) to
+  register one worker per attention-DP rank.
 
 ### Excluded replica groups
 

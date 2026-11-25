@@ -312,6 +312,8 @@ RUN <<EOF
 
     # Fail the build if the observer patch did not land.
     grep -q "struct ObserverRouter" sgl-router/src/observer.rs
+    grep -q "pub mod observer;" sgl-router/src/lib.rs
+    grep -q "/observer/endpoints" sgl-router/src/server/app.rs
 
     rm -rf /tmp/patches
 EOF

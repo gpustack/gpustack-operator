@@ -85,15 +85,16 @@ Ownership is scoped per `(engine, key)` (`modelDeploymentOwnedKeys`):
   projection of `Pod` annotation `kvcache.gpustack.ai/client-config` (no `ConfigMap` created).
   An overlay volume mounting over `/etc/gpustack/kvcache` silently replaces it.
 - **KV events publisher**: Publishing roles open ZMQ publisher `tcp://*:5557` and replay
-  `tcp://*:5558` (`tcp://*:<5557+localDP>` when per-`Pod` `localDP > 1`, reserving
-  `[5557 .. 5557 + 2*localDP - 1]` across local DP ranks; `topic: "kv@pod@<spec.model.name>"` on
+  `tcp://*:5558` (`tcp://*:<5557+dpSpan>` when global `dpSpan > 1`, reserving
+  `[5557 .. 5557 + 2*dpSpan - 1]` across all DP ranks; `topic: "kv@pod@<spec.model.name>"` on
   `vLLM`/`vLLM-Ascend` behind `llm-d-router` or `vllm-router` `kv_aware`; `topic: "kv-events"` on
-  `SGLang` *Server*/*Prefill* behind `sgl-router`).
+  `SGLang` *Server*/*Prefill* behind `sgl-router`). Under `llm-d-router`, single-`Pod` `vLLM`
+  multi-DP subscribes to `RankIndex=0` (`5557`) only, and `@` in *`spec.model.name`* is refused.
 - **`KVEventsPublishing` condition**: Reports `True/Publishing` when all expected roles publish,
-  `True/NotApplicable` for unrouted *Server* roles, `SGLang + llm-d-router`, `vllm-router` without
-  `kv_aware`, and frozen `sglang-gateway`, `Unknown/RoleUnmanaged` when an expected role sets
-  *`roles[].command`*, and `False` for unrouted *PD* (`NoRouter`) or missing config
-  (`PublisherDisabled`).
+  `True/NotApplicable` for unrouted *Server* roles, `SGLang + llm-d-router`, multi-`Pod` `vLLM` DP
+  behind `llm-d-router`, `vllm-router` without `kv_aware`, and frozen `sglang-gateway`,
+  `Unknown/RoleUnmanaged` when an expected role sets *`roles[].command`*, and `False` for unrouted
+  *PD* (`NoRouter`) or missing config (`PublisherDisabled`).
 
 ### Defaulted cache and env
 
@@ -193,6 +194,7 @@ engine version backfill; validating for the rules below) plus CRD schema checks 
 | Invalid engine version syntax | Field path and `major.minor[.patch][rcN|.rcN|.postN]` grammar |
 | Mismatched engine and router pairing | Router name and allowed engines (`sgl-router`/`sglang-gateway` → `SGLang`, `vllm-router` → `vLLM`, `llm-d-router` → both) |
 | `vllm-router` `kv_aware` with `vLLM < 0.31.0` or unresolved version | Role, `0.31.0` floor (`GET /kv_event_sources`), and version field path |
+| `@` in *`spec.model.name`* with `llm-d-router` KV events active | *`spec.model.name`* and `llm-d-router` `"kv@pod@<model>"` `@`-delimiter split rule |
 | Mixed Ascend *PD* connector generation (`< 0.30.0` paired with `>= 0.30.0`) | Both roles, resolved versions, and `MooncakeConnectorV1`/`V2` alignment rule |
 | Invalid `VLLM_EC_SIDE_CHANNEL_PORT` or HTTP port collision | Role, port (`0` or `1`–`65535`), and `ECCPUConnector` side-channel conflict |
 | More than 10 roles | Operator's own role-count limit (each role renders replicas, `Service`s, and queues) |
@@ -214,7 +216,7 @@ engine version backfill; validating for the rules below) plus CRD schema checks 
 | Owned key in *`extraArgs`* or *`env`* (including `kv_aware` conditional keys and router owned flags) | Key, engine/router, and *`roles[].command`* alternative |
 | `--kv-cache-dtype` in *`extraArgs`* with *`spec.kvCache`* | Binding `dtype` ownership and ways out |
 | `--port` mismatching first *`ports`* entry | Both values and source fields (managed direct decoder exempt; stored roles checked on edit) |
-| Reserved listener port collision (ZMQ `[5557 .. 5557 + 2*localDP - 1]` on all publishing *Server*/*Prefill* roles, NIXL `8998`, bootstrap `8998`, SGLang encoder bootstrap `8997`) | Port, source field, reserved set (take-over *`command`* exempt) |
+| Reserved listener port collision (ZMQ `[5557 .. 5557 + 2*dpSpan - 1]` on all publishing *Server*/*Prefill* roles, NIXL `8998`, bootstrap `8998`, SGLang encoder bootstrap `8997`) | Port, source field, reserved set (take-over *`command`* exempt) |
 | Unparseable parallel degree flag or malformed `VLLM_DP_SIZE` | Role, flag, and *`roles[].command`* alternative |
 | Declared per-member parallel width exceeding card request | Card count and derived degrees (*`size`* does not cover per-member width) |
 | Removed `template` field on role | Strict schema decoding refusal |
