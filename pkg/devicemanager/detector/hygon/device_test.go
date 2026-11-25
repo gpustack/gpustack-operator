@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	klog "k8s.io/klog/v2"
 
+	"gpustack.ai/gpustack/binding/dmi"
 	"gpustack.ai/gpustack/binding/rsmi"
 	"gpustack.ai/gpustack/pkg/device"
 )
@@ -606,4 +607,306 @@ func TestSnapshotLiveDetectedExcludesWithheldDivergentProfiles(t *testing.T) {
 	assert.True(t, restored.Status.Unhealthy)
 	assert.Equal(t, int32(2), restored.Status.PhysicalSliced.Count)
 	assert.Equal(t, []device.AcceleratorPhysicalSlicedProfile{shared}, restored.Status.PhysicalSliced.Profiles)
+}
+
+const dmiFixtureSource = `
+#include "dmi_mig.h"
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static const char *fixture_env(const char *name) {
+    const char *value = getenv(name);
+    return value == NULL ? "" : value;
+}
+
+static unsigned int dmi_device_index(nvmlDevice_t device) {
+    return (unsigned int)((uintptr_t)device - 1U);
+}
+
+static nvmlReturn_t maybe_fail_dmi(const char *stage, unsigned int idx) {
+    if (strcmp(fixture_env("GPUSTACK_TEST_DMI_FAIL_STAGE"), stage) != 0)
+        return NVML_SUCCESS;
+    const char *fail_idx = fixture_env("GPUSTACK_TEST_DMI_FAIL_INDEX");
+    if (fail_idx[0] == '\0')
+        return NVML_SUCCESS;
+    if (strcmp(fail_idx, "all") != 0 && (unsigned int)strtoul(fail_idx, NULL, 10) != idx)
+        return NVML_SUCCESS;
+    return (nvmlReturn_t)atoi(fixture_env("GPUSTACK_TEST_DMI_FAIL_ERR"));
+}
+
+nvmlReturn_t nvmlGetSystemMigMode(unsigned int *current_mode, unsigned int *pending_mode) {
+    const char *err_env = fixture_env("GPUSTACK_TEST_DMI_SYS_MODE_ERR");
+    if (err_env[0] != '\0')
+        return (nvmlReturn_t)atoi(err_env);
+    if (strcmp(fixture_env("GPUSTACK_TEST_DMI_MIG_MODE"), "enabled") == 0) {
+        *current_mode = NVML_DEVICE_MIG_ENABLE;
+        *pending_mode = NVML_DEVICE_MIG_ENABLE;
+        return NVML_SUCCESS;
+    }
+    *current_mode = NVML_DEVICE_MIG_DISABLE;
+    *pending_mode = NVML_DEVICE_MIG_DISABLE;
+    return NVML_SUCCESS;
+}
+
+nvmlReturn_t nvmlDeviceGetHandleByPciBusId(const char *pci_bus_id, nvmlDevice_t *device) {
+    unsigned int bus = 0;
+    if (sscanf(pci_bus_id, "0000:%x:00.0", &bus) != 1 || bus == 0U)
+        return NVML_ERROR_NOT_FOUND;
+    unsigned int idx = bus - 1U;
+    nvmlReturn_t ret = maybe_fail_dmi("handle", idx);
+    if (ret != NVML_SUCCESS)
+        return ret;
+    *device = (nvmlDevice_t)(uintptr_t)(idx + 1U);
+    return NVML_SUCCESS;
+}
+
+nvmlReturn_t nvmlDeviceGetGpuInstanceProfileInfo(nvmlDevice_t device, unsigned int profile,
+                                                 nvmlGpuInstanceProfileInfo_t *info) {
+    unsigned int idx = dmi_device_index(device);
+    nvmlReturn_t ret = maybe_fail_dmi("profile", idx);
+    if (ret != NVML_SUCCESS)
+        return ret;
+    if (profile != 0U)
+        return NVML_ERROR_INVALID_ARGUMENT;
+    memset(info, 0, sizeof(*info));
+    info->id = 3U;
+    info->gi_count_max = 4U;
+    info->cu_count = 20U;
+    info->gpu_slice_count = 1U;
+    info->memory_size_MB = 16380ULL;
+    snprintf(info->name, sizeof(info->name), "MIG 2g.15gb");
+    return NVML_SUCCESS;
+}
+
+nvmlReturn_t nvmlDeviceGetGpuInstancePossiblePlacements(nvmlDevice_t device, unsigned int profile_id,
+                                                        nvmlGpuInstancePlacement_t *placements,
+                                                        unsigned int *count) {
+    unsigned int idx = dmi_device_index(device);
+    nvmlReturn_t ret = maybe_fail_dmi("placement", idx);
+    if (ret != NVML_SUCCESS)
+        return ret;
+    if (profile_id != 3U)
+        return NVML_ERROR_INVALID_ARGUMENT;
+    unsigned int n = *count < 4U ? *count : 4U;
+    for (unsigned int i = 0; i < n; i++) {
+        placements[i].start = i;
+        placements[i].size = 1U;
+    }
+    *count = n;
+    return NVML_SUCCESS;
+}
+`
+
+func compileDMIFixture(t *testing.T, dir string) {
+	t.Helper()
+
+	src := filepath.Join(dir, "fixture_dmi.c")
+	require.NoError(t, os.WriteFile(src, []byte(dmiFixtureSource), 0o600))
+
+	flags := make([]string, 0, 6)
+	if runtime.GOOS == "darwin" {
+		flags = append(flags, "-dynamiclib")
+	} else {
+		flags = append(flags, "-shared", "-fPIC")
+	}
+	flags = append(flags, "-I../../../../binding/dmi", src, "-o", filepath.Join(dir, "libhydmi_mig.so.1"))
+	output, err := exec.Command("cc", flags...).CombinedOutput()
+	require.NoError(t, err, "%s", output)
+}
+
+func TestMigCardFaultIsolation(t *testing.T) {
+	if scenario := os.Getenv("GPUSTACK_TEST_DMI_MIG_SCENARIO"); scenario != "" {
+		d := New(device.DetectorOptions{})
+
+		if scenario == "system_mig_mode_unavailable" || scenario == "system_mig_mode_unsupported" {
+			t.Setenv("GPUSTACK_TEST_DMI_SYS_MODE_ERR", os.Getenv("GPUSTACK_TEST_DMI_MIG_FAIL_ERR"))
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			for i := 0; i < 2; i++ {
+				acc := groups[0].Accelerators[i]
+				assert.False(t, acc.Status.Unhealthy)
+				assert.Zero(t, acc.Status.PhysicalSliced.Count)
+				assert.Equal(t, int32(4), acc.Status.LogicalSliced.Count)
+				assert.True(t, device.IsWholeAcceleratorCapable(acc.Status))
+			}
+			return
+		}
+
+		// Pass 1: seed both cards as healthy MIG accelerators.
+		groups, err := d.DetectAccelerator(true)
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+		require.Len(t, groups[0].Accelerators, 2)
+		for i := 0; i < 2; i++ {
+			acc := groups[0].Accelerators[i]
+			assert.False(t, acc.Status.Unhealthy)
+			assert.Equal(t, int32(4), acc.Status.PhysicalSliced.Count)
+			assert.Zero(t, acc.Status.LogicalSliced.Count)
+			assert.False(t, device.IsWholeAcceleratorCapable(acc.Status))
+		}
+
+		switch scenario {
+		case "system_mig_mode_error":
+			t.Setenv("GPUSTACK_TEST_DMI_SYS_MODE_ERR", os.Getenv("GPUSTACK_TEST_DMI_MIG_FAIL_ERR"))
+			groups, err = d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			// Verify cache was preserved by making card 1 unqueryable on the next pass.
+			t.Setenv("GPUSTACK_TEST_DMI_SYS_MODE_ERR", "")
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_STAGE", "handle")
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_ERR", strconv.Itoa(int(dmi.ERROR_GPU_IS_LOST)))
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.False(t, groups[0].Accelerators[0].Status.Unhealthy)
+			assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+			assert.Equal(t, int32(4), groups[0].Accelerators[1].Status.PhysicalSliced.Count)
+
+			// Pass 4: card 1 recovers cleanly.
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_STAGE", "")
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_INDEX", "")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.False(t, groups[0].Accelerators[1].Status.Unhealthy)
+			assert.Equal(t, int32(4), groups[0].Accelerators[1].Status.PhysicalSliced.Count)
+
+		case "dmi_handle_unqueryable", "dmi_profile_unqueryable", "dmi_placement_unqueryable":
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_STAGE", os.Getenv("GPUSTACK_TEST_DMI_MIG_FAIL_STAGE"))
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_ERR", os.Getenv("GPUSTACK_TEST_DMI_MIG_FAIL_ERR"))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			card0 := groups[0].Accelerators[0]
+			assert.Equal(t, "GPU-1", card0.ID)
+			assert.False(t, card0.Status.Unhealthy)
+			assert.Equal(t, int32(4), card0.Status.PhysicalSliced.Count)
+
+			card1 := groups[0].Accelerators[1]
+			assert.Equal(t, "GPU-2", card1.ID)
+			assert.True(t, card1.Status.Unhealthy)
+			assert.Equal(t, int32(4), card1.Status.PhysicalSliced.Count)
+			assert.Zero(t, card1.Status.LogicalSliced.Count)
+			assert.False(t, device.IsWholeAcceleratorCapable(card1.Status))
+
+			// Pass 3: card 1 recovers cleanly.
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_STAGE", "")
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_INDEX", "")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.False(t, groups[0].Accelerators[1].Status.Unhealthy)
+			assert.Equal(t, int32(4), groups[0].Accelerators[1].Status.PhysicalSliced.Count)
+
+		case "dmi_handle_fatal", "dmi_profile_fatal":
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_STAGE", os.Getenv("GPUSTACK_TEST_DMI_MIG_FAIL_STAGE"))
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_ERR", os.Getenv("GPUSTACK_TEST_DMI_MIG_FAIL_ERR"))
+
+			groups, err = d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			// Verify cache survived the fatal pass by dropping card 1 on the next pass.
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_STAGE", "handle")
+			t.Setenv("GPUSTACK_TEST_DMI_FAIL_ERR", strconv.Itoa(int(dmi.ERROR_GPU_IS_LOST)))
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+			assert.Equal(t, int32(4), groups[0].Accelerators[1].Status.PhysicalSliced.Count)
+
+		default:
+			t.Fatalf("unknown scenario %q", scenario)
+		}
+		return
+	}
+
+	dir := compileRSMIFixture(t)
+	compileDMIFixture(t, dir)
+
+	testCases := []struct {
+		name     string
+		scenario string
+		stage    string
+		errCode  dmi.Return
+	}{
+		{
+			name:     "system MIG mode unavailable detects non-MIG node cleanly",
+			scenario: "system_mig_mode_unavailable",
+			errCode:  dmi.ERROR_FUNCTION_NOT_FOUND,
+		},
+		{
+			name:     "system MIG mode unsupported detects non-MIG node cleanly",
+			scenario: "system_mig_mode_unsupported",
+			errCode:  dmi.ERROR_NOT_SUPPORTED,
+		},
+		{
+			name:     "system MIG mode error fails detect pass and preserves cache",
+			scenario: "system_mig_mode_error",
+			errCode:  dmi.ERROR_UNKNOWN,
+		},
+		{
+			name:     "unqueryable DMI handle lookup retains cached MIG card as unhealthy",
+			scenario: "dmi_handle_unqueryable",
+			stage:    "handle",
+			errCode:  dmi.ERROR_GPU_IS_LOST,
+		},
+		{
+			name:     "unqueryable DMI profile probe retains cached MIG card as unhealthy",
+			scenario: "dmi_profile_unqueryable",
+			stage:    "profile",
+			errCode:  dmi.ERROR_GPU_IS_LOST,
+		},
+		{
+			name:     "unqueryable DMI placement probe retains cached MIG card as unhealthy",
+			scenario: "dmi_placement_unqueryable",
+			stage:    "placement",
+			errCode:  dmi.ERROR_RESET_REQUIRED,
+		},
+		{
+			name:     "fatal DMI handle lookup fails detect pass",
+			scenario: "dmi_handle_fatal",
+			stage:    "handle",
+			errCode:  dmi.ERROR_NO_PERMISSION,
+		},
+		{
+			name:     "fatal DMI profile probe fails detect pass",
+			scenario: "dmi_profile_fatal",
+			stage:    "profile",
+			errCode:  dmi.ERROR_NO_PERMISSION,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestMigCardFaultIsolation$", "-test.count=1")
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(),
+				"GPUSTACK_TEST_DMI_MIG_SCENARIO="+tc.scenario,
+				"GPUSTACK_TEST_DMI_MIG_FAIL_STAGE="+tc.stage,
+				"GPUSTACK_TEST_DMI_MIG_FAIL_ERR="+strconv.Itoa(int(tc.errCode)),
+				"GPUSTACK_TEST_DMI_MIG_MODE=enabled",
+				"GPUSTACK_TEST_RSMI_COUNT=2",
+				"LD_LIBRARY_PATH="+dir,
+				"DYLD_LIBRARY_PATH="+dir,
+			)
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+		})
+	}
 }

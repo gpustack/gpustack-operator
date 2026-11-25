@@ -119,7 +119,10 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 
 	// Read once, not per card: the mode belongs to the node, so asking each card would be asking the
 	// same question eight times and inviting a caller to believe the answers could differ.
-	migEnabled, migKnown := in.migModeEnabled()
+	migEnabled, err := in.migModeEnabled()
+	if err != nil {
+		return nil, err
+	}
 
 	modelNames := make(modelNameCache)
 
@@ -186,7 +189,15 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		// compute-unit count can be learned nowhere else; see migCardCores.
 		var migCard migCardCapability
 		if migEnabled {
-			migCard = in.detectCardMigProfiles(pciBusId, logger)
+			var migRet dmi.Return
+			migCard, migRet = in.detectCardMigProfiles(pciBusId, logger)
+			if !migRet.IsSuccess() {
+				if err := handleDMICardQueryError(logger, i, "detect device MIG profiles", migRet, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
+				in.retainUnqueryableDetected(&grpList, unqueryableSlots, i)
+				continue
+			}
 		}
 
 		name := modelNames.resolve(pciDev, func() string {
@@ -266,22 +277,11 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 
 			// The two capabilities are mutually exclusive on this hardware, and the exclusivity is the
 			// node's rather than the card's. With Multi-Instance mode on, a container given the device
-			// nodes but no compute-instance configuration finds NO device at all -- measured on a node
-			// where five of eight cards held no instance whatsoever -- so a card in MIG mode can serve
-			// neither a whole-card nor a logically sliced request, and publishing either capability
-			// would advertise capacity that cannot be allocated.
-			//
-			// A MODE THAT COULD NOT BE READ PUBLISHES NEITHER. Which of the two is right is exactly
-			// what the unread answer decides, and both wrong guesses cost a workload: guessing
-			// unpartitioned on a partitioned node admits whole-card work the node cannot serve, and
-			// guessing partitioned on a normal node withdraws capacity that works. So the card keeps
-			// its whole-card identity and offers no share of itself until the mode reads again, which
-			// leaves a pending Pod rather than a failing one.
-			switch {
-			case !migKnown:
-			case migEnabled:
+			// nodes but no compute-instance configuration finds NO device at all, so a card in MIG
+			// mode can serve neither a whole-card nor a logically sliced request.
+			if migEnabled {
 				status.PhysicalSliced = migCard.sliced
-			default:
+			} else {
 				// DCU logical slicing via hy-virtual (vdev.conf + DTK/hyhal); the per-accelerator slice
 				// count is capped at 4 (product default). The vdev.conf assigns each slice a disjoint CU
 				// bitmask, so compute is spatially partitioned (the sum stays within one accelerator),
