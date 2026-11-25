@@ -5,6 +5,8 @@ package hygon
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -176,4 +178,173 @@ func TestListInstancesAcrossCards(t *testing.T) {
 			assert.Equal(t, c.wantSkipped, skipped)
 		})
 	}
+}
+
+func TestFindGpuInstanceByID(t *testing.T) {
+	profiles := []migProfile{{id: 3, slices: 1}}
+
+	cases := []struct {
+		name     string
+		handles  []int
+		infoByID map[int]struct {
+			info dmi.GpuInstanceInfo
+			ret  dmi.Return
+		}
+		targetGiID uint32
+		wantFound  bool
+		wantErr    dmi.Return
+	}{
+		{
+			name:    "returns error when GetInfo fails instead of reporting absent",
+			handles: []int{1},
+			infoByID: map[int]struct {
+				info dmi.GpuInstanceInfo
+				ret  dmi.Return
+			}{
+				1: {ret: dmi.ERROR_GPU_IS_LOST},
+			},
+			targetGiID: 7,
+			wantErr:    dmi.ERROR_GPU_IS_LOST,
+		},
+		{
+			name:    "finds matching GPU instance",
+			handles: []int{1, 2},
+			infoByID: map[int]struct {
+				info dmi.GpuInstanceInfo
+				ret  dmi.Return
+			}{
+				1: {info: dmi.GpuInstanceInfo{Id: 3}, ret: dmi.SUCCESS},
+				2: {info: dmi.GpuInstanceInfo{Id: 7}, ret: dmi.SUCCESS},
+			},
+			targetGiID: 7,
+			wantFound:  true,
+		},
+		{
+			name:    "reports absent cleanly when all handles succeed and none match",
+			handles: []int{1},
+			infoByID: map[int]struct {
+				info dmi.GpuInstanceInfo
+				ret  dmi.Return
+			}{
+				1: {info: dmi.GpuInstanceInfo{Id: 3}, ret: dmi.SUCCESS},
+			},
+			targetGiID: 7,
+			wantFound:  false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, _, found, err := findGpuInstanceByID(
+				"0000:01:00.0",
+				profiles,
+				c.targetGiID,
+				func(uint32) ([]int, dmi.Return) { return c.handles, dmi.SUCCESS },
+				func(h int) (dmi.GpuInstanceInfo, dmi.Return) {
+					entry := c.infoByID[h]
+					return entry.info, entry.ret
+				},
+			)
+			if c.wantErr != dmi.SUCCESS {
+				require.ErrorIs(t, err, c.wantErr)
+				assert.False(t, found)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.wantFound, found)
+		})
+	}
+}
+
+func TestListCardInstancesUsesDeviceIndexAndIsolatesMissingConfig(t *testing.T) {
+	root := t.TempDir()
+	restore := migConfigDir
+	migConfigDir = root
+	t.Cleanup(func() { migConfigDir = restore })
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "ci"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dev0"), []byte("0000:01:00.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dev2"), []byte("0000:03:00.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dev3"), []byte("   \n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "ci", "dev0gi1ci0.conf"), []byte("mig_uuid: MIG-0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "ci", "dev2gi2ci0.conf"), []byte("other: val\n"), 0o600))
+
+	// When DMI compacts handles after card 1 drops, slot 1 reports dev.GetIndex() == 2 and must
+	// resolve dev2 ("0000:03:00.0") rather than dev1.
+	got, err := listCardInstances(
+		1,
+		func() (uint32, dmi.Return) { return 2, dmi.SUCCESS },
+		migCardPciBusID,
+		func(pciBusID string) ([]migInstance, error) {
+			assert.Equal(t, "0000:03:00.0", pciBusID)
+			return []migInstance{{GiID: 9}}, nil
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, []migLiveInstance{{PciBusID: "0000:03:00.0", Instance: migInstance{GiID: 9}}}, got)
+
+	// Missing dev<idx>, empty dev<idx>, missing CI .conf, and empty-identity CI .conf are all
+	// isolated per card by listInstancesAcrossCards so healthy siblings still list.
+	var skipped []int
+	listed, err := listInstancesAcrossCards(
+		5,
+		func(slot int) ([]migLiveInstance, error) {
+			switch slot {
+			case 0:
+				return listCardInstances(0, func() (uint32, dmi.Return) { return 0, dmi.SUCCESS }, migCardPciBusID,
+					func(string) ([]migInstance, error) {
+						id, path, err := readMigInstanceIdentity(0, 1, 0)
+						if err != nil {
+							return nil, err
+						}
+						return []migInstance{{GiID: 1, UUID: id, ConfPath: path}}, nil
+					})
+			case 1:
+				// Missing dev1 file.
+				return listCardInstances(1, func() (uint32, dmi.Return) { return 1, dmi.SUCCESS }, migCardPciBusID, nil)
+			case 2:
+				// CI .conf exists but carries no mig_uuid.
+				return listCardInstances(2, func() (uint32, dmi.Return) { return 2, dmi.SUCCESS }, migCardPciBusID,
+					func(string) ([]migInstance, error) {
+						_, _, err := readMigInstanceIdentity(2, 2, 0)
+						return nil, err
+					})
+			case 3:
+				// Empty dev3 file.
+				return listCardInstances(3, func() (uint32, dmi.Return) { return 3, dmi.SUCCESS }, migCardPciBusID, nil)
+			case 4:
+				// Missing CI .conf file.
+				return listCardInstances(4, func() (uint32, dmi.Return) { return 0, dmi.SUCCESS }, migCardPciBusID,
+					func(string) ([]migInstance, error) {
+						_, _, err := readMigInstanceIdentity(0, 99, 0)
+						return nil, err
+					})
+			default:
+				return nil, nil
+			}
+		},
+		isUnqueryableError,
+		func(i int, _ error) { skipped = append(skipped, i) },
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []int{1, 2, 3, 4}, skipped)
+	require.Len(t, listed, 1)
+	assert.Equal(t, "0000:01:00.0", listed[0].PciBusID)
+	assert.Equal(t, "MIG-0", listed[0].Instance.UUID)
+
+	// Permission errors on registry files are NOT card-unqueryable and must abort listing.
+	permErr := wrapMigConfigReadError("read registry", os.ErrPermission)
+	assert.False(t, isUnqueryableError(permErr))
+	_, err = listInstancesAcrossCards(
+		2,
+		func(slot int) ([]migLiveInstance, error) {
+			if slot == 1 {
+				return nil, permErr
+			}
+			return listed, nil
+		},
+		isUnqueryableError,
+		nil,
+	)
+	require.ErrorIs(t, err, os.ErrPermission)
 }
