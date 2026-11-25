@@ -616,9 +616,9 @@ func TestPartitionLedgerIsManufacturerQualified(t *testing.T) {
 }
 
 // TestAcceleratorDetailChanged pins the Devices-watch predicate: it fires on anything the
-// desired capacity is computed from — the per-card population split, the logical count, the
-// profile inventory, and now the runtime ledger the per-profile key is derived from — and stays
-// quiet on churn that cannot move a capacity value, such as a health flip.
+// desired capacity is computed from — the per-card population split, card health flips, the
+// logical count, the profile inventory, and the runtime ledger — and stays quiet on churn that
+// cannot move a capacity value.
 func TestAcceleratorDetailChanged(t *testing.T) {
 	const node = "node-w"
 	base := devicesWithGroups(node,
@@ -628,7 +628,20 @@ func TestAcceleratorDetailChanged(t *testing.T) {
 	health := devicesWithGroups(node,
 		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", logicalCard("0", 128, true), logicalCard("1", 128, true)))
 	health.Spec.Groups[0].Accelerators[0].Status.Unhealthy = true
-	assert.False(t, acceleratorDetailChanged(base, health), "a health flip cannot move a capacity value")
+	assert.True(t, acceleratorDetailChanged(base, health), "a health flip changes capacity and must fire")
+
+	// Live Pod draining off an unhealthy card must fire so its reserved capacity shrinks back to zero.
+	unhealthyOccupied := health.DeepCopy()
+	unhealthyOccupied.Status.Groups = []workercore.DevicesAllocationGroup{{
+		ID:           "a10g",
+		Manufacturer: nodefeature.ManufacturerNVIDIA,
+		Accelerators: []workercore.AcceleratorAllocation{
+			{ID: "0", Mode: workercore.DeviceAllocationModeSliced, Remaining: nodefeature.ResourceMaxUnits / 2, AllocatedSlices: 1},
+			{ID: "1", Mode: workercore.DeviceAllocationModeNone, Remaining: nodefeature.ResourceMaxUnits},
+		},
+	}}
+	assert.True(t, acceleratorDetailChanged(unhealthyOccupied, health),
+		"live workload draining off an unhealthy card must fire")
 
 	toMig := devicesWithGroups(node,
 		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", logicalCard("0", 128, true), migCard("1", 7)))
@@ -953,4 +966,186 @@ func TestNodeCapacityReconciler_Reconcile(t *testing.T) {
 		_, present := get(cli).Status.Capacity[nvidiaSlicedUnits]
 		assert.False(t, present, "unmanaged node not patched")
 	})
+}
+
+func TestDesiredAcceleratorCapacity_UnhealthyCards(t *testing.T) {
+	const (
+		node = "node-u"
+		d    = int64(nodefeature.ResourceMaxUnits)
+	)
+	profileKey := string(nodefeature.GetAcceleratablePartitionedProfileResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb"))
+
+	slicedNode := withSlicedPool(acceleratableNode(node, "nvidia-a10g", "2", "24Gi", true),
+		nodefeature.ManufacturerNVIDIA, 2*128)
+	partNode := withPartitionedPool(acceleratableNode(node, "nvidia-a100", "2", "80Gi", true),
+		nodefeature.ManufacturerNVIDIA, 14)
+
+	mkSlicedDevs := func(status []workercore.AcceleratorAllocation) *workercore.Devices {
+		c0 := logicalCard("0", 128, true)
+		c1 := logicalCard("1", 128, true)
+		c1.Status.Unhealthy = true
+		devs := devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", c0, c1))
+		if status != nil {
+			devs.Status.Groups = []workercore.DevicesAllocationGroup{{
+				ID:           "a10g",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: status,
+			}}
+		}
+		return devs
+	}
+
+	mkPartDevs := func(status []workercore.AcceleratorAllocation) *workercore.Devices {
+		p0 := migCard("0", 7)
+		p0.Status.PhysicalSliced.Profiles = []workercore.AcceleratorPhysicalSlicedProfile{{Name: "1g.10gb", Count: 7}}
+		p1 := migCard("1", 7)
+		p1.Status.PhysicalSliced.Profiles = []workercore.AcceleratorPhysicalSlicedProfile{{Name: "1g.10gb", Count: 7}}
+		p1.Status.Unhealthy = true
+		devs := devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a100", p0, p1))
+		devs.Status.Groups = []workercore.DevicesAllocationGroup{{
+			ID:           "a100",
+			Manufacturer: nodefeature.ManufacturerNVIDIA,
+			Accelerators: status,
+		}}
+		return devs
+	}
+
+	cases := []struct {
+		name string
+		node *core.Node
+		devs *workercore.Devices
+		want map[string]int64
+	}{
+		{
+			name: "idle unhealthy sliced card contributes zero",
+			node: slicedNode,
+			devs: mkSlicedDevs(nil),
+			want: map[string]int64{
+				string(nvidiaSlicedUnits):  d,
+				string(nvidiaSlicedCores):  128 * 100,
+				string(nvidiaSlicedMemPct): 100,
+				string(nvidiaSlicedMemMib): a10gMib,
+			},
+		},
+		{
+			name: "occupied unhealthy sliced card preserves live usage only",
+			node: slicedNode,
+			devs: mkSlicedDevs([]workercore.AcceleratorAllocation{
+				{ID: "0", Mode: workercore.DeviceAllocationModeNone, Remaining: nodefeature.ResourceMaxUnits},
+				{ID: "1", Mode: workercore.DeviceAllocationModeSliced, Remaining: nodefeature.ResourceMaxUnits / 2, AllocatedSlices: 1},
+			}),
+			want: map[string]int64{
+				string(nvidiaSlicedUnits):  d + d/2,
+				string(nvidiaSlicedCores):  128*100 + 100,
+				string(nvidiaSlicedMemPct): 150,
+				string(nvidiaSlicedMemMib): a10gMib + a10gMib/2,
+			},
+		},
+		{
+			name: "malformed negative Remaining and oversized AllocatedSlices are clamped",
+			node: slicedNode,
+			devs: mkSlicedDevs([]workercore.AcceleratorAllocation{
+				{ID: "0", Mode: workercore.DeviceAllocationModeNone, Remaining: nodefeature.ResourceMaxUnits},
+				{ID: "1", Mode: workercore.DeviceAllocationModeSliced, Remaining: -500000, AllocatedSlices: 999},
+			}),
+			want: map[string]int64{
+				string(nvidiaSlicedUnits):  2 * d,
+				string(nvidiaSlicedCores):  2 * 128 * 100,
+				string(nvidiaSlicedMemPct): 200,
+				string(nvidiaSlicedMemMib): 2 * a10gMib,
+			},
+		},
+		{
+			name: "negative AllocatedSlices with full Remaining contributes zero",
+			node: slicedNode,
+			devs: mkSlicedDevs([]workercore.AcceleratorAllocation{
+				{ID: "0", Mode: workercore.DeviceAllocationModeNone, Remaining: nodefeature.ResourceMaxUnits},
+				{ID: "1", Mode: workercore.DeviceAllocationModeSliced, Remaining: nodefeature.ResourceMaxUnits, AllocatedSlices: -1},
+			}),
+			want: map[string]int64{
+				string(nvidiaSlicedUnits):  d,
+				string(nvidiaSlicedCores):  128 * 100,
+				string(nvidiaSlicedMemPct): 100,
+				string(nvidiaSlicedMemMib): a10gMib,
+			},
+		},
+		{
+			name: "occupied unhealthy partitioned card preserves live usage and allocated profiles",
+			node: partNode,
+			devs: mkPartDevs([]workercore.AcceleratorAllocation{
+				{
+					ID:                "0",
+					Mode:              workercore.DeviceAllocationModeNone,
+					Remaining:         nodefeature.ResourceMaxUnits,
+					RemainingProfiles: []workercore.AcceleratorProfileCount{{Name: "1g.10gb", Count: 7}},
+				},
+				{
+					ID:                "1",
+					Mode:              workercore.DeviceAllocationModePartitioned,
+					Remaining:         600000,
+					AllocatedProfiles: []workercore.AcceleratorProfileCount{{Name: "1g.10gb", Count: 5}},
+					RemainingProfiles: []workercore.AcceleratorProfileCount{{Name: "1g.10gb", Count: 2}},
+				},
+			}),
+			want: map[string]int64{
+				string(nvidiaPartitionedUnits): d + 1000000,
+				profileKey:                     12,
+			},
+		},
+		{
+			name: "idle unhealthy partitioned card contributes zero",
+			node: partNode,
+			devs: mkPartDevs([]workercore.AcceleratorAllocation{
+				{
+					ID:                "0",
+					Mode:              workercore.DeviceAllocationModeNone,
+					Remaining:         nodefeature.ResourceMaxUnits,
+					RemainingProfiles: []workercore.AcceleratorProfileCount{{Name: "1g.10gb", Count: 7}},
+				},
+				{
+					ID:        "1",
+					Mode:      workercore.DeviceAllocationModeNone,
+					Remaining: nodefeature.ResourceMaxUnits,
+				},
+			}),
+			want: map[string]int64{
+				string(nvidiaPartitionedUnits): d,
+				profileKey:                     7,
+			},
+		},
+		{
+			name: "unhealthy partitioned card held in Exclusive mode leaks no partitioned units",
+			node: partNode,
+			devs: mkPartDevs([]workercore.AcceleratorAllocation{
+				{
+					ID:                "0",
+					Mode:              workercore.DeviceAllocationModeNone,
+					Remaining:         nodefeature.ResourceMaxUnits,
+					RemainingProfiles: []workercore.AcceleratorProfileCount{{Name: "1g.10gb", Count: 7}},
+				},
+				{
+					ID:                "1",
+					Mode:              workercore.DeviceAllocationModeExclusive,
+					Remaining:         0,
+					AllocatedProfiles: []workercore.AcceleratorProfileCount{{Name: "1g.10gb", Count: -2}},
+				},
+			}),
+			want: map[string]int64{
+				string(nvidiaPartitionedUnits): d,
+				profileKey:                     7,
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := desiredAcceleratorCapacity(c.node, c.devs)
+			assert.Len(t, got, len(c.want))
+			for name, wantVal := range c.want {
+				q, ok := got[core.ResourceName(name)]
+				require.Truef(t, ok, "missing %s", name)
+				assert.Equalf(t, wantVal, q.Value(), "%s value", name)
+			}
+		})
+	}
 }

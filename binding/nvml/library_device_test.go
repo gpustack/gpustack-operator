@@ -1,11 +1,19 @@
 package nvml
 
 import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gpustack.ai/gpustack/binding"
 )
 
 // The whole reason a v3 read has to be cross-checked is that the two struct versions are the same
@@ -155,4 +163,151 @@ func TestV2LayoutMisreadAtV3Offsets(t *testing.T) {
 	odd := asV3Buffer(v2)
 	assert.NotEmpty(t, odd.GetName(),
 		"one MiB more and the misread produces a name, which is why a test on the name alone is not enough")
+}
+
+type fakeNVMLLibrary struct {
+	symbols map[string]error
+}
+
+func (f *fakeNVMLLibrary) Load() error   { return nil }
+func (f *fakeNVMLLibrary) Unload() error { return nil }
+func (f *fakeNVMLLibrary) Path() string  { return "fake.so" }
+func (f *fakeNVMLLibrary) Lookup(sym string) error {
+	if err, ok := f.symbols[sym]; ok {
+		return err
+	}
+	return errors.New("symbol not found")
+}
+
+func TestCreateInstance_DestroysOnGetInfoFailure(t *testing.T) {
+	if soPath := os.Getenv("GPUSTACK_TEST_NVML_CREATE_SO"); soPath != "" {
+		so := binding.NewLibrary([]string{soPath})
+		require.NoError(t, so.Load())
+		dev := Device{so: so}
+		gi := GpuInstance{so: so}
+
+		_, ret := dev.CreateGpuInstance(&GpuInstanceProfileInfo{Id: 1})
+		assert.Equal(t, ERROR_GPU_IS_LOST, ret)
+		_, ret = dev.CreateGpuInstanceWithPlacement(&GpuInstanceProfileInfo{Id: 2}, &GpuInstancePlacement{Start: 0, Size: 1})
+		assert.Equal(t, ERROR_GPU_IS_LOST, ret)
+		_, ret = gi.CreateComputeInstance(&ComputeInstanceProfileInfo{Id: 3})
+		assert.Equal(t, ERROR_GPU_IS_LOST, ret)
+		_, ret = gi.CreateComputeInstanceWithPlacement(&ComputeInstanceProfileInfo{Id: 4}, &ComputeInstancePlacement{Start: 0, Size: 1})
+		assert.Equal(t, ERROR_GPU_IS_LOST, ret)
+		// Profile 5 exercises _v2 returning ERROR_NOT_SUPPORTED and falling back to v1 without destroying.
+		ci, ret := gi.CreateComputeInstance(&ComputeInstanceProfileInfo{Id: 5})
+		assert.Equal(t, SUCCESS, ret)
+		assert.Equal(t, uint32(5), ci.computeInstanceId)
+		return
+	}
+
+	t.Run("missing GetInfo symbol fails before calling Create", func(t *testing.T) {
+		lib := &fakeNVMLLibrary{
+			symbols: map[string]error{
+				"nvmlDeviceCreateGpuInstance":                       nil,
+				"nvmlDeviceCreateGpuInstanceWithPlacement":          nil,
+				"nvmlGpuInstanceCreateComputeInstance":              nil,
+				"nvmlGpuInstanceCreateComputeInstanceWithPlacement": nil,
+			},
+		}
+		dev := Device{so: lib}
+		gi := GpuInstance{so: lib}
+
+		_, ret := dev.CreateGpuInstance(&GpuInstanceProfileInfo{Id: 1})
+		assert.Equal(t, ERROR_FUNCTION_NOT_FOUND, ret)
+		_, ret = dev.CreateGpuInstanceWithPlacement(&GpuInstanceProfileInfo{Id: 2}, &GpuInstancePlacement{})
+		assert.Equal(t, ERROR_FUNCTION_NOT_FOUND, ret)
+		_, ret = gi.CreateComputeInstance(&ComputeInstanceProfileInfo{Id: 3})
+		assert.Equal(t, ERROR_FUNCTION_NOT_FOUND, ret)
+		_, ret = gi.CreateComputeInstanceWithPlacement(&ComputeInstanceProfileInfo{Id: 4}, &ComputeInstancePlacement{})
+		assert.Equal(t, ERROR_FUNCTION_NOT_FOUND, ret)
+	})
+
+	t.Run("destroys created GI and CI handles when GetInfo fails", func(t *testing.T) {
+		dir := t.TempDir()
+		srcPath := filepath.Join(dir, "fixture.c")
+		soPath := filepath.Join(dir, "libnvml_create_test.so")
+		logPath := filepath.Join(dir, "destroy.log")
+
+		src := fmt.Sprintf(`
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static void record_destroy(const char *kind, void *handle) {
+	const char *path = getenv("GPUSTACK_TEST_DESTROY_LOG");
+	if (!path) return;
+	FILE *f = fopen(path, "a");
+	if (!f) return;
+	fprintf(f, "%%s:%%lu\n", kind, (unsigned long)(uintptr_t)handle);
+	fclose(f);
+}
+
+int nvmlDeviceCreateGpuInstance(void *dev, unsigned int profileId, void **gi) {
+	*gi = (void *)(uintptr_t)profileId;
+	return 0;
+}
+int nvmlDeviceCreateGpuInstanceWithPlacement(void *dev, unsigned int profileId, void *placement, void **gi) {
+	*gi = (void *)(uintptr_t)profileId;
+	return 0;
+}
+int nvmlGpuInstanceGetInfo(void *gi, void *info) {
+	return %d;
+}
+int nvmlGpuInstanceDestroy(void *gi) {
+	record_destroy("gi", gi);
+	return 0;
+}
+int nvmlGpuInstanceCreateComputeInstance(void *gi, unsigned int profileId, void **ci) {
+	*ci = (void *)(uintptr_t)profileId;
+	return 0;
+}
+int nvmlGpuInstanceCreateComputeInstanceWithPlacement(void *gi, unsigned int profileId, void *placement, void **ci) {
+	*ci = (void *)(uintptr_t)profileId;
+	return 0;
+}
+int nvmlComputeInstanceGetInfo_v2(void *ci, void *info) {
+	if ((uintptr_t)ci == 5) {
+		return %d;
+	}
+	return %d;
+}
+int nvmlComputeInstanceGetInfo(void *ci, void *info) {
+	if ((uintptr_t)ci == 5 && info) {
+		struct { void *dev; void *gi; unsigned int id; unsigned int profileId; } *out = info;
+		out->id = 5;
+		out->profileId = 5;
+		return 0;
+	}
+	return %d;
+}
+int nvmlComputeInstanceDestroy(void *ci) {
+	record_destroy("ci", ci);
+	return 0;
+}
+`, int(ERROR_GPU_IS_LOST), int(ERROR_NOT_SUPPORTED), int(ERROR_GPU_IS_LOST), int(ERROR_GPU_IS_LOST))
+
+		require.NoError(t, os.WriteFile(srcPath, []byte(src), 0o600))
+		args := []string{}
+		if runtime.GOOS == "darwin" {
+			args = append(args, "-dynamiclib")
+		} else {
+			args = append(args, "-shared", "-fPIC")
+		}
+		args = append(args, srcPath, "-o", soPath)
+		out, err := exec.Command("cc", args...).CombinedOutput()
+		require.NoError(t, err, "%s", out)
+
+		cmd := exec.Command(os.Args[0], "-test.run=^TestCreateInstance_DestroysOnGetInfoFailure$")
+		cmd.Env = append(os.Environ(),
+			"GPUSTACK_TEST_NVML_CREATE_SO="+soPath,
+			"GPUSTACK_TEST_DESTROY_LOG="+logPath,
+		)
+		out, err = cmd.CombinedOutput()
+		require.NoError(t, err, "%s", out)
+
+		destroyed, err := os.ReadFile(logPath)
+		require.NoError(t, err)
+		assert.Equal(t, "gi:1\ngi:2\nci:3\nci:4\n", string(destroyed))
+	})
 }

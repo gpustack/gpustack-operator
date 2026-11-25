@@ -1059,6 +1059,15 @@ func getAcceleratorResources(devices []workercore.Devices, acceleratorKey string
 				}
 
 				nodeCards++
+				logicallySliceable := device.IsLogicallySliceable(st)
+				if logicallySliceable {
+					nodeLogicalCards++
+				}
+				// An unhealthy card remains part of installed Capacity, but offers zero
+				// Remaining availability and cannot satisfy OnceMaxRequest.
+				if st.Unhealthy {
+					continue
+				}
 				rem := int64(a.Remaining)
 				free := rem >= d
 				if free {
@@ -1075,10 +1084,9 @@ func getAcceleratorResources(devices []workercore.Devices, acceleratorKey string
 				// capability is a whole card and nothing else, and the device plugin, the node
 				// capacity and the AdmissionCheck all gate on the same predicate — counting it
 				// here would advertise a slice no layer below can ever place.
-				if !device.IsLogicallySliceable(st) {
+				if !logicallySliceable {
 					continue
 				}
-				nodeLogicalCards++
 				// A card holding its full count of slices takes no more whatever memory it has
 				// left, so it offers no room to the remaining or the largest single request.
 				if (free || a.Mode == workercore.DeviceAllocationModeSliced) &&
@@ -1168,14 +1176,16 @@ func (in *poolPartitionView) addNode(dev *workercore.Devices, acceleratorKey str
 // when the node's status carries no row for it yet.
 func (in *poolPartitionView) addCard(st workercore.AcceleratorStatus, a *workercore.AcceleratorAllocation) {
 	in.capacity += int64(st.PhysicalSliced.Count)
-	cardRemaining := remainingPartitionInstances(st, a)
-	in.remaining += cardRemaining
-	// A partition request is validated to be exactly one instance on exactly one card, on both
-	// ingress paths, so the only value that can ever be requested at once is 1: report 1 while any
-	// card can still host an instance, and 0 when none can. Reporting the freest card's count
-	// instead would advertise a request every ingress path rejects.
-	if cardRemaining > 0 {
-		in.onceMaxRequest = 1
+	if !st.Unhealthy {
+		cardRemaining := remainingPartitionInstances(st, a)
+		in.remaining += cardRemaining
+		// A partition request is validated to be exactly one instance on exactly one card, on both
+		// ingress paths, so the only value that can ever be requested at once is 1: report 1 while any
+		// card can still host an instance, and 0 when none can. Reporting the freest card's count
+		// instead would advertise a request every ingress path rejects.
+		if cardRemaining > 0 {
+			in.onceMaxRequest = 1
+		}
 	}
 	in.addProfiles(st, a)
 }
@@ -1188,9 +1198,9 @@ func (in *poolPartitionView) addCard(st workercore.AcceleratorStatus, a *workerc
 // but currently full" from "not offered at all", and the key set stops changing on every carve and
 // release. Allocated needs no such padding — an absent profile holds nothing.
 //
-// A card with no usable ledger falls back to the capability's static per-profile ceiling. That
-// over-states a card that is in fact occupied, which converges as soon as the ledger reports,
-// whereas reporting zero would read as a full card on a working node.
+// An unhealthy card registers its offered profiles at zero remaining and folds only its live
+// AllocatedProfiles. A healthy card with no usable ledger falls back to the capability's static
+// per-profile ceiling.
 func (in *poolPartitionView) addProfiles(st workercore.AcceleratorStatus, a *workercore.AcceleratorAllocation) {
 	ready := device.PartitionLedgerReady(a)
 	for i := range st.PhysicalSliced.Profiles {
@@ -1198,18 +1208,24 @@ func (in *poolPartitionView) addProfiles(st workercore.AcceleratorStatus, a *wor
 		if _, seen := in.remainingProfiles[p.Name]; !seen {
 			in.remainingProfiles[p.Name] = 0
 		}
-		if !ready {
+		if !st.Unhealthy && !ready {
 			in.remainingProfiles[p.Name] += p.Count
 		}
 	}
-	if !ready {
+	if a != nil {
+		for i := range a.AllocatedProfiles {
+			if c := a.AllocatedProfiles[i].Count; c > 0 {
+				in.allocatedProfiles[a.AllocatedProfiles[i].Name] += c
+			}
+		}
+	}
+	if st.Unhealthy || !ready {
 		return
 	}
-	for i := range a.AllocatedProfiles {
-		in.allocatedProfiles[a.AllocatedProfiles[i].Name] += a.AllocatedProfiles[i].Count
-	}
 	for i := range a.RemainingProfiles {
-		in.remainingProfiles[a.RemainingProfiles[i].Name] += a.RemainingProfiles[i].Count
+		if c := a.RemainingProfiles[i].Count; c > 0 {
+			in.remainingProfiles[a.RemainingProfiles[i].Name] += c
+		}
 	}
 }
 

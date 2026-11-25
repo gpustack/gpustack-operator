@@ -774,6 +774,25 @@ func TestDevicesReconciler_PhysicalLedgerFold(t *testing.T) {
 		assert.Equal(t, int32(1), recordedFree, "recorded instance leaves one 3g.20gb slot free")
 		assert.Equal(t, int32(2), missingFree, "unrecorded orphan overstates free to the empty ceiling")
 	})
+
+	t.Run("unhealthy MIG card reports zero remaining profiles while keeping live allocated", func(t *testing.T) {
+		idleDevs := physicalAndLogicalDevices(nodeName)
+		idleDevs.Spec.Groups[0].Accelerators[0].Status.Unhealthy = true
+		idleCapture := &statusCapture{}
+		reconcileNode(t, newReconciler(t, nodeName, idleCapture, idleDevs), nodeName)
+		idleMig := acceleratorByID(t, idleCapture.last, "mig-0")
+		assert.Nil(t, idleMig.AllocatedProfiles)
+		assert.Nil(t, idleMig.RemainingProfiles)
+
+		liveDevs := physicalAndLogicalDevices(nodeName)
+		liveDevs.Spec.Groups[0].Accelerators[0].Status.Unhealthy = true
+		pod := physicalSlicePod(t, "p-3g", "grp-0", "mig-0", "3g.20gb", nodeName, pl(0, 4))
+		liveCapture := &statusCapture{}
+		reconcileNode(t, newReconciler(t, nodeName, liveCapture, liveDevs, pod), nodeName)
+		liveMig := acceleratorByID(t, liveCapture.last, "mig-0")
+		assert.Equal(t, []workercore.AcceleratorProfileCount{{Name: "3g.20gb", Count: 1}}, liveMig.AllocatedProfiles)
+		assert.Nil(t, liveMig.RemainingProfiles)
+	})
 }
 
 // TestDevicesReconciler_ReconcileNotifier_Unsubscribes keeps the broadcast set from growing once per

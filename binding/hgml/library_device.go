@@ -400,7 +400,7 @@ func (l Device) CreateGpuInstance(info *GpuInstanceProfileInfo) (GpuInstance, Re
 		return GpuInstance{}, ERROR_INVALID_ARGUMENT
 	}
 
-	if l.so.Lookup("hgmlDeviceCreateGpuInstance") != nil {
+	if l.so.Lookup("hgmlDeviceCreateGpuInstance") != nil || l.so.Lookup("hgmlGpuInstanceGetInfo") != nil {
 		return GpuInstance{}, ERROR_FUNCTION_NOT_FOUND
 	}
 	var gpuInstance hgmlGpuInstance
@@ -409,23 +409,7 @@ func (l Device) CreateGpuInstance(info *GpuInstanceProfileInfo) (GpuInstance, Re
 		return GpuInstance{}, ret
 	}
 
-	if l.so.Lookup("hgmlGpuInstanceGetInfo") != nil {
-		return GpuInstance{}, ERROR_FUNCTION_NOT_FOUND
-	}
-	var gpuInstanceInfo hgmlGpuInstanceInfo
-	ret = hgmlGpuInstanceGetInfo(gpuInstance, &gpuInstanceInfo)
-	if !ret.IsSuccess() {
-		return GpuInstance{}, ret
-	}
-
-	return GpuInstance{
-		device:               l.handle,
-		gpuInstanceId:        gpuInstanceInfo.Id,
-		gpuInstanceProfileId: gpuInstanceInfo.ProfileId,
-		gpuInstancePlacement: gpuInstanceInfo.Placement,
-		gpuInstance:          gpuInstance,
-		so:                   l.so,
-	}, ret
+	return l.newGpuInstance(gpuInstance)
 }
 
 // CreateGpuInstanceWithPlacement creates a GPU instance on the device using the specified GPU instance profile information and placement,
@@ -435,7 +419,7 @@ func (l Device) CreateGpuInstanceWithPlacement(info *GpuInstanceProfileInfo, pla
 		return GpuInstance{}, ERROR_INVALID_ARGUMENT
 	}
 
-	if l.so.Lookup("hgmlDeviceCreateGpuInstanceWithPlacement") != nil {
+	if l.so.Lookup("hgmlDeviceCreateGpuInstanceWithPlacement") != nil || l.so.Lookup("hgmlGpuInstanceGetInfo") != nil {
 		return GpuInstance{}, ERROR_FUNCTION_NOT_FOUND
 	}
 	var gpuInstance hgmlGpuInstance
@@ -444,12 +428,16 @@ func (l Device) CreateGpuInstanceWithPlacement(info *GpuInstanceProfileInfo, pla
 		return GpuInstance{}, ret
 	}
 
-	if l.so.Lookup("hgmlGpuInstanceGetInfo") != nil {
-		return GpuInstance{}, ERROR_FUNCTION_NOT_FOUND
-	}
+	return l.newGpuInstance(gpuInstance)
+}
+
+func (l Device) newGpuInstance(gpuInstance hgmlGpuInstance) (GpuInstance, Return) {
 	var gpuInstanceInfo hgmlGpuInstanceInfo
-	ret = hgmlGpuInstanceGetInfo(gpuInstance, &gpuInstanceInfo)
+	ret := hgmlGpuInstanceGetInfo(gpuInstance, &gpuInstanceInfo)
 	if !ret.IsSuccess() {
+		if l.so.Lookup("hgmlGpuInstanceDestroy") == nil {
+			_ = hgmlGpuInstanceDestroy(gpuInstance)
+		}
 		return GpuInstance{}, ret
 	}
 
@@ -698,7 +686,7 @@ func (l GpuInstance) CreateComputeInstance(info *ComputeInstanceProfileInfo) (Co
 		return ComputeInstance{}, ERROR_INVALID_ARGUMENT
 	}
 
-	if l.so.Lookup("hgmlGpuInstanceCreateComputeInstance") != nil {
+	if l.so.Lookup("hgmlGpuInstanceCreateComputeInstance") != nil || !l.hasComputeInstanceGetInfo() {
 		return ComputeInstance{}, ERROR_FUNCTION_NOT_FOUND
 	}
 	var computeInstance hgmlComputeInstance
@@ -707,23 +695,7 @@ func (l GpuInstance) CreateComputeInstance(info *ComputeInstanceProfileInfo) (Co
 		return ComputeInstance{}, ret
 	}
 
-	var computeInstanceInfo hgmlComputeInstanceInfo
-	if l.so.Lookup("hgmlComputeInstanceGetInfo_v2") == nil {
-		ret = hgmlComputeInstanceGetInfo_v2(computeInstance, &computeInstanceInfo)
-	} else {
-		ret = hgmlComputeInstanceGetInfo(computeInstance, &computeInstanceInfo)
-	}
-	if !ret.IsSuccess() {
-		return ComputeInstance{}, ret
-	}
-
-	return ComputeInstance{
-		GpuInstance:              l,
-		computeInstanceId:        computeInstanceInfo.Id,
-		computeInstanceProfileId: computeInstanceInfo.ProfileId,
-		computeInstancePlacement: computeInstanceInfo.Placement,
-		computeInstance:          computeInstance,
-	}, ret
+	return l.newComputeInstance(computeInstance)
 }
 
 // CreateComputeInstanceWithPlacement creates a compute instance associated with the GPU instance using the specified profile information and placement.
@@ -732,7 +704,7 @@ func (l GpuInstance) CreateComputeInstanceWithPlacement(info *ComputeInstancePro
 		return ComputeInstance{}, ERROR_INVALID_ARGUMENT
 	}
 
-	if l.so.Lookup("hgmlGpuInstanceCreateComputeInstanceWithPlacement") != nil {
+	if l.so.Lookup("hgmlGpuInstanceCreateComputeInstanceWithPlacement") != nil || !l.hasComputeInstanceGetInfo() {
 		return ComputeInstance{}, ERROR_FUNCTION_NOT_FOUND
 	}
 	var computeInstance hgmlComputeInstance
@@ -741,13 +713,31 @@ func (l GpuInstance) CreateComputeInstanceWithPlacement(info *ComputeInstancePro
 		return ComputeInstance{}, ret
 	}
 
-	var computeInstanceInfo hgmlComputeInstanceInfo
+	return l.newComputeInstance(computeInstance)
+}
+
+func (l GpuInstance) hasComputeInstanceGetInfo() bool {
+	return l.so.Lookup("hgmlComputeInstanceGetInfo_v2") == nil || l.so.Lookup("hgmlComputeInstanceGetInfo") == nil
+}
+
+func (l GpuInstance) newComputeInstance(computeInstance hgmlComputeInstance) (ComputeInstance, Return) {
+	var (
+		computeInstanceInfo hgmlComputeInstanceInfo
+		ret                 Return
+	)
+	hasV1 := l.so.Lookup("hgmlComputeInstanceGetInfo") == nil
 	if l.so.Lookup("hgmlComputeInstanceGetInfo_v2") == nil {
 		ret = hgmlComputeInstanceGetInfo_v2(computeInstance, &computeInstanceInfo)
+		if hasV1 && entryPointRefused(ret) {
+			ret = hgmlComputeInstanceGetInfo(computeInstance, &computeInstanceInfo)
+		}
 	} else {
 		ret = hgmlComputeInstanceGetInfo(computeInstance, &computeInstanceInfo)
 	}
 	if !ret.IsSuccess() {
+		if l.so.Lookup("hgmlComputeInstanceDestroy") == nil {
+			_ = hgmlComputeInstanceDestroy(computeInstance)
+		}
 		return ComputeInstance{}, ret
 	}
 

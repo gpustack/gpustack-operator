@@ -3,6 +3,8 @@ package worker
 import (
 	"context"
 	"maps"
+	"math"
+	"math/bits"
 	"sort"
 	"strconv"
 	"strings"
@@ -156,6 +158,7 @@ func desiredAcceleratorCapacity(nd *core.Node, devs *workercore.Devices) core.Re
 		memoryMib        int64
 		hasLogical       bool
 		partitionedUnits int64
+		hasPartitioned   bool
 		// profile name → Σ (allocated + remaining) instances over the partitioned cards.
 		partitionProfiles map[string]int64
 	}
@@ -167,10 +170,11 @@ func desiredAcceleratorCapacity(nd *core.Node, devs *workercore.Devices) core.Re
 		}
 		nodeKey := nodefeature.AcceleratableFeatureLabelPrefix + aKey
 		vram := acceleratableCardMemoryMib(nd, nodeKey)
+		ledger := ledgerByGroup[aKey]
 
-		logicalCards, logicalSlices, partitionedCards := acceleratorCards(grp)
-		if logicalCards == 0 && partitionedCards == 0 {
-			// Non-sliceable model: contributes nothing.
+		contrib := groupCapacityContribution(grp, ledger, vram)
+		if !contrib.hasLogical && !contrib.hasPartitioned {
+			// Non-sliceable or all-unhealthy idle model: contributes nothing.
 			continue
 		}
 
@@ -180,23 +184,17 @@ func desiredAcceleratorCapacity(nd *core.Node, devs *workercore.Devices) core.Re
 			t = &tally{}
 			byManufacturer[manufacturer] = t
 		}
-		if logicalCards > 0 {
+		if contrib.hasLogical {
 			t.hasLogical = true
-			t.units += logicalCards * nodefeature.ResourceMaxUnits
-			if grp.AcceleratorSlicedDetail.Logical.CoresPercentageOvercommit {
-				t.cores += logicalSlices * 100
-			} else {
-				t.cores += logicalCards * 100
-			}
-			t.memoryPct += logicalCards * 100
-			t.memoryMib += logicalCards * vram
+			t.units += contrib.units
+			t.cores += contrib.cores
+			t.memoryPct += contrib.memoryPct
+			t.memoryMib += contrib.memoryMib
 		}
-		if partitionedCards > 0 {
-			// A partitioned card is worth a whole card's units, exactly as a logically
-			// sliceable one is: the two ".units" keys value a card identically and differ
-			// only in which cards they count.
-			t.partitionedUnits += partitionedCards * nodefeature.ResourceMaxUnits
-			for name, count := range partitionInstancesByProfile(grp, ledgerByGroup[aKey]) {
+		if contrib.hasPartitioned {
+			t.hasPartitioned = true
+			t.partitionedUnits += contrib.partitionedUnits
+			for name, count := range partitionInstancesByProfile(grp, ledger) {
 				if t.partitionProfiles == nil {
 					t.partitionProfiles = make(map[string]int64)
 				}
@@ -215,7 +213,7 @@ func desiredAcceleratorCapacity(nd *core.Node, devs *workercore.Devices) core.Re
 			out[nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(manufacturer)] = *resource.NewQuantity(t.memoryPct, resource.DecimalSI)
 			out[nodefeature.GetAcceleratableSlicedMemoryMibResourceName(manufacturer)] = *resource.NewQuantity(t.memoryMib, resource.DecimalSI)
 		}
-		if t.partitionedUnits == 0 || !poolAdvertised(nd, manufacturer, workercore.DeviceAllocationModePartitioned) {
+		if !t.hasPartitioned || !poolAdvertised(nd, manufacturer, workercore.DeviceAllocationModePartitioned) {
 			continue
 		}
 		out[nodefeature.GetAcceleratablePartitionedUnitsResourceName(manufacturer)] = *resource.NewQuantity(t.partitionedUnits, resource.DecimalSI)
@@ -260,38 +258,130 @@ func devicesGroupsByAcceleratableKey(devs *workercore.Devices) map[string]*worke
 	return out
 }
 
-// acceleratorCards splits a Devices group's cards into the two populations that can never
-// overlap: logical counts the cards offering software slicing, partitioned the cards put into a
-// hardware partitioning mode. logicalSlices is Σ the logical cards' slice counts. A card belongs
-// to at most one population — that is what keeps a card from being counted by both families'
-// capacity keys — and a card offering neither belongs to none.
-func acceleratorCards(g *workercore.DevicesGroup) (logical, logicalSlices, partitioned int64) {
+type groupCapacity struct {
+	hasLogical       bool
+	units            int64
+	cores            int64
+	memoryPct        int64
+	memoryMib        int64
+	hasPartitioned   bool
+	partitionedUnits int64
+}
+
+// groupCapacityContribution computes a Devices group's capacity contribution across its two
+// disjoint populations (logical-sliced and partitioned). Healthy cards contribute their full card
+// capacity; unhealthy cards contribute zero free capacity while still accounting for any live
+// allocations so running Pods on an unhealthy card do not starve healthy siblings.
+func groupCapacityContribution(
+	g *workercore.DevicesGroup,
+	ledger map[string]*workercore.AcceleratorAllocation,
+	vram int64,
+) groupCapacity {
+	const d = int64(nodefeature.ResourceMaxUnits)
+	overcommit := g.AcceleratorSlicedDetail.Logical.CoresPercentageOvercommit
+
+	var out groupCapacity
 	for i := range g.Accelerators {
-		st := g.Accelerators[i].Status
+		acc := &g.Accelerators[i]
+		st := acc.Status
+		alloc := ledger[acc.ID]
+
 		switch {
 		case device.IsPartitioned(st):
-			partitioned++
+			if !st.Unhealthy {
+				out.hasPartitioned = true
+				out.partitionedUnits += d
+				continue
+			}
+			if alloc == nil || alloc.Mode != workercore.DeviceAllocationModePartitioned {
+				continue
+			}
+			usedUnits := liveAllocatedUnits(alloc, d)
+			if usedUnits > 0 || hasPositiveProfileCount(alloc.AllocatedProfiles) {
+				out.hasPartitioned = true
+				out.partitionedUnits += usedUnits
+			}
 		case device.IsLogicallySliceable(st):
-			logical++
-			logicalSlices += int64(st.LogicalSliced.Count)
+			if !st.Unhealthy {
+				out.hasLogical = true
+				out.units += d
+				if overcommit {
+					out.cores += int64(st.LogicalSliced.Count) * 100
+				} else {
+					out.cores += 100
+				}
+				out.memoryPct += 100
+				out.memoryMib += vram
+				continue
+			}
+			if alloc == nil || alloc.Mode != workercore.DeviceAllocationModeSliced {
+				continue
+			}
+			usedUnits := liveAllocatedUnits(alloc, d)
+			if usedUnits == 0 && alloc.AllocatedSlices <= 0 {
+				continue
+			}
+			out.hasLogical = true
+			out.units += usedUnits
+			if overcommit {
+				slices := min(max(alloc.AllocatedSlices, 1), st.LogicalSliced.Count)
+				out.cores += int64(slices) * 100
+			} else {
+				// Devices.Status does not record per-card allocated cores-percentage,
+				// so reserve one card's 100% ceiling for the running slice(s).
+				out.cores += 100
+			}
+			out.memoryPct += ceilMulDiv(usedUnits, 100, d)
+			out.memoryMib += ceilMulDiv(usedUnits, vram, d)
 		}
 	}
-	return logical, logicalSlices, partitioned
+	return out
+}
+
+func liveAllocatedUnits(alloc *workercore.AcceleratorAllocation, maxUnits int64) int64 {
+	if alloc == nil || alloc.Mode == workercore.DeviceAllocationModeNone {
+		return 0
+	}
+	rem := max(int64(alloc.Remaining), 0)
+	return max(maxUnits-rem, 0)
+}
+
+func hasPositiveProfileCount(profiles []workercore.AcceleratorProfileCount) bool {
+	for i := range profiles {
+		if profiles[i].Count > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// ceilMulDiv returns ceil(a*b/d) for non-negative inputs without int64 overflow, capped at b when a >= d.
+func ceilMulDiv(a, b, d int64) int64 {
+	if a <= 0 || b <= 0 || d <= 0 {
+		return 0
+	}
+	if a >= d {
+		return b
+	}
+	hi, lo := bits.Mul64(uint64(a), uint64(b))
+	q, rem := bits.Div64(hi, lo, uint64(d))
+	if rem != 0 {
+		q++
+	}
+	if q > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(q)
 }
 
 // partitionInstancesByProfile counts, per profile name, the hardware partitions a group's
 // partitioned cards can account for: summed over those cards, each profile's allocated instances
-// plus the instances it can still host.
+// plus, for healthy cards, the instances it can still host.
 //
 // Both terms are needed. The scheduler fits a Pod by subtracting the requests of the Pods already
 // on the node from the advertised capacity, so publishing only what is still free would subtract
-// every live instance twice and the key would read one short per running partition.
-//
-// A card whose ledger entry reports neither allocated nor remaining instances has no usable
-// ledger yet — the runtime status is rebuilt from the card's cached placement geometry, which an
-// older device manager did not record — so it falls back to the capability's static per-profile
-// ceiling. That over-states a card that is in fact occupied, which converges as soon as the
-// ledger reports, whereas publishing zero would strand a working node.
+// every live instance twice and the key would read one short per running partition. An unhealthy
+// card offers zero remaining room while keeping its live allocated instances counted.
 func partitionInstancesByProfile(g *workercore.DevicesGroup, ledger map[string]*workercore.AcceleratorAllocation) map[string]int64 {
 	out := make(map[string]int64)
 	for i := range g.Accelerators {
@@ -310,18 +400,24 @@ func partitionInstancesByProfile(g *workercore.DevicesGroup, ledger map[string]*
 			if _, seen := out[p.Name]; !seen {
 				out[p.Name] = 0
 			}
-			if !ready {
+			if !acc.Status.Unhealthy && !ready {
 				out[p.Name] += int64(p.Count)
 			}
 		}
-		if !ready {
+		if alloc != nil {
+			for k := range alloc.AllocatedProfiles {
+				if c := alloc.AllocatedProfiles[k].Count; c > 0 {
+					out[alloc.AllocatedProfiles[k].Name] += int64(c)
+				}
+			}
+		}
+		if acc.Status.Unhealthy || !ready {
 			continue
 		}
-		for k := range alloc.AllocatedProfiles {
-			out[alloc.AllocatedProfiles[k].Name] += int64(alloc.AllocatedProfiles[k].Count)
-		}
 		for k := range alloc.RemainingProfiles {
-			out[alloc.RemainingProfiles[k].Name] += int64(alloc.RemainingProfiles[k].Count)
+			if c := alloc.RemainingProfiles[k].Count; c > 0 {
+				out[alloc.RemainingProfiles[k].Name] += int64(c)
+			}
 		}
 	}
 	return out
@@ -516,9 +612,9 @@ func (r *NodeCapacityReconciler) SetupController(_ context.Context, opts control
 				r.enqueueNodeWhenDevicesChanged,
 			),
 			ctrlbuilder.WithPredicates(ctrlpredicate.Funcs{
-				// A managed Devices' slicing detail: on create/delete the whole capability
-				// appears/vanishes; on update fire only when the spec slicing detail changed,
-				// never on Status (allocation) churn or non-slicing spec fields like health.
+				// A managed Devices' capacity inputs: on create/delete the whole capability
+				// appears/vanishes; on update fire only when slicing detail, card health,
+				// unhealthy-card live allocations, or partition profile ledgers change.
 				CreateFunc: func(e ctrlevent.CreateEvent) bool {
 					return isManagedDevices(e.Object)
 				},
@@ -560,8 +656,12 @@ func (r *NodeCapacityReconciler) enqueueNodeWhenDevicesChanged(
 // without moving the card counts. It must stay comparable (it is a maps.Equal value), so the
 // profiles are folded into a canonical string, not a map.
 type acceleratorSignature struct {
-	logicalCards      int64
-	partitionedCards  int64
+	hasLogical        bool
+	logicalUnits      int64
+	logicalCores      int64
+	logicalMemPct     int64
+	hasPartitioned    bool
+	partitionedUnits  int64
 	logicalCount      int32
 	logicalOvercommit bool
 	partitionProfiles string
@@ -584,9 +684,9 @@ func partitionProfileSignature(profiles map[string]int64) string {
 
 // acceleratorDetailChanged reports whether anything the desired capacity is computed from moved
 // between two Devices snapshots. Unlike its predecessor it reads the status side as well as the
-// spec: the per-profile partition key is derived from the runtime ledger, so an allocation or a
-// release changes a capacity value with the spec untouched. Everything else on the status side —
-// a mode flip, a units movement — projects to the same signature and still does not fire.
+// spec: the per-profile partition key is derived from the runtime ledger, and unhealthy cards
+// track live allocated usage rather than full capacity. Healthy-card mode/units movements still
+// project to the same signature and do not fire.
 func acceleratorDetailChanged(oldDevs, newDevs *workercore.Devices) bool {
 	return !maps.Equal(acceleratorSignatures(oldDevs), acceleratorSignatures(newDevs))
 }
@@ -597,18 +697,43 @@ func acceleratorSignatures(devs *workercore.Devices) map[string]acceleratorSigna
 	if devs == nil {
 		return nil
 	}
-	ledgerByGroup := devicesLedgerByGroup(devs)
+	var ledgerByGroup map[string]map[string]*workercore.AcceleratorAllocation
 	out := make(map[string]acceleratorSignature, len(devs.Spec.Groups))
 	for i := range devs.Spec.Groups {
 		g := &devs.Spec.Groups[i]
+		hasPartitionedCard, hasUnhealthyCard := false, false
+		for j := range g.Accelerators {
+			st := g.Accelerators[j].Status
+			if device.IsPartitioned(st) {
+				hasPartitionedCard = true
+			}
+			if st.Unhealthy {
+				hasUnhealthyCard = true
+			}
+		}
 		key := g.Manufacturer + "-" + g.ID
-		logicalCards, _, partitionedCards := acceleratorCards(g)
+		var ledger map[string]*workercore.AcceleratorAllocation
+		if hasPartitionedCard || hasUnhealthyCard {
+			if ledgerByGroup == nil {
+				ledgerByGroup = devicesLedgerByGroup(devs)
+			}
+			ledger = ledgerByGroup[key]
+		}
+		contrib := groupCapacityContribution(g, ledger, 0)
+		var profiles string
+		if hasPartitionedCard {
+			profiles = partitionProfileSignature(partitionInstancesByProfile(g, ledger))
+		}
 		out[key] = acceleratorSignature{
-			logicalCards:      logicalCards,
-			partitionedCards:  partitionedCards,
+			hasLogical:        contrib.hasLogical,
+			logicalUnits:      contrib.units,
+			logicalCores:      contrib.cores,
+			logicalMemPct:     contrib.memoryPct,
+			hasPartitioned:    contrib.hasPartitioned,
+			partitionedUnits:  contrib.partitionedUnits,
 			logicalCount:      g.AcceleratorSlicedDetail.Logical.Count,
 			logicalOvercommit: g.AcceleratorSlicedDetail.Logical.CoresPercentageOvercommit,
-			partitionProfiles: partitionProfileSignature(partitionInstancesByProfile(g, ledgerByGroup[key])),
+			partitionProfiles: profiles,
 		}
 	}
 	return out
