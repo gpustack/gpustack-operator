@@ -2625,6 +2625,109 @@ func TestResourceServer_GetListAndWatch_PartitionHealthySetSurvivesARestart(t *t
 		"the annotation alone must keep a checkpointed ID healthy")
 }
 
+func TestResourceServer_GetListAndWatch_PartitionUnhealthyCardDoesNotStarveHealthySibling(t *testing.T) {
+	const nodeName = "node-partition-unhealthy-sibling"
+
+	cases := []struct {
+		name           string
+		card0Allocated map[string]int32
+		card0Remaining map[string]int32
+		card0Unhealthy bool
+		card1Allocated map[string]int32
+		card1Remaining map[string]int32
+		card1Unhealthy bool
+		heldIDs        []string
+		wantHealthy    int
+	}{
+		{
+			name:           "unhealthy card holding 5 live instances preserves all 7 free slots on healthy sibling",
+			card0Remaining: map[string]int32{"1g.10gb": 7},
+			card1Allocated: map[string]int32{"1g.10gb": 5},
+			card1Remaining: map[string]int32{"1g.10gb": 2},
+			card1Unhealthy: true,
+			heldIDs: []string{
+				"grp-0:dev-1:0000", "grp-0:dev-1:0001", "grp-0:dev-1:0002",
+				"grp-0:dev-1:0003", "grp-0:dev-1:0004",
+			},
+			wantHealthy: 12,
+		},
+		{
+			name:           "saturated unhealthy card holding 7 live instances does not zero healthy sibling",
+			card0Remaining: map[string]int32{"1g.10gb": 7},
+			card1Allocated: map[string]int32{"1g.10gb": 7},
+			card1Unhealthy: true,
+			heldIDs: []string{
+				"grp-0:dev-1:0000", "grp-0:dev-1:0001", "grp-0:dev-1:0002",
+				"grp-0:dev-1:0003", "grp-0:dev-1:0004", "grp-0:dev-1:0005",
+				"grp-0:dev-1:0006",
+			},
+			wantHealthy: 14,
+		},
+		{
+			name:           "both cards carrying live instances keep healthy card remaining intact",
+			card0Allocated: map[string]int32{"1g.10gb": 2},
+			card0Remaining: map[string]int32{"1g.10gb": 5},
+			card1Allocated: map[string]int32{"1g.10gb": 3},
+			card1Remaining: map[string]int32{"1g.10gb": 4},
+			card1Unhealthy: true,
+			heldIDs: []string{
+				"grp-0:dev-0:0000", "grp-0:dev-0:0001",
+				"grp-0:dev-1:0000", "grp-0:dev-1:0001", "grp-0:dev-1:0002",
+			},
+			wantHealthy: 10,
+		},
+		{
+			name:           "idle unhealthy card contributes zero room alongside healthy sibling",
+			card0Remaining: map[string]int32{"1g.10gb": 7},
+			card0Unhealthy: true,
+			card1Remaining: map[string]int32{"1g.10gb": 7},
+			wantHealthy:    7,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			spec0, status0 := partitionLedgerCard("dev-0", 0, 7, c.card0Allocated, c.card0Remaining)
+			spec0.Status.Unhealthy = c.card0Unhealthy
+			spec1, status1 := partitionLedgerCard("dev-1", 1, 7, c.card1Allocated, c.card1Remaining)
+			spec1.Status.Unhealthy = c.card1Unhealthy
+			devs := partitionLedgerDevices(nodeName,
+				[]workercore.Accelerator{spec0, spec1},
+				[]workercore.AcceleratorAllocation{status0, status1},
+			)
+
+			cli := nodeFixture(devs)
+			rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+			for idx, id := range c.heldIDs {
+				podUID := types.UID(fmt.Sprintf("pod-held-%d", idx))
+				rec.reserveDevices(podUID, workloadContainer, workercore.DevicesStatus{
+					Groups: []workercore.DevicesAllocationGroup{{
+						ID: "grp-0", Manufacturer: nodefeature.ManufacturerNVIDIA,
+						Accelerators: []workercore.AcceleratorAllocation{{
+							ID: "dev-1", Mode: workercore.DeviceAllocationModePartitioned,
+						}},
+					}},
+				}, []string{id})
+			}
+
+			s := partitionServer(rec, stubResponder{})
+			first, err := s.getListAndWatchResponse(context.Background())
+			require.NoError(t, err)
+			assert.Len(t, first.Devices, 14)
+
+			got := healthyIDs(first)
+			assert.Len(t, got, c.wantHealthy)
+			for _, id := range c.heldIDs {
+				assert.Contains(t, got, id)
+			}
+
+			second, err := s.getListAndWatchResponse(context.Background())
+			require.NoError(t, err)
+			assert.Equal(t, got, healthyIDs(second), "repeated cycles publish the identical healthy set")
+		})
+	}
+}
+
 // TestResourceServer_GetListAndWatch_PartitionedHasNoTopology pins that a partition token carries
 // no NUMA hint: Allocate chooses the accelerator, so the token names none and a hint would tell the
 // TopologyManager something the token cannot honor. The accelerator-bound families keep theirs.
