@@ -45,9 +45,15 @@ injection, and mid-flight control-loop disruptions:
    applied via `kubeadmConfigPatches` for Kueue TAS):
 
    ```bash
+   # Local Docker host:
    bash .agents/skills/gpustack-operator-e2e-chaos/scripts/gen-kind-mock.sh \
      --name gpustack-chaos --workers 3 --zones 2 \
      --out /tmp/kind-chaos.yaml --create
+
+   # Or on a larger remote Docker host over SSH (any Kubernetes version):
+   terraform -chdir=testing/infra/clusters/kind init
+   terraform -chdir=testing/infra/clusters/kind apply \
+     -var='host=<user>@<remote-host>' -var='workers=4' -var='release=v1.34.11'
    ```
 
 2. **Generate and apply a multi-node mock hardware `ConfigMap`** backed by the built-in multi-vendor
