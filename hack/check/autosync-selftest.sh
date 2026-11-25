@@ -802,6 +802,487 @@ else
   fail "TaskpackSuite, Taskpack 2.0 manifests, digests, memory, proposals, holds, and workflow static checks"
 fi
 
+echo "== router freeze, sgl-router staging, and Base Image build recommendations end-to-end =="
+if python3 -B - "${ROOT_DIR}" <<'PY'
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+root = sys.argv[1]
+sys.path.insert(0, os.path.join(root, ".auto-sync", "checks"))
+from base_image_builds import recommend_from_diff, validate_proposal_builds
+
+
+def run(cmd, *, cwd=None, env=None, check=True):
+    return subprocess.run(
+        cmd,
+        cwd=cwd,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=check,
+    )
+
+
+def git_init_commit(repo_dir: str, files: dict[str, str], tag: str, msg: str, env: dict) -> None:
+    if not os.path.isdir(os.path.join(repo_dir, ".git")):
+        os.makedirs(repo_dir, exist_ok=True)
+        run(["git", "-C", repo_dir, "init", "-q", "-b", "main"], env=env)
+        run(["git", "-C", repo_dir, "config", "user.name", "selftest"], env=env)
+        run(["git", "-C", repo_dir, "config", "user.email", "selftest@gpustack.local"], env=env)
+        run(["git", "-C", repo_dir, "config", "commit.gpgsign", "false"], env=env)
+    for rel, content in files.items():
+        fp = os.path.join(repo_dir, rel)
+        os.makedirs(os.path.dirname(fp), exist_ok=True)
+        with open(fp, "w", encoding="utf-8") as f:
+            f.write(content)
+    run(["git", "-C", repo_dir, "add", "-A"], env=env)
+    run(["git", "-C", repo_dir, "commit", "-q", "--allow-empty", "-m", msg], env=env)
+    run(["git", "-C", repo_dir, "tag", "-f", tag], env=env)
+
+
+git_env = {
+    **os.environ,
+    "LC_ALL": "C",
+    "GIT_AUTHOR_NAME": "selftest",
+    "GIT_AUTHOR_EMAIL": "selftest@gpustack.local",
+    "GIT_COMMITTER_NAME": "selftest",
+    "GIT_COMMITTER_EMAIL": "selftest@gpustack.local",
+}
+
+# Exact minimal context lines matching pack/llm-router/patches/sgl-router/0001-observer-endpoints.patch
+SGL_ROUTER_LIB_RS = """// SPDX-FileCopyrightText: Copyright (c) 2026 The SGLang Authors
+// SPDX-License-Identifier: Apache-2.0
+
+//! sgl-router: slim KV-aware OpenAI-compatible router for SGLang workers.
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub mod buckets_reorg;
+pub mod config;
+pub mod discovery;
+pub mod health;
+pub(crate) mod off_worker;
+pub mod policies;
+pub mod policies_reorg;
+"""
+
+SGL_ROUTER_APP_RS = """fn is_infra_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/healthz"
+            | "/readyz"
+            | "/health"
+            | "/liveness"
+            | "/readiness"
+            | "/health_generate"
+            | "/metrics"
+    )
+}
+
+pub fn build_router_with_body_limit(ctx: Arc<AppContext>, max_body_bytes: usize) -> Router {
+    let router = Router::new()
+        .route("/healthz", get(crate::server::routes::health::healthz))
+        .route("/readyz", get(crate::server::routes::health::readyz))
+        // Aliases of the probes above: the engine's `/health`, and the
+        // `/liveness` and `/readiness` paths deployments poll.
+        .route("/health", get(crate::server::routes::health::healthz))
+        .route("/liveness", get(crate::server::routes::health::healthz))
+        .route("/readiness", get(crate::server::routes::health::readyz))
+        .route("/metrics", get(crate::server::routes::metrics::metrics))
+        .route(
+            "/v1/models",
+            get(crate::server::routes::models::list_models),
+        );
+    router
+}
+"""
+
+with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
+    # 1. End-to-end router preflight: separate staging dirs, frozen sglang-gateway, sgl-router drift + base_image_builds.
+    fix_dir = os.path.join(tmp, "router-fixture")
+    repos_dir = os.path.join(fix_dir, "repos")
+    git_init_commit(
+        os.path.join(repos_dir, "llm-d-router"),
+        {"go.mod": "module example.com/llmd\n\ngo 1.27.0\n"},
+        "v1.0.0",
+        "v1.0.0",
+        git_env,
+    )
+    vllm_fix_repo = os.path.join(repos_dir, "vllm-router")
+    git_init_commit(
+        vllm_fix_repo,
+        {"Cargo.toml": '[package]\nname = "vllm-router"\nedition = "2021"\n'},
+        "v0.1.17",
+        "v0.1.17",
+        git_env,
+    )
+    vllm_epd_sha = run(["git", "-C", vllm_fix_repo, "rev-parse", "refs/tags/v0.1.17^{commit}"], env=git_env).stdout.strip()
+    # Shared sglang fixture repo carrying gateway-v0.3.1, newer gateway-v0.4.0 (must be ignored!),
+    # and router-v0.1.0 + router-v0.2.0 (sgl-router + rust subpaths).
+    sgl_repo = os.path.join(repos_dir, "sglang")
+    git_init_commit(
+        sgl_repo,
+        {
+            "sgl-model-gateway/Cargo.toml": '[package]\nname = "sgl-model-gateway"\nedition = "2021"\n',
+            "sgl-router/Cargo.toml": '[package]\nname = "sgl-router"\nedition = "2021"\n',
+            "sgl-router/src/lib.rs": SGL_ROUTER_LIB_RS,
+            "sgl-router/src/server/app.rs": SGL_ROUTER_APP_RS,
+            "rust/Cargo.toml": '[workspace]\nmembers = []\n',
+        },
+        "gateway-v0.3.1",
+        "gateway-v0.3.1",
+        git_env,
+    )
+    run(["git", "-C", sgl_repo, "tag", "-f", "router-v0.1.0"], env=git_env)
+    git_init_commit(
+        sgl_repo,
+        {"sgl-model-gateway/README.md": "deleted later\n"},
+        "gateway-v0.4.0",
+        "gateway-v0.4.0 (must not unfreeze)",
+        git_env,
+    )
+    git_init_commit(
+        sgl_repo,
+        {
+            "sgl-router/Cargo.toml": '[package]\nname = "sgl-router"\nversion = "0.2.0"\nedition = "2021"\n',
+            "rust/Cargo.toml": '[workspace]\nmembers = []\n# router-v0.2.0\n',
+        },
+        "router-v0.2.0",
+        "router-v0.2.0",
+        git_env,
+    )
+
+    # Read current defaults dynamically from value.go so the test stays decoupled from setting tag bumps.
+    vg_txt = open(os.path.join(root, "pkg/worker/settings/value.go"), "r", encoding="utf-8").read()
+    def cur_vg_img(var_name: str) -> str:
+        m = re.search(
+            rf'{re.escape(var_name)}\s*=\s*settings\.NewEditable\([^)]*?setting\.InitializeFromEnv\("([^"]+)"\)',
+            vg_txt,
+            re.DOTALL,
+        )
+        assert m, f"missing {var_name} in value.go"
+        return m.group(1).strip()
+
+    cur_router_img = cur_vg_img("ModelDeploymentRouterImage")
+    cur_proxy_img = cur_vg_img("ModelDeploymentRouterProxyImage")
+    cur_sidecar_img = cur_vg_img("ModelDeploymentRoutingSidecarImage")
+
+    manifests_path = os.path.join(fix_dir, "image-manifests.json")
+    with open(manifests_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "schemaVersion": 1,
+                "images": {
+                    cur_router_img: {
+                        "published": True,
+                        "amd64Digest": "sha256:" + "1" * 64,
+                        "arm64Digest": "sha256:" + "2" * 64,
+                    },
+                    cur_proxy_img: {
+                        "published": True,
+                        "amd64Digest": "sha256:" + "3" * 64,
+                        "arm64Digest": "sha256:" + "4" * 64,
+                    },
+                    cur_sidecar_img: {
+                        "published": True,
+                        "amd64Digest": "sha256:" + "5" * 64,
+                        "arm64Digest": "sha256:" + "6" * 64,
+                    },
+                },
+            },
+            f,
+        )
+
+    stage_dir = os.path.join(tmp, "stage-router")
+    staging_dir = os.path.join(tmp, "preflight-staging")
+    preflight_out = os.path.join(tmp, "preflight-out.json")
+    pf_env = {
+        **os.environ,
+        "AUTOSYNC_STAGE_DIR": stage_dir,
+        "AUTOSYNC_ROUTER_FIXTURE_DIR": fix_dir,
+        "AUTOSYNC_ROUTER_EPD_COMMIT": vllm_epd_sha,
+        "AUTOSYNC_SKIP_GO_MOD_DOWNLOAD": "true",
+        "AUTOSYNC_SKIP_LFS_FETCH": "true",
+        "AUTOSYNC_SKIP_GO_TEST": "true",
+        "LOOPWRIGHT_STAGING_DIR": staging_dir,
+        "LOOPWRIGHT_PREFLIGHT_OUT": preflight_out,
+    }
+    pf_res = run(
+        ["bash", os.path.join(root, ".auto-sync/scripts/preflight-router.sh")],
+        cwd=root,
+        env=pf_env,
+        check=False,
+    )
+    if pf_res.returncode != 0:
+        raise AssertionError(
+            f"preflight-router.sh failed (rc={pf_res.returncode}):\n{pf_res.stdout}\n{pf_res.stderr}"
+        )
+
+    # Separate staging directories for sglang-gateway and sgl-router.
+    gw_stage = os.path.join(stage_dir, "sglang-gateway")
+    sr_stage = os.path.join(stage_dir, "sgl-router")
+    if not os.path.isdir(os.path.join(gw_stage, ".git")):
+        raise AssertionError(f"expected separate staged repo at {gw_stage}")
+    if not os.path.isdir(os.path.join(sr_stage, ".git")):
+        raise AssertionError(f"expected separate staged repo at {sr_stage}")
+    if os.path.exists(os.path.join(stage_dir, "sglang")):
+        raise AssertionError("legacy single-repo stage dir $STAGE_DIR/sglang must not be created")
+
+    rep = json.load(open(os.path.join(staging_dir, "router-preflight-report.json"), "r", encoding="utf-8"))
+    if rep.get("stage") != "recipe_sync":
+        raise AssertionError(f"expected stage=recipe_sync, got {rep.get('stage')!r}")
+    if rep["target_tags"]["sglang-gateway"] != "gateway-v0.3.1":
+        raise AssertionError(
+            f"frozen sglang-gateway must stay gateway-v0.3.1, got {rep['target_tags']['sglang-gateway']!r}"
+        )
+    if rep["stage_a_drifts"]["sglang-gateway"] is not False:
+        raise AssertionError("frozen sglang-gateway must report stage_a_drifts=False")
+    if rep["target_tags"]["sgl-router"] != "router-v0.2.0" or rep["stage_a_drifts"]["sgl-router"] is not True:
+        raise AssertionError(f"expected sgl-router drift to router-v0.2.0, got {rep['target_tags']!r}")
+
+    pf_builds = rep.get("base_image_builds")
+    if not isinstance(pf_builds, list) or len(pf_builds) != 1:
+        raise AssertionError(f"expected 1 base_image_builds entry in router report, got {pf_builds!r}")
+    b0 = pf_builds[0]
+    if (
+        b0.get("repository") != "gpustack/llm-router"
+        or b0.get("target") != ""
+        or not b0.get("recommended_tag")
+        or 'gh workflow run "Base Image" -f repository=llm-router -f tag=' not in b0.get("command", "")
+    ):
+        raise AssertionError(f"unexpected router base_image_builds entry: {b0!r}")
+
+    pf_summary = json.load(open(os.path.join(staging_dir, "router-preflight-summary.json"), "r", encoding="utf-8"))
+    if (pf_summary.get("highlights") or {}).get("base_image_builds") != pf_builds:
+        raise AssertionError("router-preflight-summary.json highlights.base_image_builds mismatch")
+    print("PASS  preflight-router.sh separate sglang-gateway/sgl-router staging, freeze skip, and base_image_builds")
+
+    # 2. validate_router.sh positive + negative freeze & base_image_builds tests.
+    def make_candidate_tree(dst: str) -> None:
+        for rel in (
+            "pack/llm-router",
+            "pkg/worker/settings/value.go",
+            "docs/reference/settings.md",
+            ".auto-sync/checks",
+            ".auto-sync/proposals/router.json",
+            ".auto-sync/setting-image-holds.json",
+        ):
+            src = os.path.join(root, rel)
+            out = os.path.join(dst, rel)
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            if os.path.isdir(src):
+                shutil.copytree(src, out)
+            else:
+                shutil.copy2(src, out)
+
+    val_stage = os.path.join(tmp, "val-stage")
+    os.makedirs(val_stage, exist_ok=True)
+    shutil.copytree(sr_stage, os.path.join(val_stage, "sgl-router"))
+    shutil.copy2(os.path.join(staging_dir, "router-preflight-report.json"), os.path.join(val_stage, "router-preflight-report.json"))
+    shutil.copy2(os.path.join(staging_dir, "image-manifests.json"), os.path.join(val_stage, "image-manifests.json"))
+    val_base = os.path.join(val_stage, "baseline")
+    make_candidate_tree(val_base)
+
+    def run_validate_router(cand_dir: str):
+        env = {
+            **os.environ,
+            "AUTOSYNC_STAGE_DIR": val_stage,
+            "LOOPWRIGHT_BASE_DIR": val_base,
+            "LOOPWRIGHT_CANDIDATE_DIR": cand_dir,
+            "AUTOSYNC_FAST_SELFTEST": "true",
+            "AUTOSYNC_ALLOW_MISSING_STAGED_REPO": "true",
+            "AUTOSYNC_ROUTER_BUILD_RUNNER": "true",
+        }
+        return run(
+            ["bash", os.path.join(root, ".auto-sync/checks/validate_router.sh")],
+            cwd=cand_dir,
+            env=env,
+            check=False,
+        )
+
+    # 2a. Positive: sgl-router bump to router-v0.2.0 + valid base_image_builds passes (real git apply on sgl-router!).
+    cand_ok = os.path.join(tmp, "cand-router-ok")
+    make_candidate_tree(cand_ok)
+    df_ok = os.path.join(cand_ok, "pack/llm-router/Dockerfile")
+    with open(df_ok, "r", encoding="utf-8") as f:
+        df_txt = f.read()
+    with open(df_ok, "w", encoding="utf-8") as f:
+        f.write(df_txt.replace("ARG SGL_ROUTER_VERSION=router-v0.1.0", "ARG SGL_ROUTER_VERSION=router-v0.2.0", 1))
+    prop_ok = os.path.join(cand_ok, ".auto-sync/proposals/router.json")
+    pdoc = json.load(open(prop_ok, "r", encoding="utf-8"))
+    pdoc["stage"] = "recipe_sync"
+    pdoc["versions"]["sgl-router"] = "router-v0.2.0"
+    pdoc["base_image_builds"] = pf_builds
+    with open(prop_ok, "w", encoding="utf-8") as f:
+        json.dump(pdoc, f, indent=2)
+    res_ok = run_validate_router(cand_ok)
+    if res_ok.returncode != 0:
+        raise AssertionError(f"valid sgl-router candidate failed validate_router.sh:\n{res_ok.stdout}\n{res_ok.stderr}")
+    print("PASS  validate_router.sh accepts sgl-router bump with real patch apply and base_image_builds")
+
+    # 2b. Negative: modifying SGLANG_GATEWAY_VERSION must fail validate_router.sh.
+    cand_unfreeze = os.path.join(tmp, "cand-router-unfreeze")
+    shutil.copytree(cand_ok, cand_unfreeze)
+    df_unf = os.path.join(cand_unfreeze, "pack/llm-router/Dockerfile")
+    with open(df_unf, "r", encoding="utf-8") as f:
+        t = f.read()
+    with open(df_unf, "w", encoding="utf-8") as f:
+        f.write(t.replace("ARG SGLANG_GATEWAY_VERSION=gateway-v0.3.1", "ARG SGLANG_GATEWAY_VERSION=gateway-v0.4.0", 1))
+    res_unf = run_validate_router(cand_unfreeze)
+    if res_unf.returncode == 0 or "SGLANG_GATEWAY_VERSION is frozen" not in res_unf.stderr:
+        raise AssertionError(
+            f"expected validate_router.sh to reject SGLANG_GATEWAY_VERSION change; rc={res_unf.returncode}, stderr={res_unf.stderr!r}"
+        )
+    print("PASS  validate_router.sh rejects SGLANG_GATEWAY_VERSION modification")
+
+    # 2c. Negative: modifying pack/llm-router/patches/sglang-gateway/* must fail validate_router.sh.
+    cand_gw_patch = os.path.join(tmp, "cand-router-gw-patch")
+    shutil.copytree(cand_ok, cand_gw_patch)
+    with open(
+        os.path.join(cand_gw_patch, "pack/llm-router/patches/sglang-gateway/0002-observer-read-only-endpoint-view.patch"),
+        "a",
+        encoding="utf-8",
+    ) as f:
+        f.write("\n# unauthorized edit\n")
+    res_gwp = run_validate_router(cand_gw_patch)
+    if res_gwp.returncode == 0 or "pack/llm-router/patches/sglang-gateway/ is frozen" not in res_gwp.stderr:
+        raise AssertionError(
+            f"expected validate_router.sh to reject sglang-gateway patch edit; rc={res_gwp.returncode}, stderr={res_gwp.stderr!r}"
+        )
+    print("PASS  validate_router.sh rejects pack/llm-router/patches/sglang-gateway/ modification")
+
+    # 2d. Negative: missing/empty base_image_builds on modified pack/llm-router/Dockerfile must fail.
+    cand_no_builds = os.path.join(tmp, "cand-router-no-builds")
+    shutil.copytree(cand_ok, cand_no_builds)
+    prop_nb = os.path.join(cand_no_builds, ".auto-sync/proposals/router.json")
+    pdoc_nb = json.load(open(prop_nb, "r", encoding="utf-8"))
+    pdoc_nb["base_image_builds"] = []
+    with open(prop_nb, "w", encoding="utf-8") as f:
+        json.dump(pdoc_nb, f, indent=2)
+    res_nb = run_validate_router(cand_no_builds)
+    if res_nb.returncode == 0 or "missing required build recommendation" not in res_nb.stderr:
+        raise AssertionError(
+            f"expected validate_router.sh to reject empty base_image_builds; rc={res_nb.returncode}, stderr={res_nb.stderr!r}"
+        )
+    print("PASS  validate_router.sh rejects missing base_image_builds when pack/llm-router changes")
+
+    # 3. Cross-domain base_image_builds tests for kv-transfer (mirrored-mooncake, model-transfer, mirrored-modelexpress-server).
+    kv_base = os.path.join(tmp, "kv-base")
+    kv_cand = os.path.join(tmp, "kv-cand")
+    for rel in (
+        "pack/mirrored-mooncake/Dockerfile",
+        "pack/model-transfer/Dockerfile",
+        "pack/model-transfer/patches/hixl/001_channel_generation.patch",
+        "pack/mirrored-modelexpress-server/Dockerfile",
+        "pkg/worker/settings/value.go",
+        "deploy/gpustack-operator/chart/values.yaml",
+        ".auto-sync/proposals/kv-transfer.json",
+    ):
+        for dst_root in (kv_base, kv_cand):
+            out = os.path.join(dst_root, rel)
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            shutil.copy2(os.path.join(root, rel), out)
+
+    # Modify mooncake, model-transfer (rocm UCX + cann HIXL patch), and modelexpress.
+    mc_df = os.path.join(kv_cand, "pack/mirrored-mooncake/Dockerfile")
+    with open(mc_df, "r", encoding="utf-8") as f:
+        t = f.read()
+    with open(mc_df, "w", encoding="utf-8") as f:
+        f.write(re.sub(r'^ARG MOONCAKE_VERSION="[^"]+"', 'ARG MOONCAKE_VERSION="0.3.15"', t, count=1, flags=re.MULTILINE))
+
+    mt_df = os.path.join(kv_cand, "pack/model-transfer/Dockerfile")
+    with open(mt_df, "r", encoding="utf-8") as f:
+        t = f.read()
+    with open(mt_df, "w", encoding="utf-8") as f:
+        f.write(re.sub(r'^ARG NIXL_ROCM_UCX_REF="[^"]+"', 'ARG NIXL_ROCM_UCX_REF="v1.24.0"', t, count=1, flags=re.MULTILINE))
+
+    with open(os.path.join(kv_cand, "pack/model-transfer/patches/hixl/001_channel_generation.patch"), "a", encoding="utf-8") as f:
+        f.write("\n# bump\n")
+
+    mx_df = os.path.join(kv_cand, "pack/mirrored-modelexpress-server/Dockerfile")
+    with open(mx_df, "r", encoding="utf-8") as f:
+        t = f.read()
+    with open(mx_df, "w", encoding="utf-8") as f:
+        f.write(re.sub(r'^ARG MODELEXPRESS_VERSION=\S+', 'ARG MODELEXPRESS_VERSION=v0.9.0', t, count=1, flags=re.MULTILINE))
+
+    cli_res = run(
+        [
+            "bash",
+            os.path.join(root, ".auto-sync/scripts/base-image-recommendations.sh"),
+            "diff",
+            kv_base,
+            kv_cand,
+            "--domain",
+            "kv-transfer",
+        ],
+        cwd=root,
+    )
+    kv_builds = json.loads(cli_res.stdout)
+    by_key = {(b["repository"], b["target"]): b for b in kv_builds}
+    want_keys = {
+        ("gpustack/mirrored-mooncake", ""),
+        ("gpustack/model-transfer", "rocm"),
+        ("gpustack/model-transfer", "cann"),
+        ("gpustack/mirrored-modelexpress-server", ""),
+    }
+    if set(by_key) != want_keys:
+        raise AssertionError(f"expected kv-transfer base_image_builds keys {sorted(want_keys)}, got {sorted(by_key)}")
+    if by_key[("gpustack/mirrored-mooncake", "")]["recommended_tag"] != "0.3.15-cpu":
+        raise AssertionError(f"unexpected mooncake tag: {by_key[('gpustack/mirrored-mooncake', '')]!r}")
+    if by_key[("gpustack/mirrored-modelexpress-server", "")]["recommended_tag"] != "v0.9.0":
+        raise AssertionError(f"unexpected modelexpress tag: {by_key[('gpustack/mirrored-modelexpress-server', '')]!r}")
+    if "-f target=rocm" not in by_key[("gpustack/model-transfer", "rocm")]["command"]:
+        raise AssertionError(f"missing target=rocm in command: {by_key[('gpustack/model-transfer', 'rocm')]!r}")
+    if "-f target=cann" not in by_key[("gpustack/model-transfer", "cann")]["command"]:
+        raise AssertionError(f"missing target=cann in command: {by_key[('gpustack/model-transfer', 'cann')]!r}")
+
+    kv_prop = os.path.join(kv_cand, ".auto-sync/proposals/kv-transfer.json")
+    kv_pdoc = json.load(open(kv_prop, "r", encoding="utf-8"))
+    kv_pdoc["base_image_builds"] = kv_builds
+    with open(kv_prop, "w", encoding="utf-8") as f:
+        json.dump(kv_pdoc, f, indent=2)
+    validate_proposal_builds(kv_base, kv_cand, kv_prop, "kv-transfer")
+
+    # Negative: dropping one required target fails validation.
+    kv_pdoc["base_image_builds"] = [b for b in kv_builds if b["target"] != "cann"]
+    with open(kv_prop, "w", encoding="utf-8") as f:
+        json.dump(kv_pdoc, f, indent=2)
+    try:
+        validate_proposal_builds(kv_base, kv_cand, kv_prop, "kv-transfer")
+    except SystemExit as exc:
+        if "missing required build recommendation" not in str(exc):
+            raise AssertionError(f"unexpected error for missing cann target: {exc}")
+    else:
+        raise AssertionError("expected validate_proposal_builds to reject missing cann target")
+
+    # Negative: non-empty base_image_builds when no pack/* files changed must fail.
+    kv_pdoc["base_image_builds"] = kv_builds
+    with open(kv_prop, "w", encoding="utf-8") as f:
+        json.dump(kv_pdoc, f, indent=2)
+    try:
+        validate_proposal_builds(kv_base, kv_base, kv_prop, "kv-transfer")
+    except SystemExit as exc:
+        if "must be empty when no mapped pack/* files changed" not in str(exc):
+            raise AssertionError(f"unexpected error for stale base_image_builds: {exc}")
+    else:
+        raise AssertionError("expected validate_proposal_builds to reject stale base_image_builds")
+
+    # Sanity: recommend_from_diff on identical dirs returns [].
+    if recommend_from_diff(kv_base, kv_base) != []:
+        raise AssertionError("expected empty recommend_from_diff on unchanged dirs")
+    print("PASS  base_image_builds positive and negative validation across router and kv-transfer domains")
+PY
+then
+  pass "router freeze, sgl-router staging, and Base Image build recommendations end-to-end"
+else
+  fail "router freeze, sgl-router staging, and Base Image build recommendations end-to-end"
+fi
+
 echo
 echo "Summary: ${PASSES} passed, ${FAILS} failed"
 [[ "${FAILS}" -eq 0 ]]

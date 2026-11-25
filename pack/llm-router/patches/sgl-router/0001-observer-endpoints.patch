@@ -1,0 +1,348 @@
+Expose read-only GET /observer/endpoints returning native sgl-router worker
+registry membership and single-lock circuit-breaker snapshots without mutating
+routing state, claiming half-open probe slots, or emitting routing metrics.
+
+AGAINST: sgl-project/sglang router-v0.1.0 (commit
+7fed639806be1b03ef4eaba3fc4ad2117a8f2be4). Applied from the sparse clone root
+(/src) against sgl-router/ and rust/.
+
+WHEN TO REMOVE: when upstream sgl-router ships a native read-only membership
+endpoint matching the operator observer wire contract.
+
+diff --git a/sgl-router/src/lib.rs b/sgl-router/src/lib.rs
+index 118f64e6d9e7ab457ad1612fb0423b54902dbbf9..385f4b6709d3e454bb5ad51bb7e7a705b2bd42f3 100644
+--- a/sgl-router/src/lib.rs
++++ b/sgl-router/src/lib.rs
+@@ -9,6 +9,7 @@ pub mod buckets_reorg;
+ pub mod config;
+ pub mod discovery;
+ pub mod health;
++pub mod observer;
+ pub(crate) mod off_worker;
+ pub mod policies;
+ pub mod policies_reorg;
+diff --git a/sgl-router/src/observer.rs b/sgl-router/src/observer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..6f79759eaae3864457e4d5f1f951d9455a2ff484
+--- /dev/null
++++ b/sgl-router/src/observer.rs
+@@ -0,0 +1,298 @@
++// SPDX-FileCopyrightText: Copyright (c) 2026 The SGLang Authors
++// SPDX-License-Identifier: Apache-2.0
++
++//! Read-only membership and effective circuit state view for external observation.
++//!
++//! Exposes `GET /observer/endpoints` without mutating worker state, claiming
++//! half-open probe slots, or emitting routing metrics.
++
++use crate::discovery::WorkerMode;
++use crate::server::app_context::AppContext;
++use axum::extract::State;
++use axum::http::header::CONTENT_TYPE;
++use axum::http::{HeaderMap, StatusCode};
++use axum::response::{IntoResponse, Response};
++use serde::Serialize;
++use std::collections::BTreeMap;
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::sync::{Arc, Mutex, OnceLock};
++use std::time::{SystemTime, UNIX_EPOCH};
++
++/// Process start time in milliseconds (strictly non-zero). Constant for the life of the
++/// process and distinct after every restart.
++fn boot_generation() -> u64 {
++    static BOOT: OnceLock<u64> = OnceLock::new();
++    *BOOT.get_or_init(|| {
++        SystemTime::now()
++            .duration_since(UNIX_EPOCH)
++            .map(|d| d.as_millis() as u64)
++            .unwrap_or(1)
++            .max(1)
++    })
++}
++
++fn now_ms() -> u64 {
++    SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .map(|d| d.as_millis() as u64)
++        .unwrap_or(0)
++}
++
++#[derive(Serialize)]
++struct ObserverRouter {
++    boot_generation: u64,
++    now_ms: u64,
++}
++
++#[derive(Serialize)]
++struct ObserverSelection {
++    registered: bool,
++    healthy: bool,
++    circuit_open: bool,
++    in_selection: bool,
++}
++
++#[derive(Serialize)]
++struct ObserverWorker {
++    url: String,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    port: Option<String>,
++    role: String,
++    pod_hint: String,
++    worker_id: String,
++    selection: ObserverSelection,
++}
++
++#[derive(Serialize)]
++struct ObserverView {
++    router: ObserverRouter,
++    registry_revision: u64,
++    workers: Vec<ObserverWorker>,
++}
++
++/// Host[:port] portion of the worker URL, for operator convenience only.
++fn pod_hint(raw: &str) -> String {
++    let without_scheme = raw.split_once("://").map(|(_, rest)| rest).unwrap_or(raw);
++    let authority = without_scheme.split(['/', '?']).next().unwrap_or("");
++    authority.to_string()
++}
++
++/// Port portion of the worker URL, when explicitly present.
++fn url_port(raw: &str) -> Option<String> {
++    let without_scheme = raw.split_once("://").map(|(_, rest)| rest).unwrap_or(raw);
++    let authority = without_scheme.split(['/', '?']).next().unwrap_or("");
++    if let Some(bracket_end) = authority.rfind(']') {
++        let rest = &authority[bracket_end + 1..];
++        let port = rest.strip_prefix(':')?;
++        if port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
++            return None;
++        }
++        return Some(port.to_string());
++    }
++    let (_, port) = authority.rsplit_once(':')?;
++    if port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
++        return None;
++    }
++    Some(port.to_string())
++}
++
++fn role_name(mode: WorkerMode) -> String {
++    match mode {
++        WorkerMode::Plain => "regular".to_string(),
++        WorkerMode::Prefill => "prefill".to_string(),
++        WorkerMode::Decode => "decode".to_string(),
++    }
++}
++
++fn collect_workers(ctx: &AppContext) -> Vec<ObserverWorker> {
++    // Sort deterministically by (url, worker_id) so consecutive revisions are comparable.
++    let mut ordered: BTreeMap<(String, String), ObserverWorker> = BTreeMap::new();
++    for worker in ctx.registry.all() {
++        let url = worker.url.clone();
++        let worker_id = worker.id.0.clone();
++        // Single-lock read-only snapshot matching WorkerRegistry::healthy_workers_for.
++        let cb = worker.breaker.snapshot();
++        let healthy = !worker.awaiting_bootstrap_port();
++        let circuit_open = cb.state_code == 1 && !cb.admit;
++        let in_selection = healthy && cb.admit;
++        ordered.insert(
++            (url.clone(), worker_id.clone()),
++            ObserverWorker {
++                port: url_port(&url),
++                role: role_name(worker.mode()),
++                pod_hint: pod_hint(&url),
++                worker_id,
++                url,
++                selection: ObserverSelection {
++                    registered: true,
++                    healthy,
++                    circuit_open,
++                    in_selection,
++                },
++            },
++        );
++    }
++    ordered.into_values().collect()
++}
++
++static LAST_WORKERS_JSON: Mutex<Option<String>> = Mutex::new(None);
++static VIEW_REVISION: AtomicU64 = AtomicU64::new(1);
++
++fn registry_revision_for(workers_json: &str) -> u64 {
++    let mut last = LAST_WORKERS_JSON
++        .lock()
++        .unwrap_or_else(|poisoned| poisoned.into_inner());
++    if last.as_deref() != Some(workers_json) {
++        *last = Some(workers_json.to_string());
++        VIEW_REVISION.fetch_add(1, Ordering::Relaxed);
++    }
++    VIEW_REVISION.load(Ordering::Relaxed)
++}
++
++/// GET /observer/endpoints — read-only membership view matching the operator schema.
++pub async fn observer_endpoints(
++    State(ctx): State<Arc<AppContext>>,
++    _headers: HeaderMap,
++) -> Response {
++    let workers = collect_workers(&ctx);
++    let workers_json = match serde_json::to_string(&workers) {
++        Ok(json) => json,
++        Err(_) => {
++            return (
++                StatusCode::INTERNAL_SERVER_ERROR,
++                "observer failed to serialize workers",
++            )
++                .into_response();
++        }
++    };
++    let revision = registry_revision_for(&workers_json);
++    let view = ObserverView {
++        router: ObserverRouter {
++            boot_generation: boot_generation(),
++            now_ms: now_ms(),
++        },
++        registry_revision: revision,
++        workers,
++    };
++    match serde_json::to_string(&view) {
++        Ok(body) => ([(CONTENT_TYPE, "application/json")], body).into_response(),
++        Err(_) => (
++            StatusCode::INTERNAL_SERVER_ERROR,
++            "observer failed to serialize view",
++        )
++            .into_response(),
++    }
++}
++
++#[cfg(test)]
++mod observer_tests {
++    use super::*;
++    use crate::discovery::{ModelId, WorkerId, WorkerSpec};
++    use crate::health::circuit_breaker::CircuitBreakerConfig;
++    use crate::workers::worker::WireProtocol;
++    use axum::body::Body;
++    use axum::http::Request;
++    use http_body_util::BodyExt;
++    use std::num::NonZeroU32;
++    use std::time::Duration;
++    use tower::ServiceExt;
++
++    async fn fetch_observer(ctx: Arc<AppContext>) -> (StatusCode, serde_json::Value) {
++        let app = crate::server::app::build_router(ctx);
++        let resp = app
++            .oneshot(
++                Request::builder()
++                    .uri("/observer/endpoints")
++                    .body(Body::empty())
++                    .unwrap(),
++            )
++            .await
++            .unwrap();
++        let status = resp.status();
++        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
++        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
++        (status, json)
++    }
++
++    #[tokio::test]
++    async fn empty_registry_returns_valid_schema() {
++        let ctx = Arc::new(AppContext::stub());
++        let (status, body) = fetch_observer(ctx).await;
++        assert_eq!(status, StatusCode::OK);
++        assert!(body["router"]["boot_generation"].as_u64().unwrap() > 0);
++        assert!(body["registry_revision"].as_u64().unwrap() >= 1);
++        assert_eq!(body["workers"].as_array().unwrap().len(), 0);
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn observer_reads_circuit_and_bootstrap_state_without_mutation() {
++        let ctx = Arc::new(AppContext::stub());
++        let cb_cfg = CircuitBreakerConfig {
++            threshold: NonZeroU32::new(1).unwrap(),
++            cool_down: Duration::from_secs(10),
++        };
++        ctx.registry
++            .add_with_cb(
++                WorkerSpec {
++                    id: WorkerId("w-plain".into()),
++                    url: "http://10.0.0.1:8000".into(),
++                    mode: WorkerMode::Plain,
++                    model_ids: vec![ModelId("m".into())],
++                    ..Default::default()
++                },
++                Some(cb_cfg),
++                WireProtocol::default(),
++            )
++            .unwrap();
++
++        let (status, body) = fetch_observer(Arc::clone(&ctx)).await;
++        assert_eq!(status, StatusCode::OK);
++        let w = &body["workers"][0];
++        assert_eq!(w["url"], "http://10.0.0.1:8000");
++        assert_eq!(w["port"], "8000");
++        assert_eq!(w["role"], "regular");
++        assert_eq!(w["pod_hint"], "10.0.0.1:8000");
++        assert_eq!(w["worker_id"], "w-plain");
++        assert_eq!(w["selection"]["registered"], true);
++        assert_eq!(w["selection"]["healthy"], true);
++        assert_eq!(w["selection"]["circuit_open"], false);
++        assert_eq!(w["selection"]["in_selection"], true);
++
++        // Open breaker: observer sees circuit_open=true, in_selection=false.
++        let worker = ctx.registry.get(&WorkerId("w-plain".into())).unwrap();
++        worker.breaker.record_failure();
++        let (_, body) = fetch_observer(Arc::clone(&ctx)).await;
++        assert_eq!(body["workers"][0]["selection"]["circuit_open"], true);
++        assert_eq!(body["workers"][0]["selection"]["in_selection"], false);
++        assert_eq!(worker.breaker.snapshot().state_code, 1);
++
++        // Past cooldown: observer reports admit without mutating Open -> HalfOpen.
++        tokio::time::advance(Duration::from_secs(11)).await;
++        let (_, body) = fetch_observer(Arc::clone(&ctx)).await;
++        assert_eq!(body["workers"][0]["selection"]["circuit_open"], false);
++        assert_eq!(body["workers"][0]["selection"]["in_selection"], true);
++        assert_eq!(worker.breaker.snapshot().state_code, 1);
++    }
++
++    #[tokio::test]
++    async fn prefill_awaiting_bootstrap_port_is_not_in_selection() {
++        let ctx = Arc::new(AppContext::stub());
++        ctx.registry
++            .add(WorkerSpec {
++                id: WorkerId("p-1".into()),
++                url: "http://10.0.0.2:8000".into(),
++                mode: WorkerMode::Prefill,
++                model_ids: vec![ModelId("m".into())],
++                bootstrap_port: None,
++                ..Default::default()
++            })
++            .unwrap();
++        let (_, body) = fetch_observer(Arc::clone(&ctx)).await;
++        let w = &body["workers"][0];
++        assert_eq!(w["role"], "prefill");
++        assert_eq!(w["selection"]["registered"], true);
++        assert_eq!(w["selection"]["healthy"], false);
++        assert_eq!(w["selection"]["circuit_open"], false);
++        assert_eq!(w["selection"]["in_selection"], false);
++    }
++}
+diff --git a/sgl-router/src/server/app.rs b/sgl-router/src/server/app.rs
+index 6ff8661f8626dc3f011354fbee8958f10dfe54ea..547def97b3b5d461807527ed1bd5c816fa7499a1 100644
+--- a/sgl-router/src/server/app.rs
++++ b/sgl-router/src/server/app.rs
+@@ -33,6 +33,7 @@ fn is_infra_path(path: &str) -> bool {
+             | "/readiness"
+             | "/health_generate"
+             | "/metrics"
++            | "/observer/endpoints"
+     )
+ }
+ 
+@@ -224,6 +225,8 @@ pub fn build_router_with_body_limit(ctx: Arc<AppContext>, max_body_bytes: usize)
+         .route("/liveness", get(crate::server::routes::health::healthz))
+         .route("/readiness", get(crate::server::routes::health::readyz))
+         .route("/metrics", get(crate::server::routes::metrics::metrics))
++        // Read-only external observation of pool membership (see src/observer.rs).
++        .route("/observer/endpoints", get(crate::observer::observer_endpoints))
+         .route(
+             "/v1/models",
+             get(crate::server::routes::models::list_models),

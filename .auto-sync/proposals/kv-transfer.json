@@ -19,5 +19,6 @@
     "hixl",
     "modelexpress",
     "gpustack-runner"
-  ]
+  ],
+  "base_image_builds": []
 }

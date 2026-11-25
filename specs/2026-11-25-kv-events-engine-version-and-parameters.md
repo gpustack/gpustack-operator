@@ -282,7 +282,7 @@ if prefill, decode := in.Parallelism.Prefill.orOne(), in.Parallelism.Decode.orOn
       Acceptance: `router.SGL = "sgl-router"` (alongside `router.SGLangGateway = "sglang-gateway"`) renders `--host`, `--port`, `--model-id`, `--chat-routing=reorg`, default `--no-tokenizer` (omitted when `extraArgs` sets `--tokenizer-path`, `--bucket-config`, or enables `cache_aware`/prefix-cache policies), `--service-discovery`, `--service-discovery-namespace`, EndpointSlice `--selector` / `--prefill-selector` + `--decode-selector`, `--dp-aware` for External DP, and `--request-timeout-secs`; exported `SGLOwnedFlags` and `vllm-router` `kv_aware` helper parse `--policy`, `--prefill-policy`, and `--decode-policy` (`=value`, two-token, last-wins); `router.go` preserves `publisherKinds` before `delete(kinds, roleKindEncode)` for SGLang EPD while preserving `llm-d-router` `topicFilter: "kv@"` and frozen `sglang-gateway` output byte-for-byte.
       Verify: `go test -v ./pkg/worker/kvcache/router/...`
 
-- [ ] **T5 · `pack/llm-router` `sgl-router` stage/observer patch, `.auto-sync/` freeze, and `Base Image` build recommendations**
+- [x] **T5 · `pack/llm-router` `sgl-router` stage/observer patch, `.auto-sync/` freeze, and `Base Image` build recommendations**
       Blocked by: None
       Owns: `pack/llm-router/**`, `.auto-sync/**`, `hack/check/autosync-selftest.sh`
       Gate: review

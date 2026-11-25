@@ -1262,13 +1262,16 @@ fi
 UPSTREAM_RECORDS_JSON="${STAGE_DIR}/upstream-records.json"
 PREFLIGHT_REPORT_JSON="${STAGE_DIR}/kv-transfer-preflight-report.json"
 
-python3 - "${DISCOVERY_JSON}" "${MANIFESTS_JSON}" "${UPSTREAM_RECORDS_JSON}" "${PREFLIGHT_REPORT_JSON}" "${STAGE_A_RECIPE_FILES[@]}" <<'PY'
+python3 -B - "${REPO_ROOT}" "${DISCOVERY_JSON}" "${MANIFESTS_JSON}" "${UPSTREAM_RECORDS_JSON}" "${PREFLIGHT_REPORT_JSON}" "${STAGE_A_RECIPE_FILES[@]}" <<'PY'
 import json
+import os
 import re
 import sys
 
-disc_path, man_path, recs_path, rep_path = sys.argv[1:5]
-stage_a_recipe_files = sys.argv[5:]
+repo_root, disc_path, man_path, recs_path, rep_path = sys.argv[1:6]
+stage_a_recipe_files = sys.argv[6:]
+sys.path.insert(0, os.path.join(repo_root, ".auto-sync", "checks"))
+from base_image_builds import recommend_for_preflight
 with open(disc_path, "r", encoding="utf-8") as f:
     disc = json.load(f)
 with open(man_path, "r", encoding="utf-8") as f:
@@ -1546,6 +1549,21 @@ else:
         },
     ]
 
+base_image_builds = recommend_for_preflight(
+    repo_root,
+    "kv-transfer",
+    stage,
+    stage_a_drifts,
+    {
+        "mooncake": up["mooncake"],
+        "nixl-pypi": up["nixl_pypi"],
+        "nixl-rocm": up["nixl_rocm"],
+        "ucx-rocm": up["ucx_rocm"],
+        "hixl": effective_hixl_target,
+        "modelexpress": up["modelexpress"],
+    },
+)
+
 with open(recs_path, "w", encoding="utf-8") as f:
     json.dump(records, f, indent=2)
     f.write("\n")
@@ -1571,6 +1589,7 @@ report = {
     "recipe": recipe,
     "defaults": defaults,
     "targets": targets,
+    "base_image_builds": base_image_builds,
     "nixl_pypi": {
         "selected_version": up["nixl_pypi"],
         "recent_versions": up["nixl_pypi_recent"],
