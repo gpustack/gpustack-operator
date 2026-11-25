@@ -95,7 +95,7 @@ func (d *Detector) MonitorAcceleratorPartitions(
 	grp.Timestamp = time.Now()
 	grp.Partitions = make([]device.AcceleratorPartition, 0, len(requests))
 
-	slotsByID := make(map[string]*mockspec.ResolvedSlot)
+	var slotsByID map[string]*mockspec.ResolvedSlot
 	if mfrSpec != nil {
 		slotsByID = make(map[string]*mockspec.ResolvedSlot, len(mfrSpec.Slots))
 		for i := range mfrSpec.Slots {

@@ -28,7 +28,9 @@ const (
 
 // InitErrorSpec configures library initialization failure injection for one manufacturer.
 // In YAML or JSON it accepts a boolean, an error message string, or an object with
-// enabled, failCount, and message fields.
+// enabled, failCount, and message fields. In object form, omitting enabled auto-enables
+// injection whenever failCount or message is non-empty; setting enabled explicitly to false
+// disables injection while preserving failCount and message for toggling.
 type InitErrorSpec struct {
 	// Enabled activates initialization failure injection.
 	Enabled bool `json:"enabled,omitempty"`
@@ -95,6 +97,8 @@ func (s *InitErrorSpec) UnmarshalJSON(data []byte) error {
 
 // FaultErrorSpec configures a manufacturer-wide count or total-query failure.
 // In YAML or JSON it accepts a boolean, an error message string, or an object with enabled and message.
+// In object form, omitting enabled auto-enables injection when message is non-empty; setting enabled
+// explicitly to false disables injection while preserving message for toggling.
 type FaultErrorSpec struct {
 	// Enabled activates the fault.
 	Enabled bool `json:"enabled,omitempty"`

@@ -38,10 +38,10 @@ func New(c *Config) (*Allocator, error) {
 		if err != nil {
 			return nil, err
 		}
-		klog.Warningf("!!! mock device mode is active (mock-devices-file=%q); real hardware detection and device injection are bypassed !!!",
-			specStore.Path())
 	}
 	if specStore != nil {
+		klog.Warningf("!!! mock device mode is active (mock-devices-file=%q); real hardware detection and device injection are bypassed !!!",
+			specStore.Path())
 		partStore := c.MockPartitionStore
 		if partStore == nil {
 			partStore = allocatormock.NewPartitionStore()
@@ -52,6 +52,7 @@ func New(c *Config) (*Allocator, error) {
 			allocatormock.WithPartitionStore(partStore),
 			allocatormock.WithSpecStore(specStore, nodeName),
 		)
+		// Caller-supplied MockOptions run last so callers and tests may override default stores.
 		mockOpts = append(mockOpts, c.MockOptions...)
 
 		allocatorCreators = allocatormock.SupportedAllocatorCreators(mockOpts...)

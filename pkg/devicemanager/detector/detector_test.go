@@ -1271,6 +1271,22 @@ func TestReportDevices_MockAnnotationBoundary(t *testing.T) {
 			wantPreservedVal: "yes",
 		},
 		{
+			name:        "default disabled removes stale mock annotation while preserving unrelated annotations",
+			mockEnabled: false,
+			existing: &workercore.Devices{
+				ObjectMeta: meta.ObjectMeta{
+					Name: nodeName,
+					Annotations: map[string]string{
+						MockDevicesAnnotationKey: "true",
+						"example.com/keep":       "yes",
+					},
+				},
+			},
+			wantMockAnno:     false,
+			wantPreservedKey: "example.com/keep",
+			wantPreservedVal: "yes",
+		},
+		{
 			name:         "mock enabled creates Devices with mock annotation true",
 			mockEnabled:  true,
 			wantMockAnno: true,

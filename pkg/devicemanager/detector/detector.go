@@ -311,8 +311,7 @@ const detectEveryNMonitorRounds = 40
 
 func (d *Detector) readInterfaces() ([]workercore.DeviceInterface, error) {
 	if d.mockSpecStore != nil {
-		nodeName := cmp.Or(d.mockNodeName, osx.Getenv("KUBERNETES_NODE_NAME"))
-		ifaces, configured, err := detectormock.DetectInterfaces(nodeName, d.mockSpecStore)
+		ifaces, configured, err := detectormock.DetectInterfaces(d.mockNodeName, d.mockSpecStore)
 		if configured {
 			return ifaces, err
 		}
@@ -326,8 +325,7 @@ func (d *Detector) readRDMAInterfaces() ([]device.RDMADevice, error) {
 		return d.rdmaInterfaceReader()
 	}
 	if d.mockSpecStore != nil {
-		nodeName := cmp.Or(d.mockNodeName, osx.Getenv("KUBERNETES_NODE_NAME"))
-		devs, configured, err := detectormock.DetectRDMADevices(nodeName, d.mockSpecStore)
+		devs, configured, err := detectormock.DetectRDMADevices(d.mockNodeName, d.mockSpecStore)
 		if configured {
 			return devs, err
 		}
@@ -1064,6 +1062,12 @@ func (a devicesAlignment) apply(actual *workercore.Devices) (*workercore.Devices
 	for k, v := range a.annotations {
 		if actual.Annotations[k] != v {
 			actual.Annotations[k] = v
+			skip = false
+		}
+	}
+	if _, wantMock := a.annotations[MockDevicesAnnotationKey]; !wantMock {
+		if _, hasMock := actual.Annotations[MockDevicesAnnotationKey]; hasMock {
+			delete(actual.Annotations, MockDevicesAnnotationKey)
 			skip = false
 		}
 	}

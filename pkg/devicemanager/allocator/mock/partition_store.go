@@ -126,13 +126,13 @@ func (s *PartitionStore) Reserve(
 			continue
 		}
 		if existing.Profile != profile {
-			return VirtualPartition{}, true, fmt.Errorf(
+			return VirtualPartition{}, false, fmt.Errorf(
 				"card %s already holds partition %s with profile %q for pod %s container %q, cannot rebind as %q",
 				acc.ID, existing.ID, existing.Profile, podUID, container, profile,
 			)
 		}
 		if !containsPlacement(profSpec.Placements, existing.Placement) {
-			return VirtualPartition{}, true, fmt.Errorf(
+			return VirtualPartition{}, false, fmt.Errorf(
 				"card %s no longer offers placement %+v for profile %q",
 				acc.ID, existing.Placement, profile,
 			)

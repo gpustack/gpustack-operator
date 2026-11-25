@@ -51,10 +51,13 @@ func (c *Config) wireMockStores() error {
 	if partStore == nil {
 		partStore = allocatormock.NewPartitionStore()
 	}
+	mockFile = cmp.Or(mockFile, specStore.Path())
+	c.DetectorConfig.MockDevicesFile = cmp.Or(c.DetectorConfig.MockDevicesFile, mockFile)
 	c.DetectorConfig.MockSpecStore = specStore
 	if c.DetectorConfig.MockPartitionProvider == nil {
 		c.DetectorConfig.MockPartitionProvider = partStore
 	}
+	c.AllocatorConfig.MockDevicesFile = cmp.Or(c.AllocatorConfig.MockDevicesFile, mockFile)
 	c.AllocatorConfig.MockSpecStore = specStore
 	c.AllocatorConfig.MockPartitionStore = partStore
 	return nil

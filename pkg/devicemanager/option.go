@@ -8,7 +8,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"gpustack.ai/gpustack/pkg/devicemanager/allocator"
-	allocatormock "gpustack.ai/gpustack/pkg/devicemanager/allocator/mock"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector"
 	"gpustack.ai/gpustack/pkg/devicemanager/exporter"
 	"gpustack.ai/gpustack/pkg/manager"
@@ -116,20 +115,12 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 		return nil, err
 	}
 
-	if detConfig.MockSpecStore != nil {
-		partStore := allocatormock.NewPartitionStore()
-		detConfig.MockPartitionProvider = partStore
-		alcConfig.MockDevicesFile = detConfig.MockDevicesFile
-		alcConfig.MockSpecStore = detConfig.MockSpecStore
-		alcConfig.MockPartitionStore = partStore
-	}
-
 	// Create a channel for sharing detected manufacturers between detector and allocator.
 	detectedManufacturersCh := make(chan sets.Set[string], 4)
 	detConfig.DetectedManufacturersCh = detectedManufacturersCh
 	alcConfig.DetectedManufacturersCh = detectedManufacturersCh
 
-	return &Config{
+	cfg := &Config{
 		ServerConfig:    srvConfig,
 		ManagerConfig:   mgrConfig,
 		DetectorConfig:  detConfig,
@@ -137,5 +128,10 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 		// The exporter has no flags of its own: it samples on the detector's period, which
 		// Config.Apply hands it.
 		ExporterConfig: &exporter.Config{},
-	}, nil
+	}
+	if err := cfg.wireMockStores(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }

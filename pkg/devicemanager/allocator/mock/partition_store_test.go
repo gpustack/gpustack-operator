@@ -169,9 +169,10 @@ func TestPartitionStore_PlacementsOverlapConcurrencyAndInspection(t *testing.T) 
 	assert.Equal(t, results[0].ID, reboundPart.ID)
 	assert.Equal(t, 3, store.Count())
 
-	// Conflicting profile retry for pod-0 fails closed.
-	_, _, err = store.Reserve(nodefeature.ManufacturerNVIDIA, "pod-0", "main", grp, acc, "1g.10gb")
+	// Conflicting profile retry for pod-0 fails closed with rebound=false.
+	_, conflictRebound, err := store.Reserve(nodefeature.ManufacturerNVIDIA, "pod-0", "main", grp, acc, "1g.10gb")
 	require.Error(t, err)
+	assert.False(t, conflictRebound)
 	assert.ErrorContains(t, err, "profile")
 
 	// Inspection helpers return accurate snapshots and defensive copies.
