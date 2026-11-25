@@ -398,8 +398,10 @@ The record is JSON. Its keys mean:
   could not identify as an engine entry point.
 
 `Pod`s admitted by an older operator may also carry `engineVersion`. New records omit it because it
-described the upstream source used when the injector was written, not the image in the `Pod`. Readers
-must ignore that legacy field and must not infer image compatibility from it.
+described the upstream source used when the injector was written, not the image in the `Pod`.
+Standalone `Pod` injection does not require an engine version annotation and renders on the shared
+store baseline; `ModelDeployment` version-gated connectors (`MooncakeConnectorV2`, `ECCPUConnector`
+env defaults, and KV events) are covered in [Parameters](model-deployment-parameters.md).
 
 `vehicle` is on the record so a reader can tell which shape was written without decoding the
 container: `"file"` means a projected configuration document plus its volume, `"environment"` means
@@ -518,8 +520,8 @@ copied and nothing is allocated twice, so the two are not competing. Disabling p
 no memory back and loses the engine's own reuse.
 
 Host DRAM is where an overlap could happen, and neither engine puts KV there unless asked. vLLM's
-`--swap-space` is deprecated and ignored, and `kv_offloading_size` defaults off, so on vLLM the only
-host DRAM this injection adds is the staging buffer above. SGLang's host tier needs
+`--swap-space` was removed in vLLM `0.30+`, and `kv_offloading_size` defaults off, so on vLLM the
+only host DRAM this injection adds is the staging buffer above. SGLang's host tier needs
 `--enable-hierarchical-cache`, which this injection renders because the store hangs off that tier.
 Its [host pool](#sglang-host-memory-tier) is the one host allocation it adds there.
 
