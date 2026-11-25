@@ -1,0 +1,52 @@
+manufacturer: amd
+groups:
+  - name: AMD Instinct MI300X OAM
+    memory: 196592
+    cores: 304
+    driverVersion: "6.10.5"
+    runtimeVersion: "7.0"
+    computeCapability: "gfx942"
+    family: "Arctic Islands"
+    accelerators:
+      - id: GPU-0cee36ddc4255115
+        index: 0
+        physicalIndexes: [9, 136]
+        topology:
+          pciBusId: "0000:26:00.0"
+          pciRootId: "0000:20:00.0"
+          pciClass: "0380"
+          pciSwitches: ["0000:24:00.0", "0000:22:00.0"]
+          numaAffinity: "0"
+          cpuAffinity: "0-47"
+          fabric:
+            kind: xgmi
+            id: "4a8b1c2d3e4f5061"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 284
+          coresUtilization: 0
+          temperature: 34
+          powerUsage: 132
+      - id: GPU-cfb3160d6c053160
+        index: 1
+        physicalIndexes: [17, 144]
+        topology:
+          pciBusId: "0000:46:00.0"
+          pciRootId: "0000:40:00.0"
+          pciClass: "0380"
+          pciSwitches: ["0000:44:00.0", "0000:42:00.0"]
+          numaAffinity: "0"
+          cpuAffinity: "0-47"
+          fabric:
+            kind: xgmi
+            id: "4a8b1c2d3e4f5061"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 284
+          coresUtilization: 0
+          temperature: 44
+          powerUsage: 141

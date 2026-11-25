@@ -298,20 +298,25 @@ func filterAllocatedAcceleratorMetrics(
 
 // selectDeviceManagerPod returns the Ready, non-terminating device manager pod serving the
 // given manufacturer, or nil. Another manufacturer's pod is never an acceptable substitute:
-// its snapshot cannot carry the cards we are asked about. An unlabeled manufacturer
-// (an allocation predating the label) accepts any pod.
+// its snapshot cannot carry the cards we are asked about. A mock device manager pod
+// (gpustack.ai/manufacturer=mock) serves multi-vendor mock snapshots and acts as a fallback
+// when no manufacturer-specific pod is present. An unlabeled manufacturer (an allocation
+// predating the label) accepts any pod.
 func selectDeviceManagerPod(pods []core.Pod, manufacturer string) *core.Pod {
+	var mockFallback *core.Pod
 	for i := range pods {
 		pod := &pods[i]
 		if pod.DeletionTimestamp != nil || pod.Status.PodIP == "" || !deviceplugin.IsPodReady(pod) {
 			continue
 		}
-		if manufacturer != "" && pod.Labels[deviceplugin.ManufacturerLabelKey] != manufacturer {
-			continue
+		if manufacturer == "" || pod.Labels[deviceplugin.ManufacturerLabelKey] == manufacturer {
+			return pod
 		}
-		return pod
+		if mockFallback == nil && pod.Labels[deviceplugin.ManufacturerLabelKey] == deviceplugin.ManufacturerMock {
+			mockFallback = pod
+		}
 	}
-	return nil
+	return mockFallback
 }
 
 // listNodeDeviceManagerPods lists the device manager pods of the given node

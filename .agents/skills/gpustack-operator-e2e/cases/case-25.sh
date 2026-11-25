@@ -1,377 +1,209 @@
 #!/usr/bin/env bash
 #
-# CASE 25 — Partition capacity and token health are read from the live ledger, not from a static ceiling
-#   (MUTATING, self-recovering; AUTO-SKIPS without a partition-capable node AND a node-SSH address)
+# CASE 25 — A ModelScope artifact resolves with the git cross-check, materializes on a cold node,
+#            syncs from a peer, and a conforming ModelScope SDK pins the commit (MUTATING,
+#            self-recovering; AUTO-SKIPS with E2E_C25_OFFLINE=1 when the cluster cannot reach
+#            www.modelscope.cn)
 #
-#   MIG_NODE_SSH=<user@host> case-25.sh <NS>
+#   case-25.sh <NS>
 #
-# Prerequisites: nodes=1; gpu=nvidia; features=partition; cluster=real; inputs=MIG_NODE_SSH,MIG_WRITE_IDLE_WINDOW
-# Goal:        A node's partition keys answer one question: how many more instances can this node host.
-#              A per-profile key publishes what its own cards can STILL host, because the profiles
-#              compete for the same physical slices: carving one 4-memory-slice instance consumes half
-#              a card, so the whole-card profile stops fitting on that card and its key falls — on a
-#              node whose only partitioned card holds one such instance, to zero — while the same-size
-#              profile's key is unchanged, because the key publishes allocated + remaining and the
-#              scheduler subtracts the running Pod's own request from it. The node-level token count
-#              is a fungible count rather than a card selection: the node advertises allocated +
-#              remaining healthy tokens, so a saturated node still advertises its live instance count
-#              while the scheduler's FREE view is zero, and freeing one raises the count again with no
-#              restart of anything. A static ceiling would keep advertising the whole-card profile and
-#              attract a Pod that cannot be placed. The case also MEASURES what this costs: the
-#              ledger-derived key re-patches node capacity on every partition allocate and release, so
-#              the Node-object write volume is counted over an idle window and over a carve/free window
-#              and PRINTED for the record. Finally it exercises the residual the key shape does not
-#              close: the per-profile keys are independently subtracted scalars, so two Pods naming
-#              mutually exclusive profiles can both be admitted to a node that can host only one of
-#              them. The case FAILS if both reach Running on the one card, since that is a double-booked
-#              placement; how the loser is held is recorded, not asserted.
-# Environment: A reachable cluster whose active context is the GPU cluster, an nvidia node with at
-#              least one card that can be put into a hardware partitioning mode, AND SSH to that node
-#              (sudo nvidia-smi) supplied via MIG_NODE_SSH=<user@host>. It EXITS 2 (input required)
-#              when MIG_NODE_SSH is unset, and AUTO-SKIPS (exit 0) when the card reports no
-#              partitioning mode, when the mode switch does not converge, or when the cards advertise
-#              no per-profile key this case needs. The strict "reads zero" and the residual observation
-#              need exactly ONE partitioned card; with more, the arithmetic is asserted relative to the
-#              partitioned card count and the held-request sub-check records SKIPPED.
-# Inputs:      All real, nothing mocked — the node's own keys and the live geometry are the
-#              verification. The case partitions card MIG_GPU_INDEX if no card is partitioned yet,
-#              carves one instance of the discovered 4-memory-slice profile, then saturates every
-#              partitioned card with one whole-card-profile instance, and reads the node's allocatable
-#              keys around both. Profiles are DISCOVERED from the cards' own capability, never composed.
-# Expected:    - on an idle partitioned card set, the whole-card profile key equals the partitioned
-#                card count, the 4-slice profile key equals twice it, and the node-level token count
-#                equals the cards' ceiling;
-#              - after ONE 4-slice instance is carved, the whole-card profile key drops by exactly one
-#                card's worth (zero when there is a single partitioned card), while the 4-slice key is
-#                unchanged at allocated + remaining;
-#              - with a single partitioned card so occupied, a whole-card-profile Pod is HELD rather
-#                than admitted onto a node that cannot place it;
-#              - once every partitioned card holds a whole-card instance, allocatable equals the live
-#                instance count (one per card) — not zero, and not the ceiling — and the capacity entry
-#                survives the saturation;
-#              - a further partition Pod is HELD, and every already-running partition Pod is still
-#                Running and still holds exactly one hardware instance;
-#              - freeing one instance raises the count again with no restart, and a fresh partition
-#                request admits;
-#              - the Node-object write counts over both windows are recorded and printed;
-#              - of two Pods naming mutually exclusive profiles on one card, at most one runs; how the
-#                other is held is recorded.
-# Cleanup:     Trap deletes every test Pod, waits for the live instances to reclaim, stops the write
-#              probe, and restores the partitioning mode of the card this case toggled (a card it found
-#              already partitioned is left as found). Idempotent; runs on pass AND fail.
+# Prerequisites: nodes=2; gpu=none; features=multi-host; cluster=any
+# Goal:        Prove the second hub end to end against the real ModelScope API: a branch resolves
+#              to the commit git also names, its files materialize on a cold node and hash to the
+#              hub's own sha256, a second node's copy comes from the first node's published tree,
+#              and a ModelScope SDK at the documented floor downloads at the resolved commit.
+# Environment: A cluster installed from this chart with modelManager.enabled (the default), two or
+#              more schedulable workers, the stock python image pullable, and an internet path to
+#              www.modelscope.cn and pypi.org from the nodes and from this machine. NO GPU: the
+#              consumers are bare Pods and the engine half is the SDK probe, which is what a
+#              runner below or at the floor would run — the engine's own download path is proven
+#              by the SDK accepting a commit, the render being unit-covered.
+# Inputs:      All real, nothing mocked: qwen/Qwen2.5-0.5B-Instruct on www.modelscope.cn, filtered
+#              to its JSON and tokenizer files; modelscope==1.39.1 installed from PyPI inside the
+#              probe Pod. No token: the repository is public, so no credential exists to leak.
+# Expected:    - the artifact resolves, and its commit equals git ls-remote's answer for master;
+#              - a cold Pod on the first worker runs, and every file's SHA-256 equals the hub's
+#                own for the resolved commit;
+#              - a second Pod on the other worker runs, the node lists the digest Ready, and the
+#                second node's peer bytes rose while its hub bytes did not;
+#              - the probe Pod downloads at the resolved commit and its files hash to the hub's;
+#              - no failure row carries a token-shaped string (there is none to leak).
+# Cleanup:     Trap deletes the Pods and the artifact.
 set -uo pipefail
 
-# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
-# on transport alone, and a check that takes such a failure for an answer reports a verdict
-# about the network rather than about the operator.
+CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
-
-NS="${1:?usage: MIG_NODE_SSH=<user@host> case-25.sh <NS>}"
-CASE_ID=25
+. "${CASES_DIR}/_rows-lib.sh"
 # shellcheck source=/dev/null
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_partition-lib.sh"
+. "${CASES_DIR}/_model-hub-lib.sh"
 
-# Two pod families, one per half of the case: the ledger half carves and frees, the saturation half
-# fills every card. The prefixes keep the two sets apart, so neither half can read the other's Pods.
-LEDGERPFX=gpustack-e2e-ledgercap
-SATURATEPFX=gpustack-e2e-saturate
-IDLE_WINDOW="${MIG_WRITE_IDLE_WINDOW:-60}"
+NS="${1:?usage: case-25.sh <consumer-NS>}"
+if [ "$NS" = "$SYSTEM_NS" ]; then
+  echo "[case-25] refusing system namespace ${SYSTEM_NS}; usage: case-25.sh <consumer-NS>" >&2
+  exit 2
+fi
+P=c25
+REPO="qwen/Qwen2.5-0.5B-Instruct"
+COMMIT_BOUND=120
+POD_BOUND=300
 
-part_require_node_ssh "case-25.sh"
-part_require_mig_capable
-part_discover
+WORKERS=()
+for _w in $(model_workers); do WORKERS+=("$_w"); done
+if [ "${#WORKERS[@]}" -lt 2 ]; then
+  echo "[case-25] SKIP: needs two schedulable workers, found ${#WORKERS[@]}" >&2
+  exit 0
+fi
 
-TOGGLED=""
-restore() {
+# shellcheck disable=SC2317  # the trap keeps it reachable; the checker cannot see the EXIT
+cleanup() {
   echo
-  echo "[case-25] cleanup: deleting test Pods, stopping the write probe, restoring card(s) '${TOGGLED:-<none>}'"
-  stop_node_write_probe
-  [ -n "$NODE_WRITE_LOG" ] && rm -f "$NODE_WRITE_LOG"
-  delete_test_pods
-  part_restore_toggled
+  echo "[case-25] cleanup"
+  kubectl -n "$NS" delete pod "${P}-cold" "${P}-peer" "${P}-probe" --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1
+  kubectl -n "$NS" delete modelartifacts.worker.gpustack.ai "${P}-qwen" --ignore-not-found >/dev/null 2>&1
 }
-trap restore EXIT
+trap cleanup EXIT
 
-# ---------------------------------------------------------------------------------------------------
-# One partitioned card, one geometry, one discovery — both halves of this case read it.
-# ---------------------------------------------------------------------------------------------------
-part_ensure_partitioned_card
+# A ModelScope source, the patterns keeping only the small JSON and tokenizer files.
+kubectl apply -f - >/dev/null <<YAML
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelArtifact
+metadata:
+  name: ${P}-qwen
+  namespace: $NS
+  labels: {e2e.gpustack.ai/case: "${P}"}
+spec:
+  source:
+    modelScope:
+      repository: $REPO
+      revision: master
+  allowPatterns: ["*.json", "tokenizer*", "configuration*"]
+YAML
 
-read -r SMALL SMALL_CNT MID MID_CNT FULL FULL_CNT NPART NTOT <<<"$(card_profiles)"
-MIDKEY="$(profile_key "$MID")"
-FULLKEY="$(profile_key "$FULL")"
-SMALLKEY="$(profile_key "$SMALL")"
-CEILING="$(partition_ceiling)"
-echo "[case-25] discovered profiles: SMALL=${SMALL}(${SMALL_CNT}/card) MID=${MID}(${MID_CNT}/card) FULL=${FULL}(${FULL_CNT}/card); partitioned cards=${NPART:-0} of ${NTOT:-0}, partition ceiling=${CEILING:-0}"
-if [ -z "$MIDKEY" ] || [ -z "$FULLKEY" ] || [ -z "$SMALLKEY" ] || [ "${NPART:-0}" -lt 1 ]; then
-  part_skip \
-    "The node advertises no usable per-profile keys (MID='${MIDKEY:-<none>}', FULL='${FULLKEY:-<none>}'," \
-    "SMALL='${SMALLKEY:-<none>}') over ${NPART:-0} partitioned card(s). This case needs a partitioned card" \
-    "offering a 4-memory-slice profile, a whole-card profile and the smallest profile."
-fi
-
-# The card must start empty, or the baselines below are not the empty-card ones.
-wait_card_idle || echo "[case-25] warning: the card already holds live instances — the baselines may not be the empty-card ones"
-
-# ---------------------------------------------------------------------------------------------------
-# Half 1 — the per-profile keys are derived from the live ledger, not from a static ceiling.
-# ---------------------------------------------------------------------------------------------------
-echo
-echo "[case-25] === baseline: idle partitioned card(s) ==="
-base_mid="$(node_key "$MIDKEY")"
-base_full="$(node_key "$FULLKEY")"
-want_mid=$((MID_CNT * NPART))
-want_full=$((FULL_CNT * NPART))
-if [ "${base_mid:-x}" = "$want_mid" ] && [ "${base_full:-x}" = "$want_full" ]; then
-  record PASS "idle per-profile keys equal the cards' geometry" "${MIDKEY}=${base_mid} (want ${want_mid}), ${FULLKEY}=${base_full} (want ${want_full}) over ${NPART} partitioned card(s)"
+echo "== 1. resolution =="
+DIGEST="$(wait_resolved "$NS" "${P}-qwen" "$COMMIT_BOUND")"
+COMMIT="$(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai "${P}-qwen" -o jsonpath='{.status.resolved.revision}' 2>/dev/null)"
+if [ -n "$DIGEST" ] && [ -n "$COMMIT" ]; then
+  GIT_COMMIT="$(git ls-remote "https://www.modelscope.cn/${REPO}.git" refs/heads/master 2>/dev/null | cut -f1)"
+  if [ "$GIT_COMMIT" = "$COMMIT" ]; then
+    record PASS "resolved" "commit ${COMMIT:0:12}… equals git ls-remote's master, digest ${DIGEST:0:19}…"
+  else
+    record FAIL "resolved" "the hub answered ${COMMIT:0:12}…, git answers ${GIT_COMMIT:0:12}…"
+  fi
 else
-  record FAIL "idle per-profile keys equal the cards' geometry" "${MIDKEY}='${base_mid:-<absent>}' (want ${want_mid}), ${FULLKEY}='${base_full:-<absent>}' (want ${want_full}) — an empty card must advertise its full per-profile ceiling"
+  record FAIL "resolved" "no digest within ${COMMIT_BOUND}s: $(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai "${P}-qwen" -o jsonpath='{.status.conditions[?(@.type=="Resolved")].message}' 2>/dev/null)"
 fi
+[ -n "$DIGEST" ] || { print_rows "${ROWS[@]}"; exit 1; }
 
-# ---------------------------------------------------------------------------------------------------
-# Write volume, part 1 — the idle baseline the carve window is compared against.
-# ---------------------------------------------------------------------------------------------------
-echo "[case-25] measuring Node-object writes over ${IDLE_WINDOW}s of partition inactivity"
-start_node_write_probe
-sleep "$IDLE_WINDOW"
-stop_node_write_probe
-IDLE_WRITES="$(node_write_count)"
-rm -f "$NODE_WRITE_LOG"
-echo "[case-25]   idle window: ${IDLE_WRITES} Node write(s) in ${IDLE_WINDOW}s"
-
-# ---------------------------------------------------------------------------------------------------
-# Carve one mid-size instance and watch the keys move: the whole-card profile loses that card, the
-# same-size profile does not, because the key is allocated + remaining.
-# ---------------------------------------------------------------------------------------------------
-echo
-echo "[case-25] === carving one ${MID} instance ==="
-start_node_write_probe
-CARVE_T0=$(date +%s)
-A="${LEDGERPFX}-mid"
-mkpod "$A" "$(partition_reslines "$MIDKEY")"
-LEDGER_OK=1
-if ! wait_running "$A"; then
-  record FAIL "a mid-size partition admits" "${A} did not reach Running (held: $(held_reason "$A")) — cannot set up the occupancy the rest of the case reads"
-  stop_node_write_probe
-  LEDGER_OK=0
-else
-  record PASS "a mid-size partition admits" "${A} Running on card(s) $(wait_pod_cards "$A"), profile recorded '$(pod_profiles "$A")'"
-fi
-
-# The rows below read the occupancy this Pod created, so they run only when it admitted. A failed
-# carve must not swallow the second half of the case, which starts from its own baseline.
-if [ "$LEDGER_OK" = 1 ]; then
-  exp_full=$((want_full - FULL_CNT))
-  cur_full=""; cur_mid=""
-  for _ in $(seq 1 30); do
-    cur_full="$(node_key "$FULLKEY")"
-    cur_mid="$(node_key "$MIDKEY")"
-    [ "${cur_full:-x}" = "$exp_full" ] && break
-    sleep 3
-  done
-  if [ "${cur_full:-x}" = "$exp_full" ]; then
-    record PASS "the whole-card profile key falls to what the cards can still host" "${FULLKEY}: ${base_full} → ${cur_full} (want ${exp_full}$([ "$exp_full" = 0 ] && echo ', the single partitioned card is half occupied')) after one ${MID} was carved"
-  else
-    record FAIL "the whole-card profile key falls to what the cards can still host" "${FULLKEY}='${cur_full:-<absent>}', want ${exp_full} — the key is still reporting a static ceiling the geometry cannot serve"
-  fi
-  if [ "${cur_mid:-x}" = "$want_mid" ]; then
-    record PASS "the same-size profile key still reads allocated + remaining" "${MIDKEY}=${cur_mid} unchanged (1 allocated + $((MID_CNT - 1)) remaining on the carved card) — publishing bare remaining would subtract the running instance twice"
-  else
-    record FAIL "the same-size profile key still reads allocated + remaining" "${MIDKEY}='${cur_mid:-<absent>}', want ${want_mid} — the allocated term is missing, so the scheduler will double-subtract the live instance"
-  fi
-
-  # With one partitioned card, a whole-card-profile Pod must not be admitted onto this node at all.
-  if [ "${NPART:-0}" = 1 ]; then
-    B="${LEDGERPFX}-full"
-    mkpod "$B" "$(partition_reslines "$FULLKEY")"
-    hr="$(assert_held "$B")"
-    if [ -n "$hr" ]; then
-      record PASS "a whole-card-profile Pod is not placed on the occupied node" "${B} held [${hr}] — the zero-valued key kept the scheduler off this node"
-    else
-      record FAIL "a whole-card-profile Pod is not placed on the occupied node" "${B} shows no concrete held signal (phase=$(phase "$B")) — a whole-card profile cannot fit a card that already holds a 4-slice instance"
-    fi
-    delpod "$B"
-  else
-    record SKIP "a whole-card-profile Pod is not placed on the occupied node" "${NPART} partitioned cards — a sibling card can legitimately host the whole-card profile, so the node-level refusal is not assertable here"
-  fi
-
-  # -------------------------------------------------------------------------------------------------
-  # Free the instance again and close the write window.
-  # -------------------------------------------------------------------------------------------------
-  delpod "$A"
-  for _ in $(seq 1 30); do
-    [ "$(node_key "$FULLKEY")" = "$want_full" ] && break
-    sleep 3
-  done
-  CARVE_T1=$(date +%s)
-  stop_node_write_probe
-  CARVE_WRITES="$(node_write_count)"
-  rm -f "$NODE_WRITE_LOG"
-  CARVE_SECS=$((CARVE_T1 - CARVE_T0))
-  record PASS "OBSERVED: node-status write volume of the ledger-derived key" "idle ${IDLE_WRITES} write(s)/${IDLE_WINDOW}s; one carve+free cycle ${CARVE_WRITES} write(s)/${CARVE_SECS}s (sampled at 1 Hz on the Node object's resourceVersion)"
-
-  echo
-  echo "---- fold back into the spec: node-status write volume ----"
-  echo "idle window       : ${IDLE_WRITES} Node write(s) over ${IDLE_WINDOW}s with no partition activity"
-  echo "carve+free window : ${CARVE_WRITES} Node write(s) over ${CARVE_SECS}s covering one allocate and one release"
-  echo "method            : 1 Hz poll of node/${GPU_NODE} .metadata.resourceVersion, counting transitions"
-  echo "-----------------------------------------------------------"
-fi
-
-# ---------------------------------------------------------------------------------------------------
-# The residual the key shape does not close, DEMONSTRATED rather than asserted: the per-profile keys
-# are independently subtracted scalars, so two Pods naming mutually exclusive profiles can both be
-# admitted to a node that can host only one. The containment is that Allocate fails closed and the
-# admission check retries; the case records what actually happened.
-# ---------------------------------------------------------------------------------------------------
-echo
-echo "[case-25] === observation: mutually exclusive profiles on one card ==="
-wait_card_idle || true
-if [ "${NPART:-0}" = 1 ]; then
-  X="${LEDGERPFX}-x-full"; Y="${LEDGERPFX}-x-mid"
-  mkpod "$X" "$(partition_reslines "$FULLKEY")"
-  mkpod "$Y" "$(partition_reslines "$MIDKEY")"
-  xr=1; wait_running "$X" || xr=0
-  yr=1; wait_running "$Y" || yr=0
-  xu="$(pod_unexpected_admission "$X")"; yu="$(pod_unexpected_admission "$Y")"
-  both=$((xr + yr))
-  if [ "$both" -le 1 ]; then
-    if [ "$xr" = 0 ]; then loser="$X"; loser_prof="$FULL"; else loser="$Y"; loser_prof="$MID"; fi
-    record PASS "OBSERVED: mutually exclusive profiles do not both run" "only $both of 2 ran on the single card; ${loser} (${loser_prof}) did not [$(held_reason "$loser")] and stayed held rather than corrupting the card; UnexpectedAdmissionError X=${xu:-0} Y=${yu:-0}"
-  else
-    record FAIL "OBSERVED: mutually exclusive profiles do not both run" "BOTH ${X} (${FULL}) and ${Y} (${MID}) reached Running on ONE card — the geometry cannot host both, so a placement was double-booked"
-  fi
-  delpods "$X" "$Y"
-else
-  record SKIP "OBSERVED: mutually exclusive profiles do not both run" "${NPART} partitioned cards — the two profiles can legitimately land on different cards, so the node-level window is not observable here"
-fi
-
-# ---------------------------------------------------------------------------------------------------
-# Half 2 — the token count is a node-level number: allocated + remaining.
-# ---------------------------------------------------------------------------------------------------
-wait_card_idle || echo "[case-25] warning: the card still holds live instances — the ceiling baseline may be off"
-
-echo
-echo "[case-25] === baseline: idle partitioned card(s) advertise the full ceiling ==="
-base_tok=""
-for _ in $(seq 1 20); do
-  base_tok="$(node_key "$PARTITIONED")"
-  [ "${base_tok:-x}" = "${CEILING}" ] && break
-  sleep 3
-done
-if [ "${base_tok:-x}" = "${CEILING}" ]; then
-  record PASS "idle node advertises the full partition ceiling" "${PARTITIONED}=${base_tok} = Σ per-card ceiling over ${NPART} partitioned card(s)"
-else
-  record FAIL "idle node advertises the full partition ceiling" "${PARTITIONED}='${base_tok:-<absent>}', want ${CEILING} — an empty partitioned card must advertise every slot it could host as Healthy"
-fi
-
-# ---------------------------------------------------------------------------------------------------
-# Saturate: one whole-card instance per partitioned card leaves no room for any profile.
-# ---------------------------------------------------------------------------------------------------
-echo
-echo "[case-25] === saturating ${NPART} partitioned card(s) with one ${FULL} each ==="
-FILLED=()
-SAT_OK=1
-for i in $(seq 1 "$NPART"); do
-  p="${SATURATEPFX}-full-${i}"
-  mkpod "$p" "$(partition_reslines "$FULLKEY")"
-  if ! wait_running "$p"; then
-    record FAIL "every partitioned card is saturated" "${p} did not reach Running (held: $(held_reason "$p")) — cannot saturate the node"
-    SAT_OK=0
-    break
-  fi
-  FILLED+=("$p")
-done
-
-# The rows below read the saturation this loop created, so they run only when every card filled.
-if [ "$SAT_OK" = 1 ]; then
-  record PASS "every partitioned card is saturated" "${#FILLED[@]}× ${FULL} Running, node reports $(node_gi_count) live hardware instance(s)"
-
-  sat_tok=""
-  for _ in $(seq 1 30); do
-    sat_tok="$(node_key "$PARTITIONED")"
-    [ "${sat_tok:-x}" = "${#FILLED[@]}" ] && break
-    sleep 3
-  done
-  if [ "${sat_tok:-x}" = "${#FILLED[@]}" ]; then
-    record PASS "a saturated node advertises exactly its live instance count" "${PARTITIONED}=${sat_tok} = ${#FILLED[@]} allocated + 0 remaining; the scheduler subtracts the running Pods' requests, so its free view is zero"
-  else
-    record FAIL "a saturated node advertises exactly its live instance count" "${PARTITIONED}='${sat_tok:-<absent>}', want ${#FILLED[@]} — allocatable must keep the allocated term, or the scheduler double-subtracts the live instances (too low) / keeps attracting Pods (too high)"
-  fi
-  # Capacity is the operator-owned side and must not have collapsed with the free view.
-  sat_cap="$(node_key_cap "$PARTITIONED")"
-  if [ -n "$sat_cap" ]; then
-    record PASS "capacity survives saturation" "${PARTITIONED} capacity=${sat_cap} while allocatable=${sat_tok:-?} — the family is saturated, not absent"
-  else
-    record FAIL "capacity survives saturation" "${PARTITIONED} has no capacity entry — a saturated family must keep its keys, or they would be deleted and re-added on every release"
-  fi
-
-  # -----------------------------------------------------------------------------------------------
-  # A further partition Pod is held, and the running ones are untouched.
-  # -----------------------------------------------------------------------------------------------
-  EXTRA="${SATURATEPFX}-extra"
-  mkpod "$EXTRA" "$(partition_reslines "$SMALLKEY")"
-  hr="$(assert_held "$EXTRA")"
-  if [ -n "$hr" ]; then
-    record PASS "a further partition request is held on a full node" "${EXTRA} held [${hr}] — no room for even the smallest profile"
-  else
-    record FAIL "a further partition request is held on a full node" "${EXTRA} shows no concrete held signal (phase=$(phase "$EXTRA")) — the node has no room, so the request must not be admitted onto it"
-  fi
-
-  stillok=1
-  for p in "${FILLED[@]}"; do
-    running "$p" || stillok=0
-    [ "$(pod_mig_devices "$p")" = 1 ] || stillok=0
-  done
-  if [ "$stillok" = 1 ]; then
-    record PASS "running partitions are unaffected by saturation" "${#FILLED[@]}× ${FULL} still Running, each still holding exactly one hardware instance"
-  else
-    record FAIL "running partitions are unaffected by saturation" "at least one saturating Pod is no longer Running or no longer sees exactly one instance — a health recount must never disturb a live allocation"
-  fi
-
-  # -----------------------------------------------------------------------------------------------
-  # Freeing one instance raises the count again, with no restart of anything.
-  # -----------------------------------------------------------------------------------------------
-  echo
-  echo "[case-25] === freeing one instance restores the count ==="
-  delpod "$EXTRA"
-  FREED="${FILLED[0]}"
-  delpod "$FREED"
-  freed_tok=""
-  for _ in $(seq 1 40); do
-    freed_tok="$(node_key "$PARTITIONED")"
-    [ -n "$freed_tok" ] && [ "${freed_tok}" -gt "${sat_tok:-0}" ] && break
-    sleep 3
-  done
-  if [ -n "$freed_tok" ] && [ "${freed_tok}" -gt "${sat_tok:-0}" ]; then
-    record PASS "freeing an instance raises the healthy count" "${PARTITIONED}: ${sat_tok} → ${freed_tok} after ${FREED} was deleted, with no plugin or kubelet restart"
-  else
-    record FAIL "freeing an instance raises the healthy count" "${PARTITIONED} still '${freed_tok:-<absent>}' after freeing an instance (was ${sat_tok:-?}) — released room must reappear on the next ListAndWatch cycle"
-  fi
-
-  REFILL="${SATURATEPFX}-refill"
-  mkpod "$REFILL" "$(partition_reslines "$SMALLKEY")"
-  if wait_running "$REFILL"; then
-    record PASS "the freed room is usable again" "${REFILL} (${SMALL}) Running on the room ${FREED} released"
-  else
-    record FAIL "the freed room is usable again" "${REFILL} did not reach Running (held: $(held_reason "$REFILL")) — a released slot must be allocatable without a restart"
-  fi
-fi
-
-part_results "Per-profile capacity and partition token health are read from the live ledger"
-
-if [ "$FAILS" -ne 0 ]; then
-  echo
-  echo "FAILED ${FAILS} check(s). Each per-profile key must publish Σ (allocated + remaining) over the node's"
-  echo "partitioned cards, and the node-level token count must publish allocated + remaining as well —"
-  echo "never bare remaining and never zero while instances live. Diagnose:"
-  echo "  kubectl get devices ${GPU_NODE} -o json | jq '.status.groups[].accelerators[] | {id, allocatedProfiles, remainingProfiles}'"
-  echo "  kubectl get node ${GPU_NODE} -o json | jq '{cap:.status.capacity, alloc:.status.allocatable} | map_values(with_entries(select(.key|test(\"partitioned\"))))'"
-  echo "  kubectl get node ${GPU_NODE} -o json | jq '.status.allocatable | with_entries(select(.key|test(\"partitioned\")))'"
-  echo "  kubectl -n ${NS} logs deploy/gpustack-operator-worker --tail=200 | grep -i 'node capacity'"
-  echo "  ${MIG_NODE_SSH} sudo nvidia-smi mig -lgi"
-  echo "  kubectl -n ${NS} logs ds/${DM_DS} --tail=200"
+ART_UID=$(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai "${P}-qwen" -o jsonpath='{.metadata.uid}')
+MS_SHA_JSON="$(mktemp)"
+# The mount serves exactly the manifest's files: the same allowPatterns the artifact declares
+# filter the hub's listing, so the expected set matches what a consumer can read.
+curl -sf "https://www.modelscope.cn/api/v1/models/${REPO}/repo/files?Revision=${COMMIT}" \
+  | python3 -c "
+import fnmatch, json, sys
+d = json.load(sys.stdin)
+allow = ['*.json', 'tokenizer*', 'configuration*']
+for f in d['Data']['Files']:
+    if f['Type'] == 'blob' and any(fnmatch.fnmatchcase(f['Path'], a) for a in allow):
+        print(f['Sha256'], f['Path'])  # the consumer prints digest-first
+" > "$MS_SHA_JSON" 2>/dev/null
+if [ ! -s "$MS_SHA_JSON" ]; then
+  record FAIL "hub listing" "this machine cannot read the hub's listing; the rest is unverifiable"
+  print_rows "${ROWS[@]}"
   exit 1
 fi
-echo "CASE 25 PASS"
+
+echo "== 2. a cold node materializes the files =="
+consumer "$NS" "${P}-cold" "${WORKERS[0]}" "${P}-qwen" "$ART_UID" "$DIGEST"
+if pod_ready "$NS" "${P}-cold" "$POD_BOUND"; then
+  GOT="$(kubectl -n "$NS" logs "${P}-cold" 2>/dev/null | sort)"
+  WANT="$(sort "$MS_SHA_JSON")"
+  if [ "$GOT" = "$WANT" ]; then
+    record PASS "cold node" "every file hashes to the hub's own sha256 at the commit ($(wc -l < "$MS_SHA_JSON" | tr -d ' ') files)"
+  else
+    record FAIL "cold node" "the Pod's hashes differ from the hub's listing"
+  fi
+else
+  record FAIL "cold node" "not Running within ${POD_BOUND}s: $(pod_mount_events "$NS" "${P}-cold" | head -1)"
+fi
+
+echo "== 3. a second node syncs from the peer =="
+# The second node's plugin pod is deleted before the mount, so its cache starts empty and this
+# leg always pulls; the helper samples the byte counters around the mount.
+if COUNTERS="$(mh_peer_sync_check "$NS" "${P}-peer" "${WORKERS[1]}" "${P}-qwen" "$ART_UID" "$DIGEST" "$POD_BOUND")"; then
+  read -r PEER_BEFORE HUB_BEFORE PEER_AFTER HUB_AFTER <<< "$COUNTERS"
+  GOT="$(kubectl -n "$NS" logs "${P}-peer" 2>/dev/null | sort)"
+  WANT="$(sort "$MS_SHA_JSON")"
+  if [ "$GOT" != "$WANT" ]; then
+    record FAIL "peer sync" "the second Pod's hashes differ from the hub's listing"
+  elif [ "$PEER_AFTER" -le "$PEER_BEFORE" ] && [ "$HUB_AFTER" -le "$HUB_BEFORE" ]; then
+    # Both flat: the digest was already on the node from an earlier run. The mount is a hit, and
+    # the peer leg cannot be re-proven here.
+    record PASS "peer sync" "the second node served the mount from published content (bytes flat: pre-warmed node)"
+  elif [ "$PEER_AFTER" -gt "$PEER_BEFORE" ] && [ "$HUB_AFTER" -le "$HUB_BEFORE" ]; then
+    record PASS "peer sync" "the second node took ${PEER_AFTER} peer bytes and ${HUB_AFTER} hub bytes"
+  else
+    record FAIL "peer sync" "the second node pulled from the hub (${HUB_BEFORE} → ${HUB_AFTER}), not the peer"
+  fi
+else
+  record FAIL "peer sync" "not Running within ${POD_BOUND}s: $(pod_mount_events "$NS" "${P}-peer" | head -1)"
+fi
+
+echo "== 4. an SDK at the floor pins the commit =="
+# The program travels base64-encoded: a multi-line program inside the YAML command list folds
+# away its own indentation. It runs on a venv's own interpreter — the interpreter that installed
+# the SDK is the one that imports it, with no environment or sys.path coupling.
+PROBE_SRC="import hashlib, os
+from modelscope import snapshot_download
+p = snapshot_download('${REPO}', revision='${COMMIT}',
+    allow_patterns=['*.json', 'tokenizer*', 'configuration*'])
+print('SNAPSHOT', p, flush=True)
+for r, _, fs in os.walk(p):
+    for f in sorted(fs):
+        fp = os.path.join(r, f)
+        print(hashlib.sha256(open(fp,'rb').read()).hexdigest(), os.path.relpath(fp, p), flush=True)"
+PROBE_B64="$(printf '%s' "$PROBE_SRC" | base64)"
+kubectl apply -f - >/dev/null <<YAML
+apiVersion: v1
+kind: Pod
+metadata: {name: ${P}-probe, namespace: $NS}
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 1
+  securityContext: {runAsNonRoot: true, runAsUser: 65534, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: probe
+      image: python:3.12-slim
+      command: ["bash", "-c", "export HOME=/tmp && python3 -m venv /tmp/venv && /tmp/venv/bin/pip install --quiet modelscope==1.39.1 && MODELSCOPE_CACHE=/tmp/ms /tmp/venv/bin/python -c \"import base64; exec(base64.b64decode('${PROBE_B64}').decode())\""]
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+YAML
+PROBE_DONE=0
+for _ in $(seq 1 $(( POD_BOUND / 2 ))); do
+  S="$(kubectl -n "$NS" get pod "${P}-probe" -o jsonpath='{.status.phase}' 2>/dev/null)"
+  [ "$S" = Succeeded ] && PROBE_DONE=1 && break
+  [ "$S" = Failed ] && break
+  sleep 2
+done
+if [ "$PROBE_DONE" = 1 ]; then
+  GOT="$(kubectl -n "$NS" logs "${P}-probe" -c probe 2>/dev/null | grep -E '^[0-9a-f]{64} ' | sort)"
+  WANT="$(sort "$MS_SHA_JSON")"
+  if [ "$GOT" = "$WANT" ]; then
+    record PASS "SDK pin" "modelscope 1.39.1 downloaded at the commit; the files hash to the hub's"
+  else
+    record FAIL "SDK pin" "the probe's hashes differ from the hub's listing"
+  fi
+else
+  record FAIL "SDK pin" "probe did not succeed: $(kubectl -n "$NS" logs "${P}-probe" -c probe 2>/dev/null | tail -2 | tr '\n' ' ')"
+fi
+
+echo "== 5. no token anywhere =="
+LEAK="$(kubectl -n "$NS" logs -l "e2e.gpustack.ai/consumer=true" 2>/dev/null | grep -c 'hf_' || true)"
+if [ "$LEAK" = 0 ]; then
+  record PASS "no token" "no token-shaped string in any Pod log (none exists to leak)"
+else
+  record FAIL "no token" "a token-shaped string appeared in a Pod log"
+fi
+
+rm -f "$MS_SHA_JSON"
+print_rows "${ROWS[@]}"
+exit "$FAILS"

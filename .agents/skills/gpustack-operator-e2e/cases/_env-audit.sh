@@ -8,14 +8,15 @@
 # about a fixture.
 #
 # Prerequisites: nodes=1; gpu=none; cluster=any
-# Goal:        Report, for every cases/case-N.sh, whether the cluster in front of us satisfies the
-#              Prerequisites its own header declares, without running a single case.
+# Goal:        Report, for every cases/case-N.sh (1..37), whether the cluster in front of us
+#              satisfies the Prerequisites its own header declares, without running a single case.
 # Environment: Any cluster, or none. The cluster is read once per resource, with read-only kubectl
-#              get calls only: the node inventory, the operator's Devices ledger, the store objects
-#              and the objects in the operator's namespace. With no reachable cluster every row is
-#              UNKNOWN — the script reports that it cannot tell, and never fails on it.
-# Inputs:      <NS> — the operator's namespace, read once to confirm the operator is present.
-#              Nothing is written, and no case is run.
+#              get calls only: the node inventory, the operator's Devices ledger, the Mock Device
+#              Manager DaemonSet, the store objects, and the objects in the operator's namespace.
+#              With no reachable cluster every row is UNKNOWN — the script reports that it cannot
+#              tell, and never fails on it.
+# Inputs:      <NS> — the operator's namespace, read once to confirm the operator and any mock
+#              device-manager DaemonSet are present. Nothing is written, and no case is run.
 # Expected:    One line per case, in case-number order:
 #                CASE <N> | RUN|SKIP|UNKNOWN | nodes <have>/<want> | gpu <have>/<want> | features <list>
 #              <list> names the features the cluster demonstrably lacks; "ok" means it lacks none,
@@ -57,6 +58,13 @@ if ! DEVICES_JSON="$(kubectl get devices.worker.gpustack.ai -o json 2>/dev/null)
   DEVICES_JSON=""
 fi
 
+MOCK_DS_JSON=""
+if ! MOCK_DS_JSON="$(kubectl -n "$NS" get daemonset \
+  -l app.kubernetes.io/component=device-manager,gpustack.ai/manufacturer=mock \
+  -o json 2>/dev/null)"; then
+  MOCK_DS_JSON=""
+fi
+
 # The store image is the one feature an image pull would decide and no read proves. It is looked
 # for where a pulled image shows up: a node's own image list, and the images of running Pods.
 STORE_IMAGES=""
@@ -88,18 +96,26 @@ fi
 # The facts the probes below read, extracted once so the probes themselves stay small.
 FACTS=""
 if [ -n "$NODES_JSON" ]; then
-  FACTS="$(printf '%s' "$NODES_JSON" | python3 -c '
-import json,sys
+  FACTS="$(NODES_ENV="$NODES_JSON" DEVICES_ENV="$DEVICES_JSON" MOCK_DS_ENV="$MOCK_DS_JSON" python3 -c '
+import json, os
 
-try:
-    nodes = json.load(sys.stdin)
-except Exception:
-    nodes = {}
+def load_obj(key):
+    raw = os.environ.get(key) or ""
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+nodes = load_obj("NODES_ENV")
+devices_doc = load_obj("DEVICES_ENV")
+mock_ds_doc = load_obj("MOCK_DS_ENV")
 
 CONTROL = ("node-role.kubernetes.io/control-plane", "node-role.kubernetes.io/master")
-
-# The accelerator vendors, from the node capacity keys. The operator names a vendor in the
-# resource family, so the family is what identifies it.
+ALL_KNOWN_VENDORS = (
+    "amd", "ascend", "cambricon", "hygon", "iluvatar", "metax", "mthreads", "nvidia", "thead"
+)
 VENDOR_KEYS = {
     "nvidia.com/": "nvidia",
     "amd.com/": "amd",
@@ -112,26 +128,85 @@ VENDOR_KEYS = {
     "mthreads.com/": "mthreads",
 }
 
+dev_items = devices_doc.get("items")
+if dev_items is None and devices_doc.get("spec"):
+    dev_items = [devices_doc]
+dev_items = dev_items or []
+
+mock_nodes = set()
+real_dev_vendors = set()
+mock_dev_vendors = set()
+ledger_partition = 0
+for d in dev_items:
+    md = d.get("metadata") or {}
+    ann = md.get("annotations") or {}
+    is_mock = ann.get("device.gpustack.ai/mock") == "true"
+    if is_mock and md.get("name"):
+        mock_nodes.add(md["name"])
+    for g in (d.get("spec") or {}).get("groups") or []:
+        mfr = g.get("manufacturer") or ""
+        accs = g.get("accelerators") or []
+        if mfr and accs:
+            if is_mock:
+                mock_dev_vendors.add(mfr)
+            else:
+                real_dev_vendors.add(mfr)
+        for a in accs:
+            profs = ((a.get("status") or {}).get("physicalSliced") or {}).get("profiles") or []
+            if profs:
+                ledger_partition = 1
+
+mock_ds_ready = 0
+mock_ds_vendors = set()
+for ds in mock_ds_doc.get("items") or []:
+    st = ds.get("status") or {}
+    if int(st.get("numberReady") or 0) >= 1:
+        mock_ds_ready = 1
+        ctrs = (((ds.get("spec") or {}).get("template") or {}).get("spec") or {}).get("containers") or []
+        args = (ctrs[0].get("args") or []) if ctrs else []
+        mfrs = [a.split("=", 1)[1] for a in args if a.startswith("--manufacturer=")]
+        if mfrs:
+            for entry in mfrs:
+                for tok in entry.split(","):
+                    tok = tok.strip()
+                    if tok:
+                        mock_ds_vendors.add(tok)
+        else:
+            mock_ds_vendors.update(ALL_KNOWN_VENDORS)
+
 ready = 0
 kinds = 0
 images = []
 rdma = 0
 efa = 0
 partition = 0
-vendors = set()
+node_real_vendors = set()
+node_mock_vendors = set()
 for n in nodes.get("items") or []:
     md = n.get("metadata") or {}
     labels = md.get("labels") or {}
-    if any(c in labels for c in CONTROL):
+    taints = (n.get("spec") or {}).get("taints") or []
+    cp_tainted = any(
+        t.get("key") in CONTROL and t.get("effect") in ("NoSchedule", "NoExecute")
+        for t in taints
+    )
+    if any(c in labels for c in CONTROL) and cp_tainted:
         continue
+    spec = n.get("spec") or {}
     status = n.get("status") or {}
+    conds = status.get("conditions") or []
+    is_ready = any(c.get("type") == "Ready" and c.get("status") == "True" for c in conds)
+    if not is_ready or spec.get("unschedulable"):
+        continue
     ready += 1
     name = md.get("name") or ""
-    if name.startswith("kind-"):
+    provider_id = spec.get("providerID") or ""
+    if name.startswith("kind-") or provider_id.startswith("kind://"):
         kinds += 1
     for img in status.get("images") or []:
         for iname in img.get("names") or []:
             images.append(iname)
+    is_mock_node = name in mock_nodes
     for key, val in (status.get("capacity") or {}).items():
         try:
             qty = int(val)
@@ -147,37 +222,27 @@ for n in nodes.get("items") or []:
             partition = 1
         for prefix, vendor in VENDOR_KEYS.items():
             if key.startswith(prefix):
-                vendors.add(vendor)
+                if is_mock_node:
+                    node_mock_vendors.add(vendor)
+                else:
+                    node_real_vendors.add(vendor)
+
+real_vendors = sorted(real_dev_vendors | node_real_vendors)
+all_vendors = sorted(set(real_vendors) | mock_dev_vendors | node_mock_vendors | mock_ds_vendors)
+display_vendors = sorted(set(real_vendors) | mock_dev_vendors | node_mock_vendors)
+if not display_vendors and mock_ds_ready:
+    display_vendors = ["mock"]
 
 print("READY=%d" % ready)
 print("KIND=%d" % kinds)
 print("RDMA=%d" % rdma)
 print("EFA=%d" % efa)
-print("PARTITION=%d" % partition)
-print("VENDORS=%s" % ",".join(sorted(vendors)))
+print("PARTITION=%d" % (1 if (partition or ledger_partition) else 0))
+print("MOCK_DM=%d" % (1 if (mock_ds_ready or mock_nodes) else 0))
+print("REAL_VENDORS=%s" % ",".join(real_vendors))
+print("ALL_VENDORS=%s" % ",".join(all_vendors))
+print("DISPLAY_VENDORS=%s" % ",".join(display_vendors))
 print("IMAGES=%s" % ",".join(sorted(set(images))))
-' 2>/dev/null)"
-fi
-
-if [ -n "$DEVICES_JSON" ]; then
-  FACTS="${FACTS}"$'\n'"$(printf '%s' "$DEVICES_JSON" | python3 -c '
-import json,sys
-
-try:
-    devices = json.load(sys.stdin)
-except Exception:
-    devices = {}
-
-# A card that reports hardware partition profiles in the ledger, whether or not a partition
-# instance exists on the node yet.
-partition = 0
-for g in (devices.get("spec") or {}).get("groups") or []:
-    for a in g.get("accelerators") or []:
-        profs = (a.get("status") or {}).get("physicalSliced") or {}
-        if profs.get("profiles"):
-            partition = 1
-
-print("LEDGER_PARTITION=%d" % partition)
 ' 2>/dev/null)"
 fi
 
@@ -190,20 +255,11 @@ READY_WORKERS="$(fact READY)"
 KIND_NODES="$(fact KIND)"
 HAVE_RDMA="$(fact RDMA)"
 HAVE_EFA="$(fact EFA)"
-HAVE_VENDORS="$(fact VENDORS)"
+HAVE_PARTITION="$(fact PARTITION)"
+REAL_VENDORS="$(fact REAL_VENDORS)"
+ALL_VENDORS="$(fact ALL_VENDORS)"
+DISPLAY_VENDORS="$(fact DISPLAY_VENDORS)"
 NODE_IMAGES="$(fact IMAGES)"
-
-# A partition-capable card is reported either by the node's own partitioned resource keys or by
-# the ledger's partition profiles. Either source answering yes is enough; when neither source
-# could be read the answer is unknown rather than no.
-NODE_PARTITION="$(fact PARTITION)"
-LEDGER_PARTITION="$(fact LEDGER_PARTITION)"
-HAVE_PARTITION=""
-if [ "$NODE_PARTITION" = "1" ] || [ "$LEDGER_PARTITION" = "1" ]; then
-  HAVE_PARTITION=1
-elif [ -n "$NODE_PARTITION" ] || [ -n "$LEDGER_PARTITION" ]; then
-  HAVE_PARTITION=0
-fi
 
 # The store image, from the nodes' own image lists and from the Pods' images.
 HAVE_STORE=""
@@ -294,17 +350,18 @@ feature_state() {
   esac
 }
 
-# vendor_present <wanted> — whether the cluster offers a vendor the case can use.
+# vendor_present <wanted> <available_csv> — whether the cluster offers a vendor the case can use.
 # The wanted list is "|"-separated, so a case that runs against several vendors matches any
 # of them. Returns 0 when the cluster offers one, 1 when it offers none of them, and 2 when
 # the question cannot be asked.
 vendor_present() {
   local want="${1:-}"
+  local avail="${2:-}"
   [ -n "$want" ] || return 2
-  [ -n "$HAVE_VENDORS" ] || return 1
+  [ -n "$avail" ] || return 1
   local have
   local IFS=','
-  for have in $HAVE_VENDORS; do
+  for have in $avail; do
     case "|$want|" in
       *"|$have|"*) return 0 ;;
     esac
@@ -362,25 +419,33 @@ while IFS=$'\t' read -r num case_file; do
     missing="nodes"
   fi
 
-  # The accelerator vendor, when the case wants one.
+  # Real-cluster GPU cases require physical vendor devices; cluster=any cases (such as Mock DM
+  # cases 4 and 5) accept either real vendor devices or an active Mock Device Manager.
+  eligible_vendors="$ALL_VENDORS"
+  if [ "$want_cluster" = "real" ]; then
+    eligible_vendors="$REAL_VENDORS"
+  fi
+
   have_gpu="none"
-  if [ -n "$HAVE_VENDORS" ]; then
-    have_gpu="$HAVE_VENDORS"
-  elif [ -z "$READY_WORKERS" ]; then
+  if [ "$want_cluster" = "real" ]; then
+    [ -n "$REAL_VENDORS" ] && have_gpu="$REAL_VENDORS"
+  elif [ -n "$DISPLAY_VENDORS" ]; then
+    have_gpu="$DISPLAY_VENDORS"
+  fi
+  if [ -z "$READY_WORKERS" ]; then
     have_gpu="unknown"
   fi
-  # The accelerator vendor, when the case wants one. "any" means whatever the cluster offers,
-  # so it only fails on a cluster with no accelerator at all.
+
   if [ "$want_gpu" != "none" ]; then
     if [ -z "$READY_WORKERS" ]; then
       verdict="UNKNOWN"
       undecided="${undecided}${undecided:+,}gpu"
     elif [ "$want_gpu" = "any" ]; then
-      if [ -z "$HAVE_VENDORS" ]; then
+      if [ -z "$eligible_vendors" ]; then
         missing="${missing}${missing:+,}gpu"
       fi
     else
-      vendor_present "$want_gpu"
+      vendor_present "$want_gpu" "$eligible_vendors"
       case $? in
         0) ;;
         1) missing="${missing}${missing:+,}gpu" ;;
@@ -445,4 +510,4 @@ while IFS=$'\t' read -r num case_file; do
 done <<< "$case_list"
 
 printf 'CLUSTER  | ready %-6s | vendors %-17s | operator %-10s | nodes %s\n' \
-  "${READY_WORKERS:-unknown}" "${HAVE_VENDORS:-unknown}" "$OPERATOR_STATE" "$NS"
+  "${READY_WORKERS:-unknown}" "${DISPLAY_VENDORS:-none}" "$OPERATOR_STATE" "$NS"

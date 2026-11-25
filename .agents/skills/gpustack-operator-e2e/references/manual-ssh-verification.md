@@ -1,6 +1,6 @@
 # Manual SSH-Instance verification (VS Code Remote-SSH + sshfs)
 
-`case-21.sh` covers the exec channel, the interactive login, an `sftp` round-trip, and a loopback TCP
+`case-7.sh` covers the exec channel, the interactive login, an `sftp` round-trip, and a loopback TCP
 port-forward automatically. Two things it cannot drive live in CI: a real **VS Code Remote-SSH** session
 (a GUI client that opens a workspace and lands an integrated terminal in `main`) and a real **`sshfs`**
 mount. This runbook is the manual pass for those two, on any cluster with an SSH-enabled Instance whose
@@ -89,7 +89,7 @@ Pass when:
   it under the **Ports** panel, and open it from the local browser.
 
 If VS Code hangs at the bootstrap step, the exec channel is discarding the command (the regression
-`case-21.sh` guards); if the Ports panel cannot forward, TCP forwarding is disabled in `sshd_config`.
+`case-7.sh` guards); if the Ports panel cannot forward, TCP forwarding is disabled in `sshd_config`.
 
 ## 5. sshfs mount
 

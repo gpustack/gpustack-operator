@@ -59,10 +59,12 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	o.DetectorOptions.AddFlags(fs)
 
 	// Allocator.
-	o.AllocatorOptions.AddFlags(fs)
+	o.AllocatorOptions.AddFlags(fs, allocator.WithoutMockDevicesOptions())
 }
 
 func (o *Options) Validate(ctx context.Context) error {
+	o.AllocatorOptions.MockDevicesFile = o.DetectorOptions.MockDevicesFile
+
 	// Server.
 	if err := o.ServerOptions.Validate(ctx); err != nil {
 		return err
@@ -87,6 +89,8 @@ func (o *Options) Validate(ctx context.Context) error {
 }
 
 func (o *Options) Complete(ctx context.Context) (*Config, error) {
+	o.AllocatorOptions.MockDevicesFile = o.DetectorOptions.MockDevicesFile
+
 	// Server.
 	srvConfig, err := o.ServerOptions.Complete(ctx)
 	if err != nil {
@@ -116,7 +120,7 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 	detConfig.DetectedManufacturersCh = detectedManufacturersCh
 	alcConfig.DetectedManufacturersCh = detectedManufacturersCh
 
-	return &Config{
+	cfg := &Config{
 		ServerConfig:    srvConfig,
 		ManagerConfig:   mgrConfig,
 		DetectorConfig:  detConfig,
@@ -124,5 +128,10 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 		// The exporter has no flags of its own: it samples on the detector's period, which
 		// Config.Apply hands it.
 		ExporterConfig: &exporter.Config{},
-	}, nil
+	}
+	if err := cfg.wireMockStores(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }

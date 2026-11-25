@@ -270,6 +270,9 @@ func TestStatefulSlicedManufacturers_MatchTheReclaimLoops(t *testing.T) {
 	got := sets.New[string]()
 	loops := 0
 	for _, dir := range matches {
+		if filepath.Base(dir) == "mock" {
+			continue
+		}
 		manufacturer := ""
 		var modes []string
 		for _, file := range parseGoFiles(t, dir) {

@@ -645,31 +645,31 @@ wave2_slot_a() {
   return 0
 }
 
-# The slot that runs the live-traffic E2E case of wave 2 against a single server.
+# The slot that runs Phase 1 of the live-traffic E2E case of wave 2 against a single server.
 #
-# CASE 128 DOES NOT RUN HERE. It builds deployments of its own that request up to six GPUs, and
-# slot A of this wave holds six, so running both at once would queue case-128's Pods behind the
-# EPD arm's and pollute the arm's timeline with a count that is not ready. Case 128 runs once,
+# CASE 31 DOES NOT RUN HERE. It builds deployments of its own that request up to six GPUs, and
+# slot A of this wave holds six, so running both at once would queue case-31's Pods behind the
+# EPD arm's and pollute the arm's timeline with a count that is not ready. Case 31 runs once,
 # before wave 1, where the cluster is free.
 wave2_slot_b() {
   local deploy=autoscaling-e2e-server
   local rc=0
   deploy_arm autoscaling-e2e-server.yaml "$deploy" || return 1
-  bash "${REPO}/.agents/skills/gpustack-operator-e2e/cases/case-129.sh" "$NS" "$deploy" server \
-    > >(tee "${OUT_BASE}/e2e-case-129.log") 2>&1 || rc=$?
-  echo "$rc" > "${OUT_BASE}/e2e-case-129.rc"
+  E2E_C35_SKIP_PHASE2=1 bash "${REPO}/.agents/skills/gpustack-operator-e2e/cases/case-35.sh" "$NS" "$deploy" server \
+    > >(tee "${OUT_BASE}/e2e-case-35.log") 2>&1 || rc=$?
+  echo "$rc" > "${OUT_BASE}/e2e-case-35.rc"
   drop_arm "$deploy"
   return 0
 }
 
 # The admission case, run once before the waves so that the GPUs it asks for are not contending
 # with an arm's.
-run_case_128() {
+run_case_31() {
   local rc=0
-  bash "${REPO}/.agents/skills/gpustack-operator-e2e/cases/case-128.sh" "$NS" \
-    > >(tee "${OUT_BASE}/e2e-case-128.log") 2>&1 || rc=$?
-  echo "$rc" > "${OUT_BASE}/e2e-case-128.rc"
-  log "case-128 exited with ${rc}"
+  bash "${REPO}/.agents/skills/gpustack-operator-e2e/cases/case-31.sh" "$NS" \
+    > >(tee "${OUT_BASE}/e2e-case-31.log") 2>&1 || rc=$?
+  echo "$rc" > "${OUT_BASE}/e2e-case-31.rc"
+  log "case-31 exited with ${rc}"
   return 0
 }
 
@@ -787,7 +787,7 @@ write_summary_md() {
     echo
     echo "Generated at $(date -u +%Y-%m-%dT%H:%M:%SZ), mode ${MODE}."
     echo
-    echo "The E2E cases this run drove: case-128 exited ${case128_rc}, case-129 exited ${case129_rc}."
+    echo "The E2E cases this run drove: case-31 exited ${case31_rc}, case-35 exited ${case35_rc}."
     echo
     echo "| arm | deploy | phase | requests | errors | TTFT p50 (ms) | TTFT p99 (ms) | ITL p50 (ms) | ITL p99 (ms) | output tok/s | scale-out lead (s) | scaled before ramp | desired max | scaled | retirement states |"
     echo "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
@@ -842,7 +842,7 @@ else
   ensure_driver || exit 1
   # THE ADMISSION CASE RUNS FIRST, on a cluster with nothing else on it. Its own targets ask for
   # up to six GPUs, and a wave asks for eight, so the two must not overlap.
-  run_case_128
+  run_case_31
 
   if [ "$MODE" = "serial" ]; then
     log "wave 1 (serial)"
@@ -872,21 +872,22 @@ fi
 
 # The exit code of each E2E case the run drove, so a benchmark summary cannot look healthy over
 # a broken case.
-case128_rc="$(cat "${OUT_BASE}/e2e-case-128.rc" 2>/dev/null || echo null)"
-case129_rc="$(cat "${OUT_BASE}/e2e-case-129.rc" 2>/dev/null || echo null)"
+case31_rc="$(cat "${OUT_BASE}/e2e-case-31.rc" 2>/dev/null || echo null)"
+case35_rc="$(cat "${OUT_BASE}/e2e-case-35.rc" 2>/dev/null || echo null)"
 
 # The comparison is every arm's summary, in one document.
+# shellcheck disable=SC2016 # jq variables expand inside jq, not bash.
 jq -n \
   --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg mode "$MODE" \
-  --argjson case128 "$case128_rc" \
-  --argjson case129 "$case129_rc" \
+  --argjson case31 "$case31_rc" \
+  --argjson case35 "$case35_rc" \
   --argjson arms "$(for arm in "${ARMS[@]}"; do
     if [ -s "${OUT_BASE}/${arm}/summary.json" ]; then
       jq -c --arg arm "$arm" '{key: $arm, value: .}' "${OUT_BASE}/${arm}/summary.json" 2>/dev/null
     fi
   done | jq -s 'from_entries' 2>/dev/null || echo '{}')" \
-  '{comparisonKind: "legacy-topology", generated_at: $generated_at, mode: $mode, e2e: {case128: $case128, case129: $case129}, arms: $arms}' \
+  '{comparisonKind: "legacy-topology", generated_at: $generated_at, mode: $mode, e2e: {case31: $case31, case35: $case35}, arms: $arms}' \
   > "${OUT_BASE}/comparison.json"
 
 # The summary a reader opens first: one row per arm and phase, and the exit code of each E2E

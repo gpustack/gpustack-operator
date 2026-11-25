@@ -1,6 +1,7 @@
 package devicemanager
 
 import (
+	"cmp"
 	"context"
 
 	core "k8s.io/api/core/v1"
@@ -10,8 +11,10 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/devicemanager/allocator"
+	allocatormock "gpustack.ai/gpustack/pkg/devicemanager/allocator/mock"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector"
 	"gpustack.ai/gpustack/pkg/devicemanager/exporter"
+	"gpustack.ai/gpustack/pkg/devicemanager/mockspec"
 	"gpustack.ai/gpustack/pkg/manager"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/webserver"
@@ -25,7 +28,45 @@ type Config struct {
 	ExporterConfig  *exporter.Config
 }
 
+func (c *Config) wireMockStores() error {
+	if c.DetectorConfig == nil || c.AllocatorConfig == nil {
+		return nil
+	}
+	specStore := c.DetectorConfig.MockSpecStore
+	if specStore == nil {
+		specStore = c.AllocatorConfig.MockSpecStore
+	}
+	mockFile := cmp.Or(c.DetectorConfig.MockDevicesFile, c.AllocatorConfig.MockDevicesFile)
+	if specStore == nil && mockFile == "" {
+		return nil
+	}
+	if specStore == nil {
+		var err error
+		specStore, err = mockspec.NewStore(mockFile)
+		if err != nil {
+			return err
+		}
+	}
+	partStore := c.AllocatorConfig.MockPartitionStore
+	if partStore == nil {
+		partStore = allocatormock.NewPartitionStore()
+	}
+	mockFile = cmp.Or(mockFile, specStore.Path())
+	c.DetectorConfig.MockDevicesFile = cmp.Or(c.DetectorConfig.MockDevicesFile, mockFile)
+	c.DetectorConfig.MockSpecStore = specStore
+	if c.DetectorConfig.MockPartitionProvider == nil {
+		c.DetectorConfig.MockPartitionProvider = partStore
+	}
+	c.AllocatorConfig.MockDevicesFile = cmp.Or(c.AllocatorConfig.MockDevicesFile, mockFile)
+	c.AllocatorConfig.MockSpecStore = specStore
+	c.AllocatorConfig.MockPartitionStore = partStore
+	return nil
+}
+
 func (c *Config) Apply(ctx context.Context) (*Manager, error) {
+	if err := c.wireMockStores(); err != nil {
+		return nil, err
+	}
 	srv, err := c.ServerConfig.Apply(ctx)
 	if err != nil {
 		return nil, err

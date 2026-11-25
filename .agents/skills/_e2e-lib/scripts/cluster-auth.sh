@@ -3,7 +3,7 @@
 # Verify the toolchain + cloud credential a cluster modality's Terraform module
 # needs. READ-ONLY — it never provisions, destroys, or mutates a cluster.
 #
-#   cluster-auth.sh <eks|k3s|nebius|rke2>
+#   cluster-auth.sh <eks|k3s|kind|nebius|rke2>
 #
 # Run it TWICE in a run: once BEFORE provisioning, and again BEFORE the teardown
 # destroy. A module can resolve inputs from a LIVE cloud API call at plan, apply
@@ -20,7 +20,7 @@ set -uo pipefail
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/kubectl-shim" 2>/dev/null && pwd)"
 [ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 
-MOD="${1:?usage: cluster-auth.sh <eks|k3s|nebius|rke2>}"
+MOD="${1:?usage: cluster-auth.sh <eks|k3s|kind|nebius|rke2>}"
 FAILS=0
 need() {
   if command -v "$1" >/dev/null 2>&1; then
@@ -77,6 +77,12 @@ k3s)
   echo "note    k3s installs onto servers you already own — verify passwordless SSH"
   echo "        and passwordless sudo yourself; addresses stay in the live command only"
   ;;
+kind)
+  need ssh
+  need jq
+  echo "note    kind provisions a multi-node Kind cluster over SSH on a Docker host you own"
+  echo "        verify passwordless SSH, passwordless sudo, Docker daemon, and port 6443 reachability"
+  ;;
 rke2)
   need ssh
   # Same workstation-side jq requirement as k3s, for the same containerd rendering.
@@ -90,7 +96,7 @@ rke2)
   echo "        on 6443 (the apiserver endpoint is not proxied through ssh_jumper)"
   ;;
 *)
-  echo "unknown modality '${MOD}' (expected eks | k3s | nebius | rke2)"
+  echo "unknown modality '${MOD}' (expected eks | k3s | kind | nebius | rke2)"
   exit 1
   ;;
 esac

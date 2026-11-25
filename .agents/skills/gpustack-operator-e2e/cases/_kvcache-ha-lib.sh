@@ -16,8 +16,8 @@
 # wanted, and prints the LAST value seen, so a timeout says what the object was doing.
 #
 # The family's own jsonpath poller, self-contained on purpose, for the two reasons the sibling
-# family in _kvcache-inject-lib.sh gives: `wait_for` is a replaceable global - cases 50, 66, 68 and
-# 70 each define their own with another signature - and forwarding this family's kind/name/path/want
+# family in _kvcache-inject-lib.sh gives: `wait_for` is a replaceable global - cases 27 and 28
+# define their own with another signature - and forwarding this family's kind/name/path/want
 # calls through it would run them against that incompatible signature. The argument order differs as
 # well: this family passes the namespace FIRST and the shared poller takes it LAST, so the two
 # cannot be called with the same arguments even when the global is the shared one. The

@@ -882,6 +882,22 @@ func TestSelectDeviceManagerPod(t *testing.T) {
 		assert.Equal(t, "dm-amd-abc", pod.Name)
 	})
 
+	t.Run("accepts mock pod as fallback when manufacturer-specific pod is absent", func(t *testing.T) {
+		mockPod := metricsTestDMPod()
+		mockPod.Name = "dm-mock-abc"
+		mockPod.Labels[deviceplugin.ManufacturerLabelKey] = deviceplugin.ManufacturerMock
+		mockPod.Status.PodIP = "10.0.0.11"
+
+		got := selectDeviceManagerPod([]core.Pod{*amdPod(), *mockPod}, "nvidia")
+		require.NotNil(t, got)
+		assert.Equal(t, "dm-mock-abc", got.Name)
+
+		// Exact manufacturer match still takes precedence over mock fallback.
+		gotExact := selectDeviceManagerPod([]core.Pod{*mockPod, *metricsTestDMPod()}, "nvidia")
+		require.NotNil(t, gotExact)
+		assert.Equal(t, "dm-nvidia-abc", gotExact.Name)
+	})
+
 	t.Run("returns nil when nothing is ready", func(t *testing.T) {
 		assert.Nil(t, selectDeviceManagerPod(nil, "nvidia"))
 	})

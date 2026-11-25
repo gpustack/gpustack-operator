@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 #
-# _kvcache-inject-lib.sh — shared fixture and assertion helpers for the KV cache injection cases
-# (53-59).
+# _kvcache-inject-lib.sh — shared fixture and assertion helpers for the KV cache injection and
+# rendered-connector cases (case-18, case-27).
 #
 # NOT A CASE. The leading underscore keeps it out of the `case-N.sh` namespace: it carries no case
 # header, no trap and no results table. Each of those stays with the case that sources it, so a case
-# still reads end to end on its own terms; this file only removes seven copies of the same backend,
+# still reads end to end on its own terms; this file only removes repeated copies of the same backend,
 # pool and Binding setup.
 #
 # A case uses it as:
 #
 #     set -uo pipefail
-#     NS="${1:?usage: case-53.sh <NS>}"
-#     CASE_ID=53
+#     NS="${1:?usage: case-18.sh <NS>}"
+#     CASE_ID=18
 #     # shellcheck source=/dev/null
 #     . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_kvcache-inject-lib.sh"
 #     trap kvi_teardown EXIT   # ARM FIRST - kvi_setup can fail with objects already created
@@ -27,18 +27,18 @@
 #
 # Environment the caller may set:
 #   E2E_MOONCAKE_IMAGE   the store image                 (default docker.io/kvcacheai/mooncake:0.3.13)
-#   E2E_VLLM_IMAGE       a vLLM image, for case 53       (unset => that half SKIPs, loudly)
-#   E2E_SGLANG_IMAGE     an SGLang image, for case 53    (unset => that half SKIPs, loudly)
+#   E2E_VLLM_IMAGE       a vLLM image, for case 18       (unset => that half SKIPs, loudly)
+#   E2E_SGLANG_IMAGE     an SGLang image, for case 18    (unset => that half SKIPs, loudly)
 #   E2E_CLIENT_IMAGE     an image carrying the mooncake python client, for the read/write probes
 #
-# EXERCISED 2026-09-04 on a three-node k3s cluster: all seven completed with no failures, and case
-# 54's LWS half SKIPped for a CRD that cluster does not have. Not "all passing" - a skip verifies
+# EXERCISED 2026-09-04 on a three-node k3s cluster: all sections completed with no failures, and
+# case 18's LWS half SKIPped for a CRD that cluster does not have. Not "all passing" - a skip verifies
 # nothing, which is this library's own rule.
 #
-# Four of the seven failed on their first real run, and not one was failing for the reason it printed:
-# case 53 hit a missing prerequisite (no Binding registered the tenant its writes land on) and then
-# read usage off the wrong Binding; case 53 could not have passed at all, because it compared fields
-# the API server defaults onto every Pod; case 53 timed out on a 19.1GB image pull. Reading them had
+# Four of the sections failed on their first real run, and not one was failing for the reason it printed:
+# case 18 hit a missing prerequisite (no Binding registered the tenant its writes land on) and then
+# read usage off the wrong Binding; case 18 could not have passed at all, because it compared fields
+# the API server defaults onto every Pod; case 18 timed out on a 19.1GB image pull. Reading them had
 # shown none of that, and three of the four were defects in the cases rather than in the webhook.
 
 E2E_SHIM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
@@ -98,7 +98,7 @@ DOMAIN="dom-i-${SFX}"
 ENDPOINT=""
 # The launch stub kvi_setup projects into every injected fixture, and where each Pod mounts it. The
 # three names are shared because four manifests in this family declare the same volume: this file's
-# kvi_pod_manifest, case 53's Deployment, LWS leader and submit().
+# kvi_pod_manifest, case 18's Deployment, LWS leader and submit().
 #
 # LAUNCH_DIR is NOT on any image's PATH, and must not be: the stub is reached by the absolute path in
 # `command`, while a probe running `python3` inside the container has to get the image's real
@@ -121,7 +121,7 @@ record() {
 
 
 # kvi_wait_for is the family's own jsonpath poller, self-contained on purpose: a consumer may
-# define a wait_for of its own (case-70 replaces its argument list with seconds-then-predicate),
+# define a wait_for of its own (case-27 replaces its argument list with seconds-then-predicate),
 # and forwarding through a replaceable global would run this family's kind/name/path/want calls
 # against that incompatible signature. The base corpus had this implementation inline; the
 # extraction keeps it whole rather than aliasing it.
@@ -235,7 +235,7 @@ YAML
   # Such a client falls back to the store's own default name, and a multi-tenant master, the kind this
   # fixture's pool runs on, refuses a write from a name absent from its ledger. An engine that consumes the
   # injected tenant writes under its Binding's own reuse domain and needs nothing here; this fixture
-  # creates it anyway because the other cases share the setup, and case 53 reads it as the Binding
+  # creates it anyway because the other cases share the setup, and case 18 reads it as the Binding
   # that must stay at zero.
   #
   # Measured: with only the domain Binding above, a client that passes no tenant starts, stays Ready,
@@ -309,7 +309,7 @@ container whose program does not exist and report it as an injection failure"
 # including the connector flags admission appends, and sleeps.
 #
 # THE STUB IS NOT AN ENGINE, and no check here reads it as one. What these cases assert is what
-# admission WROTE onto the Pod - env, args, mounts, the stamp - and, in cases 59 and 60, what the
+# admission WROTE onto the Pod - env, args, mounts, the stamp - and, in case 18's engine sections, what the
 # REAL engine's library does when a probe execs into the container. Neither needs the container's own
 # program to serve inference, and building a fixture that did would put a model and an accelerator
 # behind every check in this family.

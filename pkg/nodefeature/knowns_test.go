@@ -650,3 +650,59 @@ func TestQuantityToOriginalValue(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyAcceleratableRuntimeNameOverrides(t *testing.T) {
+	cases := []struct {
+		name string
+		env  map[string]string
+		want map[string]string
+	}{
+		{
+			name: "unset env preserves defaults",
+			env:  map[string]string{},
+			want: map[string]string{
+				ManufacturerNVIDIA: "nvidia",
+				ManufacturerAMD:    "amd",
+			},
+		},
+		{
+			name: "explicit empty value clears default runtime name",
+			env: map[string]string{
+				"GPUSTACK_NVIDIA_ACCELERATABLE_RUNTIME_NAME": "",
+				"GPUSTACK_AMD_ACCELERATABLE_RUNTIME_NAME":    "  ",
+			},
+			want: map[string]string{
+				ManufacturerNVIDIA: "",
+				ManufacturerAMD:    "",
+			},
+		},
+		{
+			name: "custom value overrides default and trims whitespace",
+			env: map[string]string{
+				"GPUSTACK_NVIDIA_ACCELERATABLE_RUNTIME_NAME": " nvidia-cdi ",
+			},
+			want: map[string]string{
+				ManufacturerNVIDIA: "nvidia-cdi",
+				ManufacturerAMD:    "amd",
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dst := map[string]string{
+				ManufacturerNVIDIA: "nvidia",
+				ManufacturerAMD:    "amd",
+			}
+			applyAcceleratableRuntimeNameOverrides(
+				dst,
+				[]string{ManufacturerNVIDIA, ManufacturerAMD},
+				func(k string) (string, bool) {
+					v, ok := c.env[k]
+					return v, ok
+				},
+			)
+			assert.Equal(t, c.want, dst)
+		})
+	}
+}

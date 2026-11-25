@@ -135,6 +135,7 @@ subset of the allocation modes its hardware would otherwise offer.
 | `--no-pci-check` | `false` | skip the PCI check the detect pass makes |
 | `--no-fast-failed` | `false` | publish a first pass that found nothing rather than holding it back and detecting again. Only applies when `--manufacturer` names exactly one |
 | `--monitor-period` | `15s` | how often utilization is sampled; only the latest sample is kept |
+| `--mock-devices-file` | `$GPUSTACK_MOCK_DEVICES_FILE` | path to a YAML or JSON mock hardware specification for CPU-only testing; see [Local Cluster Setup](../contribute/local-cluster-setup.md#mock-device-manager) |
 | `--kube-socket` | `/var/lib/kubelet/device-plugins/kubelet.sock` | the kubelet socket to register on |
 | `--secure-port` | `32443` | the HTTPS port |
 | `--bind-address`, `--cert-dir`, `--kube-conn-*`, `--informer-cache-resync-period`, `--gopool-worker-factor` | as `worker` | serving, client and cache tuning |
@@ -220,6 +221,7 @@ cluster recorded; `kubectl get devices <node> -o yaml` beside it is a diff.
 | `--manufacturer` | all manufacturers | which manufacturers to detect |
 | `--no-pci-check` | `false` | skip the PCI check |
 | `--no-fast-failed` | `false` | publish a first pass that found nothing rather than detecting again |
+| `--mock-devices-file` | `$GPUSTACK_MOCK_DEVICES_FILE` | path to a YAML or JSON mock hardware specification for CPU-only testing; see [Local Cluster Setup](../contribute/local-cluster-setup.md#mock-device-manager) |
 
 ```bash
 docker run --rm --privileged -v /dev:/dev -v /sys:/sys \

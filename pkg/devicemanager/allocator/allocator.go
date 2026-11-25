@@ -2,12 +2,16 @@ package allocator
 
 import (
 	"context"
+	"errors"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
 
 	"gpustack.ai/gpustack/pkg/device"
+	allocatormock "gpustack.ai/gpustack/pkg/devicemanager/allocator/mock"
+	"gpustack.ai/gpustack/pkg/devicemanager/mockspec"
 	"gpustack.ai/gpustack/pkg/utils/gox"
+	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
 var logger = klog.Background().WithName("allocator")
@@ -19,9 +23,42 @@ type Allocator struct {
 	noSliced                bool
 	noPartitioned           bool
 	detectedManufacturersCh <-chan sets.Set[string]
+	allocatorCreators       map[string]func(device.AllocatorOptions) device.Allocator
+	rdmaCreator             func(device.AllocatorOptions) device.Allocator
 }
 
 func New(c *Config) (*Allocator, error) {
+	allocatorCreators := supportedAllocatorCreators
+	rdmaCreator := rdmaAllocatorCreator
+
+	specStore := c.MockSpecStore
+	if specStore == nil && c.MockDevicesFile != "" {
+		var err error
+		specStore, err = mockspec.NewStore(c.MockDevicesFile, mockspec.WithLogger(logger.WithName("mockspec")))
+		if err != nil {
+			return nil, err
+		}
+	}
+	if specStore != nil {
+		klog.Warningf("!!! mock device mode is active (mock-devices-file=%q); real hardware detection and device injection are bypassed !!!",
+			specStore.Path())
+		partStore := c.MockPartitionStore
+		if partStore == nil {
+			partStore = allocatormock.NewPartitionStore()
+		}
+		nodeName := osx.Getenv("KUBERNETES_NODE_NAME")
+		mockOpts := make([]allocatormock.Option, 0, 2+len(c.MockOptions))
+		mockOpts = append(mockOpts,
+			allocatormock.WithPartitionStore(partStore),
+			allocatormock.WithSpecStore(specStore, nodeName),
+		)
+		// Caller-supplied MockOptions run last so callers and tests may override default stores.
+		mockOpts = append(mockOpts, c.MockOptions...)
+
+		allocatorCreators = allocatormock.SupportedAllocatorCreators(mockOpts...)
+		rdmaCreator = allocatormock.RDMAAllocatorCreator(mockOpts...)
+	}
+
 	return &Allocator{
 		kubeSocket:              c.KubeSocket,
 		hostRoot:                c.HostRoot,
@@ -29,6 +66,8 @@ func New(c *Config) (*Allocator, error) {
 		noSliced:                c.NoSliced,
 		noPartitioned:           c.NoPartitioned,
 		detectedManufacturersCh: c.DetectedManufacturersCh,
+		allocatorCreators:       allocatorCreators,
+		rdmaCreator:             rdmaCreator,
 	}, nil
 }
 
@@ -44,6 +83,17 @@ func (a *Allocator) Start(ctx context.Context) error {
 	sCtx, sCancel := context.WithCancel(ctx)
 	defer sCancel()
 
+	reportErr := func(labelKey, labelVal string, err error) {
+		if err == nil || (sCtx.Err() != nil && errors.Is(err, context.Canceled)) {
+			return
+		}
+		logger.Error(err, "failed to start allocator", labelKey, labelVal)
+		select {
+		case errCh <- err:
+		case <-sCtx.Done():
+		}
+	}
+
 	createOpts := device.AllocatorOptions{
 		Logger:        logger.V(3),
 		KubeSocket:    a.kubeSocket,
@@ -58,39 +108,42 @@ func (a *Allocator) Start(ctx context.Context) error {
 	// manufacturer, and a network interface belongs to the node rather than to a vendor. A
 	// platform that registers no creator starts none, which keeps a device manager that today
 	// starts no allocator at all from failing on a socket directory it does not have.
-	if rdmaAllocatorCreator != nil {
-		allocator := rdmaAllocatorCreator(createOpts)
+	if a.rdmaCreator != nil {
+		allocator := a.rdmaCreator(createOpts)
 		gox.Go(func() {
-			if err := allocator.Start(sCtx); err != nil {
-				logger.Error(err, "failed to start allocator", "family", allocator.Name())
-				errCh <- err
-			}
+			reportErr("family", allocator.Name(), allocator.Start(sCtx))
 		})
 		defer allocator.Stop()
 	}
 
+	detectedCh := a.detectedManufacturersCh
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case err := <-errCh:
 			return err
-		case manus := <-a.detectedManufacturersCh:
+		case manus, ok := <-detectedCh:
+			if !ok {
+				detectedCh = nil
+				continue
+			}
 			logger.V(2).Info("received detected manufacturers")
+			pending := manus.Clone()
 
 			// Stop the existing allocators if their manufacturers are not detected.
 			for m := range allocators {
-				if !manus.Has(m) {
+				if !pending.Has(m) {
 					allocators[m].Stop()
 					delete(allocators, m)
 					continue
 				}
-				manus.Delete(m)
+				pending.Delete(m)
 			}
 
 			// Start new allocators if their manufacturers are detected but not exist.
-			for _, m := range manus.UnsortedList() {
-				creator := supportedAllocatorCreators[m]
+			for _, m := range pending.UnsortedList() {
+				creator := a.allocatorCreators[m]
 				if creator == nil {
 					logger.V(2).Info("unsupported manufacturer, skipping")
 					continue
@@ -98,10 +151,7 @@ func (a *Allocator) Start(ctx context.Context) error {
 				allocators[m] = creator(createOpts)
 				allocator := allocators[m]
 				gox.Go(func() {
-					if err := allocator.Start(sCtx); err != nil {
-						logger.Error(err, "failed to start allocator", "manufacturer", m)
-						errCh <- err
-					}
+					reportErr("manufacturer", m, allocator.Start(sCtx))
 				})
 			}
 		}

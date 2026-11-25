@@ -226,7 +226,7 @@ over a focus block that makes the rest of the run survivable**.
 
 - after **Phase 3** (build & deploy) — the build/package output is bulky and no longer needed;
 - after **each block of cases** in Phase 4 (a natural block is ~3–4 cases, or the end of a family such as
-  the hardware-partition cases 24–34), never mid-case and never inside an open analysis window;
+  the real-hardware cases 8–13), never mid-case and never inside an open analysis window;
 - before **Phase 5 triage** of a FAIL, and before a **Phase 7** fix-and-retest loop — both need room to think;
 - **before Phase 8 teardown**, always, whatever the context level. A degraded teardown is how a paid
   cluster gets stranded.
@@ -274,16 +274,16 @@ OBLIGATIONS — carry these no matter what else is dropped
        - vendor device plugin static Pod moved to /etc/kubernetes/manifests.disabled/ — not restored
        - <dcgm-service> disabled — not restored
      Both die with the node at destroy; if the run ends WITHOUT destroying, restore them.
-  3. Card MIG mode was toggled by CASE 23 and restored by its trap — verify before teardown.
+  3. Card MIG mode was toggled by CASE 9 and restored by its trap — verify before teardown.
 
 RESULTS SO FAR
-  PASS: 1, 2, 3, 4, 6, 27, 24        FAIL: 22 (Finding #1)      SKIP: 8 (no .sliced pool)
-  REMAINING, in order: 25, 26, 28, 29, 30 → Phase 5 triage of #1 → Phase 6 summary
+  PASS: 1, 2, 4, 5, 9               FAIL: 3 (Finding #1)       SKIP: 8 (no .sliced pool)
+  REMAINING, in order: 6, 7, 14, 15 → Phase 5 triage of #1 → Phase 6 summary
                        → Phase 7 (user has not decided) → Phase 8 teardown (both levels)
 
 FINDINGS
-  #1 (high, CASE 22-C) sliced claim landed on a card already held exclusively; suspected
-     ListAndWatch health reporting. Evidence: raw/21-case22.txt + worker log excerpt in the report.
+  #1 (high, CASE 3-B3) sliced claim landed on a card already held exclusively; suspected
+     ListAndWatch health reporting. Evidence: raw/12-case3.txt + worker log excerpt in the report.
 
 PROTOCOL
   Lead is the sole cluster writer, serial mutations, one rendezvous barrier per case; specialists are

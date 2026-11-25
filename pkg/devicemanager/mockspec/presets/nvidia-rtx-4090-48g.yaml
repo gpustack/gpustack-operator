@@ -1,0 +1,44 @@
+manufacturer: nvidia
+groups:
+  - name: NVIDIA GeForce RTX 4090
+    memory: 49140
+    cores: 16384
+    driverVersion: "610.43.02"
+    runtimeVersion: "13.3"
+    computeCapability: "8.9"
+    family: Ada-Lovelace
+    accelerators:
+      - id: GPU-bbc521eb-4a08-800b-eb2a-770a4a5b8a8c
+        index: 0
+        physicalIndexes: [0]
+        topology:
+          pciBusId: "0000:02:00.0"
+          pciRootId: "0000:00:01.0"
+          pciClass: "0300"
+          numaAffinity: "0"
+          cpuAffinity: "0-31"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 37
+          powerUsage: 29
+      - id: GPU-1068d7f6-26eb-5225-371e-58ca20150673
+        index: 1
+        physicalIndexes: [1]
+        topology:
+          pciBusId: "0000:03:00.0"
+          pciRootId: "0000:00:02.0"
+          pciClass: "0300"
+          numaAffinity: "0"
+          cpuAffinity: "0-31"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 0
+          coresUtilization: 0
+          temperature: 34
+          powerUsage: 31

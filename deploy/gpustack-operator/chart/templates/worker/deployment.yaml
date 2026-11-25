@@ -155,9 +155,10 @@ spec:
             # Propagate each manufacturer's identity, so the worker reads the same facts the
             # chart states: its NodeFeatureRule, its resource accounting and the RuntimeClass
             # it attaches to a workload all come from these.
+            {{- $omitRuntime := eq (include "gpustack-operator.deviceManager.omitRuntimeClass" .) "true" }}
             {{- range $manu := (keys .Values.global.manufacturers | sortAlpha) }}
             {{- include "gpustack-operator.manufacturer.env"
-                  (dict "name" $manu "identity" (index $.Values.global.manufacturers $manu))
+                  (dict "name" $manu "identity" (index $.Values.global.manufacturers $manu) "omitRuntimeName" $omitRuntime)
                   | trim | nindent 12 }}
             {{- end }}
           ports:

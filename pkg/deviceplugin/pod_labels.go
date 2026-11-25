@@ -16,8 +16,10 @@ const (
 	DeviceManagerComponent = "device-manager"
 
 	// ManufacturerLabelKey carries the manufacturer a device manager pod was rolled for. The
-	// chart rolls one DaemonSet per manufacturer and stamps this on each.
+	// chart rolls one DaemonSet per manufacturer and stamps this on each; CPU-only mock mode
+	// rolls one DaemonSet stamped with ManufacturerMock.
 	ManufacturerLabelKey = "gpustack.ai/manufacturer"
+	ManufacturerMock     = "mock"
 
 	// InstancePartOfLabelKey carries the backing Instance's UID, stamped on the Pod by the
 	// Instance controller.

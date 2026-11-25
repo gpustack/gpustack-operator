@@ -11,7 +11,7 @@
 #
 #     set -uo pipefail
 #     NS="${1:?usage: ...}"
-#     CASE_ID=80
+#     CASE_ID=14
 #     # shellcheck source=/dev/null
 #     . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rdma-lib.sh"
 #     rdma_select endpoint endpoint-whole      # picks RDMA_NODE, or skips naming what every node lacked

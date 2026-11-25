@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016
 # hack/check/skills-selftest.sh -- proves hack/check/skills.sh can fail, and fails for the stated
 # reason.
 #
@@ -29,6 +30,8 @@ failures=0
 fixture() {
   local d="$1"
   mkdir -p "${d}/.agents/skills/gpustack-operator-code-review" \
+    "${d}/.agents/skills/gpustack-operator-e2e/agents" \
+    "${d}/.agents/skills/gpustack-operator-e2e/cases" \
     "${d}/.agents/skills/demo-skill" "${d}/.opencodereview" "${d}/.github"
 
   cat >"${d}/.agents/skills/demo-skill/SKILL.md" <<'EOF'
@@ -39,6 +42,33 @@ description: "A short description."
 
 # demo
 EOF
+
+  cat >"${d}/.agents/skills/gpustack-operator-e2e/SKILL.md" <<'EOF'
+---
+name: gpustack-operator-e2e
+description: "Run the operator E2E suite."
+disable-model-invocation: true
+---
+
+# E2E
+
+## Cases (locked titles)
+
+| Case | Title |
+|---|---|
+| `cases/case-1.sh` | First case |
+| `cases/case-2.sh` | Second case |
+EOF
+
+  cat >"${d}/.agents/skills/gpustack-operator-e2e/agents/openai.yaml" <<'EOF'
+policy:
+  allow_implicit_invocation: false
+EOF
+
+  printf '#!/usr/bin/env bash\nexit 0\n' >"${d}/.agents/skills/gpustack-operator-e2e/cases/case-1.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"${d}/.agents/skills/gpustack-operator-e2e/cases/case-2.sh"
+  chmod +x "${d}/.agents/skills/gpustack-operator-e2e/cases/case-1.sh" \
+    "${d}/.agents/skills/gpustack-operator-e2e/cases/case-2.sh"
 
   cat >"${d}/.agents/skills/gpustack-operator-code-review/SKILL.md" <<'EOF'
 ---
@@ -75,6 +105,7 @@ EOF
   # AGENTS.md assertion wants the name beside an arrow, and gets its own cases below.
   cat >"${d}/AGENTS.md" <<'EOF'
 - some change → `demo-skill`
+- e2e change → `gpustack-operator-e2e`
 EOF
 }
 
@@ -132,7 +163,7 @@ case_ non-boolean-freeze 1 "expected true or false" \
 
 # Freezing removes the description from what a host loads, so AGENTS.md is the only thing left that
 # can tell the model the skill exists. Correctly frozen on both hosts, and still invisible.
-case_ frozen-missing-from-agents-md 1 "has no '<change> →" \
+case_ frozen-missing-from-agents-md 1 "has no '<change> → demo-skill'" \
   bash -c 'sed -i.bak "s/^description:/disable-model-invocation: true\ndescription:/" .agents/skills/demo-skill/SKILL.md \
     && mkdir -p .agents/skills/demo-skill/agents \
     && printf "policy:\n  allow_implicit_invocation: false\n" > .agents/skills/demo-skill/agents/openai.yaml \
@@ -140,7 +171,7 @@ case_ frozen-missing-from-agents-md 1 "has no '<change> →" \
 
 # Mentioning the skill is not the same as routing to it. This row names it while denying the
 # trigger, which the presence-only version of this assertion accepted.
-case_ agents-md-mention-without-trigger 1 "has no '<change> →" \
+case_ agents-md-mention-without-trigger 1 "has no '<change> → demo-skill'" \
   bash -c 'sed -i.bak "s/^description:/disable-model-invocation: true\ndescription:/" .agents/skills/demo-skill/SKILL.md \
     && mkdir -p .agents/skills/demo-skill/agents \
     && printf "policy:\n  allow_implicit_invocation: false\n" > .agents/skills/demo-skill/agents/openai.yaml \
@@ -180,6 +211,79 @@ case_ unsorted-exclude-list 1 "is not sorted" \
 # The extractor losing its grip on rule.json must not read as "nothing is excluded".
 case_ unreadable-rule-json 2 "no longer matches its shape" \
   sed -i.bak 's/"exclude"/"excluded_paths"/' .opencodereview/rule.json
+
+# --- E2E case contiguity and SKILL.md index sync ---------------------------------------------
+
+case_ e2e-case-gap 1 "missing case-2.sh" \
+  bash -c 'mv .agents/skills/gpustack-operator-e2e/cases/case-2.sh .agents/skills/gpustack-operator-e2e/cases/case-3.sh \
+    && sed -i.bak "s/case-2\.sh/case-3.sh/" .agents/skills/gpustack-operator-e2e/SKILL.md'
+
+case_ e2e-case-nonzero-start 1 "starts at case-2.sh, expected case-1.sh" \
+  bash -c 'rm .agents/skills/gpustack-operator-e2e/cases/case-1.sh \
+    && sed -i.bak "/case-1\.sh/d" .agents/skills/gpustack-operator-e2e/SKILL.md'
+
+case_ e2e-case-unindexed-script 1 "missing table row for" \
+  bash -c 'printf "#!/usr/bin/env bash\nexit 0\n" > .agents/skills/gpustack-operator-e2e/cases/case-3.sh \
+    && chmod +x .agents/skills/gpustack-operator-e2e/cases/case-3.sh'
+
+case_ e2e-case-stale-index-row 1 "stale table row" \
+  bash -c 'printf "| \`cases/case-3.sh\` | Stale case |\n" >> .agents/skills/gpustack-operator-e2e/SKILL.md'
+
+case_ e2e-case-out-of-order-index 1 "out-of-order table row" \
+  bash -c 'cat > .agents/skills/gpustack-operator-e2e/SKILL.md <<'\''EOF'\''
+---
+name: gpustack-operator-e2e
+description: "Run the operator E2E suite."
+disable-model-invocation: true
+---
+
+# E2E
+
+## Cases (locked titles)
+
+| Case | Title |
+|---|---|
+| `cases/case-2.sh` | Second case |
+| `cases/case-1.sh` | First case |
+EOF'
+
+case_ e2e-case-bad-name 1 "invalid case filename" \
+  bash -c 'printf "#!/usr/bin/env bash\nexit 0\n" > .agents/skills/gpustack-operator-e2e/cases/case-01.sh \
+    && chmod +x .agents/skills/gpustack-operator-e2e/cases/case-01.sh'
+
+case_ e2e-case-bad-name-alpha 1 "invalid case filename" \
+  bash -c 'printf "#!/usr/bin/env bash\nexit 0\n" > .agents/skills/gpustack-operator-e2e/cases/case-foo.sh \
+    && chmod +x .agents/skills/gpustack-operator-e2e/cases/case-foo.sh'
+
+case_ e2e-case-duplicate-index-row 1 "duplicate table row" \
+  bash -c 'printf "| \`cases/case-2.sh\` | Duplicate case |\n" >> .agents/skills/gpustack-operator-e2e/SKILL.md'
+
+case_ e2e-case-not-executable 1 "is not executable" \
+  chmod -x .agents/skills/gpustack-operator-e2e/cases/case-2.sh
+
+case_ e2e-chaos-case-gap 1 "missing chaos-2.sh" \
+  bash -c 'mkdir -p .agents/skills/gpustack-operator-e2e-chaos/agents .agents/skills/gpustack-operator-e2e-chaos/cases \
+    && printf "policy:\n  allow_implicit_invocation: false\n" > .agents/skills/gpustack-operator-e2e-chaos/agents/openai.yaml \
+    && printf -- "- chaos change → \`gpustack-operator-e2e-chaos\`\n" >> AGENTS.md \
+    && cat > .agents/skills/gpustack-operator-e2e-chaos/SKILL.md <<'\''EOF'\''
+---
+name: gpustack-operator-e2e-chaos
+description: "Run the operator chaos suite."
+disable-model-invocation: true
+---
+
+# Chaos
+
+## Cases
+
+| Case | Title |
+|---|---|
+| `cases/chaos-1.sh` | First chaos |
+| `cases/chaos-3.sh` | Third chaos |
+EOF
+    printf "#!/usr/bin/env bash\nexit 0\n" > .agents/skills/gpustack-operator-e2e-chaos/cases/chaos-1.sh
+    printf "#!/usr/bin/env bash\nexit 0\n" > .agents/skills/gpustack-operator-e2e-chaos/cases/chaos-3.sh
+    chmod +x .agents/skills/gpustack-operator-e2e-chaos/cases/chaos-1.sh .agents/skills/gpustack-operator-e2e-chaos/cases/chaos-3.sh'
 
 if [[ ${failures} -gt 0 ]]; then
   echo "check/skills-selftest: ${failures} case(s) failed" >&2

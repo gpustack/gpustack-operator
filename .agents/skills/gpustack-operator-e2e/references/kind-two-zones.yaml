@@ -1,6 +1,6 @@
 # A kind cluster of one control plane and four workers, two per zone, with the region and zone
-# labels a cloud provider would set. It is the smallest shape case 87 accepts (no zone holds three
-# counted Nodes, one zone holds two) and gives case 107 four eligible workers. kubelet may set these
+# labels a cloud provider would set. It is the smallest shape case 15 accepts (no zone holds three
+# counted Nodes, one zone holds two) and gives case 23 four eligible workers. kubelet may set these
 # two labels on its own Node, so they are applied at join time. The control plane carries the same
 # API server settings as the chart workflow's cluster.
 #

@@ -3,8 +3,8 @@
 # _quota-lib.sh — how many replicas a pool's quota can hold, summed over every flavor of its queue.
 #
 # NOT A CASE. The leading underscore keeps it out of the `case-N.sh` namespace. It reads; it creates,
-# records and deletes nothing. The cases that make a pool short by occupying it (50, 95) source it so
-# the one rule they size by is written once.
+# records and deletes nothing. The case that makes a pool short by occupying it (case-28) sources it so
+# the one rule it sizes by is written once.
 #
 # A case uses it as:
 #
@@ -36,7 +36,7 @@
 # ------------------------------------------------------------------------------------------------
 
 # The jq definition that turns a Kubernetes quantity into integer milli-units, or null for a form it
-# does not read. The shape is matched first for the reason case-50's `millis` gives: a numeric prefix
+# does not read. The shape is matched first for the reason case-28's `millis` gives: a numeric prefix
 # of a value like "2e3" or "1Ki" is a confident wrong number. Milli-units keep CPU's `m` exact, and the
 # division below is between integers, so 8 cores over 800m reads 10 and not 9.999.
 _QUOTA_JQ_MILLI='

@@ -1,0 +1,27 @@
+manufacturer: nvidia
+groups:
+  - name: NVIDIA GeForce RTX 5090 D
+    memory: 32607
+    cores: 21760
+    driverVersion: "595.84"
+    runtimeVersion: "13.2"
+    computeCapability: "12.0"
+    family: Blackwell
+    accelerators:
+      - id: GPU-31b58f27-ac45-ec52-c386-90aaeff2dfac
+        index: 0
+        physicalIndexes: [0]
+        topology:
+          pciBusId: "0000:01:00.0"
+          pciRootId: "0000:00:01.0"
+          pciClass: "0300"
+          numaAffinity: "0"
+          cpuAffinity: "0-31"
+        logicalSliced:
+          count: 128
+          coresPercentageOvercommit: true
+        metrics:
+          memoryUsage: 3
+          coresUtilization: 0
+          temperature: 51
+          powerUsage: 21
