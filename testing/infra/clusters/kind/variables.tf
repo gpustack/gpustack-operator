@@ -68,7 +68,7 @@ variable "ssh_jumper_port" {
 }
 
 variable "cluster_name" {
-  description = "Name of the Kind cluster created on the remote Docker host."
+  description = "Name of the Kind cluster created on the remote Docker host. Apply always deletes and recreates any existing Kind cluster with this name, wiping workloads in it."
   type        = string
   default     = "gpustack-kind"
 
@@ -82,7 +82,7 @@ variable "release" {
   # Named "release" because Terraform reserves the variable name "version".
   # Accepts any Kubernetes semver tag published as kindest/node:<tag> (with optional @sha256: digest),
   # e.g. 'v1.31.14', 'v1.34.11', 'v1.35.8', 'v1.37.0@sha256:...'.
-  description = "Kubernetes release tag for kindest/node, e.g. 'v1.34.11', 'v1.35.8', or 'v1.34.11@sha256:...'. Ignored when node_image is explicitly set."
+  description = "Kubernetes release tag for kindest/node, e.g. 'v1.34.11', 'v1.35.8', or 'v1.34.11@sha256:...'. Ignored when node_image is explicitly set. Changing cluster inputs replaces the Kind cluster and deletes all workloads."
   type        = string
   default     = "v1.34.11"
 
@@ -181,13 +181,13 @@ variable "topology_racks_per_zone" {
 }
 
 variable "api_server_address" {
-  description = "Bind address for Kind's exposed Kubernetes API server port on the remote host (default '0.0.0.0' so this workstation can reach it directly)."
+  description = "Bind address for Kind's exposed Kubernetes API server port on the remote host. Defaults to '0.0.0.0' for remote lab and NAT'd hosts (kube-apiserver requires mTLS client certs); on multi-homed or public-facing hosts set this to a specific reachable LAN/private interface IP to restrict exposure. Loopback binds ('127.0.0.1' / '::1') are only valid when host is also loopback because this module opens no SSH tunnel."
   type        = string
   default     = "0.0.0.0"
 
   validation {
     condition     = can(cidrhost("${var.api_server_address}/32", 0)) || can(cidrhost("${var.api_server_address}/128", 0))
-    error_message = "api_server_address must be an IPv4 or IPv6 literal (e.g. '0.0.0.0' or '127.0.0.1')."
+    error_message = "api_server_address must be an IPv4 or IPv6 literal (e.g. '0.0.0.0' or a reachable interface IP)."
   }
 }
 
@@ -274,7 +274,7 @@ variable "registry_mirrors" {
 }
 
 variable "preload_images" {
-  description = "Docker image references on the remote host to load into every Kind node via 'kind load docker-image' after cluster creation."
+  description = "Docker image references on the remote host to load into every Kind node via 'kind load docker-image' after cluster creation. Changing this input replaces the Kind cluster; to load images into a running cluster without recreating it, run 'kind load docker-image' over SSH directly."
   type        = list(string)
   default     = []
 

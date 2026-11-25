@@ -90,3 +90,16 @@ run "rejects_invalid_release" {
     var.release,
   ]
 }
+
+run "rejects_loopback_api_server_on_remote_host" {
+  command = plan
+
+  variables {
+    host               = "ubuntu@10.0.0.50"
+    api_server_address = "127.0.0.1"
+  }
+
+  expect_failures = [
+    null_resource.kind_cluster,
+  ]
+}

@@ -13,10 +13,18 @@ locals {
 
   jumper_san = local.jumper_host == "" || local.jumper_host == local.target_host ? "" : local.jumper_host
 
-  # Include the SSH target host, loopback names, optional jump host, and caller extras in the
-  # apiserver certificate so kubectl works both directly from the workstation and via SSH tunnel.
+  api_server_is_loopback = can(regex("^127\\.", var.api_server_address)) || (
+    can(cidrhost("${var.api_server_address}/128", 0)) && cidrhost("${var.api_server_address}/128", 0) == "::1"
+  )
+  target_is_loopback = local.target_host == "localhost" || can(regex("^127\\.", local.target_host)) || (
+    can(cidrhost("${local.target_host}/128", 0)) && cidrhost("${local.target_host}/128", 0) == "::1"
+  )
+  api_server_san = contains(["0.0.0.0", "::"], var.api_server_address) || local.api_server_is_loopback ? "" : var.api_server_address
+
+  # Include the SSH target host, loopback names, optional jump host, explicit bind IP, and caller
+  # extras in the apiserver certificate so kubectl works directly from the workstation or via tunnel.
   cert_sans = distinct(compact(concat(
-    [local.target_host, "127.0.0.1", "localhost", local.jumper_san],
+    [local.target_host, "127.0.0.1", "localhost", local.jumper_san, local.api_server_san],
     var.extra_cert_sans,
   )))
 
@@ -161,6 +169,13 @@ locals {
 resource "null_resource" "kind_cluster" {
   depends_on = [null_resource.vars_snapshot]
 
+  lifecycle {
+    precondition {
+      condition     = !local.api_server_is_loopback || local.target_is_loopback
+      error_message = "api_server_address '${var.api_server_address}' binds loopback only, which cannot be reached from this workstation against remote host '${local.target_host}' (this module opens no SSH tunnel); use '0.0.0.0' or a reachable interface IP."
+    }
+  }
+
   triggers = merge({
     host                       = local.target_host
     user                       = local.target_user
@@ -208,9 +223,12 @@ resource "null_resource" "kind_cluster" {
         if docker info >/dev/null 2>&1; then
           DOCKER_CMD="docker"
           KIND_PREFIX=""
-        elif sudo docker info >/dev/null 2>&1; then
-          DOCKER_CMD="sudo docker"
-          KIND_PREFIX="sudo"
+        elif sudo -n docker info >/dev/null 2>&1; then
+          DOCKER_CMD="sudo -n docker"
+          KIND_PREFIX="sudo -n"
+        elif ! sudo -n true >/dev/null 2>&1; then
+          echo "docker on $(hostname) is not accessible without sudo and passwordless sudo is unavailable" >&2
+          exit 1
         else
           echo "docker daemon is not reachable on $(hostname)" >&2
           exit 1
@@ -371,10 +389,31 @@ resource "null_resource" "kubeconfig" {
       ssh_opts=(-i '${pathexpand(var.ssh_private_key)}' -p ${var.ssh_port} -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10)
       ${local.ssh_proxy}
 
+      # Probe Docker/sudo access once so missing passwordless sudo fails fast instead of timing out.
+      docker_mode="$(ssh "$${ssh_opts[@]}" '${local.target_user}@${local.target_host}' \
+        "if docker info >/dev/null 2>&1; then echo direct; elif sudo -n docker info >/dev/null 2>&1; then echo sudo; elif ! sudo -n true >/dev/null 2>&1; then echo need-nopasswd-sudo; else echo no-docker; fi" \
+        2>/dev/null || echo ssh-failed)"
+      case "$docker_mode" in
+        direct) remote_kind="/usr/local/bin/kind" ;;
+        sudo) remote_kind="sudo -n /usr/local/bin/kind" ;;
+        need-nopasswd-sudo)
+          echo "docker on ${local.target_host} requires passwordless sudo (or docker group membership) to fetch Kind kubeconfig" >&2
+          exit 1
+          ;;
+        no-docker)
+          echo "docker daemon is not reachable on ${local.target_host}" >&2
+          exit 1
+          ;;
+        *)
+          echo "failed to probe Docker access over SSH on ${local.target_host}" >&2
+          exit 1
+          ;;
+      esac
+
       kind_ctx="kind-${var.cluster_name}"
       for i in $(seq 1 20); do
         if ssh "$${ssh_opts[@]}" '${local.target_user}@${local.target_host}' \
-             "if docker info >/dev/null 2>&1; then /usr/local/bin/kind get kubeconfig --name '${var.cluster_name}'; else sudo /usr/local/bin/kind get kubeconfig --name '${var.cluster_name}'; fi" \
+             "$remote_kind get kubeconfig --name '${var.cluster_name}'" \
              2>/dev/null > "$raw" && test -s "$raw"; then
           sed -E \
             -e "s|https://[^:]+:[0-9]+|https://${local.kubeconfig_host}:${var.api_server_port}|" \

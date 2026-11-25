@@ -40,12 +40,22 @@ workstation.
 
 1. A remote Linux host with Docker running and enough CPU/RAM for the requested
    node count, reachable on `ssh_port` and `api_server_port` (default `6443`).
+   By default `api_server_address` binds `0.0.0.0` (matching remote lab and
+   NAT'd hosts; kube-apiserver requires mTLS client certificates). On
+   multi-homed or internet-facing hosts, pass `-var='api_server_address=<lan-ip>'`
+   to restrict listening to a private interface.
 2. Key-based (passwordless) SSH login configured. The default key is
    `~/.ssh/id_ed25519`.
 3. Passwordless `sudo` on the remote host (used for installing `/usr/local/bin/kind`,
    adjusting inotify sysctls, and accessing Docker if the SSH user is not in the
    `docker` group).
 4. `terraform`, `kubectl`, `ssh`, and `jq` installed locally on your workstation.
+
+> **Note:** `null_resource.kind_cluster` always starts clean (`kind delete cluster`
+> before `kind create cluster`). Re-applying with modified cluster inputs (such as
+> `release`, `workers`, `registry_mirrors`, or `preload_images`) replaces the
+> cluster and deletes any workloads running in it. To load images into an existing
+> cluster without recreating it, run `kind load docker-image` over SSH as shown below.
 
 ## Usage
 
