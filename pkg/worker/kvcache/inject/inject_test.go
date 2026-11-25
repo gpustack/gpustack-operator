@@ -99,46 +99,179 @@ func TestRender_VLLMFamilyVehicleIsAFile(t *testing.T) {
 }
 
 func TestRender_VLLMPublishesKVEvents(t *testing.T) {
-	result, err := Render(Input{
-		Engine:          EngineVLLM,
-		Role:            RolePrefill,
-		Connection:      testConnection(),
-		PublishKVEvents: true,
-		KVEventsHost:    "qwen-prefill.team-a.svc",
-	})
-	require.NoError(t, err)
+	testCases := []struct {
+		name         string
+		in           Input
+		wantTopic    string
+		wantCBORHash bool
+	}{
+		{
+			name: "vllm legacy empty topic falls back to kv@",
+			in: Input{
+				Engine:          EngineVLLM,
+				Role:            RolePrefill,
+				Connection:      testConnection(),
+				PublishKVEvents: true,
+				KVEventsHost:    "qwen-prefill.team-a.svc",
+			},
+			wantTopic: "kv@",
+		},
+		{
+			name: "vllm explicit model topic without CBOR hash alignment",
+			in: Input{
+				Engine:          EngineVLLM,
+				Role:            RolePrefill,
+				Connection:      testConnection(),
+				PublishKVEvents: true,
+				KVEventsHost:    "qwen-prefill.team-a.svc",
+				KVEventsTopic:   "kv@Qwen/Qwen3-32B",
+			},
+			wantTopic: "kv@Qwen/Qwen3-32B",
+		},
+		{
+			name: "vllm-ascend publishes KV events identically to vllm",
+			in: Input{
+				Engine:          EngineVLLMAscend,
+				Role:            RolePrefill,
+				KVTransfer:      true,
+				EngineVersion:   "0.32.0",
+				PublishKVEvents: true,
+				KVEventsHost:    "qwen-prefill.team-a.svc",
+				KVEventsTopic:   "kv@Qwen/Qwen3-32B",
+			},
+			wantTopic: "kv@Qwen/Qwen3-32B",
+		},
+		{
+			name: "vllm-ascend store-less server publishes KV events",
+			in: Input{
+				Engine:          EngineVLLMAscend,
+				Role:            RoleNone,
+				PublishKVEvents: true,
+				KVEventsHost:    "qwen-server.team-a.svc",
+				KVEventsTopic:   "kv@Qwen/Qwen3-32B",
+			},
+			wantTopic: "kv@Qwen/Qwen3-32B",
+		},
+		{
+			name: "vllm kv_aware CBOR hash alignment on prefill",
+			in: Input{
+				Engine:              EngineVLLM,
+				Role:                RolePrefill,
+				KVTransfer:          true,
+				PublishKVEvents:     true,
+				KVEventsHost:        "qwen-prefill.team-a.svc",
+				KVEventsTopic:       "kv@Qwen/Qwen3-32B",
+				KVEventsUseCBORHash: true,
+			},
+			wantTopic:    "kv@Qwen/Qwen3-32B",
+			wantCBORHash: true,
+		},
+		{
+			name: "vllm kv_aware CBOR hash alignment on decode",
+			in: Input{
+				Engine:              EngineVLLM,
+				Role:                RoleDecode,
+				KVTransfer:          true,
+				PublishKVEvents:     true,
+				KVEventsHost:        "qwen-decode.team-a.svc",
+				KVEventsTopic:       "kv@Qwen/Qwen3-32B",
+				KVEventsUseCBORHash: true,
+			},
+			wantTopic:    "kv@Qwen/Qwen3-32B",
+			wantCBORHash: true,
+		},
+		{
+			name: "vllm-ascend kv_aware CBOR hash alignment on server",
+			in: Input{
+				Engine:              EngineVLLMAscend,
+				Role:                RoleNone,
+				PublishKVEvents:     true,
+				KVEventsHost:        "qwen-server.team-a.svc",
+				KVEventsTopic:       "kv@Qwen/Qwen3-32B",
+				KVEventsUseCBORHash: true,
+			},
+			wantTopic:    "kv@Qwen/Qwen3-32B",
+			wantCBORHash: true,
+		},
+	}
 
-	require.Len(t, result.Args, 4)
-	assert.Equal(t, "--kv-events-config", result.Args[2])
-	assert.JSONEq(t, `{
-		"enable_kv_cache_events": true,
-		"publisher": "zmq",
-		"endpoint": "tcp://*:5557",
-		"replay_endpoint": "tcp://*:5558",
-		"buffer_steps": 10000,
-		"hwm": 100000,
-		"max_queue_size": 100000,
-		"topic": "kv@"
-	}`, result.Args[3])
-	assert.Equal(t, []core.ContainerPort{
-		{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557},
-		{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558},
-	}, result.Ports)
-	require.NotNil(t, result.KVEvents)
-	assert.Equal(t, "tcp://qwen-prefill.team-a.svc:5557", result.KVEvents.Endpoint)
-	assert.Equal(t, "tcp://qwen-prefill.team-a.svc:5558", result.KVEvents.ReplayEndpoint)
-	assert.Equal(t, "kv@", result.KVEvents.Topic)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(tc.in)
+			require.NoError(t, err)
+
+			idx := slices.Index(result.Args, "--kv-events-config")
+			require.GreaterOrEqual(t, idx, 0, "expected --kv-events-config in %v", result.Args)
+			require.Less(t, idx+1, len(result.Args))
+			assert.JSONEq(t, fmt.Sprintf(`{
+				"enable_kv_cache_events": true,
+				"publisher": "zmq",
+				"endpoint": "tcp://*:5557",
+				"replay_endpoint": "tcp://*:5558",
+				"buffer_steps": 10000,
+				"hwm": 100000,
+				"max_queue_size": 100000,
+				"topic": %q
+			}`, tc.wantTopic), result.Args[idx+1])
+
+			assert.Contains(t, result.Ports, core.ContainerPort{
+				Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557,
+			})
+			assert.Contains(t, result.Ports, core.ContainerPort{
+				Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558,
+			})
+			require.NotNil(t, result.KVEvents)
+			assert.Equal(t, "tcp://"+tc.in.KVEventsHost+":5557", result.KVEvents.Endpoint)
+			assert.Equal(t, "tcp://"+tc.in.KVEventsHost+":5558", result.KVEvents.ReplayEndpoint)
+			assert.Equal(t, tc.wantTopic, result.KVEvents.Topic)
+
+			if tc.wantCBORHash {
+				hashIdx := slices.Index(result.Args, "--prefix-caching-hash-algo")
+				require.GreaterOrEqual(t, hashIdx, 0, "expected --prefix-caching-hash-algo in %v", result.Args)
+				require.Less(t, hashIdx+1, len(result.Args))
+				assert.Equal(t, "sha256_cbor", result.Args[hashIdx+1])
+				assert.Equal(t, "0", envValue(t, result.Env, "VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES").Value)
+			} else {
+				assert.NotContains(t, result.Args, "--prefix-caching-hash-algo")
+				assert.NotContains(t, envNames(result.Env), "VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES")
+			}
+		})
+	}
 }
 
 func TestRender_VLLMDoesNotPublishKVEventsUnlessRequested(t *testing.T) {
 	result, err := Render(Input{
-		Engine: EngineVLLM, Role: RoleDecode, Connection: testConnection(),
+		Engine:              EngineVLLM,
+		Role:                RoleDecode,
+		Connection:          testConnection(),
+		KVEventsUseCBORHash: true,
 	})
 	require.NoError(t, err)
 
 	assert.NotContains(t, result.Args, "--kv-events-config")
+	assert.NotContains(t, result.Args, "--prefix-caching-hash-algo")
+	assert.NotContains(t, envNames(result.Env), "VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES")
 	assert.Empty(t, result.Ports)
 	assert.Nil(t, result.KVEvents)
+}
+
+func TestVLLMKVEventsTopicForModel(t *testing.T) {
+	assert.Equal(t, "kv@", VLLMKVEventsTopicForModel(""))
+	assert.Equal(t, "kv@Qwen/Qwen3-32B", VLLMKVEventsTopicForModel("Qwen/Qwen3-32B"))
+
+	legacy := VLLMKVEvents("role.ns.svc")
+	assert.Equal(t, &KVEvents{
+		Endpoint:       "tcp://role.ns.svc:5557",
+		ReplayEndpoint: "tcp://role.ns.svc:5558",
+		Topic:          "kv@",
+	}, legacy)
+
+	explicit := KVEventsForTopic("role.ns.svc", "kv@Qwen/Qwen3-32B")
+	assert.Equal(t, &KVEvents{
+		Endpoint:       "tcp://role.ns.svc:5557",
+		ReplayEndpoint: "tcp://role.ns.svc:5558",
+		Topic:          "kv@Qwen/Qwen3-32B",
+	}, explicit)
 }
 
 // TestRender_SGLangVehicleIsTheEnvironment is the counterpart, and its negative half carries as much
@@ -1228,6 +1361,49 @@ func TestRender_Refusals(t *testing.T) {
 			},
 			want: ReasonTransportUnsupported,
 		},
+		{
+			name: "invalid engine version is refused",
+			input: Input{
+				Engine: EngineVLLM, EngineVersion: "latest", Connection: testConnection(),
+			},
+			want: ReasonEngineVersionInvalid,
+		},
+		{
+			name: "Ascend V2 non-divisible TP pair tp=3 and tp=4 is refused",
+			input: Input{
+				Engine: EngineVLLMAscend, EngineVersion: "0.30.0", Role: RolePrefill, KVTransfer: true,
+				Parallelism: ParallelismPair{
+					Prefill: Parallelism{TensorParallel: 3},
+					Decode:  Parallelism{TensorParallel: 4},
+				},
+			},
+			want: ReasonRoleUnsupported,
+		},
+		{
+			name: "Ascend V2 non-divisible TP pair tp=4 and tp=3 is refused",
+			input: Input{
+				Engine: EngineVLLMAscend, EngineVersion: "0.32.0", Role: RoleDecode, KVTransfer: true,
+				Parallelism: ParallelismPair{
+					Prefill: Parallelism{TensorParallel: 4},
+					Decode:  Parallelism{TensorParallel: 3},
+				},
+			},
+			want: ReasonRoleUnsupported,
+		},
+		{
+			name: "vllm-ascend KV events without host is refused",
+			input: Input{
+				Engine: EngineVLLMAscend, Role: RoleNone, PublishKVEvents: true,
+			},
+			want: ReasonConnectionIncomplete,
+		},
+		{
+			name: "sglang KV events without host is refused",
+			input: Input{
+				Engine: EngineSGLang, Role: RoleNone, PublishKVEvents: true,
+			},
+			want: ReasonConnectionIncomplete,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -1382,33 +1558,27 @@ func TestRender_TransferLegAndEventsFollowTheEngine(t *testing.T) {
 		wantErr  string
 	}{
 		{
-			// The transfer leg without a half to carry it: a shared member has nothing to pair.
 			name:   "sglang transfer without a role is refused",
 			engine: EngineSGLang, direct: true,
 			wantErr: "pairs a prefill half with a decode half",
 		},
 		{
-			name: "sglang cannot publish KV events", engine: EngineSGLang, publish: true,
-			wantErr: "moves nothing",
+			name:   "sglang publishes KV events",
+			engine: EngineSGLang, publish: true, accepted: true,
 		},
 		{
-			// The Ascend leg renders now: the connector it names is registered by the engine
-			// image's own plugin, and the decode proxy relays its handshake.
-			name:   "vllm-ascend renders direct transfer",
-			engine: EngineVLLMAscend, role: RolePrefill, direct: true, accepted: true,
+			name:   "vllm-ascend renders direct transfer and KV events",
+			engine: EngineVLLMAscend, role: RolePrefill, direct: true, publish: true, accepted: true,
 		},
 		{
 			name: "vllm renders both", engine: EngineVLLM, role: RolePrefill,
 			direct: true, publish: true, accepted: true,
 		},
 		{
-			// The transfer leg is SGLang's too now, carried by its disaggregation arguments.
 			name: "sglang renders direct transfer", engine: EngineSGLang, role: RolePrefill,
 			direct: true, accepted: true,
 		},
 		{
-			// The baseline that makes the refusals mean something: SGLang is still a supported
-			// engine, and asking for neither capability must still render.
 			name: "sglang with neither is still accepted", engine: EngineSGLang, accepted: true,
 		},
 	}

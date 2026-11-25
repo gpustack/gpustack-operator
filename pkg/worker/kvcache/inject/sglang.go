@@ -25,6 +25,7 @@
 package inject
 
 import (
+	"fmt"
 	"strconv"
 
 	core "k8s.io/api/core/v1"
@@ -212,7 +213,20 @@ const (
 	// sglangPodIPFieldPath is the field the kubelet resolves at container start, which is the whole
 	// reason this engine takes the environment.
 	sglangPodIPFieldPath = "status.podIP"
+
+	// sglangKVEventsConfigArg configures SGLang's ZMQ KV event publisher.
+	sglangKVEventsConfigArg = "--kv-events-config"
+
+	// SGLangKVEventsTopic is the default topic SGLang publishes KV cache events on for sgl-router.
+	SGLangKVEventsTopic = "kv-events"
 )
+
+type sglangKVEventsConfig struct {
+	Publisher      string `json:"publisher"`
+	Endpoint       string `json:"endpoint"`
+	ReplayEndpoint string `json:"replay_endpoint"`
+	Topic          string `json:"topic"`
+}
 
 // SGLangEncoderOwnedArgs returns the encoder-disaggregation arguments this renderer writes, so a
 // caller that refuses a user value for an owned key names them without restating a spelling.
@@ -243,19 +257,13 @@ func SGLangEncoderOwnedArgs() []string {
 // calls to the same function - each commented "Zero copy interface does not need local buffer"
 // (v0.5.18 `mooncake_store.py:28,464,514`). Emitting it would write something nothing reads.
 //
-// IT ALSO WRITES NO MODE, AND THAT ONE IS NOT MEASURED. This comment used to claim the reader has
-// no key for a mode in any spelling. It has one, under a name a search for "mode" does not find:
-// `load_from_env` binds `standalone_storage` from `MOONCAKE_STANDALONE_STORAGE`, and
-// `sglang.srt.environ` defaults it to `EnvBool(False)` (v0.5.18). So this renderer leaves SGLang in
-// a different store shape from the one it gives vLLM, whose annotation carries
-// `"mode":"standalone-store"` beside the same `"global_segment_size":0` - and `client_config.go`
-// says of that pair that the two are always written together.
-//
-// Whether writing it here is the repair is UNRESOLVED, which is why nothing is written. Setting
-// `MOONCAKE_STANDALONE_STORAGE=true` on a deployment moved the engine's failure rather than
-// clearing it: the store's warmup stopped being reached and `setup_dummy` raised a TypeError on
-// its own signature instead. Naming the gap is what this paragraph is for; closing it needs a
-// reading from an engine that gets past that call.
+// MOONCAKE_STANDALONE_STORAGE (standalone_storage, default False in sglang.srt.environ) is
+// deliberately left unset: in SGLang it enables dummy-client mode, which requires
+// MooncakeHostTensorAllocator and connects via setup_dummy to an external mooncake_client daemon
+// (MOONCAKE_CLIENT / client_server_address). It is not equivalent to vLLM's
+// "mode":"standalone-store". Because this operator connects SGLang directly to MOONCAKE_MASTER
+// as a zero-segment in-process client (MOONCAKE_GLOBAL_SEGMENT_SIZE=0), standalone_storage must
+// remain false.
 //
 // `global_segment_size` IS written, because SGLang defaults it to "4gb" when absent (v0.5.18
 // `environ.py:704`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`) - the same trap vLLM has, so the same explicit
@@ -295,13 +303,16 @@ func renderSGLang(in Input) (*Result, error) {
 	// a full Mooncake configuration and moves no blocks. Refused here, before the store block, so
 	// the answer does not depend on how far the render already got.
 	//
-	// Publishing events is not in the condition because it cannot reach here: Render refuses it for
-	// any engine but vLLM proper, before this renderer runs.
 	if in.Role == RoleEncode && (hasStore || in.KVTransfer) {
 		return nil, newRefusal(ReasonRoleUnsupported,
 			"role %q holds no KV cache, so a shared store or a point-to-point transfer asked of it "+
 				"would leave the encoder carrying a cache configuration that moves nothing",
 			in.Role)
+	}
+	if in.Role == RoleEncode && in.PublishKVEvents {
+		return nil, newRefusal(ReasonRoleUnsupported,
+			"the encoder role is not among the KV event publishers: it writes no KV cache "+
+				"for one to describe")
 	}
 	env := []core.EnvVar{}
 	tenantInjected := hasStore && in.Domain != ""
@@ -469,6 +480,31 @@ func renderSGLang(in Input) (*Result, error) {
 			in.Disaggregated && (in.Role == RolePrefill || in.Role == RoleDecode) && directLegForcesTCP(in)) {
 		result.DefaultedEnv = append(result.DefaultedEnv, mooncakeTCPDefaultedEnv()...)
 		result.DefaultedArgs = append(result.DefaultedArgs, []string{sglangPageSizeArg, defaultSGLangTCPPageSize})
+	}
+
+	// Emit KV events before the encoder leg so --kv-events-config always precedes --encoder-urls
+	// (which uses argparse nargs="+" and consumes subsequent non-flag tokens).
+	if in.PublishKVEvents {
+		if in.KVEventsHost == "" {
+			return nil, newRefusal(ReasonConnectionIncomplete,
+				"the KV event publisher has no dialable host")
+		}
+		topic := in.KVEventsTopic
+		if topic == "" {
+			topic = SGLangKVEventsTopic
+		}
+		eventsDoc, err := json.Marshal(sglangKVEventsConfig{
+			Publisher:      "zmq",
+			Endpoint:       fmt.Sprintf("tcp://*:%d", VLLMKVEventsPort),
+			ReplayEndpoint: fmt.Sprintf("tcp://*:%d", VLLMKVEventsReplayPort),
+			Topic:          topic,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("marshal the SGLang KV event configuration: %w", err)
+		}
+		result.Args = append(result.Args, sglangKVEventsConfigArg, string(eventsDoc))
+		result.Ports = append(result.Ports, KVEventsPorts()...)
+		result.KVEvents = KVEventsForTopic(in.KVEventsHost, topic)
 	}
 
 	// THE ENCODER LEG IS THE THIRD STAGE, AND IT IS WRITTEN LAST because the address flag takes a

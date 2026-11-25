@@ -2,6 +2,7 @@ package inject
 
 import (
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -271,4 +272,173 @@ func volumeNames(volumes []core.Volume) []string {
 		out = append(out, volumes[i].Name)
 	}
 	return out
+}
+
+func TestRender_VLLMAscendMooncakeConnectorVersionGating(t *testing.T) {
+	ascendStore := testConnectionFor(EngineVLLMAscend)
+	testCases := []struct {
+		name          string
+		engineVersion string
+		role          Role
+		conn          Connection
+		pair          ParallelismPair
+		wantConnector string
+		wantMulti     bool
+		wantErr       bool
+	}{
+		{
+			name:          "empty legacy version uses MooncakeConnectorV1",
+			engineVersion: "",
+			role:          RolePrefill,
+			pair:          ParallelismPair{Prefill: Parallelism{TensorParallel: 2}, Decode: Parallelism{TensorParallel: 1}},
+			wantConnector: "MooncakeConnectorV1",
+		},
+		{
+			name:          "v0.23.0 uses MooncakeConnectorV1",
+			engineVersion: "0.23.0",
+			role:          RoleDecode,
+			pair:          ParallelismPair{Prefill: Parallelism{TensorParallel: 4}, Decode: Parallelism{TensorParallel: 2}},
+			wantConnector: "MooncakeConnectorV1",
+		},
+		{
+			name:          "v0.23.0 rejects decode tp wider than prefill tp",
+			engineVersion: "0.23.0",
+			role:          RolePrefill,
+			pair:          ParallelismPair{Prefill: Parallelism{TensorParallel: 2}, Decode: Parallelism{TensorParallel: 4}},
+			wantErr:       true,
+		},
+		{
+			name:          "v0.30.0 uses MooncakeConnectorV2 and allows decode tp wider when divisible",
+			engineVersion: "0.30.0",
+			role:          RolePrefill,
+			pair:          ParallelismPair{Prefill: Parallelism{TensorParallel: 2, DataParallel: 1}, Decode: Parallelism{TensorParallel: 4, DataParallel: 2}},
+			wantConnector: "MooncakeConnectorV2",
+		},
+		{
+			name:          "v0.30.0rc1 uses MooncakeConnectorV2",
+			engineVersion: "0.30.0rc1",
+			role:          RoleDecode,
+			pair:          ParallelismPair{Prefill: Parallelism{TensorParallel: 2}, Decode: Parallelism{TensorParallel: 4}},
+			wantConnector: "MooncakeConnectorV2",
+		},
+		{
+			name:          "v0.30.0.rc1 uses MooncakeConnectorV2",
+			engineVersion: "0.30.0.rc1",
+			role:          RolePrefill,
+			pair:          ParallelismPair{Prefill: Parallelism{TensorParallel: 4}, Decode: Parallelism{TensorParallel: 2}},
+			wantConnector: "MooncakeConnectorV2",
+		},
+		{
+			name:          "v0.32.0 composes MultiConnector with MooncakeConnectorV2 and AscendStoreConnector",
+			engineVersion: "0.32.0",
+			role:          RolePrefill,
+			conn:          ascendStore,
+			pair:          ParallelismPair{Prefill: Parallelism{TensorParallel: 2}, Decode: Parallelism{TensorParallel: 4}},
+			wantConnector: "MooncakeConnectorV2",
+			wantMulti:     true,
+		},
+		{
+			name:          "v0.32.0 rejects non-divisible tp=3 and tp=4",
+			engineVersion: "0.32.0",
+			role:          RolePrefill,
+			pair:          ParallelismPair{Prefill: Parallelism{TensorParallel: 3}, Decode: Parallelism{TensorParallel: 4}},
+			wantErr:       true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(Input{
+				Engine:        EngineVLLMAscend,
+				EngineVersion: tc.engineVersion,
+				Role:          tc.role,
+				Connection:    tc.conn,
+				KVTransfer:    true,
+				Parallelism:   tc.pair,
+			})
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, ReasonRoleUnsupported, reasonOf(t, err))
+				return
+			}
+			require.NoError(t, err)
+
+			kvIdx := slices.Index(result.Args, vllmTransferConfigArg)
+			require.GreaterOrEqual(t, kvIdx, 0)
+			doc := result.Args[kvIdx+1]
+			assert.NotContains(t, doc, "use_layerwise", "MooncakeConnectorV2 must render Pull mode without use_layerwise")
+			assert.Contains(t, volumeNames(result.Volumes), vllmAscendDriverVolumeName)
+
+			p := tc.pair.Prefill.orOne()
+			d := tc.pair.Decode.orOne()
+			kvRole := "kv_producer"
+			if tc.role == RoleDecode {
+				kvRole = "kv_consumer"
+			}
+			if tc.wantMulti {
+				assert.JSONEq(t, `{
+					"kv_connector":"MultiConnector",
+					"kv_role":"kv_producer",
+					"kv_connector_extra_config":{"connectors":[
+						{"kv_connector":"`+tc.wantConnector+`","kv_role":"kv_producer","kv_port":8998,
+						 "kv_connector_extra_config":{
+							"prefill":{"tp_size":2,"dp_size":1},
+							"decode":{"tp_size":4,"dp_size":1}}},
+						{"kv_connector":"AscendStoreConnector","kv_role":"kv_both"}
+					]}
+				}`, doc)
+			} else {
+				wantDoc := `{
+					"kv_connector":"` + tc.wantConnector + `",
+					"kv_role":"` + kvRole + `",
+					"kv_port":8998,
+					"kv_connector_extra_config":{
+						"prefill":{"tp_size":` + strconv.Itoa(p.TensorParallel) + `,"dp_size":` + strconv.Itoa(p.DataParallel) + `},
+						"decode":{"tp_size":` + strconv.Itoa(d.TensorParallel) + `,"dp_size":` + strconv.Itoa(d.DataParallel) + `}}
+				}`
+				assert.JSONEq(t, wantDoc, doc)
+			}
+		})
+	}
+}
+
+func TestRender_VLLMAscendEPDAndKVEvents(t *testing.T) {
+	result, err := Render(Input{
+		Engine:          EngineVLLMAscend,
+		EngineVersion:   "0.32.0",
+		Role:            RolePrefill,
+		KVTransfer:      true,
+		EncoderCache:    sharedLeg(),
+		PublishKVEvents: true,
+		KVEventsHost:    "qwen-prefill.ns.svc",
+		KVEventsTopic:   VLLMKVEventsTopicForModel("Qwen/Qwen2.5-VL-7B"),
+		Parallelism: ParallelismPair{
+			Prefill: Parallelism{TensorParallel: 2},
+			Decode:  Parallelism{TensorParallel: 4},
+		},
+	})
+	require.NoError(t, err)
+
+	kvIdx := slices.Index(result.Args, vllmTransferConfigArg)
+	require.GreaterOrEqual(t, kvIdx, 0)
+	assert.Contains(t, result.Args[kvIdx+1], "MooncakeConnectorV2")
+	assert.Contains(t, result.Args, vllmECTransferConfigArg)
+
+	evIdx := slices.Index(result.Args, vllmKVEventsConfigArg)
+	require.GreaterOrEqual(t, evIdx, 0)
+	assert.Contains(t, result.Args[evIdx+1], `"topic":"kv@Qwen/Qwen2.5-VL-7B"`)
+	require.NotNil(t, result.KVEvents)
+	assert.Equal(t, "kv@Qwen/Qwen2.5-VL-7B", result.KVEvents.Topic)
+
+	_, err = Render(Input{
+		Engine:          EngineVLLMAscend,
+		EngineVersion:   "0.32.0",
+		Role:            RoleEncode,
+		EncoderCache:    sharedLeg(),
+		PublishKVEvents: true,
+		KVEventsHost:    "qwen-encode.ns.svc",
+		KVEventsTopic:   VLLMKVEventsTopicForModel("Qwen/Qwen2.5-VL-7B"),
+	})
+	require.Error(t, err)
+	assert.Equal(t, ReasonRoleUnsupported, reasonOf(t, err))
 }

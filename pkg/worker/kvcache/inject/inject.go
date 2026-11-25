@@ -88,13 +88,43 @@ type KVEvents struct {
 	Topic          string
 }
 
-// VLLMKVEvents returns the dialable event contract paired with vLLM's fixed bind configuration.
+// VLLMKVEvents returns the dialable event contract paired with vLLM's fixed bind configuration
+// and the legacy bare topic prefix.
 func VLLMKVEvents(host string) *KVEvents {
+	return KVEventsForTopic(host, VLLMKVEventsTopic)
+}
+
+// KVEventsForTopic returns the dialable event contract paired with the ZMQ publisher's fixed ports
+// and the given topic.
+func KVEventsForTopic(host, topic string) *KVEvents {
 	return &KVEvents{
 		Endpoint:       fmt.Sprintf("tcp://%s:%d", host, VLLMKVEventsPort),
 		ReplayEndpoint: fmt.Sprintf("tcp://%s:%d", host, VLLMKVEventsReplayPort),
-		Topic:          VLLMKVEventsTopic,
+		Topic:          topic,
 	}
+}
+
+// VLLMKVEventsTopicForModel returns the vLLM / vLLM-Ascend KV event publisher topic for model.
+// An empty model falls back to VLLMKVEventsTopic ("kv@").
+func VLLMKVEventsTopicForModel(model string) string {
+	if model == "" {
+		return VLLMKVEventsTopic
+	}
+	return VLLMKVEventsTopic + model
+}
+
+// engineVersionAtLeast reports whether version satisfies minimum under CompareEngineVersion.
+// An empty version represents the legacy baseline (< minimum). Non-empty invalid versions return
+// a typed refusal.
+func engineVersionAtLeast(version, minimum string) (bool, error) {
+	if version == "" {
+		return false, nil
+	}
+	ok, err := EngineVersionAtLeast(version, minimum)
+	if err != nil {
+		return false, newRefusal(ReasonEngineVersionInvalid, "%v", err)
+	}
+	return ok, nil
 }
 
 // KVEventsPorts returns the ports used by the vLLM ZMQ publisher and its replay endpoint.
@@ -123,6 +153,11 @@ func Render(in Input) (*Result, error) {
 	if !slices.Contains(Engines(), in.Engine) {
 		return nil, newRefusal(ReasonEngineUnknown,
 			"engine %q is not one this operator can configure; set one of %v", in.Engine, Engines())
+	}
+	if in.EngineVersion != "" {
+		if err := ValidateEngineVersion(in.EngineVersion); err != nil {
+			return nil, newRefusal(ReasonEngineVersionInvalid, "%v", err)
+		}
 	}
 
 	hasStore := in.Connection.MasterAddress != "" || in.Connection.Protocol != ""
@@ -157,30 +192,19 @@ func Render(in Input) (*Result, error) {
 	}
 	if !hasStore && in.Role != RoleEncode &&
 		in.Engine != EngineVLLM && in.Engine != EngineVLLMAscend &&
-		(in.Engine != EngineSGLang || !in.KVTransfer) {
+		(in.Engine != EngineSGLang || (!in.KVTransfer && !in.PublishKVEvents)) {
 		return nil, newRefusal(ReasonConnectionIncomplete,
 			"engine %q requires a shared store connection", in.Engine)
 	}
-	// Point-to-point transfer is rendered by the whole vLLM family and by SGLang, each in its
-	// own vocabulary; KV event publishing is vLLM proper's alone. A capability an engine does not
-	// render is refused HERE rather than ignored by that engine's renderer.
-	//
-	// It is refused rather than dropped because dropping it is the failure this package exists to
-	// prevent: an engine asked for a capability it renders no term for would start normally, serve
-	// normally, and move no blocks - with nothing in the Pod to read that says so. The combination
-	// is reachable, not theoretical: the router's metrics contract covers SGLang, so a managed
-	// router over an SGLang pool is a configuration a user can write today.
-	//
-	// The vLLM renderer refuses point-to-point transfer again, on a condition that also covers the
-	// role. That is not a duplicate of this one: this check is about the ENGINE and runs for every
-	// caller, while that one is about a role that is neither prefill nor decode and can only be
-	// reached once the engine is already vLLM.
+	// Point-to-point transfer and KV event publishing are rendered by the vLLM family and SGLang,
+	// each in its own vocabulary. Any future engine outside that set is refused here rather than
+	// silently dropping the capability.
 	if in.KVTransfer && in.Engine != EngineVLLM && in.Engine != EngineVLLMAscend && in.Engine != EngineSGLang {
 		return nil, newRefusal(ReasonRoleUnsupported,
 			"engine %q renders no point-to-point transfer; asking for one would leave a container "+
 				"that starts and moves nothing", in.Engine)
 	}
-	if in.PublishKVEvents && in.Engine != EngineVLLM {
+	if in.PublishKVEvents && in.Engine != EngineVLLM && in.Engine != EngineVLLMAscend && in.Engine != EngineSGLang {
 		return nil, newRefusal(ReasonRoleUnsupported,
 			"engine %q renders no KV event publishing; asking for it would leave a container that "+
 				"starts and moves nothing", in.Engine)

@@ -160,21 +160,18 @@ func TestRenderVLLM_NIXLProducerPublishesTheSideChannelTheConsumerDials(t *testi
 	require.NoError(t, err)
 
 	assert.Equal(t, []core.EnvVar{
-		// The connector raises ValueError at construction without the model runner, BEFORE it
-		// looks at the role it was handed (read at vLLM v0.30.0
-		// `vllm/distributed/ec_transfer/ec_connector/cpu/connector.py:40-44`), so it is owned
-		// rather than defaulted: a workload answering "0" would leave a leg that cannot start.
-		{Name: "VLLM_USE_V2_MODEL_RUNNER", Value: "1"},
 		{
-			// The field reference, not a value: the address is not knowable at admission, and the
-			// kubelet resolving it at container start is what makes it the producer's own.
 			Name: "VLLM_EC_SIDE_CHANNEL_HOST",
 			ValueFrom: &core.EnvVarSource{
 				FieldRef: &core.ObjectFieldSelector{FieldPath: "status.podIP"},
 			},
 		},
+	}, producer.Env, "only the kubelet-resolved podIP bind address is owned")
+
+	assert.Equal(t, []core.EnvVar{
+		{Name: "VLLM_USE_V2_MODEL_RUNNER", Value: "1"},
 		{Name: "VLLM_EC_SIDE_CHANNEL_PORT", Value: "5601"},
-	}, producer.Env, "the whole environment: these three are the producer's preconditions")
+	}, producer.DefaultedEnv, "legacy baseline defaults both VLLM_USE_V2_MODEL_RUNNER and VLLM_EC_SIDE_CHANNEL_PORT")
 
 	assert.Equal(t, []core.ContainerPort{{
 		Name: "ec-side-channel", Protocol: core.ProtocolTCP, ContainerPort: 5601,
@@ -183,19 +180,128 @@ func TestRenderVLLM_NIXLProducerPublishesTheSideChannelTheConsumerDials(t *testi
 	consumer, err := renderVLLMEncoderCache(Input{Engine: EngineVLLM, Role: RolePrefill}, nixlLeg())
 	require.NoError(t, err)
 
-	// The consumer constructs the same connector class: the role the factory passes to __init__ is
-	// worker-or-scheduler, not produce-or-consume (read at vLLM v0.30.0
-	// `vllm/distributed/ec_transfer/ec_connector/factory.py:36-56`), so the model runner is a
-	// precondition here too and a prefiller without it crash-loops at construction.
-	assert.Equal(t, []core.EnvVar{{Name: "VLLM_USE_V2_MODEL_RUNNER", Value: "1"}}, consumer.Env,
-		"the model runner is the connector's precondition on both roles")
+	assert.Empty(t, consumer.Env, "the consumer owns no encoder-cache env vars")
+	assert.Equal(t, []core.EnvVar{{Name: "VLLM_USE_V2_MODEL_RUNNER", Value: "1"}}, consumer.DefaultedEnv,
+		"legacy baseline defaults VLLM_USE_V2_MODEL_RUNNER=1 on the consumer")
 	assert.Empty(t, consumer.Ports, "the consumer dials the producer and listens on nothing")
 
-	// The side channel is the producer's alone: it is read only when NIXL transfer is enabled on a
-	// producer (read at vLLM v0.30.0 `docs/features/ec_cpu_connector.md:108`), so a consumer
-	// rendering the pair would advertise an address it never binds.
 	assert.NotContains(t, envNames(consumer.Env), "VLLM_EC_SIDE_CHANNEL_HOST")
-	assert.NotContains(t, envNames(consumer.Env), "VLLM_EC_SIDE_CHANNEL_PORT")
+	assert.NotContains(t, envNames(consumer.DefaultedEnv), "VLLM_EC_SIDE_CHANNEL_PORT")
+}
+
+func TestRenderVLLM_EncoderCacheDefaultedEnvPropagationAndVersionGating(t *testing.T) {
+	testCases := []struct {
+		name             string
+		role             Role
+		engineVersion    string
+		wantOwnedEnv     []string
+		wantDefaultedEnv []core.EnvVar
+	}{
+		{
+			name:          "encode legacy empty version defaults V2 runner and side channel port",
+			role:          RoleEncode,
+			engineVersion: "",
+			wantOwnedEnv:  []string{"VLLM_EC_SIDE_CHANNEL_HOST"},
+			wantDefaultedEnv: []core.EnvVar{
+				{Name: "VLLM_USE_V2_MODEL_RUNNER", Value: "1"},
+				{Name: "VLLM_EC_SIDE_CHANNEL_PORT", Value: "5601"},
+			},
+		},
+		{
+			name:          "encode v0.32.0 defaults V2 runner and side channel port",
+			role:          RoleEncode,
+			engineVersion: "0.32.0",
+			wantOwnedEnv:  []string{"VLLM_EC_SIDE_CHANNEL_HOST"},
+			wantDefaultedEnv: []core.EnvVar{
+				{Name: "VLLM_USE_V2_MODEL_RUNNER", Value: "1"},
+				{Name: "VLLM_EC_SIDE_CHANNEL_PORT", Value: "5601"},
+			},
+		},
+		{
+			name:          "encode v0.34.0rc0 omits V2 runner and keeps defaulted side channel port",
+			role:          RoleEncode,
+			engineVersion: "0.34.0rc0",
+			wantOwnedEnv:  []string{"VLLM_EC_SIDE_CHANNEL_HOST"},
+			wantDefaultedEnv: []core.EnvVar{
+				{Name: "VLLM_EC_SIDE_CHANNEL_PORT", Value: "5601"},
+			},
+		},
+		{
+			name:          "encode v0.34.0 omits V2 runner and keeps defaulted side channel port",
+			role:          RoleEncode,
+			engineVersion: "0.34.0",
+			wantOwnedEnv:  []string{"VLLM_EC_SIDE_CHANNEL_HOST"},
+			wantDefaultedEnv: []core.EnvVar{
+				{Name: "VLLM_EC_SIDE_CHANNEL_PORT", Value: "5601"},
+			},
+		},
+		{
+			name:          "prefill legacy empty version defaults V2 runner",
+			role:          RolePrefill,
+			engineVersion: "",
+			wantOwnedEnv:  []string{},
+			wantDefaultedEnv: []core.EnvVar{
+				{Name: "VLLM_USE_V2_MODEL_RUNNER", Value: "1"},
+			},
+		},
+		{
+			name:          "prefill v0.32.0 defaults V2 runner",
+			role:          RolePrefill,
+			engineVersion: "0.32.0",
+			wantOwnedEnv:  []string{},
+			wantDefaultedEnv: []core.EnvVar{
+				{Name: "VLLM_USE_V2_MODEL_RUNNER", Value: "1"},
+			},
+		},
+		{
+			name:             "prefill v0.34.0rc0 omits V2 runner",
+			role:             RolePrefill,
+			engineVersion:    "0.34.0rc0",
+			wantOwnedEnv:     []string{},
+			wantDefaultedEnv: nil,
+		},
+		{
+			name:             "prefill v0.34.0 omits V2 runner",
+			role:             RolePrefill,
+			engineVersion:    "0.34.0",
+			wantOwnedEnv:     []string{},
+			wantDefaultedEnv: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := Input{
+				Engine:        EngineVLLM,
+				EngineVersion: tc.engineVersion,
+				Role:          tc.role,
+				EncoderCache:  nixlLeg(),
+			}
+			if tc.role == RolePrefill {
+				in.KVTransfer = true
+				in.KVTransferBackend = KVTransferBackendNIXL
+			}
+
+			// Verify leg output directly and full Render composition (which must propagate leg.DefaultedEnv).
+			leg, err := renderVLLMEncoderCache(in, nixlLeg())
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantOwnedEnv, envNames(leg.Env))
+			assert.Equal(t, tc.wantDefaultedEnv, leg.DefaultedEnv)
+
+			rendered, err := Render(in)
+			require.NoError(t, err)
+			for _, want := range tc.wantDefaultedEnv {
+				assert.Contains(t, rendered.DefaultedEnv, want,
+					"vllm.go must append leg.DefaultedEnv onto Result.DefaultedEnv")
+				assert.NotContains(t, envNames(rendered.Env), want.Name,
+					"%s must be defaulted, never owned", want.Name)
+			}
+			if len(tc.wantDefaultedEnv) == 0 || !slices.Contains(envNames(tc.wantDefaultedEnv), "VLLM_USE_V2_MODEL_RUNNER") {
+				assert.NotContains(t, envNames(rendered.DefaultedEnv), "VLLM_USE_V2_MODEL_RUNNER")
+				assert.NotContains(t, envNames(rendered.Env), "VLLM_USE_V2_MODEL_RUNNER")
+			}
+		})
+	}
 }
 
 // TestRenderVLLM_TheSharedLegNeedsNoModelRunner is the other connector's answer to the same
@@ -209,6 +315,7 @@ func TestRenderVLLM_TheSharedLegNeedsNoModelRunner(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Empty(t, leg.Env, "the shared-directory connector reads no model-runner flag")
+			assert.Empty(t, leg.DefaultedEnv, "the shared-directory connector defaults no env vars")
 			assert.Empty(t, leg.Ports, "and it opens no side channel")
 		})
 	}
@@ -382,27 +489,68 @@ func TestRenderVLLM_DecodeAndUnsplitRolesAreUnchanged(t *testing.T) {
 // not working - which is the only kind of failure this proof is here to prevent.
 func TestEncoderCacheOwnedKeys_CoverEverythingTheLegWrites(t *testing.T) {
 	testCases := []struct {
-		name string
-		in   Input
-		ec   EncoderCache
-		// owned counts what the row must own, so a leg that starts writing a new key fails here
-		// rather than passing because both sides grew together.
-		owned bool
+		name             string
+		in               Input
+		ec               EncoderCache
+		owned            bool
+		wantOwnedEnv     []string
+		wantDefaultedEnv []string
 	}{
-		{name: "the NIXL producer owns the model runner and the side channel", in: Input{Role: RoleEncode}, ec: nixlLeg(), owned: true},
-		{name: "the NIXL consumer owns the model runner and the document", in: Input{Role: RolePrefill}, ec: nixlLeg(), owned: true},
-		{name: "the shared producer owns the transfer document alone", in: Input{Role: RoleEncode}, ec: sharedLeg(), owned: true},
-		{name: "the shared consumer owns the transfer document alone", in: Input{Role: RolePrefill}, ec: sharedLeg(), owned: true},
-		// The Ascend legs carry the engine explicitly because EncoderCacheOwnedKeys takes no engine:
-		// these two rows are the only thing tying the vendor that has its own refusal to the same
-		// list the NVIDIA rows above pin. The NIXL connector has no Ascend row because it is refused
-		// there rather than rendered, and a refusal renders nothing to own.
-		{name: "the Ascend shared producer owns the transfer document alone", in: Input{Engine: EngineVLLMAscend, Role: RoleEncode}, ec: sharedLeg(), owned: true},
-		{name: "the Ascend shared consumer owns the transfer document alone", in: Input{Engine: EngineVLLMAscend, Role: RolePrefill}, ec: sharedLeg(), owned: true},
-		// The zero request renders nothing, so it owns nothing. A caller that asked for these keys
-		// on every deployment would otherwise refuse a user's --ec-transfer-config on a deployment
-		// that never had an encoder stage at all.
-		{name: "a request naming no connector owns nothing", in: Input{Role: RolePrefill}, ec: EncoderCache{}},
+		{
+			name:             "the NIXL producer owns only the side channel host and defaults runner and port",
+			in:               Input{Role: RoleEncode},
+			ec:               nixlLeg(),
+			owned:            true,
+			wantOwnedEnv:     []string{"VLLM_EC_SIDE_CHANNEL_HOST"},
+			wantDefaultedEnv: []string{"VLLM_USE_V2_MODEL_RUNNER", "VLLM_EC_SIDE_CHANNEL_PORT"},
+		},
+		{
+			name:             "the NIXL consumer owns the transfer document alone and defaults runner",
+			in:               Input{Role: RolePrefill},
+			ec:               nixlLeg(),
+			owned:            true,
+			wantOwnedEnv:     []string{},
+			wantDefaultedEnv: []string{"VLLM_USE_V2_MODEL_RUNNER"},
+		},
+		{
+			name:             "the shared producer owns the transfer document alone",
+			in:               Input{Role: RoleEncode},
+			ec:               sharedLeg(),
+			owned:            true,
+			wantOwnedEnv:     []string{},
+			wantDefaultedEnv: []string{},
+		},
+		{
+			name:             "the shared consumer owns the transfer document alone",
+			in:               Input{Role: RolePrefill},
+			ec:               sharedLeg(),
+			owned:            true,
+			wantOwnedEnv:     []string{},
+			wantDefaultedEnv: []string{},
+		},
+		{
+			name:             "the Ascend shared producer owns the transfer document alone",
+			in:               Input{Engine: EngineVLLMAscend, Role: RoleEncode},
+			ec:               sharedLeg(),
+			owned:            true,
+			wantOwnedEnv:     []string{},
+			wantDefaultedEnv: []string{},
+		},
+		{
+			name:             "the Ascend shared consumer owns the transfer document alone",
+			in:               Input{Engine: EngineVLLMAscend, Role: RolePrefill},
+			ec:               sharedLeg(),
+			owned:            true,
+			wantOwnedEnv:     []string{},
+			wantDefaultedEnv: []string{},
+		},
+		{
+			name:             "a request naming no connector owns nothing",
+			in:               Input{Role: RolePrefill},
+			ec:               EncoderCache{},
+			wantOwnedEnv:     []string{},
+			wantDefaultedEnv: []string{},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -413,8 +561,12 @@ func TestEncoderCacheOwnedKeys_CoverEverythingTheLegWrites(t *testing.T) {
 
 			assert.Equal(t, ownedArgs, renderedFlags(t, leg.Args),
 				"the flags this package claims to own are exactly the flags the leg writes")
+			assert.Equal(t, tc.wantOwnedEnv, ownedEnv)
 			assert.Equal(t, ownedEnv, envNames(leg.Env),
 				"the variables this package claims to own are exactly the variables the leg writes")
+			assert.Equal(t, tc.wantDefaultedEnv, envNames(leg.DefaultedEnv))
+			assert.NotContains(t, ownedEnv, "VLLM_USE_V2_MODEL_RUNNER")
+			assert.NotContains(t, ownedEnv, "VLLM_EC_SIDE_CHANNEL_PORT")
 			if tc.owned {
 				assert.NotEmpty(t, ownedArgs, "a named leg always writes the document that names it")
 			} else {

@@ -36,8 +36,15 @@ const (
 	VLLMKVEventsPort int32 = 5557
 	// VLLMKVEventsReplayPort is the publisher's replay port.
 	VLLMKVEventsReplayPort int32 = 5558
-	// VLLMKVEventsTopic is the topic both publisher and subscriber use.
+	// VLLMKVEventsTopic is the subscriber topic filter prefix and legacy fallback topic.
 	VLLMKVEventsTopic = "kv@"
+	// VLLMPrefixCachingHashAlgoArg selects vLLM's prefix-caching block hash algorithm.
+	VLLMPrefixCachingHashAlgoArg = "--prefix-caching-hash-algo"
+	// VLLMPrefixCachingHashAlgoSHA256CBOR aligns vLLM prefix block hashes with vllm-router kv_aware.
+	VLLMPrefixCachingHashAlgoSHA256CBOR = "sha256_cbor"
+	// VLLMKVEventsUseIntBlockHashesEnv controls whether vLLM truncates published KV event hashes
+	// to 64-bit ints (default 1) or emits full 32-byte hashes (0, required by vllm-router kv_aware).
+	VLLMKVEventsUseIntBlockHashesEnv = "VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES"
 	// VLLMMooncakeBootstrapPort is where a prefiller exposes Mooncake's transfer handshake.
 	VLLMMooncakeBootstrapPort int32 = 8998
 
@@ -70,6 +77,14 @@ const (
 	// transfer_id and a bootstrap address, while this one wants the prefiller's host, port, block
 	// ids and engine id, which is why a router that proxies between them must match the engine.
 	vllmAscendTransferConnector = "MooncakeConnectorV1"
+
+	// vllmAscendTransferConnectorV2 is the Pull-mode point-to-point connector registered by
+	// vLLM-Ascend >= 0.30.0 with renewable KV leases and symmetric TP divisibility.
+	vllmAscendTransferConnectorV2 = "MooncakeConnectorV2"
+
+	// VLLMAscendMooncakeV2MinVersion is the minimum vLLM-Ascend release line that renders
+	// MooncakeConnectorV2 instead of MooncakeConnectorV1.
+	VLLMAscendMooncakeV2MinVersion = "0.30.0"
 
 	// vllmAscendDriverPath is the host driver tree the Ascend transfer leg reads each NPU's NIC
 	// address through: hccn_tool ships under it, while the engine image carries the driver
@@ -444,12 +459,27 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 			// through the one helper -- a test row declares the halves differently so an edit
 			// feeding either block the wrong side fails an assertion, not the build.
 			//
-			// The connector also raises there on the PAIR when the prefill tp_size reads
-			// below the decode one, so that ordering is declined here rather than rendered
-			// into a crash-loop. The check covers tp_size alone and is this arm's alone:
-			// the native leg maps both directions, and refusing the ordering for every
-			// vLLM pair would break deployments the engine runs fine.
-			if prefill, decode := in.Parallelism.Prefill.orOne(), in.Parallelism.Decode.orOne(); prefill.TensorParallel < decode.TensorParallel {
+			// Version-gate vLLM-Ascend P/D connector generation: >= 0.30.0 uses MooncakeConnectorV2
+			// (Pull mode, requiring max(tp_p, tp_d) % min(tp_p, tp_d) == 0 per pull_worker.py),
+			// while < 0.30.0 and empty legacy versions keep MooncakeConnectorV1 (tp_p >= tp_d).
+			useV2, err := engineVersionAtLeast(in.EngineVersion, VLLMAscendMooncakeV2MinVersion)
+			if err != nil {
+				return nil, err
+			}
+			prefill, decode := in.Parallelism.Prefill.orOne(), in.Parallelism.Decode.orOne()
+			connector := vllmAscendTransferConnector
+			if useV2 {
+				connector = vllmAscendTransferConnectorV2
+				larger := max(prefill.TensorParallel, decode.TensorParallel)
+				smaller := min(prefill.TensorParallel, decode.TensorParallel)
+				if smaller <= 0 || larger%smaller != 0 {
+					return nil, newRefusal(ReasonRoleUnsupported,
+						"the vLLM-Ascend MooncakeConnectorV2 transfer leg requires prefill and decode "+
+							"tp_size to divide evenly, but the pair declares prefill %d and decode %d; "+
+							"align the roles' tensor parallelism so one divides the other",
+						prefill.TensorParallel, decode.TensorParallel)
+				}
+			} else if prefill.TensorParallel < decode.TensorParallel {
 				return nil, newRefusal(ReasonRoleUnsupported,
 					"the vLLM-Ascend transfer leg requires the prefill tp_size to be at "+
 						"least the decode one, but the pair declares prefill %d and decode %d; "+
@@ -457,7 +487,7 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 					prefill.TensorParallel, decode.TensorParallel)
 			}
 			direct = vllmTransferConfig{
-				KVConnector: vllmAscendTransferConnector,
+				KVConnector: connector,
 				KVRole:      kvRole,
 				KVPort:      VLLMMooncakeBootstrapPort,
 				KVConnectorExtraConfig: &vllmConnectorExtraConfig{
@@ -577,6 +607,7 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 	}
 	result.Args = append(result.Args, leg.Args...)
 	result.Env = append(result.Env, leg.Env...)
+	result.DefaultedEnv = append(result.DefaultedEnv, leg.DefaultedEnv...)
 	result.Ports = append(result.Ports, leg.Ports...)
 	result.DefaultedArgs = append(result.DefaultedArgs, leg.DefaultedArgs...)
 	if hasPool && in.Dtype != "" {
@@ -648,6 +679,10 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 			"the KV event publisher has no dialable host")
 	}
 
+	topic := in.KVEventsTopic
+	if topic == "" {
+		topic = VLLMKVEventsTopic
+	}
 	eventsDoc, err := json.Marshal(vllmKVEventsConfig{
 		EnableKVCacheEvents: true,
 		Publisher:           "zmq",
@@ -656,14 +691,21 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 		BufferSteps:         10_000,
 		HWM:                 100_000,
 		MaxQueueSize:        100_000,
-		Topic:               VLLMKVEventsTopic,
+		Topic:               topic,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal the vLLM KV event configuration: %w", err)
 	}
 	result.Args = append(result.Args, vllmKVEventsConfigArg, string(eventsDoc))
+	if in.KVEventsUseCBORHash {
+		result.Args = append(result.Args, VLLMPrefixCachingHashAlgoArg, VLLMPrefixCachingHashAlgoSHA256CBOR)
+		result.Env = append(result.Env, core.EnvVar{
+			Name:  VLLMKVEventsUseIntBlockHashesEnv,
+			Value: "0",
+		})
+	}
 	result.Ports = append(result.Ports, KVEventsPorts()...)
-	result.KVEvents = VLLMKVEvents(in.KVEventsHost)
+	result.KVEvents = KVEventsForTopic(in.KVEventsHost, topic)
 
 	return result, nil
 }
