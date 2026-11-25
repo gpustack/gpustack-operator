@@ -1,6 +1,7 @@
 # Spec: KV Events Alignment, Engine Version Resolution, and Parameter Reference Overhaul
 
-Status: Building
+Status: Built
+Blocked on: End-of-build review and PR merge via `my-ship` (lifts to `Shipped` when opening the pull request).
 Type: Feature
 
 ## Summary
@@ -316,10 +317,10 @@ if prefill, decode := in.Parallelism.Prefill.orOne(), in.Parallelism.Decode.orOn
       Acceptance: `docs/reference/model-deployment-parameters.md` is reorganized around orthogonal axes (`KVCache`, `KVTransfer`, `KVEvents`, `ECTransfer`, `Router`, `Serving`, `Weight Delivery`) with explicit `Engine Version` ("Before vs At/After") tables matching Go code 1:1; all doc drift (`SGLANG_HICACHE_ENABLE_GARBAGE_COLLECTION`, un-injected `SGLANG_ENABLE_OVERLAP_PLAN_STREAM`, `--swap-space` status) is fixed; `sgl-router`, frozen `sglang-gateway`, `vllm-router` `kv_aware` (`>= 0.31.0` & shared `KVCachePool` `sha256_cbor` caveat), `llm-d-router@v1.0.0` SGLang `approx-prefix-cache-producer` limitation, and Ascend `MooncakeConnectorV2` (`>= 0.30.0`) are documented accurately; `docs/README.md` stays in sync.
       Verify: `make lint docs`
 
-- [ ] **T8 · Final verification checkpoint and follow-up TODO issues**
+- [x] **T8 · Final verification checkpoint and follow-up TODO issues**
       Blocked by: T5, T6, T7
       Owns: None
-      Acceptance: Full repository lint, codegen, unit tests, docs lint, API description check, and auto-sync self-test pass cleanly with zero uncommitted generated drift; two follow-up tracking GitHub TODO issues are filed (per `gpustack-operator-issue-pr` conventions): (1) enable `SGLang + llm-d-router` KV events once upstream `llm-d-router` adds a non-vLLM `token-producer` backend for `precise-prefix-cache-producer`, and (2) evaluate Ascend `MooncakeConnectorV2` layerwise Push mode and `ECMooncakeConnector` once a tagged `llm-d-router` release includes PR `#3529` (`--ec-connector=ec-mooncake`).
+      Acceptance: Full repository lint, codegen, unit tests, docs lint, API description check, and auto-sync self-test pass cleanly with zero uncommitted generated drift; two follow-up tracking GitHub TODO issues are filed (per `gpustack-operator-issue-pr` conventions): (1) enable `SGLang + llm-d-router` KV events once upstream `llm-d-router` adds a non-vLLM `token-producer` backend for `precise-prefix-cache-producer` (`#892`), and (2) evaluate Ascend `MooncakeConnectorV2` layerwise Push mode and `ECMooncakeConnector` once a tagged `llm-d-router` release includes PR `#3529` (`--ec-connector=ec-mooncake`) (`#893`).
       Verify: `make lint && make generate && RACE=false make test && make lint docs && bash hack/check/api-descriptions.sh && bash hack/check/autosync-selftest.sh`
 
 ### Test Plan
