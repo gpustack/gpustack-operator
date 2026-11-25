@@ -43,9 +43,12 @@ With a router, it is absent until the router is ready, then uses the router `Ser
 Each role, including *Encode*, also gets its own `<deployment>-<role>` `Service`.
 
 *`status.router`* publishes the contract used to render the router: its implementation and address,
-the cache pool's client endpoint, the metrics names and port, and one entry for every role containing
-the effective kind, selector, direct endpoint and any dialable KV-event endpoints. The event entries
-are absent when the corresponding rendered `Pod`s do not carry publisher configuration.
+the cache pool's client endpoint, the metrics names and port, and one entry per role with effective
+kind, selector, direct endpoint, and dialable Service-level KV-event endpoints.
+
+The event entries are absent when rendered `Pod`s do not publish KV events, and under `sgl-router`,
+where per-role `Service`s expose only the HTTP serving port while `sgl-router` discovers per-`Pod`
+ZMQ ports via HTTP `GET /server_info`.
 
 This router contract names metrics sources for routing; it is not a live utilization sample.
 The separate [Model Deployment Metrics](model-deployment-metrics.md) subresource reads the current

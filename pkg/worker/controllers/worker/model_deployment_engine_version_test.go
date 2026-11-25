@@ -539,8 +539,8 @@ func TestModelDeploymentMultiDP_KVEventsReplayPort(t *testing.T) {
 
 		routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 		require.NoError(t, err)
-		require.NotNil(t, routerObjs.Contract.Roles[0].KVEvents)
-		assert.Equal(t, "tcp://qwen-server.team-a.svc:5561", routerObjs.Contract.Roles[0].KVEvents.ReplayEndpoint)
+		assert.Nil(t, routerObjs.Contract.Roles[0].KVEvents,
+			"sgl-router role Services omit ZMQ ports so status.router.roles[].kvEvents stays nil")
 	})
 
 	t.Run("vLLM External DP and Hybrid DP offset replay to 5561 under vllm-router kv_aware and report NotApplicable under llm-d-router", func(t *testing.T) {
@@ -865,10 +865,11 @@ func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
 		}}, roleObj.Rules)
 
 		// Verify Router Objects (Envoy loopback sidecar, :9091 observer probe, :9090 metrics listener, --dp-aware, --no-tokenizer, EndpointSlice selector).
+		// sgl-router discovers per-Pod ZMQ ports via /server_info rather than Service-level kvEvents ports.
 		routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 		require.NoError(t, err)
-		require.NotNil(t, routerObjs.Contract.Roles[0].KVEvents)
-		assert.Equal(t, "kv-events", routerObjs.Contract.Roles[0].KVEvents.Topic)
+		assert.Nil(t, routerObjs.Contract.Roles[0].KVEvents,
+			"sgl-router role Services omit ZMQ ports so status.router.roles[].kvEvents must not advertise unreachable Service endpoints")
 
 		podTpl := routerObjs.Deployment.Spec.Template
 		assert.Equal(t, "9090", podTpl.Annotations["prometheus.io/port"])

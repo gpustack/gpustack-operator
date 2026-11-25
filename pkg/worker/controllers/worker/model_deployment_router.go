@@ -391,12 +391,17 @@ func renderModelDeploymentRouterObjectsWithProxy(
 		roleStatus := workercore.ModelDeploymentRouterRoleStatus{
 			Name: role.Name, Kind: kind, Selector: selector, Endpoint: modelDeploymentRoleEndpoint(md, role),
 		}
-		if publish, topic, _ := modelDeploymentKVEventsConfig(md, role); publish {
-			events := inject.KVEventsForTopicAndLocalDP(
-				md.Name+"-"+role.Name+"."+md.Namespace+".svc", topic, ModelDeploymentKVEventsLocalDP(md, role),
-			)
-			roleStatus.KVEvents = &workercore.ModelDeploymentRouterKVEvents{
-				Endpoint: events.Endpoint, ReplayEndpoint: events.ReplayEndpoint, Topic: events.Topic,
+		// sgl-router per-role Services omit ZMQ ports so EndpointSlice.ports[0] stays the HTTP
+		// serving port; sgl-router discovers per-Pod ZMQ ports via HTTP GET /server_info instead
+		// of dialing Service-level status.router.roles[].kvEvents endpoints.
+		if md.Spec.Router.Name != workercore.ModelDeploymentRouterSGL {
+			if publish, topic, _ := modelDeploymentKVEventsConfig(md, role); publish {
+				events := inject.KVEventsForTopicAndLocalDP(
+					md.Name+"-"+role.Name+"."+md.Namespace+".svc", topic, ModelDeploymentKVEventsLocalDP(md, role),
+				)
+				roleStatus.KVEvents = &workercore.ModelDeploymentRouterKVEvents{
+					Endpoint: events.Endpoint, ReplayEndpoint: events.ReplayEndpoint, Topic: events.Topic,
+				}
 			}
 		}
 		contract.Roles = append(contract.Roles, roleStatus)
