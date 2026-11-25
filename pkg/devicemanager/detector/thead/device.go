@@ -185,6 +185,46 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
+		var status device.AcceleratorStatus
+		{
+			status.Unhealthy = memoryUnhealthy
+
+			// Logical (software) and physical (partition) slicing are mutually exclusive per
+			// accelerator. Unqueryable partitioning mode or profile query errors isolate the
+			// affected card and preserve cached unhealthy state, while other non-absent errors
+			// fail the pass rather than misclassifying a partitioned card.
+			migCurrent, _, migRet := dev.GetMigMode()
+			if !migRet.IsSuccess() && !isMigModeAbsent(migRet) {
+				if err := handleCardQueryError(logger, i, "get device MIG mode", migRet, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
+				in.restoreCachedDetected(i, unqueryableSlots, &grpList)
+				continue
+			}
+			if migRet.IsSuccess() && migCurrent == hgml.DEVICE_MIG_ENABLE {
+				profiles, profileRet := detectMigProfiles(dev, logger)
+				if !profileRet.IsSuccess() {
+					if err := handleCardQueryError(logger, i, "detect device MIG profiles", profileRet, &lastUnqueryableErr); err != nil {
+						return nil, err
+					}
+					in.restoreCachedDetected(i, unqueryableSlots, &grpList)
+					continue
+				}
+				status.PhysicalSliced = physicalSliced(profiles)
+			} else {
+				// Logical (software) slicing via the preload pair this image stages. Unlike
+				// CUDA, hgml.h documents no per-accelerator user-process ceiling, so the count is a
+				// deliberately loose device-plugin token pool — the binding constraint on a
+				// slice request is its memory budget — set to the same 128 the NVIDIA detector
+				// publishes. Overcommit is true because the compute cap is a duty-cycle window
+				// over wall time; memory is the exact dimension and the flag does not touch it.
+				status.LogicalSliced = device.AcceleratorLogicalSliced{
+					Count:                     128,
+					CoresPercentageOvercommit: true,
+				}
+			}
+		}
+
 		ccMajor, ccMinor, _ := dev.GetHggcComputeCapability()
 
 		grpIndex := slices.IndexFunc(grpList, func(grp device.DevicesGroup) bool {
@@ -230,51 +270,6 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		}
 
 		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class, pciDev.Switches)
-
-		var status device.AcceleratorStatus
-		{
-			status.Unhealthy = memoryUnhealthy
-
-			// Logical (software) and physical (partition) slicing are mutually exclusive per
-			// accelerator, which is what keeps the two capacity-key families from both counting
-			// one accelerator. An accelerator currently in the partitioning mode is
-			// hard-partitioned and reports only its physical partition profiles; the capability
-			// is set solely when the driver actually offers one, so a mode-enabled accelerator
-			// whose driver offers nothing reports no capability rather than an empty one.
-			//
-			// Every other accelerator — mode off, mode unsupported, or the mode unreadable —
-			// offers logical slicing instead. A pending-mode transition is not partitioned yet
-			// and is re-detected after the administrator's DeviceManager restart, because the
-			// re-detect trigger does not include the partitioning mode.
-			//
-			// A mode the driver could not read is treated as not-partitioned, as it always has
-			// been, but it is not treated in silence: since an accelerator in the mode reports
-			// ONLY its partition profiles, an administrator who enabled the mode would otherwise
-			// see an accelerator quietly advertising the logical slicing it cannot serve. A
-			// driver answering that the mode is unsupported is not a failure — that is an
-			// accelerator which does not partition.
-			migCurrent, _, migRet := dev.GetMigMode()
-			if !migRet.IsSuccess() && !driverReportsAbsent(migRet) {
-				logger.Error(migRet, "could not read a card's partitioning mode, so it is reported as "+
-					"not partitioned; if the mode is in fact enabled, the card advertises logical "+
-					"slicing it cannot serve",
-					"card", uuid)
-			}
-			if migCurrent == hgml.DEVICE_MIG_ENABLE {
-				status.PhysicalSliced = physicalSliced(detectMigProfiles(dev, logger))
-			} else {
-				// Logical (software) slicing via the preload pair this image stages. Unlike
-				// CUDA, hgml.h documents no per-accelerator user-process ceiling, so the count is a
-				// deliberately loose device-plugin token pool — the binding constraint on a
-				// slice request is its memory budget — set to the same 128 the NVIDIA detector
-				// publishes. Overcommit is true because the compute cap is a duty-cycle window
-				// over wall time; memory is the exact dimension and the flag does not touch it.
-				status.LogicalSliced = device.AcceleratorLogicalSliced{
-					Count:                     128,
-					CoresPercentageOvercommit: true,
-				}
-			}
-		}
 
 		accel := device.Accelerator{
 			ID:              uuid,

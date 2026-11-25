@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -688,4 +689,55 @@ func nonEmptyIDs(ids []uint32) []uint32 {
 		return nil
 	}
 	return ids
+}
+
+func TestDetectMigProfilesWith_ErrorClassification(t *testing.T) {
+	testCases := []struct {
+		name       string
+		probe      func(uint32) (hgml.GpuInstanceProfileInfo_v3, hgml.Return)
+		placements func(uint32) ([]hgml.GpuInstancePlacement, hgml.Return)
+		wantRet    hgml.Return
+	}{
+		{
+			name: "unqueryable probe error isolates card",
+			probe: func(uint32) (hgml.GpuInstanceProfileInfo_v3, hgml.Return) {
+				return hgml.GpuInstanceProfileInfo_v3{}, hgml.ERROR_GPU_IS_LOST
+			},
+			placements: func(uint32) ([]hgml.GpuInstancePlacement, hgml.Return) {
+				return nil, hgml.SUCCESS
+			},
+			wantRet: hgml.ERROR_GPU_IS_LOST,
+		},
+		{
+			name: "non-unqueryable probe error does not escalate to whole-node failure",
+			probe: func(uint32) (hgml.GpuInstanceProfileInfo_v3, hgml.Return) {
+				return hgml.GpuInstanceProfileInfo_v3{}, hgml.ERROR_NO_PERMISSION
+			},
+			placements: func(uint32) ([]hgml.GpuInstancePlacement, hgml.Return) {
+				return nil, hgml.SUCCESS
+			},
+			wantRet: hgml.SUCCESS,
+		},
+		{
+			name: "non-unqueryable placement error leaving empty inventory returns success",
+			probe: func(id uint32) (hgml.GpuInstanceProfileInfo_v3, hgml.Return) {
+				if id == 0 {
+					return hgml.GpuInstanceProfileInfo_v3{Id: 0, SliceCount: 1, InstanceCount: 7, Name: profileName("1c.12g")}, hgml.SUCCESS
+				}
+				return hgml.GpuInstanceProfileInfo_v3{}, hgml.ERROR_NOT_SUPPORTED
+			},
+			placements: func(uint32) ([]hgml.GpuInstancePlacement, hgml.Return) {
+				return nil, hgml.ERROR_FUNCTION_NOT_FOUND
+			},
+			wantRet: hgml.SUCCESS,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			profiles, ret := detectMigProfilesWith(tc.probe, tc.placements, logr.Discard())
+			assert.Equal(t, tc.wantRet, ret)
+			assert.Empty(t, profiles)
+		})
+	}
 }

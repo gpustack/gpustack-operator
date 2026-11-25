@@ -181,6 +181,35 @@ func driverReportsAbsent(ret nvml.Return) bool {
 	}
 }
 
+// isMigModeAbsent reports whether a GetMigMode return means MIG is unsupported by the driver or
+// card rather than a card or driver fault. Per nvml.h, only ERROR_NOT_SUPPORTED (non-MIG GPU) and
+// ERROR_FUNCTION_NOT_FOUND (pre-MIG driver) mean absent; ERROR_INVALID_ARGUMENT indicates an
+// invalid device handle and must not be silently treated as MIG off.
+func isMigModeAbsent(ret nvml.Return) bool {
+	return ret == nvml.ERROR_NOT_SUPPORTED || ret == nvml.ERROR_FUNCTION_NOT_FOUND
+}
+
+// firstUnqueryableReturn walks a possibly joined error and returns the first card-unqueryable NVML
+// return code it wraps.
+func firstUnqueryableReturn(err error) (nvml.Return, bool) {
+	if err == nil {
+		return nvml.SUCCESS, false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, sub := range joined.Unwrap() {
+			if ret, found := firstUnqueryableReturn(sub); found {
+				return ret, true
+			}
+		}
+		return nvml.SUCCESS, false
+	}
+	var ret nvml.Return
+	if errors.As(err, &ret) && isUnqueryableDeviceError(ret) {
+		return ret, true
+	}
+	return nvml.SUCCESS, false
+}
+
 // probeMigProfiles walks the whole GPU instance profile-id space and separates the three answers a
 // probe can give: a profile, an id the driver disclaims, and an id it could not answer for. The
 // disclaimed ids are the ordinary case — the space is a fixed enumeration and an accelerator offers a
@@ -219,15 +248,32 @@ func probeMigProfiles(
 // is refused by admission as a profile the accelerator does not offer. The disclaimed ids are
 // filtered out
 // first precisely so that what remains is a driver fault worth an error rather than a routine answer.
-func detectMigProfiles(dev nvml.Device) []device.AcceleratorPhysicalSlicedProfile {
-	infos, probeErr := probeMigProfiles(dev.GetGpuInstanceProfileInfo)
+func detectMigProfiles(dev nvml.Device) ([]device.AcceleratorPhysicalSlicedProfile, nvml.Return) {
+	return detectMigProfilesWith(
+		func() string {
+			uuid, _ := dev.GetUUID()
+			return uuid
+		},
+		dev.GetGpuInstanceProfileInfo,
+		dev.GetGpuInstancePossiblePlacements,
+	)
+}
+
+func detectMigProfilesWith(
+	deviceID func() string,
+	probe func(giProfileID uint32) (nvml.GpuInstanceProfileInfo_v3, nvml.Return),
+	placements func(giProfileID uint32) ([]nvml.GpuInstancePlacement, nvml.Return),
+) ([]device.AcceleratorPhysicalSlicedProfile, nvml.Return) {
+	infos, probeErr := probeMigProfiles(probe)
 	if probeErr != nil {
-		uuid, _ := dev.GetUUID()
 		klog.Background().Error(probeErr,
 			"Left MIG profiles out of a card's inventory because the driver could not answer for them; "+
 				"a profile absent here is absent from the node's capacity, its flavor and its InstanceType, "+
 				"so a MIG instance of it can stop being nameable and a new request for it is refused",
-			"device", uuid)
+			"device", deviceID())
+		if ret, ok := firstUnqueryableReturn(probeErr); ok {
+			return nil, ret
+		}
 	}
 
 	// Cache each profile's empty-accelerator legal placement set at detect time so the reconciler
@@ -238,11 +284,13 @@ func detectMigProfiles(dev nvml.Device) []device.AcceleratorPhysicalSlicedProfil
 	// A profile whose placement query failed is withheld rather than published from an
 	// unverified geometry. The failure names the accelerator and the profile ids so the capacity
 	// missing from the inventory is diagnosable instead of merely absent.
-	answered, placementsByID, err := migPlacementsByProfile(infos, dev.GetGpuInstancePossiblePlacements)
-	if err != nil {
-		uuid, _ := dev.GetUUID()
-		klog.Background().Error(err, "Dropped MIG profiles whose possible placements are unreadable",
-			"device", uuid)
+	answered, placementsByID, placementErr := migPlacementsByProfile(infos, placements)
+	if placementErr != nil {
+		klog.Background().Error(placementErr, "Dropped MIG profiles whose possible placements are unreadable",
+			"device", deviceID())
+		if ret, ok := firstUnqueryableReturn(placementErr); ok {
+			return nil, ret
+		}
 	}
 
 	placementsFor := func(giProfileID uint32) []device.AcceleratorPlacement {
@@ -256,10 +304,9 @@ func detectMigProfiles(dev nvml.Device) []device.AcceleratorPhysicalSlicedProfil
 	// merely absent.
 	profiles, err := deriveSlicedProfiles(answered, placementsFor)
 	if err != nil {
-		uuid, _ := dev.GetUUID()
-		klog.Background().Error(err, "Dropped unpublishable MIG profiles", "device", uuid)
+		klog.Background().Error(err, "Dropped unpublishable MIG profiles", "device", deviceID())
 	}
-	return profiles
+	return profiles, nvml.SUCCESS
 }
 
 // maxProfileCount returns the accelerator's physical-slice ceiling — the largest per-profile Count

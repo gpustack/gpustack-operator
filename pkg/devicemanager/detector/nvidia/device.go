@@ -233,6 +233,46 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			memoryUnhealthy = isDeviceUnhealthy(dev)
 		}
 
+		var status device.AcceleratorStatus
+		{
+			status.Unhealthy = memoryUnhealthy
+
+			// Logical (software) and physical (MIG) slicing are mutually exclusive per accelerator,
+			// keyed on the current MIG mode: an accelerator that is currently MIG-enabled is
+			// hard-partitioned and reports only its physical MIG profiles. Unqueryable MIG query
+			// errors isolate the affected card and preserve cached unhealthy state, while other
+			// non-absent errors fail the pass rather than misclassifying a partitioned card.
+			migCurrent, _, migRet := dev.GetMigMode()
+			if !migRet.IsSuccess() && !isMigModeAbsent(migRet) {
+				if err := handleCardQueryError(logger, i, "get device MIG mode", migRet, &lastUnqueryableErr); err != nil {
+					return nil, err
+				}
+				in.restoreCachedDetected(i, unqueryableSlots, &grpList)
+				continue
+			}
+			if migRet.IsSuccess() && migCurrent == nvml.DEVICE_MIG_ENABLE {
+				profiles, profileRet := detectMigProfiles(dev)
+				if !profileRet.IsSuccess() {
+					if err := handleCardQueryError(logger, i, "detect device MIG profiles", profileRet, &lastUnqueryableErr); err != nil {
+						return nil, err
+					}
+					in.restoreCachedDetected(i, unqueryableSlots, &grpList)
+					continue
+				}
+				status.PhysicalSliced = device.AcceleratorPhysicalSliced{
+					Profiles: profiles,
+					Count:    maxProfileCount(profiles),
+				}
+			} else {
+				// Logical (software) slicing via HAMi-core ld.preload; the per-accelerator slice count is
+				// capped at the max CUDA user processes a GPU serves (128, Volta+).
+				status.LogicalSliced = device.AcceleratorLogicalSliced{
+					Count:                     128,
+					CoresPercentageOvercommit: true,
+				}
+			}
+		}
+
 		grpIndex := slices.IndexFunc(grpList, func(grp device.DevicesGroup) bool {
 			return grp.Name == name && grp.Memory == memory
 		})
@@ -272,47 +312,6 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 
 		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class, pciDev.Switches)
 		topo.Fabric = in.readFabric(dev, uuid, logger)
-
-		var status device.AcceleratorStatus
-		{
-			status.Unhealthy = memoryUnhealthy
-
-			// Logical (software) and physical (MIG) slicing are mutually exclusive per accelerator,
-			// keyed on the current MIG mode: an accelerator that is currently MIG-enabled is
-			// hard-partitioned and reports only its physical MIG profiles. Every other accelerator —
-			// MIG off, MIG unsupported (GetMigMode returns not-supported on non-MIG accelerators), or
-			// the mode unreadable — reports the group's logical-slice capability.
-			//
-			// A pending-mode transition is not partitioned yet and is re-detected after the
-			// administrator's reset + DeviceManager restart. This runs per accelerator, fixing the
-			// old placeholder's first-accelerator-only-seed defect.
-			//
-			// A mode the driver could not read is treated as MIG off, as it always has been, but
-			// it is no longer treated in silence: since an accelerator in the mode reports ONLY its MIG
-			// profiles, an administrator who enabled MIG would otherwise see an accelerator quietly
-			// advertising the logical-slice capability it cannot serve. A driver answering that
-			// the mode is unsupported is not a failure — that is an accelerator which does not do MIG.
-			migCurrent, _, migRet := dev.GetMigMode()
-			if !migRet.IsSuccess() && !driverReportsAbsent(migRet) {
-				logger.Error(migRet, "could not read a card's MIG mode, so it is reported as "+
-					"MIG off; if MIG is in fact enabled, the card advertises logical slicing it cannot serve",
-					"card", uuid)
-			}
-			if migCurrent == nvml.DEVICE_MIG_ENABLE {
-				profiles := detectMigProfiles(dev)
-				status.PhysicalSliced = device.AcceleratorPhysicalSliced{
-					Profiles: profiles,
-					Count:    maxProfileCount(profiles),
-				}
-			} else {
-				// Logical (software) slicing via HAMi-core ld.preload; the per-accelerator slice count is
-				// capped at the max CUDA user processes a GPU serves (128, Volta+).
-				status.LogicalSliced = device.AcceleratorLogicalSliced{
-					Count:                     128,
-					CoresPercentageOvercommit: true,
-				}
-			}
-		}
 
 		accel := device.Accelerator{
 			ID:              uuid,

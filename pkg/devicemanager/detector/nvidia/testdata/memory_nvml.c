@@ -193,3 +193,77 @@ nvmlReturn_t nvmlDeviceGetFieldValues(nvmlDevice_t device, int valuesCount,
     }
     return NVML_SUCCESS;
 }
+
+nvmlReturn_t nvmlDeviceGetMigMode(nvmlDevice_t device, unsigned int *currentMode,
+                                  unsigned int *pendingMode) {
+    unsigned int idx = device_index(device);
+    nvmlReturn_t ret = maybe_fail_device("mig_mode", idx);
+    if (ret != NVML_SUCCESS)
+        return ret;
+    if (strcmp(fixture_env("GPUSTACK_TEST_NVML_MIG_MODE"), "enabled") == 0) {
+        *currentMode = NVML_DEVICE_MIG_ENABLE;
+        *pendingMode = NVML_DEVICE_MIG_ENABLE;
+        return NVML_SUCCESS;
+    }
+    *currentMode = NVML_DEVICE_MIG_DISABLE;
+    *pendingMode = NVML_DEVICE_MIG_DISABLE;
+    return NVML_SUCCESS;
+}
+
+nvmlReturn_t nvmlDeviceGetGpuInstanceProfileInfoV(nvmlDevice_t device, unsigned int profile,
+                                                  nvmlGpuInstanceProfileInfo_v2_t *info) {
+    unsigned int idx = device_index(device);
+    nvmlReturn_t ret = maybe_fail_device("mig_profile", idx);
+    if (ret != NVML_SUCCESS)
+        return ret;
+    if (profile != 0U)
+        return NVML_ERROR_NOT_SUPPORTED;
+    unsigned int version = info->version;
+    memset(info, 0, sizeof(*info));
+    info->version = version;
+    info->id = 0U;
+    info->sliceCount = 1U;
+    info->instanceCount = 7U;
+    info->memorySizeMB = 10240ULL;
+    snprintf(info->name, sizeof(info->name), "MIG 1g.10gb");
+    return NVML_SUCCESS;
+}
+
+nvmlReturn_t nvmlDeviceGetGpuInstanceProfileInfo(nvmlDevice_t device, unsigned int profile,
+                                                 nvmlGpuInstanceProfileInfo_t *info) {
+    unsigned int idx = device_index(device);
+    nvmlReturn_t ret = maybe_fail_device("mig_profile", idx);
+    if (ret != NVML_SUCCESS)
+        return ret;
+    if (profile != 0U)
+        return NVML_ERROR_NOT_SUPPORTED;
+    memset(info, 0, sizeof(*info));
+    info->id = 0U;
+    info->sliceCount = 1U;
+    info->instanceCount = 7U;
+    info->memorySizeMB = 10240ULL;
+    return NVML_SUCCESS;
+}
+
+nvmlReturn_t nvmlDeviceGetGpuInstancePossiblePlacements_v2(nvmlDevice_t device,
+                                                           unsigned int profileId,
+                                                           nvmlGpuInstancePlacement_t *placements,
+                                                           unsigned int *count) {
+    unsigned int idx = device_index(device);
+    nvmlReturn_t ret = maybe_fail_device("mig_placement", idx);
+    if (ret != NVML_SUCCESS)
+        return ret;
+    if (profileId != 0U)
+        return NVML_ERROR_NOT_SUPPORTED;
+    if (placements == NULL) {
+        *count = 7U;
+        return NVML_SUCCESS;
+    }
+    unsigned int n = *count < 7U ? *count : 7U;
+    for (unsigned int i = 0; i < n; i++) {
+        placements[i].start = i;
+        placements[i].size = 1U;
+    }
+    *count = n;
+    return NVML_SUCCESS;
+}
