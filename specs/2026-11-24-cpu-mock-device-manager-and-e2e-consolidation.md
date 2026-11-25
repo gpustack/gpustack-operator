@@ -1,6 +1,6 @@
 # Spec: CPU-Only Mock Device Manager, E2E Consolidation, and Chaos Scheduling Skill
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
