@@ -189,6 +189,59 @@ func TestRenderVLLM_NIXLProducerPublishesTheSideChannelTheConsumerDials(t *testi
 	assert.NotContains(t, envNames(consumer.DefaultedEnv), "VLLM_EC_SIDE_CHANNEL_PORT")
 }
 
+func TestRenderVLLM_ECSideChannelPortOverride(t *testing.T) {
+	portZero := int32(0)
+	portCustom := int32(5602)
+
+	cases := []struct {
+		name      string
+		port      *int32
+		wantPorts []core.ContainerPort
+	}{
+		{
+			name: "nil uses default 5601",
+			port: nil,
+			wantPorts: []core.ContainerPort{{
+				Name: "ec-side-channel", Protocol: core.ProtocolTCP, ContainerPort: 5601,
+			}},
+		},
+		{
+			name: "custom 5602 emits 5602",
+			port: &portCustom,
+			wantPorts: []core.ContainerPort{{
+				Name: "ec-side-channel", Protocol: core.ProtocolTCP, ContainerPort: 5602,
+			}},
+		},
+		{
+			name:      "0 (ephemeral) omits ec-side-channel container port",
+			port:      &portZero,
+			wantPorts: nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := Input{
+				Engine:            EngineVLLM,
+				EngineVersion:     "0.34.0",
+				Role:              RoleEncode,
+				EncoderCache:      nixlLeg(),
+				ECSideChannelPort: tc.port,
+			}
+			leg, err := renderVLLMEncoderCache(in, nixlLeg())
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantPorts, leg.Ports)
+			assert.Contains(t, leg.DefaultedEnv, core.EnvVar{
+				Name: VLLMECSideChannelPortEnv, Value: "5601",
+			})
+
+			rendered, err := Render(in)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantPorts, rendered.Ports)
+		})
+	}
+}
+
 func TestRenderVLLM_EncoderCacheDefaultedEnvPropagationAndVersionGating(t *testing.T) {
 	testCases := []struct {
 		name             string

@@ -2677,6 +2677,16 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 			// its encoder by address; a combination with neither renders this role undivided, which is
 			// what it rendered before any of this existed and what a reconcile of an object admission
 			// refuses should keep doing rather than fail over a field nothing consumes.
+			var ecSideChannelPort *int32
+			if encoderLeg.Connector == ModelDeploymentECConnectorCPU {
+				port, envIdx, err := ParseModelDeploymentVLLMECSideChannelPort(role.Env)
+				if err != nil {
+					return nil, fmt.Errorf("role %q has invalid %s: %w", role.Name, inject.VLLMECSideChannelPortEnv, err)
+				}
+				if envIdx >= 0 {
+					ecSideChannelPort = &port
+				}
+			}
 			connector, err := SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
 				Engine:            md.Spec.Engine.Name,
 				EngineVersion:     engineVersion,
@@ -2684,6 +2694,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 				AcceleratorFamily: family,
 				Kind:              role.Kind,
 				EncoderCache:      encoderLeg,
+				ECSideChannelPort: ecSideChannelPort,
 				EncoderURLs:       encoderURLs,
 			})
 			if err != nil {

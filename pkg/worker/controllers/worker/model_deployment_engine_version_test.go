@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -234,6 +235,48 @@ func TestModelDeploymentEffectiveEngineVersion_AndSpecHash(t *testing.T) {
 		}
 		assert.True(t, ModelDeploymentDefaultsEnv(inject.VLLMUseV2ModelRunnerEnv))
 		assert.True(t, ModelDeploymentDefaultsEnv(inject.VLLMECSideChannelPortEnv))
+
+		// Encode HTTP on 5601 renders cleanly without port conflict when VLLM_EC_SIDE_CHANNEL_PORT is 0 or 5602.
+		for _, tc := range []struct {
+			name             string
+			sideChannelValue string
+			wantPorts        []core.ContainerPort
+		}{
+			{
+				name:             "ephemeral 0 omits ec-side-channel container port",
+				sideChannelValue: "0",
+				wantPorts: []core.ContainerPort{
+					{Name: "tcp-5601", ContainerPort: 5601, Protocol: core.ProtocolTCP},
+				},
+			},
+			{
+				name:             "custom 5602 emits ec-side-channel on 5602 alongside HTTP on 5601",
+				sideChannelValue: "5602",
+				wantPorts: []core.ContainerPort{
+					{Name: "tcp-5601", ContainerPort: 5601, Protocol: core.ProtocolTCP},
+					{Name: "ec-side-channel", ContainerPort: 5602, Protocol: core.ProtocolTCP},
+				},
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				mdPort := buildEPD("0.34.0", nil)
+				mdPort.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{
+					{Port: 5601, Protocol: core.ProtocolTCP},
+				}
+				mdPort.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{
+					{Name: inject.VLLMECSideChannelPortEnv, Value: tc.sideChannelValue},
+				}
+				cliPort := newModelDeploymentClient(mdPort, at)
+				rPort := &ModelDeploymentReconciler{Client: cliPort, APIReader: cliPort}
+				podsPort, err := rPort.renderModelDeploymentRolePods(context.Background(), mdPort, nil, nil, nil, false)
+				require.NoError(t, err)
+				encodePod := podsPort["encode"][0][0]
+				assert.Equal(t, tc.wantPorts, encodePod.Spec.Containers[0].Ports)
+				gotEnv, ok := envValue(encodePod, inject.VLLMECSideChannelPortEnv)
+				assert.True(t, ok)
+				assert.Equal(t, tc.sideChannelValue, gotEnv)
+			})
+		}
 	})
 }
 
@@ -523,8 +566,8 @@ func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
 		require.NoError(t, err)
 
 		prefillCmd := pods["prefill"][0][0].Spec.Containers[0].Command
-		kvIdx := slicesIndex(prefillCmd, "--kv-events-config")
-		encIdx := slicesIndex(prefillCmd, "--encoder-urls")
+		kvIdx := slices.Index(prefillCmd, "--kv-events-config")
+		encIdx := slices.Index(prefillCmd, "--encoder-urls")
 		require.NotEqual(t, -1, kvIdx, "prefill must carry --kv-events-config")
 		require.NotEqual(t, -1, encIdx, "prefill must carry --encoder-urls")
 		assert.Less(t, kvIdx, encIdx, "--kv-events-config must precede nargs='+' --encoder-urls")
@@ -586,13 +629,4 @@ func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
 		assert.Equal(t, "server", roleSvc.Labels[modelDeploymentLabelKeyRoleKind])
 		assert.Equal(t, modelDeploymentEndpointEligibleValue, roleSvc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible])
 	})
-}
-
-func slicesIndex(items []string, target string) int {
-	for i, s := range items {
-		if s == target {
-			return i
-		}
-	}
-	return -1
 }

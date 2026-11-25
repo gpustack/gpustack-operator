@@ -2555,33 +2555,6 @@ func lookupModelDeploymentLegacyBindingHashes(bindingHash string) []string {
 	return slices.Clone(modelDeploymentLegacyBindingHashMap[bindingHash])
 }
 
-// modelDeploymentDesiredPodLegacyRouterHash resolves the legacy full-router pod-spec-hash
-// corresponding to a stamped desired Pod without adding annotations to the Pod object.
-func modelDeploymentDesiredPodLegacyRouterHash(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
-	ordinal, member int, desired *core.Pod,
-) string {
-	if md == nil || role == nil || desired == nil {
-		return ""
-	}
-	projectedHash := desired.Annotations[modelDeploymentPodSpecHashAnnotation]
-	if projectedHash == "" {
-		return ""
-	}
-	if !modelDeploymentRouterHasDecoupledFields(md.Spec.Router) {
-		return projectedHash
-	}
-	bindingHash, ok := lookupModelDeploymentBindingHash(projectedHash)
-	if !ok && modelDeploymentExplicitSpecHash(md, role, ordinal, member, "") == projectedHash {
-		ok = true
-	}
-	if !ok {
-		return ""
-	}
-
-	return modelDeploymentLegacyFullRouterSpecHash(md, role, ordinal, member, bindingHash)
-}
-
 // modelDeploymentDesiredPodLegacyHashes resolves every pre-upgrade pod-spec-hash (full-router
 // hashes and render-version <= 6 connector binding hashes) accepted for a stamped desired Pod.
 func modelDeploymentDesiredPodLegacyHashes(

@@ -828,6 +828,11 @@ def run(cmd, *, cwd=None, env=None, check=True):
     )
 
 
+def read_json(path: str):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def git_init_commit(repo_dir: str, files: dict[str, str], tag: str, msg: str, env: dict) -> None:
     if not os.path.isdir(os.path.join(repo_dir, ".git")):
         os.makedirs(repo_dir, exist_ok=True)
@@ -958,7 +963,8 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
     )
 
     # Read current defaults dynamically from value.go so the test stays decoupled from setting tag bumps.
-    vg_txt = open(os.path.join(root, "pkg/worker/settings/value.go"), "r", encoding="utf-8").read()
+    with open(os.path.join(root, "pkg/worker/settings/value.go"), "r", encoding="utf-8") as f:
+        vg_txt = f.read()
     def cur_vg_img(var_name: str) -> str:
         m = re.search(
             rf'{re.escape(var_name)}\s*=\s*settings\.NewEditable\([^)]*?setting\.InitializeFromEnv\("([^"]+)"\)',
@@ -1033,7 +1039,7 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
     if os.path.exists(os.path.join(stage_dir, "sglang")):
         raise AssertionError("legacy single-repo stage dir $STAGE_DIR/sglang must not be created")
 
-    rep = json.load(open(os.path.join(staging_dir, "router-preflight-report.json"), "r", encoding="utf-8"))
+    rep = read_json(os.path.join(staging_dir, "router-preflight-report.json"))
     if rep.get("stage") != "recipe_sync":
         raise AssertionError(f"expected stage=recipe_sync, got {rep.get('stage')!r}")
     if rep["target_tags"]["sglang-gateway"] != "gateway-v0.3.1":
@@ -1057,7 +1063,7 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
     ):
         raise AssertionError(f"unexpected router base_image_builds entry: {b0!r}")
 
-    pf_summary = json.load(open(os.path.join(staging_dir, "router-preflight-summary.json"), "r", encoding="utf-8"))
+    pf_summary = read_json(os.path.join(staging_dir, "router-preflight-summary.json"))
     if (pf_summary.get("highlights") or {}).get("base_image_builds") != pf_builds:
         raise AssertionError("router-preflight-summary.json highlights.base_image_builds mismatch")
     print("PASS  preflight-router.sh separate sglang-gateway/sgl-router staging, freeze skip, and base_image_builds")
@@ -1114,7 +1120,7 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
     with open(df_ok, "w", encoding="utf-8") as f:
         f.write(df_txt.replace("ARG SGL_ROUTER_VERSION=router-v0.1.0", "ARG SGL_ROUTER_VERSION=router-v0.2.0", 1))
     prop_ok = os.path.join(cand_ok, ".auto-sync/proposals/router.json")
-    pdoc = json.load(open(prop_ok, "r", encoding="utf-8"))
+    pdoc = read_json(prop_ok)
     pdoc["stage"] = "recipe_sync"
     pdoc["versions"]["sgl-router"] = "router-v0.2.0"
     pdoc["base_image_builds"] = pf_builds
@@ -1160,7 +1166,7 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
     cand_no_builds = os.path.join(tmp, "cand-router-no-builds")
     shutil.copytree(cand_ok, cand_no_builds)
     prop_nb = os.path.join(cand_no_builds, ".auto-sync/proposals/router.json")
-    pdoc_nb = json.load(open(prop_nb, "r", encoding="utf-8"))
+    pdoc_nb = read_json(prop_nb)
     pdoc_nb["base_image_builds"] = []
     with open(prop_nb, "w", encoding="utf-8") as f:
         json.dump(pdoc_nb, f, indent=2)
@@ -1242,7 +1248,7 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
         raise AssertionError(f"missing target=cann in command: {by_key[('gpustack/model-transfer', 'cann')]!r}")
 
     kv_prop = os.path.join(kv_cand, ".auto-sync/proposals/kv-transfer.json")
-    kv_pdoc = json.load(open(kv_prop, "r", encoding="utf-8"))
+    kv_pdoc = read_json(kv_prop)
     kv_pdoc["base_image_builds"] = kv_builds
     with open(kv_prop, "w", encoding="utf-8") as f:
         json.dump(kv_pdoc, f, indent=2)

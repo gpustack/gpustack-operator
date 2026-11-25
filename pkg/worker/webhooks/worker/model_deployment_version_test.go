@@ -2,19 +2,15 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	admissionv1 "k8s.io/api/admission/v1"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
-	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -23,37 +19,17 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
 )
 
-func admissionUpdateContext(t *testing.T, old *workercore.ModelDeployment) context.Context {
-	t.Helper()
-	var raw []byte
-	if old != nil {
-		var err error
-		raw, err = json.Marshal(old)
-		require.NoError(t, err)
-	}
-	return ctrladmission.NewContextWithRequest(context.Background(), ctrladmission.Request{
-		AdmissionRequest: admissionv1.AdmissionRequest{
-			Operation: admissionv1.Update,
-			OldObject: runtime.RawExtension{Raw: raw},
-		},
-	})
-}
-
 func TestModelDeploymentWebhook_DefaultEngineVersions(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name            string
-		old             *workercore.ModelDeployment
-		useUpdateCtx    bool
-		rawOldOverride  []byte
-		md              func() *workercore.ModelDeployment
-		wantEngineVer   string
-		wantRoleVers    []string
-		wantErrContains string
+		name          string
+		md            func() *workercore.ModelDeployment
+		wantEngineVer string
+		wantRoleVers  []string
 	}{
 		{
-			name: "create backfills spec.engine.version from gpustack/runner tag",
+			name: "backfills spec.engine.version from gpustack/runner tag",
 			md: func() *workercore.ModelDeployment {
 				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
 				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
@@ -65,7 +41,7 @@ func TestModelDeploymentWebhook_DefaultEngineVersions(t *testing.T) {
 			wantRoleVers:  []string{""},
 		},
 		{
-			name: "create backfills role override and leaves role without image empty to inherit",
+			name: "backfills role override and leaves role without image empty to inherit",
 			md: func() *workercore.ModelDeployment {
 				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
 					role(func(r *workercore.ModelDeploymentRole) {
@@ -88,7 +64,7 @@ func TestModelDeploymentWebhook_DefaultEngineVersions(t *testing.T) {
 			wantRoleVers:  []string{"0.32.0", ""},
 		},
 		{
-			name: "create never overwrites user-supplied versions",
+			name: "never overwrites user-supplied versions",
 			md: func() *workercore.ModelDeployment {
 				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
 				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
@@ -102,7 +78,7 @@ func TestModelDeploymentWebhook_DefaultEngineVersions(t *testing.T) {
 			wantRoleVers:  []string{"0.31.0"},
 		},
 		{
-			name: "create leaves version empty for custom, digest-only, or mismatched-engine images",
+			name: "leaves version empty for custom, digest-only, or mismatched-engine images",
 			md: func() *workercore.ModelDeployment {
 				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
 					role(func(r *workercore.ModelDeploymentRole) {
@@ -124,148 +100,18 @@ func TestModelDeploymentWebhook_DefaultEngineVersions(t *testing.T) {
 			wantRoleVers:  []string{"", ""},
 		},
 		{
-			name:         "update scaling legacy versionless CR never backfills empty versions",
-			useUpdateCtx: true,
-			old: func() *workercore.ModelDeployment {
+			name: "backfills uniformly when version is cleared on same runner image",
+			md: func() *workercore.ModelDeployment {
 				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
 				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.32.0"
 				md.Spec.Engine.Version = ""
-				md.Spec.Roles[0].Image = "gpustack/runner:cuda13.0-vllm0.32.0"
+				md.Spec.Roles[0].Image = "gpustack/runner:cuda13.0-vllm0.34.0"
 				md.Spec.Roles[0].EngineVersion = ""
-				md.Spec.Roles[0].Resources = cards(1)
-				return md
-			}(),
-			md: func() *workercore.ModelDeployment {
-				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
-				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.32.0"
-				md.Spec.Engine.Version = ""
-				md.Spec.Roles[0].Image = "gpustack/runner:cuda13.0-vllm0.32.0"
-				md.Spec.Roles[0].EngineVersion = ""
-				md.Spec.Roles[0].Replicas = 6
-				md.Spec.Roles[0].Pause = true
-				md.Spec.Roles[0].Resources = cards(1)
-				return md
-			},
-			wantEngineVer: "",
-			wantRoleVers:  []string{""},
-		},
-		{
-			name:         "update backfills spec.engine.version when spec.engine.image changes and version is cleared",
-			useUpdateCtx: true,
-			old: func() *workercore.ModelDeployment {
-				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
-				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.32.0"
-				md.Spec.Engine.Version = "0.32.0"
-				md.Spec.Roles[0].Resources = cards(1)
-				return md
-			}(),
-			md: func() *workercore.ModelDeployment {
-				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
-				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
-				md.Spec.Engine.Version = ""
-				md.Spec.Roles[0].Resources = cards(1)
-				return md
-			},
-			wantEngineVer: "0.34.0",
-			wantRoleVers:  []string{""},
-		},
-		{
-			name:         "update does not overwrite non-empty version when image changes",
-			useUpdateCtx: true,
-			old: func() *workercore.ModelDeployment {
-				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
-				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.32.0"
-				md.Spec.Engine.Version = "0.32.0"
-				md.Spec.Roles[0].Resources = cards(1)
-				return md
-			}(),
-			md: func() *workercore.ModelDeployment {
-				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
-				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
-				md.Spec.Engine.Version = "0.32.0"
 				md.Spec.Roles[0].Resources = cards(1)
 				return md
 			},
 			wantEngineVer: "0.32.0",
-			wantRoleVers:  []string{""},
-		},
-		{
-			name:         "update matches roles by name and backfills only changed or newly added role images",
-			useUpdateCtx: true,
-			old: func() *workercore.ModelDeployment {
-				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
-					role(func(r *workercore.ModelDeploymentRole) {
-						r.Name = "prefill"
-						r.Kind = workercore.ModelDeploymentRoleKindPrefill
-						r.Image = "gpustack/runner:cuda13.0-vllm0.31.0"
-						r.Resources = cards(1)
-					}),
-					role(func(r *workercore.ModelDeploymentRole) {
-						r.Name = "decode"
-						r.Kind = workercore.ModelDeploymentRoleKindDecode
-						r.Image = "gpustack/runner:cuda13.0-vllm0.31.0"
-						r.Resources = cards(1)
-					}),
-				)
-				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.31.0"
-				md.Spec.Engine.Version = ""
-				return md
-			}(),
-			md: func() *workercore.ModelDeployment {
-				// Reorder roles: decode first (unchanged), prefill second (changed), new role third.
-				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
-					role(func(r *workercore.ModelDeploymentRole) {
-						r.Name = "decode"
-						r.Kind = workercore.ModelDeploymentRoleKindDecode
-						r.Image = "gpustack/runner:cuda13.0-vllm0.31.0"
-						r.Resources = cards(1)
-					}),
-					role(func(r *workercore.ModelDeploymentRole) {
-						r.Name = "prefill"
-						r.Kind = workercore.ModelDeploymentRoleKindPrefill
-						r.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
-						r.Resources = cards(1)
-					}),
-					role(func(r *workercore.ModelDeploymentRole) {
-						r.Name = "extra"
-						r.Kind = workercore.ModelDeploymentRoleKindEncode
-						r.Image = "gpustack/runner:cuda13.0-vllm0.33.0"
-						r.Resources = cards(1)
-					}),
-				)
-				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.31.0"
-				md.Spec.Engine.Version = ""
-				return md
-			},
-			wantEngineVer: "",
-			wantRoleVers:  []string{"", "0.34.0", "0.33.0"},
-		},
-		{
-			name:         "update with empty OldObject does not backfill",
-			useUpdateCtx: true,
-			old:          nil,
-			md: func() *workercore.ModelDeployment {
-				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
-				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
-				md.Spec.Engine.Version = ""
-				md.Spec.Roles[0].Resources = cards(1)
-				return md
-			},
-			wantEngineVer: "",
-			wantRoleVers:  []string{""},
-		},
-		{
-			name:           "update with corrupt OldObject returns unmarshal error",
-			useUpdateCtx:   true,
-			rawOldOverride: []byte("{invalid"),
-			md: func() *workercore.ModelDeployment {
-				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
-				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
-				md.Spec.Engine.Version = ""
-				md.Spec.Roles[0].Resources = cards(1)
-				return md
-			},
-			wantErrContains: "unmarshal old ModelDeployment",
+			wantRoleVers:  []string{"0.34.0"},
 		},
 		{
 			name: "deleting deployment skips version defaulting",
@@ -289,27 +135,7 @@ func TestModelDeploymentWebhook_DefaultEngineVersions(t *testing.T) {
 			w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingAcceleratorType("h20-8x", 8)})
 			md := tc.md()
 
-			ctx := context.Background()
-			if tc.useUpdateCtx {
-				if tc.rawOldOverride != nil {
-					ctx = ctrladmission.NewContextWithRequest(context.Background(), ctrladmission.Request{
-						AdmissionRequest: admissionv1.AdmissionRequest{
-							Operation: admissionv1.Update,
-							OldObject: runtime.RawExtension{Raw: tc.rawOldOverride},
-						},
-					})
-				} else {
-					ctx = admissionUpdateContext(t, tc.old)
-				}
-			}
-
-			err := w.Default(ctx, md)
-			if tc.wantErrContains != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.wantErrContains)
-				return
-			}
-			require.NoError(t, err)
+			require.NoError(t, w.Default(context.Background(), md))
 			assert.Equal(t, tc.wantEngineVer, md.Spec.Engine.Version)
 			gotRoles := make([]string, len(md.Spec.Roles))
 			for i := range md.Spec.Roles {
@@ -370,6 +196,17 @@ func TestModelDeploymentWebhook_ValidateEngineVersions(t *testing.T) {
 			}),
 			wantField: "spec.roles[0].engineVersion",
 			wantMsg:   `cannot determine vLLM engine version from image "my-reg/vllm:role-custom"`,
+		},
+		{
+			name: "create with parseable runner engine image and custom role image without role engineVersion is refused",
+			md: newValid(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
+				md.Spec.Engine.Version = "0.34.0"
+				md.Spec.Roles[0].Image = "my-reg/vllm-ascend:0.23.0"
+				md.Spec.Roles[0].EngineVersion = ""
+			}),
+			wantField: "spec.roles[0].engineVersion",
+			wantMsg:   `cannot determine vLLM engine version from image "my-reg/vllm-ascend:0.23.0"`,
 		},
 		{
 			name: "create with unmanaged role and empty version is admitted",
@@ -439,44 +276,53 @@ func TestModelDeploymentWebhook_ValidateEngineVersions(t *testing.T) {
 			wantMsg:   "update or clear spec.engine.version alongside spec.engine.image",
 		},
 		{
-			name: "update scaling and pausing legacy versionless CR succeeds",
+			name: "update with empty version on managed custom image is refused uniformly",
 			old: newValid(func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Image = "my-reg/vllm:legacy"
+				md.Spec.Engine.Image = "my-reg/vllm:custom"
 				md.Spec.Engine.Version = ""
 			}),
 			md: newValid(func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Image = "my-reg/vllm:legacy"
+				md.Spec.Engine.Image = "my-reg/vllm:custom"
 				md.Spec.Engine.Version = ""
 				md.Spec.Roles[0].Replicas = 8
-				md.Spec.Roles[0].Pause = true
 			}),
+			wantField: "spec.engine.version",
+			wantMsg:   `cannot determine vLLM engine version from image "my-reg/vllm:custom"`,
 		},
 		{
-			name: "update converting unmanaged legacy role to managed requires version",
+			name: "update converting unmanaged role to managed requires version",
 			old: newValid(func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Image = "my-reg/vllm:legacy"
+				md.Spec.Engine.Image = "my-reg/vllm:custom"
 				md.Spec.Engine.Version = ""
 				md.Spec.Roles[0].Command = []string{"python", "-m", "vllm"}
 			}),
 			md: newValid(func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Image = "my-reg/vllm:legacy"
+				md.Spec.Engine.Image = "my-reg/vllm:custom"
 				md.Spec.Engine.Version = ""
 				md.Spec.Roles[0].Command = nil
 			}),
 			wantField: "spec.engine.version",
-			wantMsg:   `cannot determine vLLM engine version from image "my-reg/vllm:legacy"`,
+			wantMsg:   `cannot determine vLLM engine version from image "my-reg/vllm:custom"`,
 		},
 		{
-			name: "update with DeletionTimestamp short-circuits version checks on legacy CR",
+			name: "update with DeletionTimestamp short-circuits version and router checks",
 			old: newValid(func(md *workercore.ModelDeployment) {
-				md.Spec.Engine.Image = "my-reg/vllm:legacy"
+				md.Spec.Engine.Image = "my-reg/vllm:custom"
 				md.Spec.Engine.Version = ""
+				md.Spec.Router = &workercore.ModelDeploymentRouter{
+					Name:      workercore.ModelDeploymentRouterSGL,
+					ExtraArgs: []string{"--host=0.0.0.0"},
+				}
 			}),
 			md: newValid(func(md *workercore.ModelDeployment) {
 				now := meta.Now()
 				md.DeletionTimestamp = &now
 				md.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
 				md.Spec.Engine.Version = "not-even-valid"
+				md.Spec.Router = &workercore.ModelDeploymentRouter{
+					Name:      workercore.ModelDeploymentRouterSGL,
+					ExtraArgs: []string{"--host=0.0.0.0"},
+				}
 			}),
 		},
 	}
@@ -504,23 +350,82 @@ func TestModelDeploymentWebhook_ValidateEngineVersions(t *testing.T) {
 	}
 }
 
-func TestModelDeploymentWebhook_UpdateImageClearsVersionRoundTrip(t *testing.T) {
+func TestModelDeploymentWebhook_UpdateDefaultAndValidateRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingAcceleratorType("h20-8x", 8)})
-	old := modelDeployment(workercore.ModelDeploymentEngineVLLM)
-	old.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.32.0"
-	old.Spec.Engine.Version = "0.32.0"
-	old.Spec.Roles[0].Resources = cards(1)
+	t.Run("updating runner image with cleared version backfills new version", func(t *testing.T) {
+		t.Parallel()
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingAcceleratorType("h20-8x", 8)})
+		old := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+		old.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.32.0"
+		old.Spec.Engine.Version = "0.32.0"
+		old.Spec.Roles[0].Resources = cards(1)
 
-	updated := old.DeepCopy()
-	updated.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
-	updated.Spec.Engine.Version = ""
+		updated := old.DeepCopy()
+		updated.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
+		updated.Spec.Engine.Version = ""
 
-	require.NoError(t, w.Default(admissionUpdateContext(t, old), updated))
-	assert.Equal(t, "0.34.0", updated.Spec.Engine.Version)
-	_, err := w.ValidateUpdate(context.Background(), old, updated)
-	assert.NoError(t, err)
+		require.NoError(t, w.Default(context.Background(), updated))
+		assert.Equal(t, "0.34.0", updated.Spec.Engine.Version)
+		_, err := w.ValidateUpdate(context.Background(), old, updated)
+		assert.NoError(t, err)
+	})
+
+	t.Run("clearing spec.engine.version on unchanged runner image re-backfills on update", func(t *testing.T) {
+		t.Parallel()
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingAcceleratorType("h20-8x", 8)})
+		old := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+		old.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
+		old.Spec.Engine.Version = "0.34.0"
+		old.Spec.Roles[0].Resources = cards(1)
+
+		updated := old.DeepCopy()
+		updated.Spec.Engine.Version = ""
+
+		require.NoError(t, w.Default(context.Background(), updated))
+		assert.Equal(t, "0.34.0", updated.Spec.Engine.Version)
+		_, err := w.ValidateUpdate(context.Background(), old, updated)
+		assert.NoError(t, err)
+	})
+
+	t.Run("clearing roles[i].image and roles[i].engineVersion inherits runner spec.engine.version", func(t *testing.T) {
+		t.Parallel()
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingAcceleratorType("h20-8x", 8)})
+		old := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+		old.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
+		old.Spec.Engine.Version = ""
+		old.Spec.Roles[0].Image = "gpustack/runner:cuda13.0-vllm0.32.0"
+		old.Spec.Roles[0].EngineVersion = "0.32.0"
+		old.Spec.Roles[0].Resources = cards(1)
+
+		updated := old.DeepCopy()
+		updated.Spec.Roles[0].Image = ""
+		updated.Spec.Roles[0].EngineVersion = ""
+
+		require.NoError(t, w.Default(context.Background(), updated))
+		assert.Equal(t, "0.34.0", updated.Spec.Engine.Version)
+		assert.Equal(t, "", updated.Spec.Roles[0].EngineVersion)
+		_, err := w.ValidateUpdate(context.Background(), old, updated)
+		assert.NoError(t, err)
+	})
+
+	t.Run("removing roles[i].command on runner image backfills version on update", func(t *testing.T) {
+		t.Parallel()
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingAcceleratorType("h20-8x", 8)})
+		old := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+		old.Spec.Engine.Image = "gpustack/runner:cuda13.0-vllm0.34.0"
+		old.Spec.Engine.Version = ""
+		old.Spec.Roles[0].Command = []string{"vllm", "serve"}
+		old.Spec.Roles[0].Resources = cards(1)
+
+		updated := old.DeepCopy()
+		updated.Spec.Roles[0].Command = nil
+
+		require.NoError(t, w.Default(context.Background(), updated))
+		assert.Equal(t, "0.34.0", updated.Spec.Engine.Version)
+		_, err := w.ValidateUpdate(context.Background(), old, updated)
+		assert.NoError(t, err)
+	})
 }
 
 func TestModelDeploymentWebhook_SGLRouterOwnedArgsAndMatrix(t *testing.T) {
@@ -575,6 +480,21 @@ func TestModelDeploymentWebhook_SGLRouterOwnedArgsAndMatrix(t *testing.T) {
 		errs := validateModelDeploymentRouter(md)
 		require.NotEmpty(t, errs)
 		assert.Contains(t, errs.ToAggregate().Error(), `router "sgl-router" does not front engine "vLLM"`)
+	})
+
+	t.Run("managed SGLang role rejects --kv-events-config in extraArgs", func(t *testing.T) {
+		t.Parallel()
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingAcceleratorType("h20-8x", 8)})
+		md := modelDeployment(workercore.ModelDeploymentEngineSGLang)
+		md.Spec.Engine.Image = "gpustack/runner:cuda13.0-sglang0.5.23"
+		md.Spec.Engine.Version = "0.5.23"
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGL}
+		md.Spec.Roles[0].Resources = cards(1)
+		md.Spec.Roles[0].ExtraArgs = []string{`--kv-events-config={"publisher":"zmq"}`}
+		_, err := w.ValidateCreate(context.Background(), md)
+		require.Error(t, err)
+		assertInvalidField(t, err, "spec.roles[0].extraArgs[0]")
+		assert.Contains(t, err.Error(), `"--kv-events-config"`)
 	})
 }
 
@@ -793,9 +713,10 @@ func TestModelDeploymentWebhook_AscendPDMixedV1V2Guard(t *testing.T) {
 	}
 
 	cases := []struct {
-		name    string
-		md      func() *workercore.ModelDeployment
-		wantErr string
+		name       string
+		md         func() *workercore.ModelDeployment
+		wantErr    string
+		wantFields []string
 	}{
 		{
 			name:    "Ascend P/D mixing 0.32.0 (V2) and 0.29.0 (V1) is refused",
@@ -808,9 +729,10 @@ func TestModelDeploymentWebhook_AscendPDMixedV1V2Guard(t *testing.T) {
 			wantErr: "cannot mix MooncakeConnectorV1 (< 0.30.0) and MooncakeConnectorV2 (>= 0.30.0)",
 		},
 		{
-			name:    "Ascend P/D mixing legacy unset (V1) and 0.30.0 (V2) is refused",
-			md:      func() *workercore.ModelDeployment { return buildPD("ascend-8x", "", "", "0.30.0") },
-			wantErr: "cannot mix MooncakeConnectorV1 (< 0.30.0) and MooncakeConnectorV2 (>= 0.30.0)",
+			name:       "Ascend P/D mixing unset (V1) and 0.30.0 (V2) is refused",
+			md:         func() *workercore.ModelDeployment { return buildPD("ascend-8x", "", "", "0.30.0") },
+			wantErr:    "cannot mix MooncakeConnectorV1 (< 0.30.0) and MooncakeConnectorV2 (>= 0.30.0)",
+			wantFields: []string{"spec.engine.version", "spec.roles"},
 		},
 		{
 			name: "Ascend P/D both V2 (0.30.0rc1 and 0.32.0) is admitted",
@@ -848,21 +770,20 @@ func TestModelDeploymentWebhook_AscendPDMixedV1V2Guard(t *testing.T) {
 			t.Parallel()
 			w := newModelDeploymentWebhookWith(epdPlatformTypes())
 			md := tc.md()
-			// Validate via full ValidateUpdate with same old (for legacy empty-version test)
-			// or ValidateCreate when all managed roles carry versions.
-			var err error
-			if md.Spec.Roles[0].EngineVersion == "" && md.Spec.Engine.Version == "" {
-				_, err = w.ValidateUpdate(context.Background(), md.DeepCopy(), md)
-			} else {
-				_, err = w.ValidateCreate(context.Background(), md)
-			}
+			_, err := w.ValidateCreate(context.Background(), md)
 			if tc.wantErr == "" {
 				assert.NoError(t, err)
 				return
 			}
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.wantErr)
-			assertInvalidField(t, err, "spec.roles")
+			if len(tc.wantFields) == 0 {
+				assertInvalidField(t, err, "spec.roles")
+				return
+			}
+			for _, f := range tc.wantFields {
+				assert.Contains(t, err.Error(), f)
+			}
 		})
 	}
 }
@@ -1168,11 +1089,11 @@ func TestModelDeploymentWebhook_EPDSideChannelPortOverrides(t *testing.T) {
 			wantMsg:   "serves HTTP on port 5602",
 		},
 		{
-			name:      "empty literal falls back to default 5601 check",
+			name:      "empty literal is rejected cleanly",
 			env:       []workercore.ModelDeploymentEnvVar{{Name: "VLLM_EC_SIDE_CHANNEL_PORT", Value: ""}},
 			ports:     []workercore.ModelDeploymentPort{{Port: inject.VLLMECSideChannelPort, Protocol: core.ProtocolTCP}},
-			wantField: "spec.roles[0].ports",
-			wantMsg:   "serves HTTP on port 5601",
+			wantField: "spec.roles[0].env[0].value",
+			wantMsg:   "must be 0 (ephemeral) or a valid TCP port (1-65535)",
 		},
 		{
 			name:      "non-numeric value is rejected cleanly",

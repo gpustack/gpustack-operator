@@ -153,6 +153,11 @@ type ModelDeploymentConnectorInput struct {
 	// renders, and the render is unchanged for it.
 	EncoderCache inject.EncoderCache
 
+	// ECSideChannelPort overrides the vLLM ECCPUConnector ec-side-channel ContainerPort on Encode
+	// roles when the user declares VLLM_EC_SIDE_CHANNEL_PORT in role.Env (nil = default 5601,
+	// 0 = ephemeral/omitted, > 0 = custom port).
+	ECSideChannelPort *int32
+
 	// EncoderURLs are the addresses of the encoder stage, which is the other engine's half of the
 	// same leg: SGLang takes the URLs on the language side and passes them down to the encoder
 	// rather than naming a connector. It is deployment-wide rather than per role because a
@@ -453,7 +458,7 @@ var modelDeploymentOwnedKeys = map[string]struct {
 		Args: append([]string{
 			"--hicache-storage-backend", "--hicache-storage-backend-extra-config",
 			"--disaggregation-mode", "--disaggregation-transfer-backend",
-			"--disaggregation-bootstrap-port",
+			"--disaggregation-bootstrap-port", "--kv-events-config",
 		}, inject.SGLangEncoderOwnedArgs()...),
 		Env: []string{
 			"SGLANG_HICACHE_MOONCAKE_CONFIG_PATH",
@@ -887,8 +892,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		// The encoder leg arrives whole rather than being assembled here: which connector carries it
 		// is admission's answer, read from the row it admitted this combination under. A zero value
 		// asks for no leg and renders exactly what this render produced before the leg existed.
-		EncoderCache: in.EncoderCache,
-		EncoderURLs:  in.EncoderURLs,
+		EncoderCache:      in.EncoderCache,
+		ECSideChannelPort: in.ECSideChannelPort,
+		EncoderURLs:       in.EncoderURLs,
 		Connection: inject.Connection{
 			MasterAddress: in.MasterServerAddress,
 			Protocol:      protocol,
@@ -1144,12 +1150,49 @@ func modelDeploymentKVEventsConfig(
 	}
 }
 
+// ModelDeploymentRolePublishesKVEvents reports whether the operator synthesizes ZMQ KV-event
+// publisher and replay listeners (ports 5557/5558) onto this managed role.
+func ModelDeploymentRolePublishesKVEvents(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	publish, _, _ := modelDeploymentKVEventsConfig(md, role)
+	return publish
+}
+
 // modelDeploymentPublishesKVEvents reports whether this role runs the event publisher.
 func modelDeploymentPublishesKVEvents(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, _ string,
 ) bool {
-	publish, _, _ := modelDeploymentKVEventsConfig(md, role)
-	return publish
+	return ModelDeploymentRolePublishesKVEvents(md, role)
+}
+
+// ParseModelDeploymentVLLMECSideChannelPort parses VLLM_EC_SIDE_CHANNEL_PORT from a role's
+// declared env list using last-wins semantics. When unset, it returns the default port (5601)
+// with envIdx=-1. When present, empty, non-numeric, negative, or >65535 values return an error
+// alongside the winning env entry index so admission can report the exact field path.
+func ParseModelDeploymentVLLMECSideChannelPort(
+	env []workercore.ModelDeploymentEnvVar,
+) (port int32, envIdx int, err error) {
+	envIdx = -1
+	for i := range env {
+		if env[i].Name == inject.VLLMECSideChannelPortEnv {
+			envIdx = i
+		}
+	}
+	if envIdx < 0 {
+		return inject.VLLMECSideChannelPort, -1, nil
+	}
+
+	val := env[envIdx].Value
+	parsed, parseErr := strconv.ParseInt(val, 10, 32)
+	if val == "" || parseErr != nil || parsed < 0 || parsed > 65535 {
+		return 0, envIdx, fmt.Errorf(
+			"%s must be 0 (ephemeral) or a valid TCP port (1-65535), got %q",
+			inject.VLLMECSideChannelPortEnv, val,
+		)
+	}
+
+	return int32(parsed), envIdx, nil
 }
 
 // modelDeploymentInjectRole maps this API's role kind onto the renderer's role.

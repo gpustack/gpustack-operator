@@ -161,11 +161,7 @@ func (r *ModelDeploymentWebhook) Default(ctx context.Context, obj runtime.Object
 		return nil
 	}
 
-	old, isUpdate, err := oldModelDeploymentFromAdmissionContext(ctx)
-	if err != nil {
-		return err
-	}
-	defaultModelDeploymentEngineVersions(old, md, isUpdate)
+	defaultModelDeploymentEngineVersions(md)
 
 	// Roles may each name a DIFFERENT AcceleratorType, so each is defaulted against the type it names
 	// and the reads are memoized rather than assumed to be one. That is no longer a defense against
@@ -883,7 +879,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	errs = append(errs, validateModelDeploymentRoleReservedListenPorts(nil, md)...)
 	errs = append(errs, validateModelDeploymentServedModelNames(nil, md)...)
 	errs = append(errs, validateModelDeploymentKVCacheDtype(md, workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx))...)
-	errs = append(errs, validateModelDeploymentEngineVersions(nil, md)...)
+	errs = append(errs, validateModelDeploymentEngineVersions(md)...)
 
 	typeErrs, err := r.validateRoleResourcesAgainstAcceleratorTypes(ctx, nil, md)
 	if err != nil {
@@ -945,7 +941,7 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	errs = append(errs, validateModelDeploymentRoleReservedListenPorts(old, md)...)
 	errs = append(errs, validateModelDeploymentServedModelNames(old, md)...)
 	errs = append(errs, validateModelDeploymentKVCacheDtype(md, workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx))...)
-	errs = append(errs, validateModelDeploymentEngineVersions(old, md)...)
+	errs = append(errs, validateModelDeploymentEngineVersions(md)...)
 	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
 	errs = append(errs, validateModelDeploymentRouterName(md, old)...)
 
@@ -1277,7 +1273,7 @@ var modelDeploymentRouterEngines = map[string][]string{
 }
 
 func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorList {
-	if md.Spec.Router == nil {
+	if md.Spec.Router == nil || md.DeletionTimestamp != nil {
 		return nil
 	}
 

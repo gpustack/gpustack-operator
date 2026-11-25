@@ -4905,9 +4905,9 @@ func TestModelDeploymentPodSpecHash_RouterProjectionAndRuntimeControlDecoupling(
 			pod := renderOne(t, md, at)
 			assert.Equal(t, llmdHash, pod.Annotations[modelDeploymentPodSpecHashAnnotation])
 
-			legacyHash := modelDeploymentDesiredPodLegacyRouterHash(md, &md.Spec.Roles[0], 0, 0, pod)
-			assert.NotEmpty(t, legacyHash)
-			assert.NotEqual(t, llmdHash, legacyHash,
+			legacyHashes := modelDeploymentDesiredPodLegacyHashes(md, &md.Spec.Roles[0], 0, 0, pod)
+			require.NotEmpty(t, legacyHashes)
+			assert.NotEqual(t, llmdHash, legacyHashes[0],
 				"legacy full-router hash must retain router.%s for pre-upgrade currency", tc.name)
 		})
 	}

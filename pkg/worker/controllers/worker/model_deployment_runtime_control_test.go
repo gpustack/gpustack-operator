@@ -651,8 +651,9 @@ func TestModelDeploymentRuntimeControl_DualHashUpgradeCurrencyAndRouterOnlyEdit(
 		Member:          0,
 	})
 	require.NoError(t, err)
-	legacyHash := modelDeploymentDesiredPodLegacyRouterHash(md, &md.Spec.Roles[0], 0, 0, renderedPod)
-	require.NotEmpty(t, legacyHash)
+	legacyHashes := modelDeploymentDesiredPodLegacyHashes(md, &md.Spec.Roles[0], 0, 0, renderedPod)
+	require.NotEmpty(t, legacyHashes)
+	legacyHash := legacyHashes[0]
 	require.NotEqual(t, legacyHash, renderedPod.Annotations[modelDeploymentPodSpecHashAnnotation])
 
 	preUpgradePod := renderedPod.DeepCopy()

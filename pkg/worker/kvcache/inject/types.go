@@ -356,6 +356,12 @@ type Input struct {
 	// picked one itself would be free to disagree with the object that was accepted. EncoderURLs
 	// above is the other half of the same leg on the engine that carries the addresses instead.
 	EncoderCache EncoderCache
+
+	// ECSideChannelPort overrides the ContainerPort emitted for the vLLM ECCPUConnector
+	// ec-side-channel listener on RoleEncode. Nil uses the default VLLMECSideChannelPort (5601),
+	// 0 requests an ephemeral port and omits the ec-side-channel ContainerPort, and a positive
+	// value emits that port number.
+	ECSideChannelPort *int32
 }
 
 // The point-to-point KV transfer backends a caller may name in Input.KVTransferBackend.

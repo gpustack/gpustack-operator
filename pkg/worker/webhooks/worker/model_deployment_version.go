@@ -1,13 +1,9 @@
 package worker
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 
-	admissionv1 "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -17,91 +13,26 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
 )
 
-const (
-	modelDeploymentVLLMRouterKVAwareMinVersion = "0.31.0"
-	modelDeploymentVLLMAscendV2MinVersion      = inject.VLLMAscendMooncakeV2MinVersion
-	modelDeploymentVLLMPrefixCachingHashAlgo   = inject.VLLMPrefixCachingHashAlgoArg
-	modelDeploymentVLLMKVEventsIntBlockHashEnv = inject.VLLMKVEventsUseIntBlockHashesEnv
-)
-
-// oldModelDeploymentFromAdmissionContext decodes the stored ModelDeployment on UPDATE admission
-// requests so engine version defaulting only backfills when an image changes. Missing admission
-// context and non-UPDATE operations return isUpdate=false so CREATE defaulting runs normally.
-func oldModelDeploymentFromAdmissionContext(
-	ctx context.Context,
-) (*workercore.ModelDeployment, bool, error) {
-	req, err := ctrladmission.RequestFromContext(ctx)
-	if err != nil || req.Operation != admissionv1.Update {
-		return nil, false, nil //nolint:nilerr // Direct Default() calls outside admission carry no request.
-	}
-	if len(req.OldObject.Raw) == 0 {
-		return nil, true, nil
-	}
-	old := new(workercore.ModelDeployment)
-	if err := json.Unmarshal(req.OldObject.Raw, old); err != nil {
-		return nil, true, fmt.Errorf("unmarshal old ModelDeployment from admission request: %w", err)
-	}
-	return old, true, nil
-}
+const modelDeploymentVLLMRouterKVAwareMinVersion = "0.31.0"
 
 // defaultModelDeploymentEngineVersions backfills empty spec.engine.version and
-// spec.roles[*].engineVersion from standard gpustack/runner image tags. On UPDATE it backfills
-// only when the corresponding image changed, preserving legacy empty-version CRs on unrelated
-// edits such as scaling or pausing. User-supplied versions are never overwritten.
-func defaultModelDeploymentEngineVersions(old, md *workercore.ModelDeployment, isUpdate bool) {
-	if !isUpdate {
-		if md.Spec.Engine.Version == "" {
-			if ver, ok := inject.ParseRunnerEngineVersion(md.Spec.Engine.Image, md.Spec.Engine.Name); ok {
-				md.Spec.Engine.Version = ver
-			}
-		}
-		for i := range md.Spec.Roles {
-			role := &md.Spec.Roles[i]
-			if role.EngineVersion != "" || role.Image == "" {
-				continue
-			}
-			if ver, ok := inject.ParseRunnerEngineVersion(role.Image, md.Spec.Engine.Name); ok {
-				role.EngineVersion = ver
-			}
-		}
-		return
-	}
-
-	if old == nil {
-		return
-	}
-	if md.Spec.Engine.Version == "" && md.Spec.Engine.Image != old.Spec.Engine.Image {
+// spec.roles[*].engineVersion from standard gpustack/runner image tags on both CREATE and UPDATE.
+// User-supplied versions are never overwritten.
+func defaultModelDeploymentEngineVersions(md *workercore.ModelDeployment) {
+	if md.Spec.Engine.Version == "" {
 		if ver, ok := inject.ParseRunnerEngineVersion(md.Spec.Engine.Image, md.Spec.Engine.Name); ok {
 			md.Spec.Engine.Version = ver
 		}
-	}
-
-	oldRoles := make(map[string]*workercore.ModelDeploymentRole, len(old.Spec.Roles))
-	for i := range old.Spec.Roles {
-		oldRoles[old.Spec.Roles[i].Name] = &old.Spec.Roles[i]
 	}
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		if role.EngineVersion != "" || role.Image == "" {
 			continue
 		}
-		prev := oldRoles[role.Name]
-		if prev != nil && prev.Image == role.Image {
-			continue
-		}
 		if ver, ok := inject.ParseRunnerEngineVersion(role.Image, md.Spec.Engine.Name); ok {
 			role.EngineVersion = ver
 		}
 	}
-}
-
-func modelDeploymentEffectiveEngineVersion(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
-) string {
-	if role.EngineVersion != "" {
-		return role.EngineVersion
-	}
-	return md.Spec.Engine.Version
 }
 
 func modelDeploymentEffectiveEngineImage(
@@ -113,42 +44,10 @@ func modelDeploymentEffectiveEngineImage(
 	return md.Spec.Engine.Image
 }
 
-func modelDeploymentEngineVersionInputsChanged(old, md *workercore.ModelDeployment) bool {
-	if old == nil {
-		return true
-	}
-	if md.Spec.Engine.Image != old.Spec.Engine.Image ||
-		md.Spec.Engine.Version != old.Spec.Engine.Version {
-		return true
-	}
-
-	oldRoles := make(map[string]*workercore.ModelDeploymentRole, len(old.Spec.Roles))
-	for i := range old.Spec.Roles {
-		oldRoles[old.Spec.Roles[i].Name] = &old.Spec.Roles[i]
-	}
-	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
-		prev, ok := oldRoles[role.Name]
-		if !ok {
-			if len(role.Command) == 0 || role.Image != "" || role.EngineVersion != "" {
-				return true
-			}
-			continue
-		}
-		if role.Image != prev.Image || role.EngineVersion != prev.EngineVersion {
-			return true
-		}
-		if len(prev.Command) > 0 && len(role.Command) == 0 {
-			return true
-		}
-	}
-	return false
-}
-
 // validateModelDeploymentEngineVersions checks engine version syntax, enforces resolved versions
-// on CREATE and image/version UPDATEs for managed roles, and refuses disagreements between
-// parseable gpustack/runner image tags and explicit version fields.
-func validateModelDeploymentEngineVersions(old, md *workercore.ModelDeployment) field.ErrorList {
+// for all managed roles, and refuses disagreements between parseable gpustack/runner image tags
+// and explicit version fields.
+func validateModelDeploymentEngineVersions(md *workercore.ModelDeployment) field.ErrorList {
 	if md.DeletionTimestamp != nil {
 		return nil
 	}
@@ -179,17 +78,21 @@ func validateModelDeploymentEngineVersions(old, md *workercore.ModelDeployment) 
 		}
 	}
 
-	if !modelDeploymentEngineVersionInputsChanged(old, md) {
-		return errs
-	}
-
 	reportedDeploymentEmpty := false
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		if len(role.Command) > 0 {
 			continue
 		}
-		if modelDeploymentEffectiveEngineVersion(md, role) != "" {
+		if role.Image != "" && role.Image != md.Spec.Engine.Image && role.EngineVersion == "" {
+			roleVerPath := rolesPath.Index(i).Child("engineVersion")
+			errs = append(errs, field.Required(roleVerPath, fmt.Sprintf(
+				"cannot determine %s engine version from image %q for role %q; set %s explicitly",
+				md.Spec.Engine.Name, role.Image, role.Name, roleVerPath,
+			)))
+			continue
+		}
+		if workerctrl.ModelDeploymentEffectiveEngineVersion(md, role) != "" {
 			continue
 		}
 		if role.Image != "" {
@@ -276,7 +179,7 @@ func validateModelDeploymentVLLMRouterKVAware(md *workercore.ModelDeployment) fi
 		}
 
 		rolePath := rolesPath.Index(i)
-		ver := modelDeploymentEffectiveEngineVersion(md, role)
+		ver := workerctrl.ModelDeploymentEffectiveEngineVersion(md, role)
 		verPath := field.NewPath("spec", "engine", "version")
 		if role.EngineVersion != "" || role.Image != "" {
 			verPath = rolePath.Child("engineVersion")
@@ -302,7 +205,7 @@ func validateModelDeploymentVLLMRouterKVAware(md *workercore.ModelDeployment) fi
 				break
 			}
 			owned, ok := workerctrl.ModelDeploymentResolveArg(
-				md.Spec.Engine.Name, arg, []string{modelDeploymentVLLMPrefixCachingHashAlgo},
+				md.Spec.Engine.Name, arg, []string{inject.VLLMPrefixCachingHashAlgoArg},
 			)
 			if !ok {
 				continue
@@ -321,7 +224,7 @@ func validateModelDeploymentVLLMRouterKVAware(md *workercore.ModelDeployment) fi
 
 		for j := range role.Env {
 			name := role.Env[j].Name
-			if name != modelDeploymentVLLMKVEventsIntBlockHashEnv {
+			if name != inject.VLLMKVEventsUseIntBlockHashesEnv {
 				continue
 			}
 			errs = append(errs, field.Invalid(rolePath.Child("env").Index(j), name, fmt.Sprintf(
@@ -378,15 +281,15 @@ func validateModelDeploymentAscendPDVersionPair(
 		if ver == "" {
 			return false, true
 		}
-		atLeast, err := inject.EngineVersionAtLeast(ver, modelDeploymentVLLMAscendV2MinVersion)
+		atLeast, err := inject.EngineVersionAtLeast(ver, inject.VLLMAscendMooncakeV2MinVersion)
 		if err != nil {
 			return false, false
 		}
 		return atLeast, true
 	}
 
-	prefillVer := modelDeploymentEffectiveEngineVersion(md, prefill)
-	decodeVer := modelDeploymentEffectiveEngineVersion(md, decode)
+	prefillVer := workerctrl.ModelDeploymentEffectiveEngineVersion(md, prefill)
+	decodeVer := workerctrl.ModelDeploymentEffectiveEngineVersion(md, decode)
 	prefillV2, prefillOK := isV2(prefillVer)
 	decodeV2, decodeOK := isV2(decodeVer)
 	if !prefillOK || !decodeOK || prefillV2 == decodeV2 {
@@ -406,7 +309,7 @@ func validateModelDeploymentAscendPDVersionPair(
 			"Ascend prefill/decode pair cannot mix MooncakeConnectorV1 (< %s) and "+
 				"MooncakeConnectorV2 (>= %s) across roles %q (%s) and %q (%s); "+
 				"align both roles on the same connector generation",
-			modelDeploymentVLLMAscendV2MinVersion, modelDeploymentVLLMAscendV2MinVersion,
+			inject.VLLMAscendMooncakeV2MinVersion, inject.VLLMAscendMooncakeV2MinVersion,
 			prefill.Name, displayVer(prefillVer), decode.Name, displayVer(decodeVer),
 		),
 	)}
@@ -417,39 +320,9 @@ func validateModelDeploymentAscendPDVersionPair(
 func modelDeploymentRolePublishesKVEvents(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) bool {
-	if len(role.Command) > 0 || md.Spec.Router == nil {
+	if md.DeletionTimestamp != nil {
 		return false
 	}
 
-	kind := workerctrl.ModelDeploymentEffectiveRoleKind(role)
-	switch md.Spec.Engine.Name {
-	case workercore.ModelDeploymentEngineVLLM:
-		switch md.Spec.Router.Name {
-		case workercore.ModelDeploymentRouterLLMD:
-			return kind == workercore.ModelDeploymentRoleKindServer ||
-				kind == workercore.ModelDeploymentRoleKindPrefill
-		case workercore.ModelDeploymentRouterVLLM:
-			if md.DeletionTimestamp != nil {
-				return false
-			}
-			upstreamKind, ok := workerctrl.ModelDeploymentRoleUpstreamKind(kind)
-			if !ok {
-				return false
-			}
-			kvAware := router.ParseVLLMRouterKVAware(
-				md.Spec.Router.ExtraArgs, workerctrl.ModelDeploymentDeclaresBothHalves(md),
-			)
-			return kvAware.ForRoleKind(upstreamKind)
-		}
-	case workercore.ModelDeploymentEngineSGLang:
-		if md.DeletionTimestamp != nil {
-			return false
-		}
-		if md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL {
-			return kind == workercore.ModelDeploymentRoleKindServer ||
-				kind == workercore.ModelDeploymentRoleKindPrefill
-		}
-	}
-
-	return false
+	return workerctrl.ModelDeploymentRolePublishesKVEvents(md, role)
 }

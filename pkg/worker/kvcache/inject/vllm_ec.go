@@ -279,9 +279,15 @@ func renderVLLMEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 		result.DefaultedEnv = append(result.DefaultedEnv,
 			core.EnvVar{Name: VLLMECSideChannelPortEnv, Value: strconv.Itoa(int(VLLMECSideChannelPort))},
 		)
-		result.Ports = []core.ContainerPort{{
-			Name: "ec-side-channel", Protocol: core.ProtocolTCP, ContainerPort: VLLMECSideChannelPort,
-		}}
+		sideChannelPort := VLLMECSideChannelPort
+		if in.ECSideChannelPort != nil {
+			sideChannelPort = *in.ECSideChannelPort
+		}
+		if sideChannelPort > 0 {
+			result.Ports = []core.ContainerPort{{
+				Name: "ec-side-channel", Protocol: core.ProtocolTCP, ContainerPort: sideChannelPort,
+			}}
+		}
 	}
 
 	result.DefaultedArgs = [][]string{

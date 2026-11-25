@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -13,7 +12,6 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
-	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
@@ -344,8 +342,6 @@ func (r *ModelDeploymentWebhook) modelDeploymentEPDPlatform(
 //
 // A ROLE NAMING NEITHER SERVES ON THE DEFAULT, which is not this number, so there is nothing to
 // refuse.
-const modelDeploymentVLLMECSideChannelPortEnv = "VLLM_EC_SIDE_CHANNEL_PORT"
-
 func validateModelDeploymentEPDSideChannelPort(
 	md *workercore.ModelDeployment, row workerctrl.ModelDeploymentEPDRow,
 ) field.ErrorList {
@@ -361,30 +357,16 @@ func validateModelDeploymentEPDSideChannelPort(
 	role := &md.Spec.Roles[encodeIdx]
 	rolesPath := field.NewPath("spec", "roles").Index(encodeIdx)
 
-	sideChannelPort := inject.VLLMECSideChannelPort
-	envIdx := -1
-	for i := range role.Env {
-		if role.Env[i].Name == modelDeploymentVLLMECSideChannelPortEnv {
-			envIdx = i
-		}
+	sideChannelPort, envIdx, err := workerctrl.ParseModelDeploymentVLLMECSideChannelPort(role.Env)
+	if err != nil {
+		return field.ErrorList{field.Invalid(
+			rolesPath.Child("env").Index(envIdx).Child("value"),
+			role.Env[envIdx].Value,
+			err.Error(),
+		)}
 	}
-	if envIdx >= 0 {
-		env := &role.Env[envIdx]
-		if env.Value != "" {
-			parsed, err := strconv.ParseInt(env.Value, 10, 32)
-			if err != nil || parsed < 0 || parsed > 65535 {
-				return field.ErrorList{field.Invalid(
-					rolesPath.Child("env").Index(envIdx).Child("value"),
-					env.Value,
-					fmt.Sprintf("%s must be 0 (ephemeral) or a valid TCP port (1-65535), got %q",
-						modelDeploymentVLLMECSideChannelPortEnv, env.Value),
-				)}
-			}
-			if parsed == 0 {
-				return nil
-			}
-			sideChannelPort = int32(parsed)
-		}
+	if envIdx >= 0 && sideChannelPort == 0 {
+		return nil
 	}
 
 	refusal := func(path *field.Path, value any) field.ErrorList {

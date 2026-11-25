@@ -1037,21 +1037,6 @@ func replacementSuperseded(slot modelDeploymentReplacementSlot, want []*core.Pod
 	return replacementSupersededWithLegacySets(slot, want, nil)
 }
 
-func replacementSupersededWithLegacy(
-	slot modelDeploymentReplacementSlot, want []*core.Pod, legacyHashes []string,
-) bool {
-	var sets [][]string
-	if len(legacyHashes) > 0 {
-		sets = make([][]string, len(legacyHashes))
-		for i, h := range legacyHashes {
-			if h != "" {
-				sets[i] = []string{h}
-			}
-		}
-	}
-	return replacementSupersededWithLegacySets(slot, want, sets)
-}
-
 func replacementSupersededWithLegacySets(
 	slot modelDeploymentReplacementSlot, want []*core.Pod, legacyHashSets [][]string,
 ) bool {

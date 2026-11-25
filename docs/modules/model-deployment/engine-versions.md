@@ -62,17 +62,18 @@ AMD *EPD* and SGLang Ascend rows are admitted but unverified on hardware
 
 Managed roles (*`roles[].command`* empty) resolve an engine version from *`spec.roles[].engineVersion`*
 or fall back to *`spec.engine.version`*. Admission backfills empty version fields automatically from
-standard `gpustack/runner` image tags on creation and whenever the corresponding image changes on
-update.
+standard `gpustack/runner` image tags on both creation and update.
 
 - **Custom or digest-only images**: Set *`spec.engine.version`* or *`roles[].engineVersion`*
-  explicitly. Admission fails closed when a managed role uses an unparseable image without a version.
+  explicitly. Admission fails closed when a managed role uses an unparseable image without a version,
+  including when a role overrides *`roles[].image`* with a different unparseable image while leaving
+  *`roles[].engineVersion`* empty.
 - **Runner tag agreement**: If you update a `gpustack/runner` image while leaving a stale explicit
   version, admission refuses the update. Update or clear the version field alongside the image.
 - **Milestone comparison**: Gates compare `(major, minor, patch)` tuples, so pre-release tags such
   as `0.30.0rc1` or `0.34.0rc0` satisfy their release line (`0.30.0` or `0.34.0`).
-- **Legacy deployments**: Existing `ModelDeployment`s stored with an empty version stay on the
-  `< 0.30.0` baseline across scale, pause, and upgrade operations without rolling standing `Pod`s.
+- **Empty stored version baseline**: In controller rendering, an empty stored version falls back to
+  the `< 0.30.0` baseline without re-parsing container image tags.
 
 ### Version gates
 

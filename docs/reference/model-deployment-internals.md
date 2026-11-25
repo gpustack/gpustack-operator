@@ -57,7 +57,7 @@ Ownership is scoped per `(engine, key)` (`modelDeploymentOwnedKeys`):
 | Engine | Owned arguments | Owned environment |
 |---|---|---|
 | `vLLM` | `--kv-transfer-config`, `--kv-events-config`, `--ec-transfer-config` (including unique prefixes like `--kv-transfer-conf`, underscores `--kv_transfer_config`, and dotted members `--kv-transfer-config.kv_role`) | `MOONCAKE_CONFIG_PATH`, `VLLM_MOONCAKE_BOOTSTRAP_PORT`, `VLLM_NIXL_SIDE_CHANNEL_HOST`, `VLLM_EC_SIDE_CHANNEL_HOST` |
-| `SGLang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config`, `--disaggregation-mode`, `--disaggregation-transfer-backend`, `--disaggregation-bootstrap-port`, `--encoder-only`, `--language-only`, `--encoder-urls`, `--encoder-bootstrap-port` (including unique prefixes like `--disaggregation-mo`) | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
+| `SGLang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config`, `--disaggregation-mode`, `--disaggregation-transfer-backend`, `--disaggregation-bootstrap-port`, `--kv-events-config`, `--encoder-only`, `--language-only`, `--encoder-urls`, `--encoder-bootstrap-port` (including unique prefixes like `--disaggregation-mo`) | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
 
 - **Conditional `--kv-cache-dtype`**: Owned on both engines while *`spec.kvCache`* is set and
   `model-deployment-kv-cache-dtype-owned` is enabled (default `true`). Stored deployments with the

@@ -1004,6 +1004,16 @@ func modelDeploymentScalerConnectorRender(
 	}
 	if roleKind == workercore.ModelDeploymentRoleKindEncode &&
 		modelDeploymentEPDReachesEncoderStage(target, manufacturer) {
+		var ecSideChannelPort *int32
+		if encoderLeg.Connector == ModelDeploymentECConnectorCPU {
+			port, envIdx, err := ParseModelDeploymentVLLMECSideChannelPort(role.Env)
+			if err != nil {
+				return ModelDeploymentConnectorRender{}, err
+			}
+			if envIdx >= 0 {
+				ecSideChannelPort = &port
+			}
+		}
 		return SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
 			Engine:            engine,
 			EngineVersion:     engineVersion,
@@ -1011,6 +1021,7 @@ func modelDeploymentScalerConnectorRender(
 			AcceleratorFamily: family,
 			Kind:              role.Kind,
 			EncoderCache:      encoderLeg,
+			ECSideChannelPort: ecSideChannelPort,
 			EncoderURLs:       encoderURLs,
 		})
 	}
