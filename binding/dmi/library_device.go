@@ -197,14 +197,31 @@ func (d Device) GetMigDeviceHandleByIndex(globalIndex uint32) (Device, Return) {
 	return Device{handle: handle, lib: d.lib}, ret
 }
 
+// isUnqueryableMigReturn reports whether a non-success return during a node-wide MIG handle sweep
+// indicates a card-specific fault that should be skipped so healthy cards' handles still enumerate.
+func isUnqueryableMigReturn(r Return) bool {
+	switch r {
+	case ERROR_GPU_IS_LOST,
+		ERROR_UNKNOWN,
+		ERROR_RESET_REQUIRED,
+		ERROR_INSUFFICIENT_POWER,
+		ERROR_IRQ_ISSUE:
+		return true
+	default:
+		return false
+	}
+}
+
 // MigDevices returns every MIG device carved out of this card, resolving the global-index quirk
 // documented on GetMigDeviceHandleByIndex.
 //
 // The sweep is bounded by the node's own capacity -- device count times per-card maximum -- because
 // that is the widest the shared index space can be. It stops early once the card's own maximum has
 // been found, so a full node costs no more than the instances it holds. An index belonging to
-// another card answers with an absent code and is skipped; anything else stops the sweep and is
-// returned, so a driver fault is never reported as a card with fewer instances than it has.
+// another card answers with an absent code and is skipped; a card-specific unqueryable error on a
+// sibling index is also skipped so a faulty card does not break healthy cards' enumeration, while
+// fatal library or permission errors abort immediately. If every index fails with an unqueryable
+// error and none succeeded or reported absent, that error is returned.
 func (d Device) MigDevices() ([]Device, Return) {
 	perCard, ret := d.GetMaxMigDeviceCount()
 	if !ret.IsSuccess() {
@@ -220,6 +237,8 @@ func (d Device) MigDevices() ([]Device, Return) {
 	}
 
 	out := make([]Device, 0, perCard)
+	sawAbsent := false
+	lastUnqueryable := SUCCESS
 	for idx := uint32(0); idx < perCard*cards && uint32(len(out)) < perCard; idx++ {
 		md, r := d.GetMigDeviceHandleByIndex(idx)
 		if r.IsSuccess() {
@@ -227,9 +246,17 @@ func (d Device) MigDevices() ([]Device, Return) {
 			continue
 		}
 		if r.ReportsAbsent() {
+			sawAbsent = true
+			continue
+		}
+		if isUnqueryableMigReturn(r) {
+			lastUnqueryable = r
 			continue
 		}
 		return nil, r
+	}
+	if len(out) == 0 && !sawAbsent && lastUnqueryable != SUCCESS {
+		return nil, lastUnqueryable
 	}
 	return out, SUCCESS
 }

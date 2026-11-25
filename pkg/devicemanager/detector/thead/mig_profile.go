@@ -263,6 +263,35 @@ func driverReportsAbsent(ret hgml.Return) bool {
 	}
 }
 
+// isMigModeAbsent reports whether a GetMigMode return means partitioning is unsupported by the
+// driver or card rather than a card or driver fault. Only ERROR_NOT_SUPPORTED (non-MIG card) and
+// ERROR_FUNCTION_NOT_FOUND (pre-MIG driver) mean absent; ERROR_INVALID_ARGUMENT indicates an
+// invalid handle and must not be silently treated as not partitioned.
+func isMigModeAbsent(ret hgml.Return) bool {
+	return ret == hgml.ERROR_NOT_SUPPORTED || ret == hgml.ERROR_FUNCTION_NOT_FOUND
+}
+
+// firstUnqueryableReturn walks a possibly joined error and returns the first card-unqueryable HGML
+// return code it wraps.
+func firstUnqueryableReturn(err error) (hgml.Return, bool) {
+	if err == nil {
+		return hgml.SUCCESS, false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, sub := range joined.Unwrap() {
+			if ret, found := firstUnqueryableReturn(sub); found {
+				return ret, true
+			}
+		}
+		return hgml.SUCCESS, false
+	}
+	var ret hgml.Return
+	if errors.As(err, &ret) && isUnqueryableDeviceError(ret) {
+		return ret, true
+	}
+	return hgml.SUCCESS, false
+}
+
 // probeMigProfiles walks the whole GPU-instance profile-id space and separates the three answers a
 // probe can give: a profile, an id the driver disclaims, and an id it could not answer for. The
 // disclaimed ids are the ordinary case — the space is a fixed enumeration and an accelerator offers
@@ -301,13 +330,24 @@ func probeMigProfiles(
 // for it is refused by admission as a profile the accelerator does not offer. The disclaimed ids are
 // filtered out first precisely so that what remains is a driver fault worth an error rather than a
 // routine answer.
-func detectMigProfiles(dev hgml.Device, logger klog.Logger) []device.AcceleratorPhysicalSlicedProfile {
-	infos, err := probeMigProfiles(dev.GetGpuInstanceProfileInfo)
-	if err != nil {
-		logger.Error(err,
+func detectMigProfiles(dev hgml.Device, logger klog.Logger) ([]device.AcceleratorPhysicalSlicedProfile, hgml.Return) {
+	return detectMigProfilesWith(dev.GetGpuInstanceProfileInfo, dev.GetGpuInstancePossiblePlacements, logger)
+}
+
+func detectMigProfilesWith(
+	probe func(giProfileID uint32) (hgml.GpuInstanceProfileInfo_v3, hgml.Return),
+	placements func(giProfileID uint32) ([]hgml.GpuInstancePlacement, hgml.Return),
+	logger klog.Logger,
+) ([]device.AcceleratorPhysicalSlicedProfile, hgml.Return) {
+	infos, probeErr := probeMigProfiles(probe)
+	if probeErr != nil {
+		logger.Error(probeErr,
 			"left partition profiles out of a card's inventory because the driver could not answer for "+
 				"them; a profile absent here is absent from the node's capacity, its flavor and its "+
 				"InstanceType, so a partition of it can stop being nameable and a new request for it is refused")
+		if ret, ok := firstUnqueryableReturn(probeErr); ok {
+			return nil, ret
+		}
 	}
 
 	// Cache each profile's empty-accelerator legal placement set at detect time so the reconciler
@@ -317,9 +357,12 @@ func detectMigProfiles(dev hgml.Device, logger klog.Logger) []device.Accelerator
 	// A profile whose placement query failed is withheld rather than published from an
 	// unverified geometry. The failure is logged with the profile ids so the capacity missing
 	// from the inventory is diagnosable instead of merely absent.
-	answered, placementsByID, err := migPlacementsByProfile(infos, dev.GetGpuInstancePossiblePlacements)
-	if err != nil {
-		logger.Error(err, "dropped partition profiles whose possible placements are unreadable")
+	answered, placementsByID, placementErr := migPlacementsByProfile(infos, placements)
+	if placementErr != nil {
+		logger.Error(placementErr, "dropped partition profiles whose possible placements are unreadable")
+		if ret, ok := firstUnqueryableReturn(placementErr); ok {
+			return nil, ret
+		}
 	}
 
 	profiles, rejected := deriveSlicedProfiles(answered,
@@ -329,7 +372,7 @@ func detectMigProfiles(dev hgml.Device, logger klog.Logger) []device.Accelerator
 	for _, reason := range rejected {
 		logger.Info("dropped unpublishable partition profile", "reason", reason)
 	}
-	return profiles
+	return profiles, hgml.SUCCESS
 }
 
 // physicalSliced presents an accelerator's detected partition profiles as its physical slicing

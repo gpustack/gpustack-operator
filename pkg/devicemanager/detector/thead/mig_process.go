@@ -234,12 +234,9 @@ func (in *thead) migPartitionSource(dev hgml.Device) migPartitionSource {
 			}
 
 			memHandler := mig.GetMemoryInfoV()
-			memInfo, ret := memHandler.V2()
-			if !ret.IsSuccess() {
-				memInfo, ret = memHandler.V1()
-				if !ret.IsSuccess() {
-					return migPartition{}, partitionQueryReason(ret), true
-				}
+			memInfo, reason := readPartitionMemory(memHandler.V2, memHandler.V1)
+			if reason != device.AcceleratorProcessReasonNone {
+				return migPartition{}, reason, true
 			}
 			return migPartition{
 				id:         id,
@@ -248,6 +245,23 @@ func (in *thead) migPartitionSource(dev hgml.Device) migPartitionSource {
 			}, device.AcceleratorProcessReasonNone, true
 		},
 	}
+}
+
+// readPartitionMemory reads partition memory with V2 and falls back to V1 while preserving V2
+// hardware or permission errors via selectVersionedReturn.
+func readPartitionMemory(
+	readV2, readV1 func() (hgml.Memory_v2, hgml.Return),
+) (hgml.Memory_v2, device.AcceleratorProcessReason) {
+	memInfo, v2Ret := readV2()
+	if v2Ret.IsSuccess() {
+		return memInfo, device.AcceleratorProcessReasonNone
+	}
+	memInfo, v1Ret := readV1()
+	ret := selectVersionedReturn(v2Ret, v1Ret)
+	if !ret.IsSuccess() {
+		return hgml.Memory_v2{}, partitionQueryReason(ret)
+	}
+	return memInfo, device.AcceleratorProcessReasonNone
 }
 
 // migDeviceHandles maps each of a card's live partition identifiers to the MIG device handle that

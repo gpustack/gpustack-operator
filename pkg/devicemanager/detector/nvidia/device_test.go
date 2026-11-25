@@ -943,3 +943,196 @@ func TestSelectVersionedReturn(t *testing.T) {
 		})
 	}
 }
+
+func TestMigCardFaultIsolation(t *testing.T) {
+	if scenario := os.Getenv("GPUSTACK_TEST_NVML_MIG_SCENARIO"); scenario != "" {
+		d := New(device.DetectorOptions{})
+
+		if scenario == "mig_mode_absent" {
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_STAGE", "mig_mode")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_ERR", os.Getenv("GPUSTACK_TEST_NVML_MIG_FAIL_ERR"))
+
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			card0 := groups[0].Accelerators[0]
+			assert.False(t, card0.Status.Unhealthy)
+			assert.Equal(t, int32(7), card0.Status.PhysicalSliced.Count)
+
+			card1 := groups[0].Accelerators[1]
+			assert.False(t, card1.Status.Unhealthy)
+			assert.Zero(t, card1.Status.PhysicalSliced.Count)
+			assert.Equal(t, int32(128), card1.Status.LogicalSliced.Count)
+			assert.True(t, device.IsWholeAcceleratorCapable(card1.Status))
+			return
+		}
+
+		// Pass 1: seed both cards as healthy MIG accelerators.
+		groups, err := d.DetectAccelerator(true)
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+		require.Len(t, groups[0].Accelerators, 2)
+		for i := 0; i < 2; i++ {
+			acc := groups[0].Accelerators[i]
+			assert.False(t, acc.Status.Unhealthy)
+			assert.Equal(t, int32(7), acc.Status.PhysicalSliced.Count)
+			assert.Zero(t, acc.Status.LogicalSliced.Count)
+			assert.False(t, device.IsWholeAcceleratorCapable(acc.Status))
+		}
+
+		switch scenario {
+		case "mig_mode_unqueryable", "mig_profile_unqueryable", "mig_placement_unqueryable":
+			stage := os.Getenv("GPUSTACK_TEST_NVML_MIG_FAIL_STAGE")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_STAGE", stage)
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_ERR", os.Getenv("GPUSTACK_TEST_NVML_MIG_FAIL_ERR"))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			card0 := groups[0].Accelerators[0]
+			assert.Equal(t, "GPU-0", card0.ID)
+			assert.False(t, card0.Status.Unhealthy)
+			assert.Equal(t, int32(7), card0.Status.PhysicalSliced.Count)
+
+			card1 := groups[0].Accelerators[1]
+			assert.Equal(t, "GPU-1", card1.ID)
+			assert.True(t, card1.Status.Unhealthy)
+			assert.Equal(t, int32(7), card1.Status.PhysicalSliced.Count)
+			assert.Zero(t, card1.Status.LogicalSliced.Count)
+			assert.False(t, device.IsWholeAcceleratorCapable(card1.Status))
+
+			// Pass 3: card 1 recovers as a healthy MIG card.
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_STAGE", "")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_INDEX", "")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.False(t, groups[0].Accelerators[1].Status.Unhealthy)
+			assert.Equal(t, int32(7), groups[0].Accelerators[1].Status.PhysicalSliced.Count)
+
+		case "mig_mode_fatal":
+			stage := os.Getenv("GPUSTACK_TEST_NVML_MIG_FAIL_STAGE")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_STAGE", stage)
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_ERR", os.Getenv("GPUSTACK_TEST_NVML_MIG_FAIL_ERR"))
+
+			groups, err = d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			// Verify cache survived the fatal pass by dropping card 1 on the next pass.
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_STAGE", "mig_mode")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_ERR", strconv.Itoa(int(nvml.ERROR_GPU_IS_LOST)))
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+			assert.Equal(t, int32(7), groups[0].Accelerators[1].Status.PhysicalSliced.Count)
+
+		case "mig_profile_non_unqueryable":
+			stage := os.Getenv("GPUSTACK_TEST_NVML_MIG_FAIL_STAGE")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_STAGE", stage)
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_NVML_FAIL_ERR", os.Getenv("GPUSTACK_TEST_NVML_MIG_FAIL_ERR"))
+
+			// Non-unqueryable MIG profile probe errors log and publish a short inventory
+			// instead of aborting whole-node detection.
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.Equal(t, int32(7), groups[0].Accelerators[0].Status.PhysicalSliced.Count)
+			assert.Zero(t, groups[0].Accelerators[1].Status.PhysicalSliced.Count)
+			assert.Zero(t, groups[0].Accelerators[1].Status.LogicalSliced.Count)
+
+		default:
+			t.Fatalf("unknown scenario %q", scenario)
+		}
+		return
+	}
+
+	dir := compileNVMLFixture(t)
+
+	testCases := []struct {
+		name     string
+		scenario string
+		stage    string
+		errCode  nvml.Return
+	}{
+		{
+			name:     "unqueryable GetMigMode retains cached MIG card as unhealthy",
+			scenario: "mig_mode_unqueryable",
+			stage:    "mig_mode",
+			errCode:  nvml.ERROR_GPU_IS_LOST,
+		},
+		{
+			name:     "unqueryable MIG profile probe retains cached MIG card as unhealthy",
+			scenario: "mig_profile_unqueryable",
+			stage:    "mig_profile",
+			errCode:  nvml.ERROR_GPU_IS_LOST,
+		},
+		{
+			name:     "unqueryable MIG placement probe retains cached MIG card as unhealthy",
+			scenario: "mig_placement_unqueryable",
+			stage:    "mig_placement",
+			errCode:  nvml.ERROR_RESET_REQUIRED,
+		},
+		{
+			name:     "non-MIG card returning NOT_SUPPORTED publishes logical slicing alongside MIG sibling",
+			scenario: "mig_mode_absent",
+			stage:    "mig_mode",
+			errCode:  nvml.ERROR_NOT_SUPPORTED,
+		},
+		{
+			name:     "pre-MIG driver returning FUNCTION_NOT_FOUND publishes logical slicing cleanly",
+			scenario: "mig_mode_absent",
+			stage:    "mig_mode",
+			errCode:  nvml.ERROR_FUNCTION_NOT_FOUND,
+		},
+		{
+			name:     "invalid argument on GetMigMode fails detect pass instead of flipping to logical slicing",
+			scenario: "mig_mode_fatal",
+			stage:    "mig_mode",
+			errCode:  nvml.ERROR_INVALID_ARGUMENT,
+		},
+		{
+			name:     "fatal GetMigMode fails detect pass",
+			scenario: "mig_mode_fatal",
+			stage:    "mig_mode",
+			errCode:  nvml.ERROR_NO_PERMISSION,
+		},
+		{
+			name:     "non-unqueryable MIG profile probe publishes short inventory without aborting detect pass",
+			scenario: "mig_profile_non_unqueryable",
+			stage:    "mig_profile",
+			errCode:  nvml.ERROR_NO_PERMISSION,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestMigCardFaultIsolation$", "-test.count=1")
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(),
+				"GPUSTACK_TEST_NVML_MIG_SCENARIO="+tc.scenario,
+				"GPUSTACK_TEST_NVML_MIG_FAIL_STAGE="+tc.stage,
+				"GPUSTACK_TEST_NVML_MIG_FAIL_ERR="+strconv.Itoa(int(tc.errCode)),
+				"GPUSTACK_TEST_NVML_MIG_MODE=enabled",
+				"GPUSTACK_TEST_NVML_COUNT=2",
+				"GPUSTACK_TEST_NVML_TOTAL_MIB=81920",
+				"LD_LIBRARY_PATH="+dir,
+				"DYLD_LIBRARY_PATH="+dir,
+			)
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+		})
+	}
+}

@@ -137,6 +137,80 @@ hgmlReturn_t hgmlDeviceGetMemoryInfo(hgmlDevice_t device, hgmlMemory_t *memory) 
     memory->used = 0;
     return HGML_SUCCESS;
 }
+
+hgmlReturn_t hgmlDeviceGetMigMode(hgmlDevice_t device, unsigned int *currentMode,
+                                  unsigned int *pendingMode) {
+    unsigned int idx = device_index(device);
+    hgmlReturn_t ret = maybe_fail_device("mig_mode", idx);
+    if (ret != HGML_SUCCESS)
+        return ret;
+    if (strcmp(fixture_env("GPUSTACK_TEST_HGML_MIG_MODE"), "enabled") == 0) {
+        *currentMode = HGML_DEVICE_MIG_ENABLE;
+        *pendingMode = HGML_DEVICE_MIG_ENABLE;
+        return HGML_SUCCESS;
+    }
+    *currentMode = HGML_DEVICE_MIG_DISABLE;
+    *pendingMode = HGML_DEVICE_MIG_DISABLE;
+    return HGML_SUCCESS;
+}
+
+hgmlReturn_t hgmlDeviceGetGpuInstanceProfileInfoV(hgmlDevice_t device, unsigned int profile,
+                                                  hgmlGpuInstanceProfileInfo_v2_t *info) {
+    unsigned int idx = device_index(device);
+    hgmlReturn_t ret = maybe_fail_device("mig_profile", idx);
+    if (ret != HGML_SUCCESS)
+        return ret;
+    if (profile != 0U)
+        return HGML_ERROR_NOT_SUPPORTED;
+    unsigned int version = info->version;
+    memset(info, 0, sizeof(*info));
+    info->version = version;
+    info->id = 0U;
+    info->sliceCount = 4U;
+    info->instanceCount = 2U;
+    info->memorySizeMB = 32768ULL;
+    snprintf(info->name, sizeof(info->name), "4g32gb");
+    return HGML_SUCCESS;
+}
+
+hgmlReturn_t hgmlDeviceGetGpuInstanceProfileInfo(hgmlDevice_t device, unsigned int profile,
+                                                 hgmlGpuInstanceProfileInfo_t *info) {
+    unsigned int idx = device_index(device);
+    hgmlReturn_t ret = maybe_fail_device("mig_profile", idx);
+    if (ret != HGML_SUCCESS)
+        return ret;
+    if (profile != 0U)
+        return HGML_ERROR_NOT_SUPPORTED;
+    memset(info, 0, sizeof(*info));
+    info->id = 0U;
+    info->sliceCount = 4U;
+    info->instanceCount = 2U;
+    info->memorySizeMB = 32768ULL;
+    return HGML_SUCCESS;
+}
+
+hgmlReturn_t hgmlDeviceGetGpuInstancePossiblePlacements_v2(hgmlDevice_t device,
+                                                           unsigned int profileId,
+                                                           hgmlGpuInstancePlacement_t *placements,
+                                                           unsigned int *count) {
+    unsigned int idx = device_index(device);
+    hgmlReturn_t ret = maybe_fail_device("mig_placement", idx);
+    if (ret != HGML_SUCCESS)
+        return ret;
+    if (profileId != 0U)
+        return HGML_ERROR_NOT_SUPPORTED;
+    if (placements == NULL) {
+        *count = 2U;
+        return HGML_SUCCESS;
+    }
+    unsigned int n = *count < 2U ? *count : 2U;
+    for (unsigned int i = 0; i < n; i++) {
+        placements[i].start = i * 4U;
+        placements[i].size = 4U;
+    }
+    *count = n;
+    return HGML_SUCCESS;
+}
 `
 
 func compileHGMLFixture(t *testing.T) string {
@@ -676,4 +750,196 @@ func TestSnapshotLiveDetectedExcludesWithheldDivergentProfiles(t *testing.T) {
 	assert.True(t, restored.Status.Unhealthy)
 	assert.Equal(t, int32(2), restored.Status.PhysicalSliced.Count)
 	assert.Equal(t, []device.AcceleratorPhysicalSlicedProfile{shared}, restored.Status.PhysicalSliced.Profiles)
+}
+
+func TestMigCardFaultIsolation(t *testing.T) {
+	if scenario := os.Getenv("GPUSTACK_TEST_HGML_MIG_SCENARIO"); scenario != "" {
+		d := New(device.DetectorOptions{})
+
+		if scenario == "mig_mode_absent" {
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_STAGE", "mig_mode")
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_ERR", os.Getenv("GPUSTACK_TEST_HGML_MIG_FAIL_ERR"))
+
+			groups, err := d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			card0 := groups[0].Accelerators[0]
+			assert.False(t, card0.Status.Unhealthy)
+			assert.Equal(t, int32(2), card0.Status.PhysicalSliced.Count)
+
+			card1 := groups[0].Accelerators[1]
+			assert.False(t, card1.Status.Unhealthy)
+			assert.Zero(t, card1.Status.PhysicalSliced.Count)
+			assert.Equal(t, int32(128), card1.Status.LogicalSliced.Count)
+			assert.True(t, device.IsWholeAcceleratorCapable(card1.Status))
+			return
+		}
+
+		// Pass 1: seed both cards as healthy partitioned accelerators.
+		groups, err := d.DetectAccelerator(true)
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+		require.Len(t, groups[0].Accelerators, 2)
+		for i := 0; i < 2; i++ {
+			acc := groups[0].Accelerators[i]
+			assert.False(t, acc.Status.Unhealthy)
+			assert.Equal(t, int32(2), acc.Status.PhysicalSliced.Count)
+			assert.Zero(t, acc.Status.LogicalSliced.Count)
+			assert.False(t, device.IsWholeAcceleratorCapable(acc.Status))
+		}
+
+		switch scenario {
+		case "mig_mode_unqueryable", "mig_profile_unqueryable", "mig_placement_unqueryable":
+			stage := os.Getenv("GPUSTACK_TEST_HGML_MIG_FAIL_STAGE")
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_STAGE", stage)
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_ERR", os.Getenv("GPUSTACK_TEST_HGML_MIG_FAIL_ERR"))
+
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+
+			card0 := groups[0].Accelerators[0]
+			assert.Equal(t, "PPU-0", card0.ID)
+			assert.False(t, card0.Status.Unhealthy)
+			assert.Equal(t, int32(2), card0.Status.PhysicalSliced.Count)
+
+			card1 := groups[0].Accelerators[1]
+			assert.Equal(t, "PPU-1", card1.ID)
+			assert.True(t, card1.Status.Unhealthy)
+			assert.Equal(t, int32(2), card1.Status.PhysicalSliced.Count)
+			assert.Zero(t, card1.Status.LogicalSliced.Count)
+			assert.False(t, device.IsWholeAcceleratorCapable(card1.Status))
+
+			// Pass 3: card 1 recovers as a healthy partitioned card.
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_STAGE", "")
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_INDEX", "")
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.False(t, groups[0].Accelerators[1].Status.Unhealthy)
+			assert.Equal(t, int32(2), groups[0].Accelerators[1].Status.PhysicalSliced.Count)
+
+		case "mig_mode_fatal":
+			stage := os.Getenv("GPUSTACK_TEST_HGML_MIG_FAIL_STAGE")
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_STAGE", stage)
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_ERR", os.Getenv("GPUSTACK_TEST_HGML_MIG_FAIL_ERR"))
+
+			groups, err = d.DetectAccelerator(true)
+			require.Error(t, err)
+			assert.Nil(t, groups)
+
+			// Verify cache survived the fatal pass by dropping card 1 on the next pass.
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_STAGE", "mig_mode")
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_ERR", strconv.Itoa(int(hgml.ERROR_GPU_IS_LOST)))
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.True(t, groups[0].Accelerators[1].Status.Unhealthy)
+			assert.Equal(t, int32(2), groups[0].Accelerators[1].Status.PhysicalSliced.Count)
+
+		case "mig_profile_non_unqueryable":
+			stage := os.Getenv("GPUSTACK_TEST_HGML_MIG_FAIL_STAGE")
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_STAGE", stage)
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_INDEX", "1")
+			t.Setenv("GPUSTACK_TEST_HGML_FAIL_ERR", os.Getenv("GPUSTACK_TEST_HGML_MIG_FAIL_ERR"))
+
+			// Non-unqueryable MIG profile probe errors log and publish a short inventory
+			// instead of aborting whole-node detection.
+			groups, err = d.DetectAccelerator(true)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Len(t, groups[0].Accelerators, 2)
+			assert.Equal(t, int32(2), groups[0].Accelerators[0].Status.PhysicalSliced.Count)
+			assert.Zero(t, groups[0].Accelerators[1].Status.PhysicalSliced.Count)
+			assert.Zero(t, groups[0].Accelerators[1].Status.LogicalSliced.Count)
+
+		default:
+			t.Fatalf("unknown scenario %q", scenario)
+		}
+		return
+	}
+
+	dir := compileHGMLFixture(t)
+
+	testCases := []struct {
+		name     string
+		scenario string
+		stage    string
+		errCode  hgml.Return
+	}{
+		{
+			name:     "unqueryable GetMigMode retains cached partitioned card as unhealthy",
+			scenario: "mig_mode_unqueryable",
+			stage:    "mig_mode",
+			errCode:  hgml.ERROR_GPU_IS_LOST,
+		},
+		{
+			name:     "unqueryable MIG profile probe retains cached partitioned card as unhealthy",
+			scenario: "mig_profile_unqueryable",
+			stage:    "mig_profile",
+			errCode:  hgml.ERROR_GPU_NOT_FOUND,
+		},
+		{
+			name:     "unqueryable MIG placement probe retains cached partitioned card as unhealthy",
+			scenario: "mig_placement_unqueryable",
+			stage:    "mig_placement",
+			errCode:  hgml.ERROR_RESET_REQUIRED,
+		},
+		{
+			name:     "non-MIG card returning NOT_SUPPORTED publishes logical slicing alongside partitioned sibling",
+			scenario: "mig_mode_absent",
+			stage:    "mig_mode",
+			errCode:  hgml.ERROR_NOT_SUPPORTED,
+		},
+		{
+			name:     "pre-MIG driver returning FUNCTION_NOT_FOUND publishes logical slicing cleanly",
+			scenario: "mig_mode_absent",
+			stage:    "mig_mode",
+			errCode:  hgml.ERROR_FUNCTION_NOT_FOUND,
+		},
+		{
+			name:     "invalid argument on GetMigMode fails detect pass instead of flipping to logical slicing",
+			scenario: "mig_mode_fatal",
+			stage:    "mig_mode",
+			errCode:  hgml.ERROR_INVALID_ARGUMENT,
+		},
+		{
+			name:     "fatal GetMigMode fails detect pass",
+			scenario: "mig_mode_fatal",
+			stage:    "mig_mode",
+			errCode:  hgml.ERROR_NO_PERMISSION,
+		},
+		{
+			name:     "non-unqueryable MIG profile probe publishes short inventory without aborting detect pass",
+			scenario: "mig_profile_non_unqueryable",
+			stage:    "mig_profile",
+			errCode:  hgml.ERROR_NO_PERMISSION,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestMigCardFaultIsolation$", "-test.count=1")
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(),
+				"GPUSTACK_TEST_HGML_MIG_SCENARIO="+tc.scenario,
+				"GPUSTACK_TEST_HGML_MIG_FAIL_STAGE="+tc.stage,
+				"GPUSTACK_TEST_HGML_MIG_FAIL_ERR="+strconv.Itoa(int(tc.errCode)),
+				"GPUSTACK_TEST_HGML_MIG_MODE=enabled",
+				"GPUSTACK_TEST_HGML_COUNT=2",
+				"LD_LIBRARY_PATH="+dir,
+				"DYLD_LIBRARY_PATH="+dir,
+			)
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+		})
+	}
 }

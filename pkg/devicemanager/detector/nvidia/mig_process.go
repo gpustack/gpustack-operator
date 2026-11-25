@@ -247,12 +247,9 @@ func (in *nvidia) migPartitionSource(dev nvml.Device) migPartitionSource {
 		}
 
 		memHandler := mig.GetMemoryInfoV()
-		memInfo, ret := memHandler.V2()
-		if !ret.IsSuccess() {
-			memInfo, ret = memHandler.V1()
-			if !ret.IsSuccess() {
-				return migPartition{}, partitionQueryReason(ret)
-			}
+		memInfo, reason := readPartitionMemory(memHandler.V2, memHandler.V1)
+		if reason != device.AcceleratorProcessReasonNone {
+			return migPartition{}, reason
 		}
 		return migPartition{
 			id:         uuid,
@@ -288,6 +285,23 @@ func (in *nvidia) migPartitionSource(dev nvml.Device) migPartitionSource {
 			return read, reason, true
 		},
 	}
+}
+
+// readPartitionMemory reads partition memory with V2 and falls back to V1 while preserving V2
+// hardware or permission errors via selectVersionedReturn.
+func readPartitionMemory(
+	readV2, readV1 func() (nvml.Memory_v2, nvml.Return),
+) (nvml.Memory_v2, device.AcceleratorProcessReason) {
+	memInfo, v2Ret := readV2()
+	if v2Ret.IsSuccess() {
+		return memInfo, device.AcceleratorProcessReasonNone
+	}
+	memInfo, v1Ret := readV1()
+	ret := selectVersionedReturn(v2Ret, v1Ret)
+	if !ret.IsSuccess() {
+		return nvml.Memory_v2{}, partitionQueryReason(ret)
+	}
+	return memInfo, device.AcceleratorProcessReasonNone
 }
 
 // migDeviceHandles maps each of a card's live partition identifiers to the MIG device handle that

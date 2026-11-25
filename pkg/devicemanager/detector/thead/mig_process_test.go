@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gpustack.ai/gpustack/binding/hgml"
 	"gpustack.ai/gpustack/pkg/device"
 )
 
@@ -167,6 +168,66 @@ func TestResolvePartitionsWalksOnceForManyPartitions(t *testing.T) {
 // signature would silently disable partition reporting rather than fail to build.
 func TestDetectorServesPartitions(t *testing.T) {
 	assert.Implements(t, (*device.AcceleratorPartitionDetector)(nil), New(device.DetectorOptions{}))
+}
+
+func TestReadPartitionMemory(t *testing.T) {
+	v2Sample := hgml.Memory_v2{Total: 10 << 30, Used: 4 << 30}
+	v1Sample := hgml.Memory_v2{Total: 10 << 30, Used: 2 << 30}
+
+	cases := []struct {
+		name       string
+		v2Mem      hgml.Memory_v2
+		v2Ret      hgml.Return
+		v1Mem      hgml.Memory_v2
+		v1Ret      hgml.Return
+		wantMem    hgml.Memory_v2
+		wantReason device.AcceleratorProcessReason
+	}{
+		{
+			name:       "v2 succeeds directly",
+			v2Mem:      v2Sample,
+			v2Ret:      hgml.SUCCESS,
+			wantMem:    v2Sample,
+			wantReason: device.AcceleratorProcessReasonNone,
+		},
+		{
+			name:       "v2 unsupported falls back to v1 success",
+			v2Ret:      hgml.ERROR_NOT_SUPPORTED,
+			v1Mem:      v1Sample,
+			v1Ret:      hgml.SUCCESS,
+			wantMem:    v1Sample,
+			wantReason: device.AcceleratorProcessReasonNone,
+		},
+		{
+			name:       "v2 GPU_IS_LOST is preserved when v1 returns NOT_SUPPORTED",
+			v2Ret:      hgml.ERROR_GPU_IS_LOST,
+			v1Ret:      hgml.ERROR_NOT_SUPPORTED,
+			wantReason: device.AcceleratorProcessReasonDriverError,
+		},
+		{
+			name:       "v2 NO_PERMISSION is preserved when v1 returns FUNCTION_NOT_FOUND",
+			v2Ret:      hgml.ERROR_NO_PERMISSION,
+			v1Ret:      hgml.ERROR_FUNCTION_NOT_FOUND,
+			wantReason: device.AcceleratorProcessReasonPermission,
+		},
+		{
+			name:       "both unsupported reports unsupported",
+			v2Ret:      hgml.ERROR_NOT_SUPPORTED,
+			v1Ret:      hgml.ERROR_NOT_SUPPORTED,
+			wantReason: device.AcceleratorProcessReasonUnsupported,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mem, reason := readPartitionMemory(
+				func() (hgml.Memory_v2, hgml.Return) { return c.v2Mem, c.v2Ret },
+				func() (hgml.Memory_v2, hgml.Return) { return c.v1Mem, c.v1Ret },
+			)
+			assert.Equal(t, c.wantReason, reason)
+			assert.Equal(t, c.wantMem, mem)
+		})
+	}
 }
 
 func ptrTo[T any](v T) *T { return &v }

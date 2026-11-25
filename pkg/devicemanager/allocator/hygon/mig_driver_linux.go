@@ -136,7 +136,7 @@ func cardProfiles(dev dmi.Device) ([]migProfile, error) {
 		profiles = append(profiles, migProfile{id: info.Id, slices: info.Gpu_slice_count})
 	}
 	if len(profiles) == 0 {
-		return nil, fmt.Errorf("card offers no partition profile at all")
+		return nil, fmt.Errorf("card offers no partition profile at all: %w", errCardUnqueryable)
 	}
 	return profiles, nil
 }
@@ -250,15 +250,33 @@ func (d *dmiMigDriver) computeInstanceOf(
 		return 0, "", "", false, fmt.Errorf("read a compute instance: %w", ret)
 	}
 
-	path := migConfPath(deviceIndex, giID, ciInfo.Id)
-	id, err := readMigConfUUID(path)
+	id, path, err := readMigInstanceIdentity(deviceIndex, giID, ciInfo.Id)
 	if err != nil {
-		return 0, "", "", false, fmt.Errorf("read the instance registry file %q: %w", path, err)
-	}
-	if id == "" {
-		return 0, "", "", false, fmt.Errorf("the instance registry file %q carries no identity", path)
+		return 0, "", "", false, err
 	}
 	return ciInfo.Id, id, path, true, nil
+}
+
+// wrapMigConfigReadError classifies a per-card registry file read error: permission failures abort
+// node-wide enumeration, while missing or unreadable per-card files are marked card-unqueryable so
+// healthy sibling cards still list and reclaim.
+func wrapMigConfigReadError(msg string, err error) error {
+	if errors.Is(err, os.ErrPermission) {
+		return fmt.Errorf("%s: %w", msg, err)
+	}
+	return fmt.Errorf("%s: %w: %w", msg, errCardUnqueryable, err)
+}
+
+func readMigInstanceIdentity(deviceIndex, giID, ciID uint32) (uuid, confPath string, err error) {
+	path := migConfPath(deviceIndex, giID, ciID)
+	id, err := readMigConfUUID(path)
+	if err != nil {
+		return "", "", wrapMigConfigReadError(fmt.Sprintf("read the instance registry file %q", path), err)
+	}
+	if id == "" {
+		return "", "", fmt.Errorf("the instance registry file %q carries no identity: %w", path, errCardUnqueryable)
+	}
+	return id, path, nil
 }
 
 // CreateInstance implements migDriver.
@@ -406,20 +424,50 @@ func (d *dmiMigDriver) DestroyInstance(pciBusID string, inst migInstance) error 
 		return fmt.Errorf("card %s: %w", pciBusID, err)
 	}
 
+	gi, p, ok, err := findGpuInstanceByID(
+		pciBusID,
+		profiles,
+		inst.GiID,
+		dev.GetGpuInstances,
+		dmi.GpuInstance.GetInfo,
+	)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	return d.destroyGpuInstance(pciBusID, gi, p)
+}
+
+// findGpuInstanceByID locates a live GPU instance handle by id across all offered profiles.
+// Returning an error on GetInfo failure prevents callers from mistaking a driver fault for an
+// already-destroyed instance.
+func findGpuInstanceByID[T any](
+	pciBusID string,
+	profiles []migProfile,
+	targetGiID uint32,
+	listInstances func(profileID uint32) ([]T, dmi.Return),
+	getInfo func(T) (dmi.GpuInstanceInfo, dmi.Return),
+) (T, migProfile, bool, error) {
+	var zero T
 	for _, p := range profiles {
-		gis, ret := dev.GetGpuInstances(p.id)
+		gis, ret := listInstances(p.id)
 		if !ret.IsSuccess() {
-			return fmt.Errorf("card %s: list instances of profile %d: %w", pciBusID, p.id, ret)
+			return zero, migProfile{}, false, fmt.Errorf("card %s: list instances of profile %d: %w", pciBusID, p.id, ret)
 		}
 		for _, gi := range gis {
-			info, ret := gi.GetInfo()
-			if !ret.IsSuccess() || info.Id != inst.GiID {
+			info, ret := getInfo(gi)
+			if !ret.IsSuccess() {
+				return zero, migProfile{}, false, fmt.Errorf("card %s: read a gpu instance of profile %d: %w", pciBusID, p.id, ret)
+			}
+			if info.Id != targetGiID {
 				continue
 			}
-			return d.destroyGpuInstance(pciBusID, gi, p)
+			return gi, p, true, nil
 		}
 	}
-	return nil
+	return zero, migProfile{}, false, nil
 }
 
 // destroyGpuInstance removes a GPU instance's compute instances and then the instance itself.
@@ -472,7 +520,15 @@ func isUnqueryableReturn(ret dmi.Return) bool {
 	}
 }
 
+// errCardUnqueryable marks card-local non-DMI faults (such as a missing or unreadable per-card
+// registry file) so node-wide partition listing skips the affected card without aborting healthy
+// siblings.
+var errCardUnqueryable = errors.New("card unqueryable")
+
 func isUnqueryableError(err error) bool {
+	if errors.Is(err, errCardUnqueryable) {
+		return true
+	}
 	var ret dmi.Return
 	return errors.As(err, &ret) && isUnqueryableReturn(ret)
 }
@@ -512,6 +568,34 @@ func listInstancesAcrossCards(
 	return out, nil
 }
 
+// listCardInstances resolves one card's hardware device index, PCI address, and live partitions.
+// Resolving the PCI mapping with dev.GetIndex() rather than the enumeration loop counter keeps the
+// mapping aligned with liveInstances when DMI compacts handles after a card drop.
+func listCardInstances(
+	slot uint32,
+	getIndex func() (uint32, dmi.Return),
+	readPciBusID func(uint32) (string, error),
+	readLive func(string) ([]migInstance, error),
+) ([]migLiveInstance, error) {
+	devIndex, ret := getIndex()
+	if !ret.IsSuccess() {
+		return nil, fmt.Errorf("card %d: read device index: %w", slot, ret)
+	}
+	pciBusID, err := readPciBusID(devIndex)
+	if err != nil {
+		return nil, err
+	}
+	live, err := readLive(pciBusID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]migLiveInstance, 0, len(live))
+	for _, inst := range live {
+		out = append(out, migLiveInstance{PciBusID: pciBusID, Instance: inst})
+	}
+	return out, nil
+}
+
 // ListInstances implements migDriver. Cards failing with a card-specific unqueryable error are
 // skipped and logged so healthy cards proceed; non-card-specific errors or failure of all cards
 // fail the enumeration.
@@ -533,19 +617,14 @@ func (d *dmiMigDriver) ListInstances() ([]migLiveInstance, error) {
 			if !ret.IsSuccess() {
 				return nil, fmt.Errorf("card %d: resolve handle: %w", idx, ret)
 			}
-			pciBusID, err := migCardPciBusID(idx)
-			if err != nil {
-				return nil, err
-			}
-			live, err := d.liveInstances(dev, pciBusID)
-			if err != nil {
-				return nil, err
-			}
-			out := make([]migLiveInstance, 0, len(live))
-			for _, inst := range live {
-				out = append(out, migLiveInstance{PciBusID: pciBusID, Instance: inst})
-			}
-			return out, nil
+			return listCardInstances(
+				idx,
+				dev.GetIndex,
+				migCardPciBusID,
+				func(pciBusID string) ([]migInstance, error) {
+					return d.liveInstances(dev, pciBusID)
+				},
+			)
 		},
 		isUnqueryableError,
 		func(i int, err error) {
@@ -563,11 +642,11 @@ func migCardPciBusID(index uint32) (string, error) {
 	path := filepath.Join(migConfigDir, fmt.Sprintf("dev%d", index))
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read the pci address of card %d from %q: %w", index, path, err)
+		return "", wrapMigConfigReadError(fmt.Sprintf("read the pci address of card %d from %q", index, path), err)
 	}
 	addr := strings.TrimSpace(string(data))
 	if addr == "" {
-		return "", fmt.Errorf("the pci address file %q of card %d is empty", path, index)
+		return "", fmt.Errorf("the pci address file %q of card %d is empty: %w", path, index, errCardUnqueryable)
 	}
 	return addr, nil
 }

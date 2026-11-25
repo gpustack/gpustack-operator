@@ -22,36 +22,88 @@ import (
 // measured offers a one-, two- and four-slice profile and nothing three slices wide.
 var migSliceWidths = []uint32{1, 2, 3, 4}
 
-// migModeEnabled reports whether the node has Multi-Instance mode on, and whether that could be
-// established at all.
+// migModeEnabled reports whether the node has Multi-Instance mode on, returning an error when the
+// library is present and fails to answer.
 //
 // The mode is a property of the NODE. The vendor's mode switch takes no device selector and the
 // library's query takes no handle, so there is no such thing as one card of a host being partitioned
-// while another is not — which is the deepest difference from NVIDIA's MIG and the reason this is
+// while another is not -- which is the deepest difference from NVIDIA's MIG and the reason this is
 // read once per detect pass rather than per accelerator.
 //
 // It is read per pass rather than once per process because an administrator flips the mode out of
 // band, and a detector that cached the answer would keep publishing the capability the node had when
 // the device manager started.
-// A host whose driver predates Multi-Instance support has no library to load and no mode to report,
-// and that is an ANSWER rather than a failure: it is every Hygon node that has not been put into MIG
-// mode, which is nearly all of them. A library that is present and would not answer is the other
-// case entirely, and the two must not be conflated — reading a MIG-enabled node as unpartitioned
-// makes it advertise whole-card and logical-slice capacity no container on it can be served from.
-func (in *hygon) migModeEnabled() (enabled, known bool) {
+// A host whose driver predates Multi-Instance support (IsAPIUnavailable) or whose DCUs do not
+// support MIG mode (ERROR_NOT_SUPPORTED, per dmi_mig.h) answers cleanly as unpartitioned. Any other
+// error is returned so DetectAccelerator fails the pass and preserves cached state instead of
+// misclassifying a MIG-enabled node as whole-card capable.
+func (in *hygon) migModeEnabled() (bool, error) {
 	current, _, ret := in.dmi.GetSystemMigMode()
 	switch {
 	case ret.IsSuccess():
-		return current == dmi.DEVICE_MIG_ENABLE, true
-	case ret.IsAPIUnavailable():
-		in.logger.V(3).Info("this node offers no multi-instance library, so it serves no partitions",
+		return current == dmi.DEVICE_MIG_ENABLE, nil
+	case ret.IsAPIUnavailable(), ret == dmi.ERROR_NOT_SUPPORTED:
+		in.logger.V(3).Info("this node does not support multi-instance partitioning, so it serves no partitions",
 			"return", ret, "library", in.dmi.Path())
-		return false, true
+		return false, nil
 	default:
-		in.logger.Error(ret, "could not read the node's multi-instance mode, so neither capability is published",
+		in.logger.Error(ret, "failed to read the node's multi-instance mode",
 			"library", in.dmi.Path())
-		return false, false
+		return false, fmt.Errorf("failed to get hygon system MIG mode: %w", ret)
 	}
+}
+
+// isUnqueryableDMIError reports whether a non-success DMI return indicates a card-specific fault
+// where isolating the affected card allows healthy sibling cards to remain queryable.
+func isUnqueryableDMIError(ret dmi.Return) bool {
+	switch ret {
+	case dmi.ERROR_GPU_IS_LOST,
+		dmi.ERROR_UNKNOWN,
+		dmi.ERROR_RESET_REQUIRED,
+		dmi.ERROR_INSUFFICIENT_POWER,
+		dmi.ERROR_IRQ_ISSUE,
+		dmi.ERROR_NOT_FOUND:
+		return true
+	default:
+		return false
+	}
+}
+
+// firstUnqueryableDMIReturn walks a possibly joined error and returns the first card-unqueryable
+// DMI return code it wraps.
+func firstUnqueryableDMIReturn(err error) (dmi.Return, bool) {
+	if err == nil {
+		return dmi.SUCCESS, false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, sub := range joined.Unwrap() {
+			if ret, found := firstUnqueryableDMIReturn(sub); found {
+				return ret, true
+			}
+		}
+		return dmi.SUCCESS, false
+	}
+	var ret dmi.Return
+	if errors.As(err, &ret) && isUnqueryableDMIError(ret) {
+		return ret, true
+	}
+	return dmi.SUCCESS, false
+}
+
+// handleDMICardQueryError classifies a per-card DMI query failure during detection. Card-specific
+// unqueryable errors are logged, recorded in lastUnqueryableErr, and skipped; other errors fail
+// the detect pass immediately.
+func handleDMICardQueryError(
+	logger klog.Logger, index int, op string, ret dmi.Return, lastUnqueryableErr *error,
+) error {
+	err := fmt.Errorf("failed to %s at index %d: %w", op, index, ret)
+	if isUnqueryableDMIError(ret) {
+		logger.Error(ret, "skipping unqueryable device", "operation", op)
+		*lastUnqueryableErr = err
+		return nil
+	}
+	logger.Error(ret, "failed to "+op)
+	return err
 }
 
 // migCardCapability is what one card's Multi-Instance handle answered: the slicing capability it
@@ -69,29 +121,38 @@ type migCardCapability struct {
 //
 // The card is reached by its PCI address because that is the only identity the two libraries share:
 // the rest of this detector enumerates cards through RSMI, and the Multi-Instance library serves no
-// UUID at all and answers its own PCI query with an empty string. A card that cannot be reached
-// reports no capability rather than an empty one, so it is excluded from the partition family
-// instead of advertising a family with nothing behind it.
-func (in *hygon) detectCardMigProfiles(pciBusID string, logger klog.Logger) migCardCapability {
+// UUID at all and answers its own PCI query with an empty string. Non-success DMI errors are
+// returned so the caller can isolate unqueryable cards and retain cached unhealthy state instead of
+// misclassifying a partitioned card as whole-card capable.
+func (in *hygon) detectCardMigProfiles(pciBusID string, logger klog.Logger) (migCardCapability, dmi.Return) {
 	dev, ret := in.dmi.GetDeviceHandleByPciBusId(pciBusID)
 	if !ret.IsSuccess() {
-		logger.Error(ret, "failed to reach a card through the multi-instance library, so it publishes no"+
-			" partition profiles even though the node is in multi-instance mode", "pci", pciBusID)
-		return migCardCapability{}
+		logger.Error(ret, "failed to reach a card through the multi-instance library", "pci", pciBusID)
+		return migCardCapability{}, ret
 	}
 
-	infos, err := probeMigProfiles(dev.GetGpuInstanceProfileInfoBySliceCount)
-	if err != nil {
-		logger.Error(err,
+	infos, probeErr := probeMigProfiles(dev.GetGpuInstanceProfileInfoBySliceCount)
+	if probeErr != nil {
+		logger.Error(probeErr,
 			"left partition profiles out of a card's inventory because the driver could not answer for "+
 				"them; a profile absent here is absent from the node's capacity, its flavor and its "+
 				"InstanceType, so a partition of it can stop being nameable and a new request for it is refused")
+		if uRet, ok := firstUnqueryableDMIReturn(probeErr); ok {
+			return migCardCapability{}, uRet
+		}
+	}
+
+	profiles, placementErr := migProfilesOf(infos, dev, logger)
+	if placementErr != nil {
+		if uRet, ok := firstUnqueryableDMIReturn(placementErr); ok {
+			return migCardCapability{}, uRet
+		}
 	}
 
 	return migCardCapability{
-		sliced: physicalSliced(migProfilesOf(infos, dev, logger)),
+		sliced: physicalSliced(profiles),
 		cores:  migCardCores(infos),
-	}
+	}, dmi.SUCCESS
 }
 
 // migCardCores derives the card's full compute-unit count from its partition profiles.
@@ -120,13 +181,13 @@ func migCardCores(infos []dmi.GpuInstanceProfileInfo) uint32 {
 // derives what survives.
 func migProfilesOf(
 	infos []dmi.GpuInstanceProfileInfo, dev dmi.Device, logger klog.Logger,
-) []device.AcceleratorPhysicalSlicedProfile {
+) ([]device.AcceleratorPhysicalSlicedProfile, error) {
 	// Each profile's empty-card legal placement set is cached at detect time so the reconciler can
 	// derive the card's remaining profiles by subtracting the occupied intervals it reconstructs
 	// from Pod annotations, with no per-reconcile device query.
-	answered, placementsByID, err := migPlacementsByProfile(infos, dev.GetGpuInstancePossiblePlacements)
-	if err != nil {
-		logger.Error(err, "dropped partition profiles whose possible placements are unreadable")
+	answered, placementsByID, placementErr := migPlacementsByProfile(infos, dev.GetGpuInstancePossiblePlacements)
+	if placementErr != nil {
+		logger.Error(placementErr, "dropped partition profiles whose possible placements are unreadable")
 	}
 
 	profiles, rejected := deriveSlicedProfiles(answered,
@@ -136,7 +197,7 @@ func migProfilesOf(
 	for _, reason := range rejected {
 		logger.Info("dropped unpublishable partition profile", "reason", reason)
 	}
-	return profiles
+	return profiles, placementErr
 }
 
 // probeMigProfiles walks the instance-width space and separates the three answers a probe can give:

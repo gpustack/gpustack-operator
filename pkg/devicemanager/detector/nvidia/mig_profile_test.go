@@ -508,3 +508,58 @@ func TestProbeMigProfiles(t *testing.T) {
 		})
 	}
 }
+
+func TestDetectMigProfilesWith_ErrorClassification(t *testing.T) {
+	testCases := []struct {
+		name       string
+		probe      func(uint32) (nvml.GpuInstanceProfileInfo_v3, nvml.Return)
+		placements func(uint32) ([]nvml.GpuInstancePlacement, nvml.Return)
+		wantRet    nvml.Return
+	}{
+		{
+			name: "unqueryable probe error isolates card",
+			probe: func(uint32) (nvml.GpuInstanceProfileInfo_v3, nvml.Return) {
+				return nvml.GpuInstanceProfileInfo_v3{}, nvml.ERROR_GPU_IS_LOST
+			},
+			placements: func(uint32) ([]nvml.GpuInstancePlacement, nvml.Return) {
+				return nil, nvml.SUCCESS
+			},
+			wantRet: nvml.ERROR_GPU_IS_LOST,
+		},
+		{
+			name: "non-unqueryable probe error does not escalate to whole-node failure",
+			probe: func(uint32) (nvml.GpuInstanceProfileInfo_v3, nvml.Return) {
+				return nvml.GpuInstanceProfileInfo_v3{}, nvml.ERROR_NO_PERMISSION
+			},
+			placements: func(uint32) ([]nvml.GpuInstancePlacement, nvml.Return) {
+				return nil, nvml.SUCCESS
+			},
+			wantRet: nvml.SUCCESS,
+		},
+		{
+			name: "non-unqueryable placement error leaving empty inventory returns success",
+			probe: func(id uint32) (nvml.GpuInstanceProfileInfo_v3, nvml.Return) {
+				if id == 0 {
+					return nvml.GpuInstanceProfileInfo_v3{Id: 0, SliceCount: 1, InstanceCount: 7, Name: profileName("1g.10gb")}, nvml.SUCCESS
+				}
+				return nvml.GpuInstanceProfileInfo_v3{}, nvml.ERROR_NOT_SUPPORTED
+			},
+			placements: func(uint32) ([]nvml.GpuInstancePlacement, nvml.Return) {
+				return nil, nvml.ERROR_FUNCTION_NOT_FOUND
+			},
+			wantRet: nvml.SUCCESS,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			profiles, ret := detectMigProfilesWith(func() string { return "GPU-test" }, tc.probe, tc.placements)
+			if ret != tc.wantRet {
+				t.Fatalf("detectMigProfilesWith() ret = %v, want %v", ret, tc.wantRet)
+			}
+			if len(profiles) != 0 {
+				t.Fatalf("detectMigProfilesWith() profiles = %+v, want empty", profiles)
+			}
+		})
+	}
+}

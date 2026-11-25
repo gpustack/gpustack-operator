@@ -290,12 +290,9 @@ func (s *ResourceServer) getPartitionListAndWatchResponse(
 			res := Resource{Group: grp.ID, Device: acc.ID}
 			ceiling := acc.Status.PhysicalSliced.Count
 			ids = append(ids, res.DeviceIDs(s.AllocationMode, ceiling)...)
-			if acc.Status.Unhealthy {
-				// A broken accelerator keeps its IDs — a live allocation may still hold one — but
-				// offers no room for a new instance.
-				continue
-			}
-			room += partitionRoomOf(devs, res, ceiling)
+			// A broken accelerator offers no room for a new instance, but still accounts for its
+			// live instances so they do not consume free room advertised by healthy siblings.
+			room += partitionRoomOf(devs, res, ceiling, acc.Status.Unhealthy)
 		}
 	}
 
@@ -323,11 +320,11 @@ func (s *ResourceServer) getPartitionListAndWatchResponse(
 }
 
 // partitionRoomOf returns how many instances an accelerator currently accounts for: the ones it
-// already carries plus the largest number of further ones it can still host over its profiles, per
-// the placement-aware ledger. An accelerator whose ledger has not been published yet — a fresh
-// node, or a device manager still rolling out — falls back to its static ceiling, so the node
-// advertises its full room rather than none.
-func partitionRoomOf(devs *workercore.Devices, res Resource, ceiling int32) int {
+// already carries plus, when healthy, the largest number of further ones it can still host over
+// its profiles, per the placement-aware ledger. An unhealthy accelerator offers zero remaining
+// room while still counting its live allocations so they do not starve healthy siblings. A healthy
+// accelerator whose ledger has not been published yet falls back to its static ceiling.
+func partitionRoomOf(devs *workercore.Devices, res Resource, ceiling int32, unhealthy bool) int {
 	for i := range devs.Status.Groups {
 		grp := &devs.Status.Groups[i]
 		if grp.ID != res.Group {
@@ -339,17 +336,26 @@ func partitionRoomOf(devs *workercore.Devices, res Resource, ceiling int32) int 
 				continue
 			}
 			if !device.PartitionLedgerReady(acc) {
+				if unhealthy {
+					return 0
+				}
 				return int(ceiling)
 			}
 			var allocated, remaining int32
 			for k := range acc.AllocatedProfiles {
 				allocated += acc.AllocatedProfiles[k].Count
 			}
+			if unhealthy {
+				return int(allocated)
+			}
 			for k := range acc.RemainingProfiles {
 				remaining = max(remaining, acc.RemainingProfiles[k].Count)
 			}
 			return int(allocated + remaining)
 		}
+	}
+	if unhealthy {
+		return 0
 	}
 	return int(ceiling)
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/utils/ptr"
 
+	"gpustack.ai/gpustack/binding/nvml"
 	"gpustack.ai/gpustack/pkg/device"
 )
 
@@ -274,4 +275,64 @@ func TestUnreadAcceleratorPartitions(t *testing.T) {
 		MemoryReason: device.AcceleratorProcessReasonPermission,
 		CoresReason:  device.AcceleratorProcessReasonUnsupported,
 	}}, got)
+}
+
+func TestReadPartitionMemory(t *testing.T) {
+	v2Sample := nvml.Memory_v2{Total: 10 << 30, Used: 4 << 30}
+	v1Sample := nvml.Memory_v2{Total: 10 << 30, Used: 2 << 30}
+
+	cases := []struct {
+		name       string
+		v2Mem      nvml.Memory_v2
+		v2Ret      nvml.Return
+		v1Mem      nvml.Memory_v2
+		v1Ret      nvml.Return
+		wantMem    nvml.Memory_v2
+		wantReason device.AcceleratorProcessReason
+	}{
+		{
+			name:       "v2 succeeds directly",
+			v2Mem:      v2Sample,
+			v2Ret:      nvml.SUCCESS,
+			wantMem:    v2Sample,
+			wantReason: device.AcceleratorProcessReasonNone,
+		},
+		{
+			name:       "v2 unsupported falls back to v1 success",
+			v2Ret:      nvml.ERROR_NOT_SUPPORTED,
+			v1Mem:      v1Sample,
+			v1Ret:      nvml.SUCCESS,
+			wantMem:    v1Sample,
+			wantReason: device.AcceleratorProcessReasonNone,
+		},
+		{
+			name:       "v2 GPU_IS_LOST is preserved when v1 returns NOT_SUPPORTED",
+			v2Ret:      nvml.ERROR_GPU_IS_LOST,
+			v1Ret:      nvml.ERROR_NOT_SUPPORTED,
+			wantReason: device.AcceleratorProcessReasonDriverError,
+		},
+		{
+			name:       "v2 NO_PERMISSION is preserved when v1 returns FUNCTION_NOT_FOUND",
+			v2Ret:      nvml.ERROR_NO_PERMISSION,
+			v1Ret:      nvml.ERROR_FUNCTION_NOT_FOUND,
+			wantReason: device.AcceleratorProcessReasonPermission,
+		},
+		{
+			name:       "both unsupported reports unsupported",
+			v2Ret:      nvml.ERROR_NOT_SUPPORTED,
+			v1Ret:      nvml.ERROR_NOT_SUPPORTED,
+			wantReason: device.AcceleratorProcessReasonUnsupported,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mem, reason := readPartitionMemory(
+				func() (nvml.Memory_v2, nvml.Return) { return c.v2Mem, c.v2Ret },
+				func() (nvml.Memory_v2, nvml.Return) { return c.v1Mem, c.v1Ret },
+			)
+			assert.Equal(t, c.wantReason, reason)
+			assert.Equal(t, c.wantMem, mem)
+		})
+	}
 }
