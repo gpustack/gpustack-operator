@@ -97,7 +97,7 @@ Send all client requests to *`status.endpoint`*. *Encode* `Pod`s stay excluded f
 
 Under `llm-d-router` + vLLM, the `encode` profile omits queue, KV-cache and prefix scorers, sends
 media requests through *Encode* first, and routes text-only requests straight to *Prefill* and
-*Decode*. See [Supported serving configurations](encode-prefill-decode.md#supported-serving-configurations) for verified combinations.
+*Decode*. See [Supported serving configurations](encode-prefill-decode.md#supported-serving-configurations) for the accepted combinations.
 
 ## Default routing policies
 

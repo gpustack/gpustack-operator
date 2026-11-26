@@ -80,7 +80,8 @@ standard `gpustack/runner` image tags on both creation and update.
 The shared-store path uses `KVCacheBackend.spec.transport.protocol`. The direct *PD* path selects
 `Mooncake`, `NIXL` or `HIXL` through *`spec.kvTransfer.backend`*
 ([Direct KV transports](prefill-decode.md#direct-kv-transports)). Admission refuses
-deployments whose store and direct paths request incompatible fabrics.
+deployments whose store and direct paths request incompatible fabrics. A cell reads **Admitted** when
+admission does not refuse the combination.
 
 | Transport (API/Mooncake) | Engine | Store path |
 |---|---|---|
