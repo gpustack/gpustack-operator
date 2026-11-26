@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,14 +36,20 @@ type fakeModelDeploymentCacheScraper struct {
 	counts map[string][3]float64
 	// errs marks replicas whose endpoint did not answer at all, which is the OTHER way to have no
 	// account — distinct from answering without the metric family.
-	errs  map[string]bool
+	errs map[string]bool
+	// calls records every replica asked. The reconciler scrapes together, so the record is guarded
+	// and its ORDER IS THE ORDER THE SCRAPES COMPLETED IN, which nothing may assert on; scraped()
+	// hands back the set.
+	mu    sync.Mutex
 	calls []string
 }
 
 func (f *fakeModelDeploymentCacheScraper) ScrapeCache(
 	_ context.Context, pod *core.Pod,
 ) (ModelDeploymentCacheAccount, error) {
+	f.mu.Lock()
 	f.calls = append(f.calls, pod.Name)
+	f.mu.Unlock()
 	if f.errs[pod.Name] {
 		return ModelDeploymentCacheAccount{}, errors.New("dial tcp: connection refused")
 	}
@@ -50,6 +59,17 @@ func (f *fakeModelDeploymentCacheScraper) ScrapeCache(
 	account.Attempted, account.Keys, account.Failed = counts[0], counts[1], counts[2]
 
 	return account, nil
+}
+
+// scraped is the set of replicas asked, in name order.
+func (f *fakeModelDeploymentCacheScraper) scraped() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	names := append([]string(nil), f.calls...)
+	slices.Sort(names)
+
+	return names
 }
 
 // cacheAttachedOf drives one reading through the whole status compute, so the assertions are over
@@ -450,7 +470,7 @@ func TestModelDeploymentCacheAttached_AnInstanceShortAMemberIsNotAsked(t *testin
 
 		got := cacheAttachedOf(t, md, pods, readyDomain(), scraper)
 
-		assert.Equal(t, []string{"qwen-server-r0-m0", "qwen-server-r1-m0"}, scraper.calls,
+		assert.Equal(t, []string{"qwen-server-r0-m0", "qwen-server-r1-m0"}, scraper.scraped(),
 			"one leader per whole instance, and only the leader: the ranks serve no API to ask")
 		assert.True(t, ModelDeploymentConditionCacheAttached.IsTrue(got))
 	})
@@ -599,7 +619,7 @@ func TestModelDeploymentCacheAttached_OnlyStoreClientRolesAreAsked(t *testing.T)
 
 		cacheAttachedOf(t, md, pods, readyDomain(), scraper)
 
-		assert.Equal(t, []string{"qwen-prefill-0", "qwen-decode-0"}, scraper.calls,
+		assert.Equal(t, []string{"qwen-decode-0", "qwen-prefill-0"}, scraper.scraped(),
 			"SGLang's store client is role-blind, so its decode half carries one")
 	})
 }
@@ -910,4 +930,91 @@ func TestModelDeploymentPoolTransportsNeedInterface(t *testing.T) {
 			assert.Equal(t, tc.want, ModelDeploymentPoolTransportsNeedInterface(tc.kvcb))
 		})
 	}
+}
+
+// TestModelDeploymentCacheAttached_MessageIsBounded keeps the CacheAttached message under the
+// length the API accepts however many replicas are ready.
+//
+// A condition message is capped by the schema at 32768 characters, and one segment per replica grows
+// with the role's replica count, which the schema allows up to 1024. At most a named count of
+// replicas is rendered per role; the rest are counted in one tail that still names their verdict, so
+// a reader is told what they are not being shown.
+func TestModelDeploymentCacheAttached_MessageIsBounded(t *testing.T) {
+	const omitted = 7
+	rendered := int32(modelDeploymentCacheMessageReplicas)
+	perReplica := int32(modelDeploymentCacheMessageReplicas) + omitted
+
+	t.Run("one_role_all_failing", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = perReplica })
+		readings := make(map[string]ModelDeploymentCacheReading, perReplica)
+		for i := range perReplica {
+			readings[fmt.Sprintf("qwen-server-%d", i)] = ModelDeploymentCacheFailing
+		}
+
+		got := cacheAttachedOf(t, md, readyPods(md, perReplica), readyDomain(),
+			&fakeModelDeploymentCacheScraper{readings: readings})
+		message := ModelDeploymentConditionCacheAttached.GetMessage(got)
+
+		assert.Equal(t, "False", ModelDeploymentConditionCacheAttached.GetStatus(got))
+		assert.Equal(t, modelDeploymentReasonCacheOperationsFailing,
+			ModelDeploymentConditionCacheAttached.GetReason(got))
+		assert.Contains(t, message, fmt.Sprintf("%d of %d ready replicas report store transfers of which every key failed",
+			perReplica, perReplica), "the head still counts every replica")
+		assert.Equal(t, int(rendered), strings.Count(message, "transfer operations attempted"),
+			"at most the bound of replicas is rendered")
+		assert.Contains(t, message, fmt.Sprintf("and %d more report transfers of which every key failed", omitted),
+			"the tail names the omitted replicas and their verdict")
+		assert.Less(t, len(message), 1200, "the message stays bounded")
+	})
+
+	t.Run("two_roles_each_rendered_up_to_the_cap", func(t *testing.T) {
+		// Ten replicas per role: the first five succeed and the rest fail, so both lines are capped
+		// and each role is rendered up to the rendered in each.
+		const perRole, failingPerRole = 10, 5
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Replicas = perRole
+			md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+				Name: "worker", Replicas: perRole, AcceleratorType: "h20-8x",
+			})
+		})
+		pods := append(readyRolePods(md, 0, perRole), readyRolePods(md, 1, perRole)...)
+		readings := make(map[string]ModelDeploymentCacheReading, 2*perRole)
+		for i := range perRole {
+			verdict := ModelDeploymentCacheActive
+			if i >= failingPerRole {
+				verdict = ModelDeploymentCacheFailing
+			}
+			readings[fmt.Sprintf("qwen-server-%d", i)] = verdict
+			readings[fmt.Sprintf("qwen-worker-%d", i)] = verdict
+		}
+
+		got := cacheAttachedOf(t, md, pods, readyDomain(), &fakeModelDeploymentCacheScraper{readings: readings})
+		message := ModelDeploymentConditionCacheAttached.GetMessage(got)
+
+		assert.Equal(t, "True", ModelDeploymentConditionCacheAttached.GetStatus(got))
+		assert.Equal(t, modelDeploymentReasonCacheActive, ModelDeploymentConditionCacheAttached.GetReason(got))
+		assert.Contains(t, message, fmt.Sprintf("%d of %d ready replicas report succeeding store transfers", 2*failingPerRole, 2*perRole))
+		assert.Contains(t, message, fmt.Sprintf("; %d report transfers of which every key failed", 2*failingPerRole))
+		assert.Equal(t, 4*int(rendered), strings.Count(message, "transfer operations attempted"),
+			"each role renders up to the rendered in each line")
+		for _, role := range []string{"server", "worker"} {
+			assert.Equal(t, 2*int(rendered), strings.Count(message, fmt.Sprintf("role %q", role)),
+				"role %q is rendered in both lines up to the rendered", role)
+		}
+		assert.Contains(t, message, fmt.Sprintf("and %d more report succeeding store transfers", 2*(failingPerRole-int(rendered))),
+			"the tail of the succeeding line names what it left out")
+		assert.Contains(t, message, fmt.Sprintf("and %d more report transfers of which every key failed", 2*(failingPerRole-int(rendered))),
+			"the tail of the failing line names what it left out")
+		assert.Less(t, len(message), 2400, "the message stays bounded")
+	})
+}
+
+// readyRolePods builds n Ready replicas of one declared role of the deployment.
+func readyRolePods(md *workercore.ModelDeployment, role, n int32) []core.Pod {
+	pods := make([]core.Pod, 0, n)
+	for ordinal := range n {
+		pods = append(pods, readyRoleReplica(md, int(role), ordinal, true))
+	}
+
+	return pods
 }

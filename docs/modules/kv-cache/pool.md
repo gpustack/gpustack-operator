@@ -259,7 +259,7 @@ fabric-only pool refuses every transfer, and vLLM records a fully refused transf
 | Symptom | Expected signal | Resolution |
 |---|---|---|
 | `CacheAttached=False` with reason `CacheOperationsFailing` | The deployment stays `Ready` and serves every request. The message names the pool, its transports and, per replica, the transfer operations attempted and how many keys failed. | If the message says the engine has no RDMA interface, set *`spec.roles[i].resources.interface`* on the named role and let the replicas roll. Otherwise read the engine logs and the `KVCacheBackend` member logs for the transport error. |
-| Admission warning that a role writes to a pool over `[rdma]` or `[efa]` and needs a fabric interface | The request is admitted. The warning names the role, the pool and *`spec.roles[i].resources.interface`*. | Set *`resources.interface`* on the named role before sending traffic. Without it every engine-to-store transfer is refused while the deployment keeps reporting `Ready`. |
+| Admission warning that a role writes to a pool whose every transport is `rdma`, `efa` or Ascend A5 Host RoCE and needs a fabric interface | The request is admitted. The warning names the role, the pool and *`spec.roles[i].resources.interface`*. | Set *`resources.interface`* on the named role before sending traffic. Without it every engine-to-store transfer is refused while the deployment keeps reporting `Ready`. |
 
 ### Tenant compatibility
 

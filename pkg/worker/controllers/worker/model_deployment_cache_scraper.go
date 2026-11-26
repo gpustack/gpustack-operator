@@ -191,10 +191,11 @@ func modelDeploymentCacheAccount(body []byte) (ModelDeploymentCacheAccount, erro
 	switch {
 	case account.Attempted == 0 || unmeasured:
 		// Unreadable: nothing was transferred, or the account cannot be classified.
-	case failedKeys == nil:
-		// The verdict rests on three counters. Transfer operations beside no failed-key counter are
-		// an account this reader cannot classify, and reading it as active is the one wrong answer
-		// that would hide the failure this condition exists to report.
+	case keys == nil || failedKeys == nil:
+		// The verdict rests on three counters. Transfer operations beside no key counter or no
+		// failed-key counter are an account this reader cannot classify, and reading it as active
+		// is the one wrong answer that would hide the failure this condition exists to report,
+		// while reading a keyless partial series as failing would report a failure not seen.
 	case account.Failed < account.Keys || clean:
 		account.Reading = ModelDeploymentCacheActive
 	default:

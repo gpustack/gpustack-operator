@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	core "k8s.io/api/core/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -247,8 +248,18 @@ type modelDeploymentCacheReplicaAccount struct {
 
 // readModelDeploymentCache scrapes every ready replica it is given and returns what came back.
 //
-// A scrape that failed is an Unreadable account rather than an error: the condition's whole contract
-// is that an unread signal is Unknown.
+// THE REPLICAS ARE SCRAPED TOGETHER, under the reconcile's own context and with the per-scrape
+// timeout the scraper keeps. One at a time, a pass over N replicas costs up to N timeouts whenever
+// endpoints hang, and that pass repeats on every modelDeploymentCacheRequeue while the controller's
+// other reconciles queue behind it. The bound on scrapes in flight is the scaler's, for the same act.
+//
+// A scrape that failed or timed out is an Unreadable account for THAT replica alone, never an error
+// for the pass: the condition's whole contract is that an unread signal is Unknown. Nothing cancels
+// the other scrapes, so a hung endpoint costs one timeout and no replica more.
+//
+// EACH GOROUTINE WRITES ITS OWN SLOT, which is what keeps the accounts in replica order however the
+// scrapes complete. The message is rendered from that order, so it reads the same from pass to pass
+// and a diff of two messages is a diff of the accounts and not of the network.
 func (r *ModelDeploymentReconciler) readModelDeploymentCache(
 	ctx context.Context, ready []*core.Pod,
 ) []modelDeploymentCacheReplicaAccount {
@@ -257,14 +268,22 @@ func (r *ModelDeploymentReconciler) readModelDeploymentCache(
 		scraper = defaultModelDeploymentCacheScraper
 	}
 
-	accounts := make([]modelDeploymentCacheReplicaAccount, 0, len(ready))
-	for _, pod := range ready {
-		account, err := scraper.ScrapeCache(ctx, pod)
-		if err != nil {
-			account = ModelDeploymentCacheAccount{}
-		}
-		accounts = append(accounts, modelDeploymentCacheReplicaAccount{pod: pod, account: account})
+	accounts := make([]modelDeploymentCacheReplicaAccount, len(ready))
+	var group errgroup.Group
+	group.SetLimit(maxSamplerScrapeConcurrency)
+	for i, pod := range ready {
+		group.Go(func() error {
+			account, err := scraper.ScrapeCache(ctx, pod)
+			if err != nil {
+				account = ModelDeploymentCacheAccount{}
+			}
+			accounts[i] = modelDeploymentCacheReplicaAccount{pod: pod, account: account}
+
+			return nil
+		})
 	}
+	// No scrape returns an error, so Wait only waits.
+	_ = group.Wait()
 
 	return accounts
 }
@@ -425,27 +444,61 @@ func modelDeploymentRoleInterface(role *workercore.ModelDeploymentRole) string {
 	return role.Resources.Interface.String()
 }
 
+// modelDeploymentCacheMessageReplicas is how many replicas of each role one line of the CacheAttached
+// message renders.
+//
+// IT IS A BOUND ON THE MESSAGE, not on the observation. The schema caps a condition message at 32768
+// characters and a role's replicas at 1024, and one segment per replica runs past the first limit
+// long before the second. Every replica is still scraped and still counted in the head; the ones
+// beyond the cap are counted again in one tail that names their verdict, so a reader is told what
+// they are not being shown rather than left to read a short list as the whole of it.
+const modelDeploymentCacheMessageReplicas = 3
+
 // modelDeploymentCacheAccountsLine renders the replicas whose account reads the given reading, each
-// with its role, the interface that role requests and its transfer counts. A replica that gave no
-// account has no counts to print, so it is not rendered here; the message counts it instead.
+// with its role, the interface that role requests and its transfer counts, at most
+// modelDeploymentCacheMessageReplicas of each role in replica order. The replicas left out follow in
+// one segment with their count and verdict. A replica that gave no account has no counts to print, so
+// it is not rendered here at all; the message counts it instead.
 func modelDeploymentCacheAccountsLine(
 	md *workercore.ModelDeployment, accounts []modelDeploymentCacheReplicaAccount,
 	reading ModelDeploymentCacheReading,
 ) string {
 	roles := modelDeploymentRolesByName(md)
+	rendered := make(map[string]int, len(roles))
 	parts := make([]string, 0, len(accounts))
+	var omitted int
 	for _, entry := range accounts {
 		if entry.account.Reading != reading {
 			continue
 		}
+		role := modelDeploymentPodRole(entry.pod)
+		if rendered[role] >= modelDeploymentCacheMessageReplicas {
+			omitted++
+
+			continue
+		}
+		rendered[role]++
 		parts = append(parts, fmt.Sprintf("%s (role %q, resources.interface: %s): %s transfer operations "+
-			"attempted, %s of %s keys failed", entry.pod.Name, modelDeploymentPodRole(entry.pod),
-			modelDeploymentRoleInterface(roles[modelDeploymentPodRole(entry.pod)]),
+			"attempted, %s of %s keys failed", entry.pod.Name, role,
+			modelDeploymentRoleInterface(roles[role]),
 			modelDeploymentCacheCount(entry.account.Attempted), modelDeploymentCacheCount(entry.account.Failed),
 			modelDeploymentCacheCount(entry.account.Keys)))
 	}
+	if omitted > 0 {
+		parts = append(parts, fmt.Sprintf("and %d more %s", omitted, modelDeploymentCacheReadingPhrase(reading)))
+	}
 
 	return strings.Join(parts, "; ")
+}
+
+// modelDeploymentCacheReadingPhrase is what a replica's account says it reports, in the words the
+// message's head already uses for the same reading.
+func modelDeploymentCacheReadingPhrase(reading ModelDeploymentCacheReading) string {
+	if reading == ModelDeploymentCacheActive {
+		return "report succeeding store transfers"
+	}
+
+	return "report transfers of which every key failed"
 }
 
 // modelDeploymentRolesByName indexes the declared roles by name.

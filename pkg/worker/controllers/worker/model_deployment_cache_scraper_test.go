@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -230,6 +231,17 @@ func TestModelDeploymentCacheScraper_Table(t *testing.T) {
 			wantKeys:      2,
 			wantFailed:    0,
 		},
+		{
+			name: "transfer operations beside no key counter",
+			exposition: "# TYPE vllm:mooncake_store_operation_total counter\n" +
+				"vllm:mooncake_store_operation_total{operation=\"save_put\",status=\"partial_failure\"} 2\n" +
+				"# TYPE vllm:mooncake_store_operation_failed_keys_total counter\n" +
+				"vllm:mooncake_store_operation_failed_keys_total{operation=\"save_put\",status=\"partial_failure\"} 2\n",
+			wantReading:   ModelDeploymentCacheUnreadable,
+			wantAttempted: 2,
+			wantKeys:      0,
+			wantFailed:    2,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -250,13 +262,20 @@ func scrapeReplica(t *testing.T, md *workercore.ModelDeployment, url, scheme str
 	t.Helper()
 
 	pod := readyReplica(md, 0, true)
+	pointReplicaAt(t, pod, url, scheme)
+
+	return *pod
+}
+
+// pointReplicaAt aims one Ready replica's metrics endpoint at a test server.
+func pointReplicaAt(t *testing.T, pod *core.Pod, url, scheme string) {
+	t.Helper()
+
 	host, port, err := net.SplitHostPort(strings.TrimPrefix(strings.TrimPrefix(url, "https://"), "http://"))
 	require.NoError(t, err)
 	pod.Status.PodIP = host
 	pod.Annotations["prometheus.io/port"] = port
 	pod.Annotations["prometheus.io/scheme"] = scheme
-
-	return *pod
 }
 
 // TestModelDeploymentCacheScraper_ScrapeCache covers the transport around the parse: an endpoint
@@ -386,4 +405,77 @@ func TestModelDeploymentCacheScraper_RendersStoreIsInvariantAcrossTheVLLMEngines
 		Engine: inject.EngineVLLM, Role: inject.RoleEncode,
 		Connection: inject.Connection{MasterAddress: "master:50051"},
 	}))
+}
+
+// TestModelDeploymentCacheScraper_ReplicasAreScrapedTogether keeps one hung endpoint from holding
+// the pass for every replica's timeout.
+//
+// The pass requeues every modelDeploymentCacheRequeue, and its reconcile is one of a bounded number
+// the controller runs at a time, so a serial scrape of N replicas is bounded by N timeouts in the
+// worst case. Four replicas here never answer until the client gives up, one answers slowly and one
+// at once. Scraped together the pass costs about one timeout.
+//
+// THE ORDER OF THE MESSAGE IS THE ORDER OF THE REPLICAS, not the order in which they answered: the
+// slow one is listed first and the fast one last, so an implementation that appended as scrapes
+// completed would list them the other way round. A scrape that fails or times out is Unreadable for
+// that replica alone.
+func TestModelDeploymentCacheScraper_ReplicasAreScrapedTogether(t *testing.T) {
+	const hung, slowAnswer, replicas = 4, 300 * time.Millisecond, 6
+
+	hungServers := make([]*httptest.Server, hung)
+	for i := range hungServers {
+		// Hangs until the client gives up and the connection goes away.
+		hungServers[i] = httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done()
+		}))
+	}
+	defer func() {
+		for _, server := range hungServers {
+			server.Close()
+		}
+	}()
+
+	var slowHits, fastHits atomic.Int64
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(slowAnswer)
+		slowHits.Add(1)
+		_, _ = w.Write([]byte(storeExposition(refusedKeys("save_put", 3, 3))))
+	}))
+	defer slow.Close()
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fastHits.Add(1)
+		_, _ = w.Write([]byte(storeExposition(refusedKeys("save_put", 7, 7))))
+	}))
+	defer fast.Close()
+
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = replicas })
+	pods := readyPods(md, replicas)
+	pointReplicaAt(t, &pods[0], slow.URL, "http")
+	for i := 1; i <= hung; i++ {
+		pointReplicaAt(t, &pods[i], hungServers[i-1].URL, "http")
+	}
+	pointReplicaAt(t, &pods[replicas-1], fast.URL, "http")
+
+	started := time.Now()
+	got := cacheAttachedOf(t, md, pods, readyDomain(), nil)
+	elapsed := time.Since(started)
+
+	// GENEROUS ON PURPOSE: the pass costs one timeout when the scrapes run together, and four when
+	// they run one after another, so the bound sits at three and cannot flake on a slow machine.
+	assert.Less(t, elapsed, 3*samplerPodTimeout,
+		"one hung endpoint must not hold the pass for every replica's timeout")
+	assert.EqualValues(t, 1, slowHits.Load())
+	assert.EqualValues(t, 1, fastHits.Load())
+
+	message := ModelDeploymentConditionCacheAttached.GetMessage(got)
+	assert.Equal(t, modelDeploymentReasonCacheOperationsFailing,
+		ModelDeploymentConditionCacheAttached.GetReason(got))
+	assert.Contains(t, message, "2 of 6 ready replicas report store transfers of which every key failed")
+	assert.Contains(t, message, "; 4 gave no account")
+
+	slowSegment := strings.Index(message, `qwen-server-0 (role "server", resources.interface: unset): 3 transfer operations attempted`)
+	fastSegment := strings.Index(message, `qwen-server-5 (role "server", resources.interface: unset): 7 transfer operations attempted`)
+	assert.GreaterOrEqual(t, slowSegment, 0, "the slow replica is rendered")
+	assert.GreaterOrEqual(t, fastSegment, 0, "the fast replica is rendered")
+	assert.Less(t, slowSegment, fastSegment, "replicas are listed in replica order, not in the order they answered")
 }
