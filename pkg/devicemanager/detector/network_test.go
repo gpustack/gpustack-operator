@@ -1024,12 +1024,11 @@ func TestEnumerateInterfacesJoinsSoftwareRDMAByNetdev(t *testing.T) {
 			},
 		},
 		{
-			// The join runs only when the PCI lookup found nothing AND read everything. A candidate whose
-			// device link exists but does not resolve might have been a hardware device for THIS interface,
-			// so the record stays unverified: the software port's verdict would answer a different
-			// question from the one the tree left open. The labels read that record as they read any
-			// unverified plain NIC.
-			name: "an unreadable RDMA candidate outranks the software join on a PCI NIC",
+			// The PCI lookup cannot establish whether a hardware device is bound: a candidate whose
+			// device link exists but does not resolve might have been one. The software index answers by
+			// NAME and does not depend on that, so a port naming this NIC is still a verdict. An
+			// unreadable candidate must not withdraw a record that was established independently.
+			name: "a netdev-name match survives an unreadable candidate",
 			build: func(f *sysfsFixture) {
 				f.physicalNIC("eth0", "0000:01:00.0")
 				soft("rxe0", port(1, active, "eth0")).build(t, f)
@@ -1038,7 +1037,32 @@ func TestEnumerateInterfacesJoinsSoftwareRDMAByNetdev(t *testing.T) {
 					filepath.Join(sysfsInfinibandDir, "mlx5_0", "device"))
 			},
 			want: map[string]ifaceVerdict{
-				"eth0": {link: workercore.DeviceInterfaceLinkStateUnverified},
+				"eth0": {rdma: true, software: true, link: workercore.DeviceInterfaceLinkStateOK, busID: "0000:01:00.0"},
+			},
+			wantLabels: map[string]string{
+				nodefeature.NodeRDMACapableLabelKey:  "true",
+				nodefeature.NodeRDMASoftwareLabelKey: "true",
+			},
+		},
+		{
+			// The sibling: nothing names this NIC, so the open question stands as an unverified record,
+			// as it reads today. The bond the port DOES name gets its record, and the virtual interface
+			// nobody names keeps none: a hardware candidate that cannot be resolved does not stamp
+			// virtual interfaces.
+			name: "an unreadable candidate leaves a NIC that nothing names unverified",
+			build: func(f *sysfsFixture) {
+				f.physicalNIC("eth0", "0000:01:00.0")
+				f.addVirtualNetDevice("bond0", nil)
+				f.addVirtualNetDevice("br0", nil)
+				soft("rxe0", port(1, active, "bond0")).build(t, f)
+				f.mkdir(filepath.Join(sysfsInfinibandDir, "mlx5_0"))
+				f.symlink("/nonexistent-escape-target",
+					filepath.Join(sysfsInfinibandDir, "mlx5_0", "device"))
+			},
+			want: map[string]ifaceVerdict{
+				"eth0":  {link: workercore.DeviceInterfaceLinkStateUnverified},
+				"bond0": {rdma: true, software: true, link: workercore.DeviceInterfaceLinkStateOK},
+				"br0":   {},
 			},
 			wantLabels: map[string]string{
 				nodefeature.NodeRDMACapableLabelKey:  "true",
@@ -1245,6 +1269,91 @@ func TestEnumerateInterfacesDegradesWhenRDMAClassIsUnreadable(t *testing.T) {
 	if bond0.RDMA || bond0.RDMASoftware || bond0.Link != nil {
 		t.Errorf("bond0 = rdma %v software %v link %+v, want no record: nothing could be read to join on",
 			bond0.RDMA, bond0.RDMASoftware, bond0.Link)
+	}
+}
+
+// TestEnumerateInterfacesDegradesWhenSoftwarePortsAreUnreadable pins the join to the rule the rest of
+// the reader already keeps: a file that cannot be read degrades to an unverified verdict, and never
+// withdraws a node label.
+//
+// A software device whose ports directory exists and cannot be listed names no netdev, so the index
+// has nothing for the interface it serves. Dropping the device silently left that interface with no
+// record at all, and a software-only node lost rdma.capable and rdma.software because a directory
+// could not be read. The record now says what happened and claims nothing: RDMA and RDMASoftware
+// stay false, because nothing is known about THIS netdev in particular, and the label rule reads an
+// unverified verdict as usable, as it does for a hardware adapter in the same state.
+//
+// The failure is the software device's alone. It is not the general flag for a hardware candidate
+// that could not be matched back, which is read as an open question on every PCI path.
+func TestEnumerateInterfacesDegradesWhenSoftwarePortsAreUnreadable(t *testing.T) {
+	f := newSysfsFixture(t)
+	f.physicalNIC("eth0", "0000:01:00.0")
+	f.addVirtualNetDevice("bond0", nil)
+	rdmaFixturePlant{devices: []rdmaDevicePlant{{
+		name: "rxe0",
+		ports: []rdmaPortPlant{{
+			number: 1,
+			attrs:  map[string]string{"state": "4: ACTIVE", "phys_state": "5: LinkUp"},
+			ndevs:  []string{"bond0"},
+		}},
+	}}}.build(t, f)
+
+	portsDir := filepath.Join(f.root, sysfsDevicesDir, sysfsVirtualDevices, "infiniband", "rxe0", "ports")
+	if err := os.Chmod(portsDir, 0o000); err != nil {
+		t.Fatalf("chmod %s: %v", portsDir, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(portsDir, 0o755) })
+	// A process with CAP_DAC_OVERRIDE reads through the mode bits. A case whose trigger never fired
+	// reads exactly like one that passed, so it is skipped instead of counted.
+	if _, err := os.ReadDir(portsDir); err == nil {
+		t.Skip("this process can list a mode-0000 directory, so an unreadable one cannot be staged here")
+	}
+
+	ifaces, err := enumerateInterfaces(f.root)
+	if err != nil {
+		t.Fatalf("enumerateInterfaces: %v — an unreadable ports directory degrades, it does not fail the pass",
+			err)
+	}
+
+	for _, name := range []string{"bond0", "eth0"} {
+		got := findInterface(ifaces, name)
+		if got == nil {
+			t.Fatalf("%s missing from the inventory", name)
+		}
+		if got.Link == nil || got.Link.State != workercore.DeviceInterfaceLinkStateUnverified {
+			t.Errorf("%s link = %+v, want unverified: nothing is known about this netdev, and no record at "+
+				"all would withdraw the node label over a file that could not be read", name, got.Link)
+			continue
+		}
+		if got.RDMA || got.RDMASoftware || got.RDMADevice != "" {
+			t.Errorf("%s rdma/software/device = %v/%v/%q, want all empty: the device that serves it is not known",
+				name, got.RDMA, got.RDMASoftware, got.RDMADevice)
+		}
+		if !strings.Contains(got.Link.Reason, "software RDMA") {
+			t.Errorf("%s reason %q does not say a software RDMA device's ports could not be read",
+				name, got.Link.Reason)
+		}
+	}
+
+	tree, err := newSysfsTree(f.root)
+	if err != nil {
+		t.Fatalf("newSysfsTree: %v", err)
+	}
+	tree.softwareRDMAIndex()
+	if tree.rdmaClassIndex().unresolvable {
+		t.Error("an unreadable software ports directory set the general unresolvable flag; that flag is " +
+			"for a hardware candidate and is read as an open question on every PCI path")
+	}
+
+	labels := nodefeature.ConstructRDMANodeLabels(rdmaLabelGroups(), ifaces)
+	want := map[string]string{
+		nodefeature.NodeRDMACapableLabelKey:  "true",
+		nodefeature.NodeRDMANumaLabelKey:     "0",
+		nodefeature.NodeRDMADistanceLabelKey: "PIX",
+	}
+	if !maps.Equal(labels, want) {
+		t.Errorf("labels = %v, want %v: the node keeps rdma.capable, and rdma.software is absent because "+
+			"no endpoint is known to be software-carried", labels, want)
 	}
 }
 

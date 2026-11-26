@@ -69,6 +69,14 @@ type rdmaClassIndex struct {
 	// NIC on a Soft-RoCE host unverified, which the node label counted as usable RDMA and a distance
 	// was computed from.
 	unresolvable bool
+	// unreadableSoftwarePorts lists, by path relative to the sysfs root, the ports directories of
+	// software devices that exist and could not be listed. Such a device names no netdev, so which
+	// interfaces it serves is unknown, and an interface the netdev-keyed lookup does not name gets an
+	// unverified record rather than none. Empty when every software device's ports were read or are
+	// truly absent. Written by softwareRDMAIndex, which is the reader of those directories. It is
+	// deliberately not `unresolvable`: that flag is about a hardware candidate and is read as an
+	// open question on every PCI path, where this one is the software lookup's alone.
+	unreadableSoftwarePorts []string
 }
 
 func newSysfsTree(root string) (*sysfsTree, error) {
@@ -421,18 +429,28 @@ func (p softwareRDMAport) name() string {
 //
 // The index degrades rather than fails. A ports directory that cannot be listed leaves its device
 // out, because nothing was established about which netdevs that device serves, and the interface
-// pass must still succeed on a tree the PCI lookup also degrades on. The reader's diagnostics have
-// nowhere to go on an interface record and are dropped with the same reasoning.
+// pass must still succeed on a tree the PCI lookup also degrades on. Dropping the device silently
+// went further than that: the interface it serves came back with no record at all, and a
+// software-only node lost both labels over a directory that could not be read. So the failure is
+// recorded on the class index, and attachSoftwareRDMA turns it into an unverified record for every
+// interface the index does not name. A ports directory that is truly absent is a portless device, an
+// observation that leaves nothing unknown, and is not recorded.
 func (s *sysfsTree) softwareRDMAIndex() map[string][]softwareRDMAport {
 	if s.softwareRDMA != nil {
 		return s.softwareRDMA
 	}
 
+	class := s.rdmaClassIndex()
 	index := make(map[string][]softwareRDMAport)
-	for _, device := range s.rdmaClassIndex().software {
+	for _, device := range class.software {
 		portsRel := filepath.Join(sysfsInfinibandDir, device, "ports")
 		entries, err := s.readDir(portsRel)
 		if err != nil {
+			// Present and unlistable is recorded, because it leaves every netdev unknown. Truly
+			// absent is a portless device, an observation that leaves nothing unknown.
+			if !os.IsNotExist(err) {
+				class.unreadableSoftwarePorts = append(class.unreadableSoftwarePorts, portsRel)
+			}
 			continue
 		}
 		for _, entry := range entries {
@@ -485,10 +503,22 @@ func sharedPortNote(ports []softwareRDMAport) string {
 // that device has no PCI parent, so the PCI lookup cannot reach it. Its ports name the netdevs they
 // serve, and the match is this interface's own name against that table (softwareRDMAIndex). The
 // lookup runs where the PCI one had nothing to say: on a virtual interface, which has no device to
-// look up, and on a physical one that came back with no device and no read failure. A hardware
-// adapter is never in the index, which is what keeps a VLAN on a RoCE adapter from claiming the
-// adapter a second time; such an interface reads as it did before this lookup existed. iWARP names
-// no netdev, so a `siw` port is not reached either.
+// look up, and on a physical one that came back with no device, or with the question left open by a
+// candidate that could not be resolved. A hardware adapter is never in the index, which is what
+// keeps a VLAN on a RoCE adapter from claiming the adapter a second time; such an interface reads
+// as it did before this lookup existed.
+//
+// Three shapes are out of reach or recorded as limits here. iWARP names no netdev, so a `siw` port
+// is not reached. A virtual function's netdev is not looked up at all: readInterface returns early
+// for a virtual function, and readVirtualFunctions runs only the PCI lookup, so
+// `rdma link add rxe0 type rxe netdev <vf-netdev>` leaves that netdev without a record. And a
+// software device bound to a Pod veth is matched like any other, which puts that veth into the
+// comparison triggersDetect makes (see link.go).
+//
+// When a software device's ports directory could not be read, the index names nothing and the
+// interface gets an unverified record instead of none: the device might have named it, and a
+// missing file must never withdraw a node label. RDMA and RDMASoftware stay false there, because
+// nothing is known about this netdev in particular.
 //
 // triggersDetect keeps whatever is recorded here, so a change on the interface takes the detect
 // round like any other RDMA endpoint.
@@ -500,8 +530,20 @@ func sharedPortNote(ports []softwareRDMAport) string {
 // and an advertised ID that disappears strands the allocation kubelet recorded against it. With
 // the name empty the device keeps its identity in every state.
 func (s *sysfsTree) attachSoftwareRDMA(iface *workercore.DeviceInterface) {
+	class := s.rdmaClassIndex()
 	ports := s.softwareRDMAIndex()[iface.Name]
 	if len(ports) == 0 {
+		if unreadable := class.unreadableSoftwarePorts; len(unreadable) > 0 {
+			// Unverified, never absent, for the same reason the PCI lookup's unreadable tree is: a
+			// missing file withholds no label. Only this flag is consulted here; a hardware
+			// candidate that could not be resolved is an open question on the PCI paths alone, and a
+			// virtual interface keeps no record for it.
+			iface.Link = &workercore.DeviceInterfaceLink{
+				State: workercore.DeviceInterfaceLinkStateUnverified,
+				Reason: "the ports of a software RDMA device are present but could not be read; tried " +
+					strings.Join(unreadable, ", "),
+			}
+		}
 		return
 	}
 
@@ -692,11 +734,18 @@ func (s *sysfsTree) readInterface(
 		// can be fully configured, with an address and a gateway, while its link is down.
 		iface.Link = s.checkRDMALink(rdmaDir)
 	case readFailed:
-		// The tree is there and unreadable. Unverified, never failed: failed withholds a node
-		// label, and a label must never be withheld because a file could not be read.
-		iface.Link = &workercore.DeviceInterfaceLink{
-			State:  workercore.DeviceInterfaceLinkStateUnverified,
-			Reason: "the RDMA tree is present but could not be read; tried " + strings.Join(tried, ", "),
+		// The PCI lookup could not establish whether a hardware device is bound. The software index
+		// answers by name and does not depend on that, so it is consulted first: a port that names
+		// this interface is a verdict the open question does not touch. The unverified record stands
+		// only when the lookup recorded nothing.
+		s.attachSoftwareRDMA(&iface)
+		if iface.Link == nil {
+			// The tree is there and unreadable. Unverified, never failed: failed withholds a node
+			// label, and a label must never be withheld because a file could not be read.
+			iface.Link = &workercore.DeviceInterfaceLink{
+				State:  workercore.DeviceInterfaceLinkStateUnverified,
+				Reason: "the RDMA tree is present but could not be read; tried " + strings.Join(tried, ", "),
+			}
 		}
 	default:
 		// No hardware device, and nothing unreadable that might have been one. A software device
