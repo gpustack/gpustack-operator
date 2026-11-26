@@ -466,14 +466,21 @@ func modelDeploymentCacheAccountsLine(
 	roles := modelDeploymentRolesByName(md)
 	rendered := make(map[string]int, len(roles))
 	parts := make([]string, 0, len(accounts))
-	var omitted int
+	// omitted counts, per role and in the order the roles were first left out, the replicas the
+	// bound removed. Each tail names its role, because every rendered segment does; an anonymous
+	// count would reconcile with the head and still not say where the replicas went.
+	omitted := make(map[string]int, len(roles))
+	var omittedRoles []string
 	for _, entry := range accounts {
 		if entry.account.Reading != reading {
 			continue
 		}
 		role := modelDeploymentPodRole(entry.pod)
 		if rendered[role] >= modelDeploymentCacheMessageReplicas {
-			omitted++
+			if _, seen := omitted[role]; !seen {
+				omittedRoles = append(omittedRoles, role)
+			}
+			omitted[role]++
 
 			continue
 		}
@@ -484,8 +491,8 @@ func modelDeploymentCacheAccountsLine(
 			modelDeploymentCacheCount(entry.account.Attempted), modelDeploymentCacheCount(entry.account.Failed),
 			modelDeploymentCacheCount(entry.account.Keys)))
 	}
-	if omitted > 0 {
-		parts = append(parts, fmt.Sprintf("and %d more %s", omitted, modelDeploymentCacheReadingPhrase(reading)))
+	for _, role := range omittedRoles {
+		parts = append(parts, fmt.Sprintf("and %d more role %q %s", omitted[role], role, modelDeploymentCacheReadingPhrase(reading)))
 	}
 
 	return strings.Join(parts, "; ")

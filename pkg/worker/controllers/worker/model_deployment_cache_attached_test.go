@@ -962,8 +962,8 @@ func TestModelDeploymentCacheAttached_MessageIsBounded(t *testing.T) {
 			perReplica, perReplica), "the head still counts every replica")
 		assert.Equal(t, int(rendered), strings.Count(message, "transfer operations attempted"),
 			"at most the bound of replicas is rendered")
-		assert.Contains(t, message, fmt.Sprintf("and %d more report transfers of which every key failed", omitted),
-			"the tail names the omitted replicas and their verdict")
+		assert.Contains(t, message, fmt.Sprintf("and %d more role %q report transfers of which every key failed", omitted, "server"),
+			"the tail names the omitted replicas, their role and their verdict")
 		assert.Less(t, len(message), 1200, "the message stays bounded")
 	})
 
@@ -998,13 +998,15 @@ func TestModelDeploymentCacheAttached_MessageIsBounded(t *testing.T) {
 		assert.Equal(t, 4*int(rendered), strings.Count(message, "transfer operations attempted"),
 			"each role renders up to the rendered in each line")
 		for _, role := range []string{"server", "worker"} {
-			assert.Equal(t, 2*int(rendered), strings.Count(message, fmt.Sprintf("role %q", role)),
-				"role %q is rendered in both lines up to the rendered", role)
+			assert.Equal(t, 2*int(rendered)+2, strings.Count(message, fmt.Sprintf("role %q", role)),
+				"role %q is rendered in both lines up to the bound and named once in each line's tail", role)
 		}
-		assert.Contains(t, message, fmt.Sprintf("and %d more report succeeding store transfers", 2*(failingPerRole-int(rendered))),
-			"the tail of the succeeding line names what it left out")
-		assert.Contains(t, message, fmt.Sprintf("and %d more report transfers of which every key failed", 2*(failingPerRole-int(rendered))),
-			"the tail of the failing line names what it left out")
+		for _, role := range []string{"server", "worker"} {
+			assert.Contains(t, message, fmt.Sprintf("and %d more role %q report succeeding store transfers", failingPerRole-int(rendered), role),
+				"the tail of the succeeding line names the role it left out")
+			assert.Contains(t, message, fmt.Sprintf("and %d more role %q report transfers of which every key failed", failingPerRole-int(rendered), role),
+				"the tail of the failing line names the role it left out")
+		}
 		assert.Less(t, len(message), 2400, "the message stays bounded")
 	})
 }
