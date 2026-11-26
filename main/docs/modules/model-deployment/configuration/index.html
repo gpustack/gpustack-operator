@@ -1449,7 +1449,7 @@ managed role:</p>
 			</tr>
 			<tr>
 					<td><code>SGLang</code></td>
-					<td><code>--hicache-storage-backend</code>, <code>--hicache-storage-backend-extra-config</code>, <code>--disaggregation-mode</code>, <code>--disaggregation-transfer-backend</code>, <code>--disaggregation-bootstrap-port</code> (including unique prefixes)</td>
+					<td><code>--hicache-storage-backend</code>, <code>--hicache-storage-backend-extra-config</code>, <code>--disaggregation-mode</code>, <code>--disaggregation-transfer-backend</code>, <code>--disaggregation-bootstrap-port</code>, <code>--kv-events-config</code> (including unique prefixes)</td>
 					<td><code>SGLANG_HICACHE_MOONCAKE_CONFIG_PATH</code>, <code>MOONCAKE_MASTER</code>, <code>MOONCAKE_TE_META_DATA_SERVER</code>, <code>MOONCAKE_PROTOCOL</code>, <code>MOONCAKE_DEVICE</code>, <code>MOONCAKE_GLOBAL_SEGMENT_SIZE</code>, <code>MOONCAKE_LOCAL_HOSTNAME</code>, <strong><code>MOONCAKE_TENANT_ID</code></strong></td>
 			</tr>
 	</tbody>
@@ -1469,8 +1469,10 @@ defaulted. <em><code>roles[].env</code></em> accepts <code>ASCEND_GLOBAL_RESOURC
 <p>vLLM reads its client configuration from <code>/etc/gpustack/kvcache/mooncake.json</code>. The file is a
 read-only downwardAPI projection, so do not mount an overlay over <code>/etc/gpustack/kvcache</code>. SGLang
 reads its whole cache configuration from environment variables.</p>
-<p>Routed cache-producing vLLM roles also render <code>--kv-events-config</code> on ZMQ ports <code>5557</code> and <code>5558</code>.
-Routed SGLang roles report <code>KVEventsPublishing=False/PublisherDisabled</code>.</p>
+<p>Routed cache-producing vLLM roles (<code>llm-d-router</code> single-<code>Pod</code> DP and <code>vllm-router</code> <code>kv_aware</code>) and
+SGLang roles behind <code>sgl-router</code> render <code>--kv-events-config</code> on ZMQ ports <code>5557</code> and <code>5558</code> (or
+<code>5557 + dpSpan</code> when <code>dpSpan &gt; 1</code>) and report <code>KVEventsPublishing=True/Publishing</code>. SGLang behind
+<code>llm-d-router</code> or deprecated <code>sglang-gateway</code> reports <code>KVEventsPublishing=True/NotApplicable</code>.</p>
 <h2 id="rollout-behavior">Rollout behavior</h2>
 <p>A change to <em><code>replicas</code></em> adds or removes instances and leaves survivors running. An edit to any field
 that changes the rendered <code>Pod</code> rolls that role&rsquo;s replicas. These fields are <em><code>size</code></em>,

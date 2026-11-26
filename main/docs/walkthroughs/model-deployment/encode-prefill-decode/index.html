@@ -1461,7 +1461,8 @@ roles (do not pass these owned flags in <em><code>extraArgs</code></em>; see
 <li><em><strong>Encode</strong></em> runs <code>--mm-encoder-only</code> (keeping LLM weights unloaded), defaults <code>--enforce-eager</code> and
 <code>--no-enable-prefix-caching</code> (<a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#operator-owned-keys">Operator-owned keys</a>
 ),
-and opens NIXL side-channel port <code>5601</code> (<code>VLLM_EC_SIDE_CHANNEL_PORT=5601</code>, <code>VLLM_USE_V2_MODEL_RUNNER=1</code>).</li>
+defaults NIXL side-channel port <code>5601</code> (<code>VLLM_EC_SIDE_CHANNEL_PORT=5601</code>, overridable including <code>0</code>),
+and defaults <code>VLLM_USE_V2_MODEL_RUNNER=1</code> on <code>vLLM &lt; 0.34.0</code> (omitted at <code>&gt;= 0.34.0</code>).</li>
 <li><em><strong>Prefill</strong></em> pairs <code>ECCPUConnector</code> (<code>ec_consumer</code>) with <code>MooncakeConnector</code> (<code>kv_producer</code>) while
 keeping CUDA graphs enabled.</li>
 <li><em><strong>Decode</strong></em> serves behind <code>routing-proxy</code> on <code>:8000</code> (<code>--ec-connector=ec-nixl</code> → engine <code>:8200</code>).</li>
@@ -1643,8 +1644,8 @@ request counter; transfers still active when that window expires fail at the cli
 			</tr>
 			<tr>
 					<td>Apply rejected on port <code>5601</code> or <code>8997</code></td>
-					<td>Owned-port collision</td>
-					<td><code>ECCPUConnector</code> owns <code>5601</code>, and SGLang <em>Prefill</em> in <em>EPD</em> owns <code>8997</code>; move custom HTTP ports off both numbers.</td>
+					<td>Side-channel or bootstrap port collision</td>
+					<td><code>ECCPUConnector</code> defaults <code>VLLM_EC_SIDE_CHANNEL_PORT=5601</code> (override in <em><code>roles[].env</code></em>, including <code>0</code>, or move HTTP off <code>5601</code>), and SGLang <em>Prefill</em> in <em>EPD</em> owns <code>8997</code>.</td>
 			</tr>
 			<tr>
 					<td><em>Encode</em> replica stays in <code>Draining</code> ~300 s</td>

@@ -1309,10 +1309,17 @@ request splits across roles.</p>
 					<td><code>vLLM</code></td>
 					<td>Single process configured by CLI flags</td>
 					<td><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#policy-overrides"><code>cache_aware</code>, or <code>--policy</code></a>
+ (supports <code>kv_aware</code> at <code>&gt;= 0.31.0</code>)</td>
+			</tr>
+			<tr>
+					<td><code>sgl-router</code></td>
+					<td><code>SGLang</code></td>
+					<td>Single process configured by CLI flags with <code>EndpointSlice</code> discovery</td>
+					<td><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#policy-overrides">SGLang native policies and KV events</a>
 </td>
 			</tr>
 			<tr>
-					<td><code>sglang-gateway</code></td>
+					<td><code>sglang-gateway</code> (deprecated, frozen at <code>gateway-v0.3.1</code>)</td>
 					<td><code>SGLang</code></td>
 					<td>Single process configured by CLI flags</td>
 					<td><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#policy-overrides"><code>cache_aware</code>, or <code>--policy</code></a>
@@ -1326,9 +1333,10 @@ hit rate for availability (upstream reports unsynchronized radix trees and a 10%
 drop).</li>
 <li><strong>Owned router flags</strong>: Admission refuses operator-derived flags in <em><code>spec.router.extraArgs</code></em>. On
 <code>llm-d-router</code>: <code>--endpoint-selector</code>, <code>--endpoint-target-ports</code>, <code>--config-file</code>,
-<code>--secure-serving</code>, <code>--grpc-health-port</code> and <code>--metrics-endpoint-auth</code>. On <code>vllm-router</code> and
-<code>sglang-gateway</code>: bind addresses/ports, service-discovery flags, disaggregation flags and
-<code>vllm-router</code>&rsquo;s transfer connector flag.</li>
+<code>--secure-serving</code>, <code>--grpc-health-port</code>, and <code>--metrics-endpoint-auth</code>. On <code>vllm-router</code>,
+<code>sgl-router</code>, and <code>sglang-gateway</code>: bind addresses/ports, service-discovery flags, disaggregation
+flags, <code>vllm-router</code>&rsquo;s <code>--kv-connector</code>, and <code>sgl-router</code>&rsquo;s <code>--model-id</code>, <code>--chat-routing</code>,
+<code>--no-tokenizer</code>, and <code>--dp-aware</code>.</li>
 <li><strong>Fixed east-west flags</strong>: <code>llm-d-router</code> fixes <code>--secure-serving=false</code> (loopback gRPC inside
 the <code>Pod</code>) and <code>--metrics-endpoint-auth=false</code> (in-cluster scrape). Enforce caller TLS and auth at
 the north-south cluster gateway.</li>
@@ -1336,8 +1344,8 @@ the north-south cluster gateway.</li>
 <h3 id="router-fields">Router fields</h3>
 <ul>
 <li><em><code>spec.router.requestTimeoutSeconds</code></em>: Sets router reply timeout (<code>&gt; 0</code>; <code>0</code> is refused). If
-omitted, upstream defaults diverge by 48×: 1 day on <code>llm-d-router</code> versus 30 minutes on
-<code>vllm-router</code> and <code>sglang-gateway</code>.</li>
+omitted, upstream defaults diverge: 1 day on <code>llm-d-router</code> versus 30 minutes on <code>vllm-router</code>,
+<code>sgl-router</code>, and <code>sglang-gateway</code>.</li>
 <li><em><code>spec.router.disaggregationThresholdTokens</code></em>: Supported on <code>llm-d-router</code> only (refused on other
 routers). Sets uncached prompt tokens needed to split a request; <code>0</code> disables splitting.</li>
 <li><strong>Access logs</strong>: The <code>llm-d-router</code> proxy writes one JSON access record per request to stdout
@@ -1419,20 +1427,30 @@ router paths:</p>
 	</thead>
 	<tbody>
 			<tr>
-					<td><code>vllm-router</code> + vLLM</td>
+					<td><code>llm-d-router</code> + <code>vLLM</code> / <code>vLLM-Ascend</code></td>
+					<td>Required on <code>&gt;= 0.30.0</code> (non-<em>Encode</em>)</td>
+					<td>Publishes KV events (<code>kv@pod@&lt;model&gt;</code>) on <em>Server</em> and <em>Prefill</em></td>
+			</tr>
+			<tr>
+					<td><code>vllm-router</code> + <code>vLLM</code> / <code>vLLM-Ascend</code></td>
 					<td>Not established</td>
-					<td>Uses router <em>PD</em> mode and selectors; <em>encode/prefill/decode (EPD)</em> renders <a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#encode-stage-routing"><code>--epd-config</code></a>
+					<td>Uses router <em>PD</em> mode and selectors; <code>kv_aware</code> (<code>&gt;= 0.31.0</code>) enables KV events; <em>encode/prefill/decode (EPD)</em> renders <a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#encode-stage-routing"><code>--epd-config</code></a>
 </td>
 			</tr>
 			<tr>
-					<td><code>sglang-gateway</code> + SGLang</td>
+					<td><code>sgl-router</code> + <code>SGLang</code></td>
 					<td>Not applicable</td>
-					<td>Uses SGLang native disaggregation flags</td>
+					<td>Uses <code>EndpointSlice</code> selectors, SGLang native disaggregation flags, and native KV events (<code>kv-events</code>) on <em>Server</em> and <em>Prefill</em>; <em>EPD</em> uses <code>--encoder-urls</code></td>
 			</tr>
 			<tr>
-					<td><code>llm-d-router</code> + SGLang</td>
+					<td><code>sglang-gateway</code> + <code>SGLang</code> (deprecated)</td>
+					<td>Not applicable</td>
+					<td>Frozen at <code>gateway-v0.3.1</code>; uses <code>--pd-disaggregation</code> and SGLang native disaggregation flags</td>
+			</tr>
+			<tr>
+					<td><code>llm-d-router</code> + <code>SGLang</code></td>
 					<td>Not applicable; token path unmeasured</td>
-					<td>Uses SGLang native disaggregation flags</td>
+					<td>Uses <code>approx-prefix-cache-producer</code> (no KV events) and SGLang native disaggregation flags</td>
 			</tr>
 	</tbody>
 </table>
@@ -1474,15 +1492,21 @@ converge. Verify image support in <a href="/gpustack-operator/main/docs/modules/
 <li><strong>Combined pool + direct KV</strong>: On vLLM pairs with <em><code>spec.kvCache</code></em>, <em>Prefill</em> wraps the direct
 connector first in <code>MultiConnector</code> beside the store connector; <em>Decode</em> runs the direct connector
 alone while keeping pool dtype and block-size alignment.</li>
+<li><strong>Ascend connector generation</strong>: On <code>vLLM-Ascend</code>, effective engine version <code>&gt;= 0.30.0</code> renders
+<code>MooncakeConnectorV2</code> (Pull mode) and relaxes <em>TP</em> validation to
+<code>max(prefill_tp, decode_tp) % min(prefill_tp, decode_tp) == 0</code>. Versions <code>&lt; 0.30.0</code> and legacy
+versionless <code>ModelDeployment</code>s keep <code>MooncakeConnectorV1</code> (<code>prefill_tp &gt;= decode_tp</code>). Admission
+refuses mixed V1/V2 pairs where one role is <code>&lt; 0.30.0</code> and the other is <code>&gt;= 0.30.0</code>.</li>
 <li><strong>Sidecar and handshakes</strong>: Under <code>llm-d-router</code>, <em>Decode</em> runs a <code>routing-proxy</code> sidecar using
-<code>--kv-connector=nixlv2</code> (vLLM NIXL or Ascend), <code>mooncake</code> (vLLM Mooncake) or <code>sglang</code> (SGLang).
+<code>--kv-connector=nixlv2</code> (vLLM NIXL or Ascend), <code>mooncake</code> (vLLM Mooncake), or <code>sglang</code> (SGLang).
 Ascend vLLM pairs also render behind <code>vllm-router</code> with <code>--kv-connector=nixl</code>. SGLang uses its
 native disaggregation flags.</li>
 </ul>
 <h3 id="parallelism-declarations">Parallelism declarations</h3>
 <p>The operator reads each role&rsquo;s parallel degrees from <em><code>roles[].extraArgs</code></em> (managed role) or
 <em><code>roles[].command</code></em> (take-over role), plus literal <code>VLLM_DP_SIZE</code> in <em><code>env</code></em>. Undeclared degrees
-default to <code>1/1</code>.</p>
+default to <code>1/1</code>. On SGLang, prefer <code>--attn-dp-size</code> over legacy <code>--enable-dp-attention</code>; both are
+parsed.</p>
 <p><em><code>resources.accelerator</code></em> requests GPUs for scheduling; it never generates <code>--tensor-parallel-size</code>,
 <code>--pipeline-parallel-size</code> or <code>--data-parallel-size</code>. Pass engine parallelism flags explicitly in
 <em><code>extraArgs</code></em>.</p>

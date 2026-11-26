@@ -1245,27 +1245,32 @@ those candidates.</p>
 			</tr>
 	</tbody>
 </table>
-<p><code>vllm-router</code> pairs only with vLLM and <code>sglang-gateway</code> only with SGLang:</p>
+<p>Admission enforces strict engine-router pairing: <code>vllm-router</code> accepts <code>vLLM</code> (including Ascend)
+only, <code>sgl-router</code> and deprecated <code>sglang-gateway</code> accept <code>SGLang</code> only, and <code>llm-d-router</code> accepts
+both:</p>
 <table>
 	<thead>
 			<tr>
 					<th>Mode</th>
 					<th><code>llm-d-router</code></th>
 					<th><code>vllm-router</code></th>
-					<th><code>sglang-gateway</code></th>
+					<th><code>sgl-router</code></th>
+					<th><code>sglang-gateway</code> (deprecated)</th>
 			</tr>
 	</thead>
 	<tbody>
 			<tr>
 					<td>Multi-replica <em>Server</em></td>
-					<td>Fixed scoring profile (prefix, queue, KV); measured 187/170 on vLLM and 375/0 on SGLang</td>
-					<td><code>cache_aware</code> default; <code>--policy round_robin</code> measured 60/60</td>
-					<td>Same policies; <code>round_robin</code> measured 60/60</td>
+					<td>Fixed scoring profile (<code>precise-prefix-cache-producer</code> on vLLM/Ascend; <code>approx-prefix-cache-producer</code> on SGLang)</td>
+					<td><code>cache_aware</code> default; <code>--policy kv_aware</code> (<code>&gt;= 0.31.0</code>) or <code>round_robin</code></td>
+					<td><code>EndpointSlice</code> discovery + native SGLang KV events (<code>kv-events</code>)</td>
+					<td>Frozen at <code>gateway-v0.3.1</code>; <code>cache_aware</code> default or <code>--policy</code></td>
 			</tr>
 			<tr>
 					<td><em>PD</em> pair</td>
-					<td>Token-counted <em>PD</em> split, connector docs and decode sidecar</td>
-					<td>Native <em>PD</em> mode</td>
+					<td>Token-counted <em>PD</em> split, connector docs, and decode sidecar</td>
+					<td>Native <em>PD</em> mode; optional <code>kv_aware</code> (<code>&gt;= 0.31.0</code>)</td>
+					<td>Inferred from <code>--prefill-selector</code> + <code>--decode-selector</code> + KV events</td>
 					<td>Native <code>--pd-disaggregation</code> (never combined with <code>--dp-aware</code>)</td>
 			</tr>
 			<tr>
@@ -1273,25 +1278,29 @@ those candidates.</p>
 					<td><code>encode</code> profile + decode sidecar transfer</td>
 					<td>Operator-owned <code>--epd-config</code>, no sidecar</td>
 					<td>Native pair; <em>Prefill</em> dials <code>--encoder-urls</code></td>
+					<td>Native pair; <em>Prefill</em> dials <code>--encoder-urls</code></td>
 			</tr>
 			<tr>
 					<td><em>Elastic EP</em></td>
 					<td>Engine internal load balancing; single endpoint</td>
 					<td>Same</td>
 					<td>Same</td>
+					<td>Same</td>
 			</tr>
 			<tr>
 					<td><em>External DP</em></td>
-					<td>Admitted, but no <code>--policy</code> flag; prefer engine router</td>
+					<td>Admitted, no <code>--policy</code> flag; prefer engine router</td>
 					<td>Per-rank endpoints with <code>--policy round_robin</code></td>
-					<td>Per-member endpoints (<code>--dp-aware</code> fan-out below)</td>
+					<td>Per-member endpoints with <code>--dp-aware</code> (including <em>PD</em>)</td>
+					<td>Per-member endpoints with <code>--dp-aware</code> (undivided only)</td>
 			</tr>
 	</tbody>
 </table>
 <p>Where even spread matters (multi-replica <em>Server</em> or <em>External DP</em>), choose <code>vllm-router</code> for vLLM
-or <code>sglang-gateway</code> for SGLang because <code>llm-d-router</code> has no policy switch
+or <code>sgl-router</code> for SGLang because <code>llm-d-router</code> has no policy switch
 (<a href="#fixed-scoring-profile">Fixed scoring profile</a>
-).</p>
+). Prefer <code>sgl-router</code> over deprecated
+<code>sglang-gateway</code> (frozen at <code>gateway-v0.3.1</code>) for new SGLang deployments.</p>
 <ul>
 <li><strong>External selectors</strong>: Qualified <em>External</em> <em>Server</em> roles omit <code>member-index=0</code> while keeping
 the <code>endpoint-eligible</code> selector; the headless <code>Service</code> always publishes all members for peer
@@ -1300,12 +1309,22 @@ communication. Hybrid GPU behavior is untested.</li>
 match). Admission rejects vLLM <code>MultiPort</code>. See
 <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
 .</li>
-<li><strong>SGLang <code>--dp-aware</code> registration</strong>: For SGLang <em>External DP</em>, the operator renders <code>--dp-aware</code>
-on <code>sglang-gateway</code> so <code>gpustack/llm-router:v0.4.0</code>+ registers one logical worker per attention-DP
-rank (<code>http://host:port@0</code>, <code>http://host:port@1</code>) pointing at each member&rsquo;s single listener. This
-render gate and fan-out are unit-tested (no live runtime capture yet). Without <code>--dp-aware</code> (for
-example on <code>v0.3.1</code>), subordinate members time out in the gateway&rsquo;s 10 s discovery step, leaving
-at most one registered worker per group.</li>
+<li><strong><code>sgl-router</code> discovery and RBAC</strong>: <code>sgl-router</code> watches Kubernetes <code>EndpointSlice</code> objects
+rather than <code>Pod</code>s. The operator stamps <code>modeldeployment.gpustack.ai/role-kind=&lt;kind&gt;</code> on
+per-role <code>Service</code>s (<code>&lt;deployment&gt;-&lt;role&gt;</code>) and grants <code>discovery.k8s.io/endpointslices</code>
+(<code>get</code>, <code>list</code>, <code>watch</code>) in the router <code>Role</code>. Custom least-privilege operator worker bindings
+must include <code>discovery.k8s.io/endpointslices</code> (<code>get</code>, <code>list</code>, <code>watch</code>).</li>
+<li><strong><code>sgl-router</code> tokenizer default</strong>: The operator emits <code>--no-tokenizer</code> by default so <code>sgl-router</code>
+starts offline in air-gapped clusters without calling Hugging Face Hub. It omits <code>--no-tokenizer</code>
+automatically when <em><code>spec.router.extraArgs</code></em> supplies <code>--tokenizer-path</code>, <code>--bucket-config</code>, or
+sets <code>--policy</code> to <code>cache_aware</code> (<code>power_of_two</code> and <code>session_aware</code> keep <code>--no-tokenizer</code>).</li>
+<li><strong><code>llm-d-router</code> SGLang limitation</strong>: On <code>llm-d-router@v1.0.0</code>, <code>SGLang</code> stays on
+<code>approx-prefix-cache-producer</code> with no KV events because upstream <code>precise-prefix-cache-producer</code>
+requires vLLM&rsquo;s <code>/v1/chat/completions/render</code> endpoint. Use <code>sgl-router</code> for SGLang KV events.</li>
+<li><strong>SGLang <code>--dp-aware</code> routing</strong>: The operator renders <code>--dp-aware</code> on <code>sgl-router</code> for SGLang
+<em>External DP</em> and multi-DP <em>PD</em> (<code>--attn-dp-size &gt;= 2</code> or <code>--dp-size &gt;= 2</code> on <em>Prefill</em> or
+<em>Decode</em>) to select DP ranks per worker, and on <code>sglang-gateway</code> (undivided <em>External DP</em> only) to
+register one worker per attention-DP rank.</li>
 </ul>
 <h3 id="excluded-replica-groups">Excluded replica groups</h3>
 <p>Protected groups are gated by <code>Pod</code> labels, never by dropping selector terms. Both the Router and
@@ -1364,9 +1383,14 @@ label marks membership only; actual routing intersects it with native role and m
 					<td>Router splits every request to <em>Prefill</em>/<em>Decode</em> (no <code>--ec-connector</code>); <em>Prefill</em> dials <em>Encode</em> via <code>--encoder-urls</code></td>
 			</tr>
 			<tr>
+					<td><code>sgl-router</code></td>
+					<td><code>SGLang</code></td>
+					<td>Router routes <em>Prefill</em>/<em>Decode</em> via <code>EndpointSlice</code> selectors; <em>Prefill</em> dials <em>Encode</em> via <code>--encoder-urls</code></td>
+			</tr>
+			<tr>
 					<td><code>sglang-gateway</code></td>
 					<td><code>SGLang</code></td>
-					<td>Gateway routes <em>Prefill</em>/<em>Decode</em> natively; <em>Prefill</em> dials <em>Encode</em> via <code>--encoder-urls</code></td>
+					<td>Deprecated frozen gateway routes <em>Prefill</em>/<em>Decode</em> natively; <em>Prefill</em> dials <em>Encode</em> via <code>--encoder-urls</code></td>
 			</tr>
 	</tbody>
 </table>
@@ -1376,7 +1400,8 @@ media requests through <em>Encode</em> first, and routes text-only requests stra
  for verified combinations.</p>
 <h2 id="default-routing-policies">Default routing policies</h2>
 <p><code>vllm-router</code> and <code>sglang-gateway</code> default to <code>cache_aware</code> (logging
-<code>policy: CacheAware { cache_threshold: 0.3, ... }</code>); <code>llm-d-router</code> uses its fixed scoring profile:</p>
+<code>policy: CacheAware { cache_threshold: 0.3, ... }</code>), <code>sgl-router</code> defaults to <code>power_of_two</code> under
+<code>--chat-routing=reorg</code>, and <code>llm-d-router</code> uses its fixed scoring profile:</p>
 <table>
 	<thead>
 			<tr>
@@ -1390,6 +1415,11 @@ media requests through <em>Encode</em> first, and routes text-only requests stra
 					<td><code>vllm-router</code></td>
 					<td><code>cache_aware</code></td>
 					<td>Longest matching prefix above <code>--cache-threshold</code> (<code>0.3</code>), else smallest tree; switches to least-loaded when load gap exceeds <code>--balance-abs-threshold</code> (<code>64</code>) and <code>--balance-rel-threshold</code> (<code>1.5×</code>)</td>
+			</tr>
+			<tr>
+					<td><code>sgl-router</code></td>
+					<td><code>power_of_two</code></td>
+					<td>Picks the less-loaded of two sampled workers under <code>--chat-routing=reorg</code> (override with <code>--policy cache_aware</code> or <code>--policy session_aware</code>)</td>
 			</tr>
 			<tr>
 					<td><code>sglang-gateway</code></td>
@@ -1464,10 +1494,12 @@ the router logs <code>Starting router ... | policy: RoundRobin</code>. On the sa
 creation, 120 requests split <code>60 / 60</code> on both routers with zero errors.</p>
 <p>Editing <em><code>router.extraArgs</code></em> replaces only the router <code>Deployment</code> without rolling worker <code>Pod</code>s
 (<a href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/#router-rollout-effects">Router rollout effects</a>
-); the new router starts with
-an empty prefix table. Both routers also run behind the shared Envoy inference allowlist sidecar
-with a <code>:9091</code> observer when managed accelerated non-<em>Encode</em> roles exist.</p>
-<p>Admission does not validate <code>--policy</code> values; an unknown value stops the router at startup:</p>
+), except when toggling
+<code>kv_aware</code> on <code>vllm-router</code>, which rolls only the affected worker roles. The new router starts with
+an empty prefix table. <code>vllm-router</code>, <code>sgl-router</code>, and <code>sglang-gateway</code> run behind the Envoy
+inference allowlist sidecar with a <code>:9091</code> observer (<code>sgl-router</code> also proxies <code>/metrics</code> on <code>:9090</code>).</p>
+<p>Admission validates <code>kv_aware</code> version requirements on <code>vllm-router</code> but does not validate other
+<code>--policy</code> values; an unknown value stops the router at startup:</p>
 <table>
 	<thead>
 			<tr>
@@ -1478,16 +1510,26 @@ with a <code>:9091</code> observer when managed accelerated non-<em>Encode</em> 
 	<tbody>
 			<tr>
 					<td><code>vllm-router</code></td>
-					<td><code>random</code>, <code>round_robin</code>, <code>cache_aware</code>, <code>power_of_two</code>, <code>consistent_hash</code>, <code>rendezvous_hash</code></td>
+					<td><code>random</code>, <code>round_robin</code>, <code>cache_aware</code>, <code>kv_aware</code> (<code>vLLM &gt;= 0.31.0</code>), <code>power_of_two</code>, <code>consistent_hash</code>, <code>rendezvous_hash</code></td>
 			</tr>
 			<tr>
-					<td><code>sglang-gateway</code></td>
+					<td><code>sgl-router</code></td>
+					<td><code>power_of_two</code> (default), <code>cache_aware</code> (omits <code>--no-tokenizer</code>), <code>session_aware</code> (under <code>--chat-routing=reorg</code>, <code>--decode-policy</code> accepts <code>power_of_two</code> only and <code>--filter</code> accepts <code>overloaded</code> only)</td>
+			</tr>
+			<tr>
+					<td><code>sglang-gateway</code> (deprecated)</td>
 					<td><code>random</code>, <code>round_robin</code>, <code>cache_aware</code>, <code>power_of_two</code>, <code>prefix_hash</code>, <code>manual</code></td>
 			</tr>
 	</tbody>
 </table>
-<p>Only <code>round_robin</code> was live-tested; <code>cache_aware</code> thresholds, <code>--prefill-policy</code> and
-<code>--decode-policy</code> pass through <em><code>extraArgs</code></em> untested.</p>
+<ul>
+<li><strong><code>vllm-router</code> <code>kv_aware</code> (<code>&gt;= 0.31.0</code>)</strong>: <code>--policy</code> on <em>Server</em>, or <code>--policy</code> /
+<code>--prefill-policy</code> on <em>PD</em> <em>Prefill</em>, set to <code>kv_aware</code> enables <code>--kv-events-config</code>
+(<code>topic: &quot;kv@pod@&lt;model&gt;&quot;</code>), <code>--prefix-caching-hash-algo sha256_cbor</code>,
+<code>VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0</code>, and ZMQ event/replay ports on <em>Server</em>/<em>Prefill</em> (<em>Decode</em>
+never subscribes to KV events). Shared <code>KVCachePool</code> domains must use matching hash algorithms for
+cross-deployment prefix hits.</li>
+</ul>
 <h3 id="fixed-scoring-profile">Fixed scoring profile</h3>
 <p><code>llm-d-router</code> cannot switch policies through <em><code>extraArgs</code></em> because the operator owns
 <code>--config-file</code> and exposes no scorer weight fields.</p>
@@ -1591,6 +1633,16 @@ URL/<code>Pod</code> address):</p>
 					<td><code>vllm-router</code></td>
 					<td><code>vllm_router_pd_prefill_requests_total{worker}</code>, <code>vllm_router_pd_decode_requests_total{worker}</code></td>
 					<td><em>PD</em> requests per <em>Prefill</em> and <em>Decode</em> worker</td>
+			</tr>
+			<tr>
+					<td><code>sgl-router</code></td>
+					<td><code>sgl_router_workers</code>, <code>sgl_router_worker_inflight_requests</code></td>
+					<td>Active worker count and in-flight requests per worker</td>
+			</tr>
+			<tr>
+					<td><code>sgl-router</code></td>
+					<td><code>sgl_router_requests_total</code>, <code>sgl_router_responses_total</code>, <code>sgl_router_worker_requests_total{outcome}</code></td>
+					<td>Total requests, responses, and per-worker outcomes</td>
 			</tr>
 			<tr>
 					<td><code>sglang-gateway</code></td>

@@ -1545,8 +1545,8 @@ router lifecycle contracts.</li>
 			</tr>
 			<tr>
 					<td><code>KVEventsPublishing=False/PublisherDisabled</code></td>
-					<td>Expected on routed SGLang or disabled publisher</td>
-					<td>Informational condition reporting configuration rather than runtime failure (<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#operator-owned-keys">Operator-owned keys</a>
+					<td>Expected when a publishing role&rsquo;s <code>--kv-events-config</code> is missing on rendered <code>Pod</code>s</td>
+					<td>Informational condition reporting configuration rather than runtime failure; routed SGLang reports <code>True/Publishing</code> under <code>sgl-router</code> and <code>True/NotApplicable</code> under <code>llm-d-router</code> or <code>sglang-gateway</code> (<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#operator-owned-keys">Operator-owned keys</a>
 ).</td>
 			</tr>
 			<tr>

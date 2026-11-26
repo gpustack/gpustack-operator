@@ -1331,7 +1331,7 @@ surviving <code>Pod</code>s.</li>
 <h3 id="sglang-rank-configuration">SGLang rank configuration</h3>
 <p>SGLang runs one distributed launch spanning <code>size</code> member <code>Pod</code>s with one attention-DP group per
 member. With <code>SGLANG_RUST_SERVER=1</code>, each member serves HTTP on its base port behind
-<code>sglang-gateway</code>, while the <em>FFN</em> tensor-parallel group spans all members:</p>
+<code>sgl-router</code>, while the <em>FFN</em> tensor-parallel group spans all members:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
@@ -1346,7 +1346,7 @@ member. With <code>SGLANG_RUST_SERVER=1</code>, each member serves HTTP on its b
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">SGLang</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-sglang0.5.22</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sglang-gateway </span><span class="w"> </span><span class="c"># required; balances across member endpoints</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sgl-router </span><span class="w"> </span><span class="c"># required; balances across member endpoints</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">

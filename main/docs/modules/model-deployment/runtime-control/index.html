@@ -1410,11 +1410,13 @@ master after expansion.</p>
 <p><em><code>spec.model.loraAdapters</code></em> (<code>name</code>, <code>artifactRef</code>, <code>subPath</code>, <code>pinned</code>) reserves a deployment-level
 LoRA contract; admission currently rejects non-empty values pending <code>ModelArtifact</code> LoRA support.</p>
 <h3 id="router-rollout-effects">Router rollout effects</h3>
-<p>Worker <code>pod-spec-hash</code> reads only <em><code>spec.router</code></em> presence and <em><code>spec.router.name</code></em>. Editing
-<code>replicas</code>, <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>extraArgs</code>, <code>requestTimeoutSeconds</code> or
-<code>disaggregationThresholdTokens</code> updates the router <code>Deployment</code> without rolling worker <code>Pod</code>s.
-Pre-existing <code>render-version &lt;= 5</code> <code>Pod</code>s roll at most once if a router field changes before
-replacement.</p>
+<p>Worker <code>pod-spec-hash</code> reads only <em><code>spec.router</code></em> presence, <em><code>spec.router.name</code></em> and, on <code>vllm-router</code>,
+whether <code>--policy=kv_aware</code> or <code>--prefill-policy=kv_aware</code> is active for each producing role.</p>
+<p>Editing <code>replicas</code>, <code>image</code>, <code>imagePullPolicy</code>, <code>imagePullSecrets</code>, <code>requestTimeoutSeconds</code>,
+<code>disaggregationThresholdTokens</code>, or unrelated <code>extraArgs</code> updates the router <code>Deployment</code> without
+rolling worker <code>Pod</code>s. Toggling <code>vllm-router</code> <code>kv_aware</code> rolls the affected producing roles so
+<code>--kv-events-config</code> and CBOR block-hash settings converge; pre-existing <code>render-version &lt;= 5</code> <code>Pod</code>s
+roll at most once if a router field changes before replacement.</p>
 <h2 id="runtime-safeguards">Runtime safeguards</h2>
 <h3 id="engine-sentinel-injection">Engine sentinel injection</h3>
 <p>Managed accelerated non-<em>Encode</em> roles inject <code>gpustack-engine-sentinel</code> automatically (CPU-only,
@@ -1426,11 +1428,12 @@ container <code>argv</code> or developer modes.</li>
 <li><strong>PreStop drain</strong>: Runs <code>python3 -m gpustack_engine_sentinel.drain</code> on <code>Pod</code> deletion.</li>
 </ul>
 <h3 id="router-api-allowlist">Router API allowlist</h3>
-<p>All three managed routers enforce a shared Envoy method/path allowlist on port <code>8000</code> (including
+<p>All four managed routers enforce a shared Envoy method/path allowlist on port <code>8000</code> (including
 <code>vllm-omni</code> and <code>sglang-omni</code> multimodal endpoints) and return <code>403</code> on non-inference routes:</p>
 <ul>
-<li><strong>Envoy sidecar</strong>: <code>vllm-router</code> and <code>sglang-gateway</code> front loopback <code>127.0.0.1:8001</code> with Envoy
-on <code>0.0.0.0:8000</code> and expose <code>/observer/endpoints</code> on <code>:9091</code>.</li>
+<li><strong>Envoy sidecar</strong>: <code>vllm-router</code>, <code>sgl-router</code> and <code>sglang-gateway</code> front loopback <code>127.0.0.1:8001</code>
+with Envoy on <code>0.0.0.0:8000</code> and expose <code>/observer/endpoints</code> on <code>:9091</code>; <code>sgl-router</code> also exposes
+a dedicated <code>:9090</code> Envoy metrics listener forwarding <code>GET /metrics</code> to <code>127.0.0.1:8001</code>.</li>
 <li><strong>Forbidden flags</strong>: Admission rejects <code>--enable-igw</code>, <code>--admin-port</code>, <code>--admin-host</code>,
 <code>--control-plane-port</code>, <code>--control-plane-host</code>, <code>--enable-admin-api</code> and <code>--enable-control-plane</code>
 in <em><code>spec.router.extraArgs</code></em>.</li>

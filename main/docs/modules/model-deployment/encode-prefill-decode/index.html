@@ -1448,19 +1448,21 @@ startup probes.</p>
 <p>The connector has no file locking or expiry, and storage latency adds transfer delay. The operator
 omits <code>VLLM_USE_V2_MODEL_RUNNER</code> because vLLM-Ascend V2 has no multimodal encoder path.</p>
 <h3 id="nixl-embedding-transfer">NIXL embedding transfer</h3>
-<p><code>ECCPUConnector</code> transfers embeddings between <code>Pod</code>s over NIXL. The operator sets
-<code>VLLM_USE_V2_MODEL_RUNNER=1</code> on both roles and renders an untuned 1 GiB host buffer
-(<code>ec_cpu_bytes</code>) in <code>--ec-transfer-config</code>.</p>
-<p><em>Encode</em> binds side-channel port <code>5601</code> (<code>VLLM_EC_SIDE_CHANNEL_HOST</code> = <em><code>status.podIP</code></em>). Admission
-refuses port <code>5601</code> on <em>Encode</em> (<code>ports</code> or <code>--port</code>) under <code>ECCPUConnector</code>; <code>ECExampleConnector</code>
-does not reserve <code>5601</code>.</p>
+<p><code>ECCPUConnector</code> transfers embeddings between <code>Pod</code>s over NIXL. The operator defaults
+<code>VLLM_USE_V2_MODEL_RUNNER=1</code> on both roles for <code>vLLM &lt; 0.34.0</code> (omitted at <code>&gt;= 0.34.0</code>, where the
+variable was removed upstream) and renders an untuned 1 GiB host buffer (<code>ec_cpu_bytes</code>) in
+<code>--ec-transfer-config</code>.</p>
+<p><em>Encode</em> sets <code>VLLM_EC_SIDE_CHANNEL_HOST</code> to <em><code>status.podIP</code></em> and defaults
+<code>VLLM_EC_SIDE_CHANNEL_PORT=5601</code> (overridable in <em><code>roles[].env</code></em>, including <code>0</code> for an ephemeral
+port). Admission checks HTTP port conflicts on <em>Encode</em> (<code>ports</code> or <code>--port</code>) against the effective
+side-channel port (skipping the check when <code>0</code>); <code>ECExampleConnector</code> reserves no side-channel port.</p>
 <h3 id="operator-owned-keys">Operator-owned keys</h3>
 <p>Admission refuses operator-owned encoder keys in any spelling the engine accepts (see
 <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#operator-owned-keys">Operator-owned keys</a>
 ):</p>
 <ul>
-<li><strong>vLLM</strong>: <code>--ec-transfer-config</code>, plus <code>VLLM_USE_V2_MODEL_RUNNER</code> and both side-channel variables
-under <code>ECCPUConnector</code>.</li>
+<li><strong>vLLM</strong>: <code>--ec-transfer-config</code>, plus <code>VLLM_EC_SIDE_CHANNEL_HOST</code> under <code>ECCPUConnector</code>
+(<code>VLLM_USE_V2_MODEL_RUNNER</code> and <code>VLLM_EC_SIDE_CHANNEL_PORT</code> are defaulted, not owned).</li>
 <li><strong>SGLang</strong>: <code>--encoder-only</code>, <code>--language-only</code>, <code>--encoder-urls</code> and <code>--encoder-bootstrap-port</code>.</li>
 </ul>
 <p>Four vLLM <em>Encode</em> flags are <strong>defaulted</strong> (user <em><code>extraArgs</code></em> wins): <code>--enforce-eager</code>,

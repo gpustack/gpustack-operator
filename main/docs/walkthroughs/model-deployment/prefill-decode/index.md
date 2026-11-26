@@ -272,7 +272,7 @@ Deleting `ModelDeployment` leaves prefetched weights in `NodeModelStore` untouch
 | *`status.endpoint`* stays empty with Router `Pod` present | `RouterReady=False/NoReadyReplicas` | Inspect Router `Pod` events and logs for image pull or readiness probe failures. |
 | No Router `Deployment` or `Pod` exists | `RouterReady=False/RenderFailed` | Read `RouterReady` on `ModelDeployment` and fix invalid fields under *`spec.router`*. |
 | KV transfer fails between *Prefill* and *Decode* | Engine transfer errors in both role logs | Verify matching Mooncake build versions in the runner image, valid *`resources.interface`* counts, and pod-to-pod network reachability. |
-| `KVEventsPublishing=False/PublisherDisabled` | Expected on routed SGLang or disabled publisher | Informational condition reporting configuration rather than runtime failure ([Operator-owned keys](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#operator-owned-keys)). |
+| `KVEventsPublishing=False/PublisherDisabled` | Expected when a publishing role's `--kv-events-config` is missing on rendered `Pod`s | Informational condition reporting configuration rather than runtime failure; routed SGLang reports `True/Publishing` under `sgl-router` and `True/NotApplicable` under `llm-d-router` or `sglang-gateway` ([Operator-owned keys](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#operator-owned-keys)). |
 | `RoleKindsReady=False` | Zero Ready replicas in *Prefill* or *Decode* | Inspect `Pod` logs and events for the unready role named in the condition message. |
 
 ---

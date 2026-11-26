@@ -119,11 +119,14 @@ LoRA contract; admission currently rejects non-empty values pending `ModelArtifa
 
 ### Router rollout effects
 
-Worker `pod-spec-hash` reads only *`spec.router`* presence and *`spec.router.name`*. Editing
-`replicas`, `image`, `imagePullPolicy`, `imagePullSecrets`, `extraArgs`, `requestTimeoutSeconds` or
-`disaggregationThresholdTokens` updates the router `Deployment` without rolling worker `Pod`s.
-Pre-existing `render-version <= 5` `Pod`s roll at most once if a router field changes before
-replacement.
+Worker `pod-spec-hash` reads only *`spec.router`* presence, *`spec.router.name`* and, on `vllm-router`,
+whether `--policy=kv_aware` or `--prefill-policy=kv_aware` is active for each producing role.
+
+Editing `replicas`, `image`, `imagePullPolicy`, `imagePullSecrets`, `requestTimeoutSeconds`,
+`disaggregationThresholdTokens`, or unrelated `extraArgs` updates the router `Deployment` without
+rolling worker `Pod`s. Toggling `vllm-router` `kv_aware` rolls the affected producing roles so
+`--kv-events-config` and CBOR block-hash settings converge; pre-existing `render-version <= 5` `Pod`s
+roll at most once if a router field changes before replacement.
 
 ## Runtime safeguards
 
@@ -139,11 +142,12 @@ Managed accelerated non-*Encode* roles inject `gpustack-engine-sentinel` automat
 
 ### Router API allowlist
 
-All three managed routers enforce a shared Envoy method/path allowlist on port `8000` (including
+All four managed routers enforce a shared Envoy method/path allowlist on port `8000` (including
 `vllm-omni` and `sglang-omni` multimodal endpoints) and return `403` on non-inference routes:
 
-- **Envoy sidecar**: `vllm-router` and `sglang-gateway` front loopback `127.0.0.1:8001` with Envoy
-  on `0.0.0.0:8000` and expose `/observer/endpoints` on `:9091`.
+- **Envoy sidecar**: `vllm-router`, `sgl-router` and `sglang-gateway` front loopback `127.0.0.1:8001`
+  with Envoy on `0.0.0.0:8000` and expose `/observer/endpoints` on `:9091`; `sgl-router` also exposes
+  a dedicated `:9090` Envoy metrics listener forwarding `GET /metrics` to `127.0.0.1:8001`.
 - **Forbidden flags**: Admission rejects `--enable-igw`, `--admin-port`, `--admin-host`,
   `--control-plane-port`, `--control-plane-host`, `--enable-admin-api` and `--enable-control-plane`
   in *`spec.router.extraArgs`*.

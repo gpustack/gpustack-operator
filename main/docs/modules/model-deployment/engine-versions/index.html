@@ -1203,6 +1203,8 @@ older engine release.</p>
 <ul>
 <li><a href="#minimum-versions">Minimum versions</a>
 </li>
+<li><a href="#engine-version-resolution">Engine version resolution</a>
+</li>
 <li><a href="#transport-compatibility">Transport compatibility</a>
 </li>
 <li><a href="#remote-weight-loading">Remote weight loading</a>
@@ -1305,7 +1307,7 @@ configurations.</p>
 			<tr>
 					<td>SGLang</td>
 					<td><em>encode/prefill/decode</em>, transfer by address (<code>encoder-urls</code>)</td>
-					<td><code>0.5.10</code>, behind <code>llm-d-router</code> or <code>sglang-gateway</code> (NVIDIA verified on 2 × NVIDIA L40S)</td>
+					<td><code>0.5.10</code>, behind <code>sgl-router</code>, <code>llm-d-router</code>, or deprecated <code>sglang-gateway</code> (NVIDIA verified on 2 × NVIDIA L40S)</td>
 					<td><code>0.3.12.post1</code></td>
 					<td>—</td>
 			</tr>
@@ -1319,10 +1321,6 @@ AMD <em>EPD</em> and SGLang Ascend rows are admitted but unverified on hardware
 ).</p>
 <h3 id="engine-image-requirements">Engine image requirements</h3>
 <ul>
-<li><strong>Image floor</strong>: There is no <em><code>engine.version</code></em> field. Roles run <em><code>roles[].image</code></em> or
-<em><code>spec.engine.image</code></em> (<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#role-images">Role images</a>
-), and admission never checks
-the tag. An image below the floor fails at startup (<code>ImagePullBackOff</code> or unknown-flag exit).</li>
 <li><strong>Render flag</strong>: Non-<em>Encode</em> vLLM deployments behind <code>llm-d-router</code> need <code>--enable-scale-out</code>
 starting at vLLM <code>0.30.0</code> or vLLM-Ascend <code>0.30.0rc1</code>
 (<a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#router-token-counting">Router token counting</a>
@@ -1346,6 +1344,53 @@ admits a member, <code>Unknown</code> keeps prior eligibility, and only a failed
 (<a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#endpoint-status">Endpoint status</a>
 ).</li>
 </ul>
+<h2 id="engine-version-resolution">Engine version resolution</h2>
+<p>Managed roles (<em><code>roles[].command</code></em> empty) resolve an engine version from <em><code>spec.roles[].engineVersion</code></em>
+or fall back to <em><code>spec.engine.version</code></em>. Admission backfills empty version fields automatically from
+standard <code>gpustack/runner</code> image tags on both creation and update.</p>
+<ul>
+<li><strong>Custom or digest-only images</strong>: Set <em><code>spec.engine.version</code></em> or <em><code>roles[].engineVersion</code></em>
+explicitly. Admission fails closed when a managed role uses an unparseable image without a version,
+including when a role overrides <em><code>roles[].image</code></em> with a different unparseable image while leaving
+<em><code>roles[].engineVersion</code></em> empty.</li>
+<li><strong>Runner tag agreement</strong>: If you update a <code>gpustack/runner</code> image while leaving a stale explicit
+version, admission refuses the update. Update or clear the version field alongside the image.</li>
+<li><strong>Milestone comparison</strong>: Gates compare <code>(major, minor, patch)</code> tuples, so pre-release tags such
+as <code>0.30.0rc1</code> or <code>0.34.0rc0</code> satisfy their release line (<code>0.30.0</code> or <code>0.34.0</code>).</li>
+<li><strong>Empty stored version baseline</strong>: In controller rendering, an empty stored version falls back to
+the <code>&lt; 0.30.0</code> baseline without re-parsing container image tags.</li>
+</ul>
+<h3 id="version-gates">Version gates</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Version gate</th>
+					<th>Engine</th>
+					<th>Before</th>
+					<th>At/after</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>0.30.0</code></td>
+					<td><code>vLLM-Ascend</code></td>
+					<td><em>PD</em> renders <code>MooncakeConnectorV1</code> (<code>prefill tp_size &gt;= decode tp_size</code>)</td>
+					<td><em>PD</em> renders <code>MooncakeConnectorV2</code> Pull mode (<code>max(tp_p, tp_d) % min(tp_p, tp_d) == 0</code>); mixed V1/V2 pairs refused</td>
+			</tr>
+			<tr>
+					<td><code>0.31.0</code></td>
+					<td><code>vLLM</code>, <code>vLLM-Ascend</code></td>
+					<td><code>vllm-router</code> <code>kv_aware</code> policy refused at admission</td>
+					<td><code>vllm-router</code> <code>kv_aware</code> admitted; emits KV events and <code>sha256_cbor</code> hash alignment</td>
+			</tr>
+			<tr>
+					<td><code>0.34.0</code></td>
+					<td><code>vLLM</code></td>
+					<td><code>ECCPUConnector</code> defaults <code>VLLM_USE_V2_MODEL_RUNNER=1</code> and <code>VLLM_EC_SIDE_CHANNEL_PORT=5601</code></td>
+					<td><code>VLLM_USE_V2_MODEL_RUNNER</code> omitted; <code>VLLM_EC_SIDE_CHANNEL_PORT=5601</code> remains defaulted (overridable, including <code>0</code>)</td>
+			</tr>
+	</tbody>
+</table>
 <h2 id="transport-compatibility">Transport compatibility</h2>
 <p>The shared-store path uses <code>KVCacheBackend.spec.transport.protocol</code>. The direct <em>PD</em> path selects
 <code>Mooncake</code>, <code>NIXL</code> or <code>HIXL</code> through <em><code>spec.kvTransfer.backend</code></em>
@@ -1555,6 +1600,11 @@ without a store and at most 16 with a <code>TCP</code> store.</li>
     <li><a href="#minimum-versions">Minimum versions</a>
       <ul>
         <li><a href="#engine-image-requirements">Engine image requirements</a></li>
+      </ul>
+    </li>
+    <li><a href="#engine-version-resolution">Engine version resolution</a>
+      <ul>
+        <li><a href="#version-gates">Version gates</a></li>
       </ul>
     </li>
     <li><a href="#transport-compatibility">Transport compatibility</a></li>
