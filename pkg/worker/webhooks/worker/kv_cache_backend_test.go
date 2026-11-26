@@ -1492,6 +1492,24 @@ func TestKVCacheBackendWebhook_ExtraEnv(t *testing.T) {
 		{"the leader's pod name", withLeaderEnvs(
 			workercore.InstanceEnvVar{Name: "KUBERNETES_POD_NAME", Value: "impostor"},
 		), "rendered from this spec"},
+		// The DFS hatch, refused outright rather than as derived: this API renders no DFS tier for
+		// the switch to turn on and no status reports the substitution, so the Derived message would
+		// be untrue. Both assertions carry the field path, because the refusal must land on the
+		// variable that was typed.
+		{"the DFS switch", withLeaderEnvs(
+			workercore.InstanceEnvVar{Name: "MOONCAKE_ENABLE_DFS", Value: "true"},
+		), "spec.connection.managed.leader.extraEnv[MOONCAKE_ENABLE_DFS]: Forbidden: it switches the store's DFS tier on"},
+		{"a MOONCAKE_DFS_ setting", withLeaderEnvs(
+			workercore.InstanceEnvVar{Name: "MOONCAKE_DFS_ROOT", Value: "/mnt/dfs"},
+		), "spec.connection.managed.leader.extraEnv[MOONCAKE_DFS_ROOT]: Forbidden: it is one of the MOONCAKE_DFS_ settings"},
+		// The reserved prefix carries its trailing underscore, so the bare namespace is an unrelated
+		// name and stays accepted, as does any name clear of it.
+		{"the bare MOONCAKE_DFS namespace, not reserved", withLeaderEnvs(
+			workercore.InstanceEnvVar{Name: "MOONCAKE_DFS", Value: "1"},
+		), ""},
+		{"an unrelated leader variable still accepted", withLeaderEnvs(
+			workercore.InstanceEnvVar{Name: "MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS", Value: "5"},
+		), ""},
 		// A name the strict rule refuses. Checked before the derived list, because a malformed name
 		// cannot collide with one while still reaching the container.
 		{"a name with a space", withMemberEnvs(

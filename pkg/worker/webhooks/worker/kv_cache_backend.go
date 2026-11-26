@@ -524,7 +524,8 @@ func validateKVCacheBackendManaged(
 	if !haUnchanged ||
 		!unchangedPassthrough(oldManaged != nil, oldLeaderExtraEnv, managed.Leader.ExtraEnv) {
 		errs = append(errs, validateExtraEnvs(managed.Leader.ExtraEnv,
-			mooncake.LeaderDerivedEnvs, fldPath.Child("leader", "extraEnv"))...)
+			mooncake.LeaderDerivedEnvs, mooncake.LeaderReservedEnvs,
+			fldPath.Child("leader", "extraEnv"))...)
 	}
 
 	for i := range managed.Members {
@@ -740,7 +741,7 @@ func validateKVCacheBackendMember(
 	}
 	if !unchangedPassthrough(oldMember != nil, oldExtraEnv, member.ExtraEnv) {
 		errs = append(errs, validateExtraEnvs(member.ExtraEnv,
-			mooncake.MemberDerivedEnvs, fldPath.Child("extraEnv"))...)
+			mooncake.MemberDerivedEnvs, nil, fldPath.Child("extraEnv"))...)
 	}
 
 	return errs
@@ -834,7 +835,9 @@ func validateKVCacheBackendMemberHostPaths(
 }
 
 // validateExtraEnvs enforces the environment passthrough's rules, against whichever side's derived
-// names it is handed.
+// names it is handed. The leader additionally hands in the reserved names -- refused outright, the
+// way extraArgs' Forbidden table is, because nothing renders them and so no name collides -- and
+// the member hands in none.
 //
 // It is separate from validateExtraArgs rather than sharing it, because the half that differs is the
 // half that matters: a config key and an environment-variable name have different shapes, judged by
@@ -847,7 +850,8 @@ func validateKVCacheBackendMemberHostPaths(
 // admitted before the entry existed — on every update, including the reconciler's own removal of
 // this object's finalizer. See unchangedPassthrough.
 func validateExtraEnvs(
-	extraEnv []workercore.InstanceEnvVar, derived []string, fldPath *field.Path,
+	extraEnv []workercore.InstanceEnvVar, derived []string,
+	reserved []mooncake.LeaderReservedEnv, fldPath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
 
@@ -873,6 +877,14 @@ func validateExtraEnvs(
 				"this variable is rendered from this spec, and two definitions of one name make the "+
 					"rendered container ambiguous: Kubernetes accepts both and leaves the winner to "+
 					"the container runtime, so nothing would report the collision"))
+		}
+		// Last, the reserved hatch names. Like the Forbidden table for extraArgs, these reach the
+		// process intact and are refused for what they configure rather than for colliding with a
+		// rendered name, which is why the message above would be untrue of them.
+		for _, r := range reserved {
+			if r.Matches(e.Name) {
+				errs = append(errs, field.Forbidden(fldPath.Key(e.Name), r.Reason))
+			}
 		}
 	}
 

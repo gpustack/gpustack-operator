@@ -24,6 +24,8 @@
 // Every entry below is read from the artifact's own source at the version this project pins.
 package mooncake
 
+import "strings"
+
 // ExtraArgsRules is what admission enforces on one side's extraArgs. The three kinds are separate
 // because they refuse for different reasons and an operator needs to hear which:
 //
@@ -386,4 +388,47 @@ var LeaderDerivedEnvs = []string{
 	LeaderPodIPEnv,
 	LeaderPodNameEnv,
 	LeaderPodNamespaceEnv,
+}
+
+// LeaderReservedEnv is one environment variable name the leader hatch may not carry even though
+// nothing in this API renders it, so no name collides and the Derived refusal would say something
+// untrue. Exactly one of Name and Prefix is set.
+type LeaderReservedEnv struct {
+	// Name is refused as an exact variable name.
+	Name string
+	// Prefix is refused as the leading run of a variable name.
+	Prefix string
+	// Reason is carried into the refusal verbatim.
+	Reason string
+}
+
+// Matches reports whether the variable name falls under the entry.
+func (r LeaderReservedEnv) Matches(name string) bool {
+	if r.Name != "" {
+		return name == r.Name
+	}
+	return strings.HasPrefix(name, r.Prefix)
+}
+
+// LeaderReservedEnvs is what admission refuses in the leader's extraEnv for reasons no name
+// collision explains. It is kept beside the Forbidden table above because that table is where the
+// refusals that are no collision live. The media spec records Mooncake DFS as unsupported, this
+// API renders no DFS tier for the switch to turn on, and no status reports the substitution -- so
+// neither spelling of it may pass.
+//
+// The prefix carries its trailing underscore on purpose: MOONCAKE_DFS alone is an unrelated name
+// and stays accepted.
+var LeaderReservedEnvs = []LeaderReservedEnv{
+	{
+		Name: "MOONCAKE_ENABLE_DFS",
+		Reason: "it switches the store's DFS tier on, and accepting it lets the object carry a " +
+			"DFS switch the process may honour while this API renders no DFS tier and no status " +
+			"reports the substitution, and the media spec holds DFS unsupported",
+	},
+	{
+		Prefix: "MOONCAKE_DFS_",
+		Reason: "it is one of the MOONCAKE_DFS_ settings of a DFS tier this API does not render, " +
+			"so accepting it lets the object carry a switch the process may honour while no status " +
+			"reports the substitution, and the media spec holds DFS unsupported",
+	},
 }
