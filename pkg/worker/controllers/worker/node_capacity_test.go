@@ -685,6 +685,64 @@ func TestAcceleratorDetailChanged(t *testing.T) {
 	assert.False(t, acceleratorDetailChanged(carved, carved), "an unchanged ledger does not fire")
 }
 
+// TestDevicesUpdateFires pins the Devices-watch update gate as a whole. A new ledger without
+// the managed mark never fires, and the mark appearing on a re-created ledger fires even when
+// the spec is byte-identical — the device manager re-creates Devices without the label and the
+// worker mirrors it afterwards, so without this fire the capability stays lost until restart.
+// A managed pair falls through to the detail diff.
+func TestDevicesUpdateFires(t *testing.T) {
+	const node = "node-m"
+	base := devicesWithGroups(node,
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", logicalCard("0", 128, true), logicalCard("1", 128, true)))
+
+	managed := func(devs *workercore.Devices) *workercore.Devices {
+		devs.Labels = map[string]string{systemname.ManagedLabelKey: "true"}
+		return devs
+	}
+
+	changed := devicesWithGroups(node,
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", logicalCard("0", 64, true), logicalCard("1", 64, true)))
+
+	cases := []struct {
+		name string
+		old  *workercore.Devices
+		new  *workercore.Devices
+		want bool
+	}{
+		{
+			name: "an unmanaged new ledger never fires",
+			old:  managed(base.DeepCopy()),
+			new:  base.DeepCopy(),
+			want: false,
+		},
+		{
+			name: "the managed mark appearing fires on an identical spec",
+			old:  base.DeepCopy(),
+			new:  managed(base.DeepCopy()),
+			want: true,
+		},
+		{
+			name: "a managed pair with an identical spec stays quiet",
+			old:  managed(base.DeepCopy()),
+			new:  managed(base.DeepCopy()),
+			want: false,
+		},
+		{
+			name: "a managed pair with a changed spec fires",
+			old:  managed(base.DeepCopy()),
+			new:  managed(changed.DeepCopy()),
+			want: true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, devicesUpdateFires(c.old, c.new))
+		})
+	}
+}
+
 // TestEnqueueNodeWhenDevicesChanged pins that a Devices ledger enqueues its name-identical Node.
 func TestEnqueueNodeWhenDevicesChanged(t *testing.T) {
 	r := &NodeCapacityReconciler{}

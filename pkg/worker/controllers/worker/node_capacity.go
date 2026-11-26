@@ -613,8 +613,10 @@ func (r *NodeCapacityReconciler) SetupController(_ context.Context, opts control
 			),
 			ctrlbuilder.WithPredicates(ctrlpredicate.Funcs{
 				// A managed Devices' capacity inputs: on create/delete the whole capability
-				// appears/vanishes; on update fire only when slicing detail, card health,
-				// unhealthy-card live allocations, or partition profile ledgers change.
+				// appears/vanishes; on update fire when the managed mark appears (a deleted
+				// ledger re-created without the label, mirrored back by the worker), or when
+				// slicing detail, card health, unhealthy-card live allocations, or partition
+				// profile ledgers change.
 				CreateFunc: func(e ctrlevent.CreateEvent) bool {
 					return isManagedDevices(e.Object)
 				},
@@ -623,10 +625,7 @@ func (r *NodeCapacityReconciler) SetupController(_ context.Context, opts control
 				},
 				UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 					oldDevs, newDevs := e.ObjectOld.(*workercore.Devices), e.ObjectNew.(*workercore.Devices)
-					if !isManagedDevices(newDevs) {
-						return false
-					}
-					return acceleratorDetailChanged(oldDevs, newDevs)
+					return devicesUpdateFires(oldDevs, newDevs)
 				},
 			}),
 		).
@@ -636,6 +635,18 @@ func (r *NodeCapacityReconciler) SetupController(_ context.Context, opts control
 // isManagedDevices reports whether a Devices ledger belongs to an operator-managed node.
 func isManagedDevices(obj ctrlcli.Object) bool {
 	return obj.GetLabels()[systemname.ManagedLabelKey] == "true"
+}
+
+// devicesUpdateFires reports whether a Devices update moves the node's capacity.
+func devicesUpdateFires(oldDevs, newDevs *workercore.Devices) bool {
+	if !isManagedDevices(newDevs) {
+		return false
+	}
+	if !isManagedDevices(oldDevs) {
+		// the managed mark appearing is itself a capacity event: the whole capability appears
+		return true
+	}
+	return acceleratorDetailChanged(oldDevs, newDevs)
 }
 
 // enqueueNodeWhenDevicesChanged maps a changed Devices ledger to its name-identical Node
