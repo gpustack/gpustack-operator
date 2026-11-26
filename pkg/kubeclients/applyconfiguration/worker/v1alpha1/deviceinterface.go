@@ -54,8 +54,19 @@ type DeviceInterfaceApplyConfiguration struct {
 	// RDMA reports that an RDMA device is bound to this interface. It says nothing about
 	// whether the link works — that is Link below, and the two differ on real hardware.
 	RDMA *bool `json:"rdma,omitempty"`
-	// RDMADevice is the bound RDMA device's name. Empty when RDMA is false.
+	// RDMADevice is the bound RDMA device's name. Empty when RDMA is false, and also on an
+	// interface that RDMASoftware marks: that device is advertised under its own name, so the
+	// allocation identity stays with it.
 	RDMADevice *string `json:"rdmaDevice,omitempty"`
+	// RDMASoftware reports that RDMA reaches this interface through a software device, such as
+	// Soft-RoCE (`rxe`), which runs RDMA in the kernel over an ordinary network device such as a
+	// bond, a VLAN or a plain NIC. The Device Manager finds the interface by its name in the
+	// software device's ports, because the device has no PCI address to look up.
+	//
+	// A node whose usable RDMA interfaces are all software-carried carries the node label
+	// `feature.gpustack.ai/rdma.software=true`. The `rdma.distance` and `rdma.numa` node labels
+	// are never derived from such an interface. Performance is far below a hardware adapter's.
+	RDMASoftware *bool `json:"rdmaSoftware,omitempty"`
 	// SRIOV reports that this interface is an SR-IOV physical function. It is a SEPARATE fact
 	// from the length of VirtualFunctions: "a PF with zero VFs configured" and "not a PF at
 	// all" are different states, and deriving the second from an empty VF list collapses them.
@@ -187,6 +198,14 @@ func (b *DeviceInterfaceApplyConfiguration) WithRDMA(value bool) *DeviceInterfac
 // If called multiple times, the RDMADevice field is set to the value of the last call.
 func (b *DeviceInterfaceApplyConfiguration) WithRDMADevice(value string) *DeviceInterfaceApplyConfiguration {
 	b.RDMADevice = &value
+	return b
+}
+
+// WithRDMASoftware sets the RDMASoftware field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RDMASoftware field is set to the value of the last call.
+func (b *DeviceInterfaceApplyConfiguration) WithRDMASoftware(value bool) *DeviceInterfaceApplyConfiguration {
+	b.RDMASoftware = &value
 	return b
 }
 

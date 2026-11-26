@@ -33,6 +33,15 @@ func plainNIC(name, bus, root, numa string, switches []string) device.Interface 
 	}
 }
 
+// softNIC is a virtual interface carrying a software RDMA device, as the detector records a bond
+// with Soft-RoCE: found by name, so with no PCI coordinates and no device name to resolve an
+// allocation through.
+func softNIC(name string, link *workercore.DeviceInterfaceLink) device.Interface {
+	return device.Interface{
+		Name: name, Bus: "virtual", Virtual: true, RDMA: true, RDMASoftware: true, Link: link,
+	}
+}
+
 // vfRDMA is a virtual function carrying a bound RDMA device and a link verdict.
 //
 // It has its own NUMA affinity, because the API type carries one and the sysfs reader fills it from
@@ -305,6 +314,61 @@ func TestConstructRDMANodeLabels(t *testing.T) {
 			interfaces: []device.Interface{{Name: "eth0", Bus: "pci"}},
 			want:       map[string]string{},
 		},
+		{
+			// A software endpoint makes the node capable, and says that the RDMA is software. It has
+			// no PCI coordinates and no NUMA node, so neither locality value is derived from it — the
+			// accelerator is there, so a distance taken over this endpoint would have published one.
+			name:   "a software endpoint makes the node capable and software, with no locality",
+			groups: acceleratorAt("0000:01:00.0", "0000:00:01.0", "0", []string{"0000:00:01.0"}),
+			interfaces: []device.Interface{
+				softNIC("bond0", linkState(workercore.DeviceInterfaceLinkStateOK)),
+			},
+			want: map[string]string{
+				NodeRDMACapableLabelKey:  "true",
+				NodeRDMASoftwareLabelKey: "true",
+			},
+		},
+		{
+			// "software" means software ONLY. The hardware endpoint still contributes the node's
+			// locality, and a reader excluding software RDMA must not lose a node that has hardware.
+			name:   "a hardware endpoint beside a software one withholds the software key",
+			groups: acceleratorAt("0000:01:00.0", "0000:00:01.0", "0", []string{"0000:00:01.0"}),
+			interfaces: []device.Interface{
+				rdmaNIC("eth0", "0000:02:00.0", "0000:00:01.0", "0", []string{"0000:00:01.0"},
+					linkState(workercore.DeviceInterfaceLinkStateOK)),
+				softNIC("bond0", linkState(workercore.DeviceInterfaceLinkStateOK)),
+			},
+			want: map[string]string{
+				NodeRDMACapableLabelKey:  "true",
+				NodeRDMANumaLabelKey:     "0",
+				NodeRDMADistanceLabelKey: "PIX",
+			},
+		},
+		{
+			// A failed software endpoint is not usable, so it makes the node neither capable nor
+			// software. The key is withheld by removal like the others.
+			name:   "a failed software endpoint emits nothing",
+			groups: acceleratorAt("0000:01:00.0", "0000:00:01.0", "0", []string{"0000:00:01.0"}),
+			interfaces: []device.Interface{
+				softNIC("bond0", linkState(workercore.DeviceInterfaceLinkStateFailed)),
+			},
+			want: map[string]string{},
+		},
+		{
+			// A broken hardware link does not count as a hardware endpoint, so a working software
+			// device beside it leaves the node software-only.
+			name:   "a failed hardware endpoint beside a working software one is software-only",
+			groups: acceleratorAt("0000:01:00.0", "0000:00:01.0", "0", []string{"0000:00:01.0"}),
+			interfaces: []device.Interface{
+				rdmaNIC("eth0", "0000:02:00.0", "0000:00:01.0", "0", []string{"0000:00:01.0"},
+					linkState(workercore.DeviceInterfaceLinkStateFailed)),
+				softNIC("bond0", linkState(workercore.DeviceInterfaceLinkStateOK)),
+			},
+			want: map[string]string{
+				NodeRDMACapableLabelKey:  "true",
+				NodeRDMASoftwareLabelKey: "true",
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -373,13 +437,14 @@ func TestRDMALabelBudget(t *testing.T) {
 func TestRDMALabelsAreNotPoolDiscriminators(t *testing.T) {
 	labels := PoolScheduleLabels(true, true, "amd-25-1", "nvidia-h100", "linux", "amd64")
 	labels[NodeRDMACapableLabelKey] = "true"
+	labels[NodeRDMASoftwareLabelKey] = "true"
 	labels[NodeRDMADistanceLabelKey] = "PIX"
 	labels[NodeRDMANumaLabelKey] = "0"
 
 	selector := PoolFlavorSelector(labels)
 	for k := range selector {
-		if k == NodeRDMACapableLabelKey || k == NodeRDMADistanceLabelKey ||
-			k == NodeRDMANumaLabelKey {
+		if k == NodeRDMACapableLabelKey || k == NodeRDMASoftwareLabelKey ||
+			k == NodeRDMADistanceLabelKey || k == NodeRDMANumaLabelKey {
 			t.Errorf("%s reached the pool selector; a link going down would then move nodes "+
 				"between pools instead of stopping a flavor from selecting them", k)
 		}

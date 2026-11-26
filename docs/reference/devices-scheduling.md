@@ -121,12 +121,13 @@ including a **mixed** one advertising both families;
 
 ### RDMA feature labels
 
-A node with a usable RDMA link also carries `feature.gpustack.ai/rdma.capable=true`, and
-conditionally two informational keys. No operator-generated flavor pins any of them; `rdma.capable`
-is the one meant for a workload's own nodeSelector, and withholding it is how a node with no usable
-link stops being selected by one.
+A node with a usable RDMA link also carries `feature.gpustack.ai/rdma.capable=true`, and the
+informational keys listed there. No operator-generated flavor pins any of them. `rdma.capable`
+and `rdma.software` are the keys meant for a workload's own nodeSelector: withholding the first
+is how a node with no usable link stops being selected, and excluding the second keeps a workload
+off software-only RDMA.
 
-See [Network Topology](rdma-network-topology.md#three-node-labels) for
+See [Network Topology](rdma-network-topology.md#rdma-node-labels) for
 which link states count as usable, when each informational key is present, and why the accelerator
 interconnect gets no label at all.
 

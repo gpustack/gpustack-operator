@@ -213,6 +213,100 @@ func TestCheckRDMALinkReasonIsDeterministic(t *testing.T) {
 	}
 }
 
+// TestCheckRDMAPortLink pins the per-port check the netdev-keyed lookup uses.
+//
+// It reads ONE port, the one a software RDMA device's GID attributes named for an interface, so the
+// rule of the whole-device check does not apply here: a sibling port says nothing about this
+// interface, and reading it would let an active port answer for a netdev served by a down one. What
+// carries over unchanged is which reads may reach which state — an unreadable file never reaches
+// `failed` — and the shape of the record: verbatim values in the reason, no reason on a verified
+// link, no first-seen time.
+func TestCheckRDMAPortLink(t *testing.T) {
+	const (
+		activeState = "4: ACTIVE"
+		deferState  = "5: ACTIVE_DEFER"
+		downState   = "1: DOWN"
+		linkUp      = "5: LinkUp"
+		disabled    = "3: Disabled"
+	)
+
+	testCases := []struct {
+		name         string
+		attrs        map[string]string
+		wantState    workercore.DeviceInterfaceLinkState
+		wantContains []string
+	}{
+		{
+			name:      "an active port whose physical link is up verifies",
+			attrs:     map[string]string{"state": activeState, "phys_state": linkUp},
+			wantState: workercore.DeviceInterfaceLinkStateOK,
+		},
+		{
+			name:         "an active port whose physical link is off fails",
+			attrs:        map[string]string{"state": activeState, "phys_state": disabled},
+			wantState:    workercore.DeviceInterfaceLinkStateFailed,
+			wantContains: []string{activeState, disabled},
+		},
+		{
+			name:         "a down port fails, carrying both values verbatim",
+			attrs:        map[string]string{"state": downState, "phys_state": disabled},
+			wantState:    workercore.DeviceInterfaceLinkStateFailed,
+			wantContains: []string{downState, disabled},
+		},
+		{
+			name:         "an ACTIVE_DEFER port does not verify",
+			attrs:        map[string]string{"state": deferState, "phys_state": linkUp},
+			wantState:    workercore.DeviceInterfaceLinkStateFailed,
+			wantContains: []string{deferState, linkUp},
+		},
+		{
+			name:         "a port with no readable state is unverified, and names the port",
+			attrs:        nil,
+			wantState:    workercore.DeviceInterfaceLinkStateUnverified,
+			wantContains: []string{"rxe0/ports/1"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSysfsFixture(t)
+			// Reached the way the lookup reaches it: through the class entry, as rxe is placed.
+			f.addClassRDMA("rxe0", "", "")
+			portRel := filepath.Join(sysfsInfinibandDir, "rxe0", "ports", "1")
+			f.mkdir(portRel)
+			for k, v := range tc.attrs {
+				f.write(filepath.Join(portRel, k), v)
+			}
+
+			tree, err := newSysfsTree(f.root)
+			if err != nil {
+				t.Fatalf("newSysfsTree: %v", err)
+			}
+
+			link := tree.checkRDMAPortLink(portRel)
+			if link == nil {
+				t.Fatal("the port produced no link record; every state has to be reported in words")
+			}
+			if link.State != tc.wantState {
+				t.Errorf("state = %q, want %q (reason %q)", link.State, tc.wantState, link.Reason)
+			}
+			for _, want := range tc.wantContains {
+				if !strings.Contains(link.Reason, want) {
+					t.Errorf("reason %q does not carry %q", link.Reason, want)
+				}
+			}
+			if tc.wantState == workercore.DeviceInterfaceLinkStateOK && link.Reason != "" {
+				t.Errorf("a verified link carries a reason %q; only the two states that need "+
+					"explaining have words", link.Reason)
+			}
+			if link.FirstSeenTime != nil {
+				t.Errorf("the checker set a first-seen time %v; that is the pass's decision",
+					link.FirstSeenTime)
+			}
+		})
+	}
+}
+
 // TestEnumerateInterfacesCarriesTheRDMALinkState pins that the pass actually runs the check.
 //
 // The check being correct in isolation says nothing about whether any interface record carries its

@@ -55,6 +55,19 @@ const (
 	// rdmaNumaSeparator joins the NUMA node ids. See NodeRDMANumaLabelKey for why it is not a
 	// comma, which is the separator this would otherwise obviously use.
 	rdmaNumaSeparator = "_"
+
+	// NodeRDMASoftwareLabelKey says that every usable RDMA interface on this node is
+	// software-carried, as DeviceInterface.RDMASoftware marks one. It is set only when at least one
+	// interface is usable, so a node whose only software port is down carries neither this key nor
+	// the capable key.
+	//
+	// It means software ONLY. A node with a usable hardware adapter beside a software device does
+	// not carry it: a reader that excludes software RDMA must not lose a node that has hardware.
+	//
+	// Software RDMA performs far below a hardware adapter, so a workload that needs hardware
+	// excludes this key through its own nodeSelector or affinity. No operator-generated
+	// ResourceFlavor pins it, the same as the capable key.
+	NodeRDMASoftwareLabelKey = RDMAFeatureLabelPrefix + "software"
 )
 
 // rdmaResourceNameBase is the base of the RDMA resource keys: the operator's own device
@@ -146,17 +159,33 @@ func ConstructRDMANodeLabels(
 	}
 	labels[NodeRDMACapableLabelKey] = "true"
 
+	// A software-carried endpoint stays out of both locality values. The coordinates it may carry
+	// are its netdev's, and they place no RDMA hardware an accelerator can sit near. Reducing over
+	// the hardware endpoints alone keeps a software-only node free of both keys rather than
+	// publishing an unknown distance as if it were a measurement.
+	hardware := make([]device.Interface, 0, len(capable))
+	for i := range capable {
+		if !capable[i].RDMASoftware {
+			hardware = append(hardware, capable[i])
+		}
+	}
+	// Software ONLY: at least one usable endpoint, and every usable endpoint software-carried. The
+	// early return above settles the first half; an empty set here settles the second.
+	if len(hardware) == 0 {
+		labels[NodeRDMASoftwareLabelKey] = "true"
+	}
+
 	// The NUMA set is a COMPOSITE value, so the sanitizer below is not a safety net for it: it caps
 	// a label value at 63 characters, and truncating "0_1_..._31" publishes a SUBSET as if it were
 	// the set — a wrong fact rather than a degraded one. A node with enough NUMA nodes to exceed the
 	// cap therefore gets no NUMA key at all. `rdma.capable` still says the node has RDMA, and the
 	// per-endpoint affinities are in `Devices`, which carries no such limit.
-	if numa := rdmaNumaNodes(capable); numa != "" && kubemeta.SanitizeLabelValue(numa) == numa {
+	if numa := rdmaNumaNodes(hardware); numa != "" && kubemeta.SanitizeLabelValue(numa) == numa {
 		labels[NodeRDMANumaLabelKey] = numa
 	}
 	// Reported only when an accelerator was there to measure from. A distance is a statement about
 	// a PAIR, so a node with RDMA and no accelerators has no distance rather than an unknown one.
-	if distance, ok := closestAcceleratorDistance(groups, capable); ok {
+	if distance, ok := closestAcceleratorDistance(groups, hardware); ok {
 		labels[NodeRDMADistanceLabelKey] = distance.String()
 	}
 

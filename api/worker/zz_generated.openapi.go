@@ -5136,8 +5136,15 @@ func schema_gpustack_api_worker_v1alpha1_DeviceInterface(ref common.ReferenceCal
 					},
 					"rdmaDevice": {
 						SchemaProps: spec.SchemaProps{
-							Description: "RDMADevice is the bound RDMA device's name. Empty when RDMA is false.",
+							Description: "RDMADevice is the bound RDMA device's name. Empty when RDMA is false, and also on an interface that RDMASoftware marks: that device is advertised under its own name, so the allocation identity stays with it.",
 							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"rdmaSoftware": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RDMASoftware reports that RDMA reaches this interface through a software device, such as Soft-RoCE (`rxe`), which runs RDMA in the kernel over an ordinary network device such as a bond, a VLAN or a plain NIC. The Device Manager finds the interface by its name in the software device's ports, because the device has no PCI address to look up.\n\nA node whose usable RDMA interfaces are all software-carried carries the node label `feature.gpustack.ai/rdma.software=true`. The `rdma.distance` and `rdma.numa` node labels are never derived from such an interface. Performance is far below a hardware adapter's.",
+							Type:        []string{"boolean"},
 							Format:      "",
 						},
 					},

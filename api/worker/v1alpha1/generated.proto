@@ -595,8 +595,20 @@ message DeviceInterface {
   // whether the link works — that is Link below, and the two differ on real hardware.
   optional bool rdma = 13;
 
-  // RDMADevice is the bound RDMA device's name. Empty when RDMA is false.
+  // RDMADevice is the bound RDMA device's name. Empty when RDMA is false, and also on an
+  // interface that RDMASoftware marks: that device is advertised under its own name, so the
+  // allocation identity stays with it.
   optional string rdmaDevice = 14;
+
+  // RDMASoftware reports that RDMA reaches this interface through a software device, such as
+  // Soft-RoCE (`rxe`), which runs RDMA in the kernel over an ordinary network device such as a
+  // bond, a VLAN or a plain NIC. The Device Manager finds the interface by its name in the
+  // software device's ports, because the device has no PCI address to look up.
+  //
+  // A node whose usable RDMA interfaces are all software-carried carries the node label
+  // `feature.gpustack.ai/rdma.software=true`. The `rdma.distance` and `rdma.numa` node labels
+  // are never derived from such an interface. Performance is far below a hardware adapter's.
+  optional bool rdmaSoftware = 18;
 
   // SRIOV reports that this interface is an SR-IOV physical function. It is a SEPARATE fact
   // from the length of VirtualFunctions: "a PF with zero VFs configured" and "not a PF at

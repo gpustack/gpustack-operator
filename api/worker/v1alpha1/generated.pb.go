@@ -1444,6 +1444,16 @@ func (m *DeviceInterface) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i--
+	if m.RDMASoftware {
+		dAtA[i] = 1
+	} else {
+		dAtA[i] = 0
+	}
+	i--
+	dAtA[i] = 0x1
+	i--
+	dAtA[i] = 0x90
 	if m.Link != nil {
 		{
 			size, err := m.Link.MarshalToSizedBuffer(dAtA[:i])
@@ -13530,6 +13540,7 @@ func (m *DeviceInterface) Size() (n int) {
 		l = m.Link.Size()
 		n += 2 + l + sovGenerated(uint64(l))
 	}
+	n += 3
 	return n
 }
 
@@ -18048,6 +18059,7 @@ func (this *DeviceInterface) String() string {
 		`SRIOV:` + fmt.Sprintf("%v", this.SRIOV) + `,`,
 		`VirtualFunctions:` + repeatedStringForVirtualFunctions + `,`,
 		`Link:` + strings.Replace(this.Link.String(), "DeviceInterfaceLink", "DeviceInterfaceLink", 1) + `,`,
+		`RDMASoftware:` + fmt.Sprintf("%v", this.RDMASoftware) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -24843,6 +24855,26 @@ func (m *DeviceInterface) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 18:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RDMASoftware", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.RDMASoftware = bool(v != 0)
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

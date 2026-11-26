@@ -37,6 +37,10 @@ type sysfsTree struct {
 
 	// rdmaClass is the reverse RDMA layout, read at most once for this tree. See rdmaClassIndex.
 	rdmaClass *rdmaClassIndex
+
+	// softwareRDMA is the netdev-keyed software RDMA index, read at most once for this tree. See
+	// softwareRDMAIndex.
+	softwareRDMA map[string][]softwareRDMAport
 }
 
 // rdmaClassIndex is what one listing of the RDMA class directory established.
@@ -51,9 +55,19 @@ type rdmaClassIndex struct {
 	existsUnlisted bool
 	// byDevice maps each candidate's RESOLVED device path to the RDMA directory holding it.
 	byDevice map[string]string
-	// unresolvable is whether some candidate's device link would not resolve. A miss in byDevice
-	// then cannot be read as "no RDMA device for this interface", because the one that did not
-	// resolve might have been the match.
+	// software lists, by name and in directory order, the entries with no parent device — software
+	// RDMA such as rxe. No PCI address can match one, so the PCI lookup skips them; the netdev-keyed
+	// lookup in softwareRDMAIndex reads them instead.
+	software []string
+	// unresolvable is whether some candidate with a parent device could not be matched back to it,
+	// because its device link exists and would not resolve. A miss in byDevice then cannot be read
+	// as "no RDMA device for this interface", because the one that did not resolve might have been
+	// the match.
+	//
+	// A parentless entry does not set it. That entry is a software device, which answers by netdev
+	// name instead and can never be the answer to a PCI lookup. Setting it there marked every plain
+	// NIC on a Soft-RoCE host unverified, which the node label counted as usable RDMA and a distance
+	// was computed from.
 	unresolvable bool
 }
 
@@ -335,7 +349,29 @@ func (s *sysfsTree) rdmaClassIndex() *rdmaClassIndex {
 		index.listed = true
 		for _, entry := range entries {
 			dir := filepath.Join(sysfsInfinibandDir, entry.Name())
-			device, derr := s.resolve(filepath.Join(dir, "device"))
+			deviceLink := filepath.Join(dir, "device")
+			// Presence is asked of the link itself, not inferred from a failed resolution: a link that
+			// is absent and a link whose target is missing both fail to resolve, and only the first is
+			// an answer. The second is a read failure and is handled as one below.
+			hasParent, lerr := rdmaPathPresent(s, deviceLink)
+			switch {
+			case lerr != nil:
+				index.unresolvable = true
+				continue
+			case !hasParent:
+				// No parent device, so software RDMA: the kernel places such a device under
+				// devices/virtual. The entry itself must still be a readable directory, because an
+				// entry that vanished or cannot be read has no readable link either, and neither of
+				// those says what the device is.
+				isDir, derr := s.isDir(dir)
+				if derr != nil || !isDir {
+					index.unresolvable = true
+					continue
+				}
+				index.software = append(index.software, entry.Name())
+				continue
+			}
+			device, derr := s.resolve(deviceLink)
 			if derr != nil {
 				index.unresolvable = true
 				continue
@@ -350,6 +386,139 @@ func (s *sysfsTree) rdmaClassIndex() *rdmaClassIndex {
 
 	s.rdmaClass = index
 	return index
+}
+
+// softwareRDMAport is one port of one software RDMA device that serves a netdev.
+type softwareRDMAport struct {
+	// device is the class/infiniband entry's name, such as rxe0.
+	device string
+	// number is the port, as the kernel names its directory under ports.
+	number uint32
+}
+
+// rel is the port's path relative to the sysfs root.
+func (p softwareRDMAport) rel() string {
+	return filepath.Join(sysfsInfinibandDir, p.device, "ports", strconv.FormatUint(uint64(p.number), 10))
+}
+
+// name renders the port for a reason, as <device>/<port>.
+func (p softwareRDMAport) name() string {
+	return p.device + "/" + strconv.FormatUint(uint64(p.number), 10)
+}
+
+// softwareRDMAIndex reads, once per tree, which ports of the node's software RDMA devices serve
+// which netdevs, keyed by netdev name.
+//
+// A software RDMA device — rxe, and its peers — has no PCI parent, so the PCI lookup cannot reach
+// it. Its ports name the netdevs they serve, one per GID attribute entry, and that table is what
+// this reads. Only parentless devices enter it. A hardware adapter's ports name their netdevs too,
+// including a VLAN or bond on top of one, and indexing those would hand the adapter to that VLAN:
+// advertised a second time under another name, and past the partitioning a physical function's
+// record enforces. Hardware keeps the PCI path.
+//
+// iWARP is out of reach. A `siw` port carries no RoCE GID table, so it names no netdev, and an
+// interface it serves reads here as it did before this index existed.
+//
+// The index degrades rather than fails. A ports directory that cannot be listed leaves its device
+// out, because nothing was established about which netdevs that device serves, and the interface
+// pass must still succeed on a tree the PCI lookup also degrades on. The reader's diagnostics have
+// nowhere to go on an interface record and are dropped with the same reasoning.
+func (s *sysfsTree) softwareRDMAIndex() map[string][]softwareRDMAport {
+	if s.softwareRDMA != nil {
+		return s.softwareRDMA
+	}
+
+	index := make(map[string][]softwareRDMAport)
+	for _, device := range s.rdmaClassIndex().software {
+		portsRel := filepath.Join(sysfsInfinibandDir, device, "ports")
+		entries, err := s.readDir(portsRel)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			number, nerr := strconv.ParseUint(entry.Name(), 10, 32)
+			if nerr != nil {
+				continue
+			}
+			port := softwareRDMAport{device: device, number: uint32(number)}
+			var notes []string
+			for _, netdev := range enumerateRDMAPortNetdevs(s, port.rel(), port.number, &notes) {
+				index[netdev] = append(index[netdev], port)
+			}
+		}
+	}
+
+	// Devices arrive in name order and ports in directory order, which is by NAME: "10" before
+	// "2". Sorted by device then by port number, so the entry a lookup takes first is fixed.
+	for netdev, ports := range index {
+		sort.Slice(ports, func(i, j int) bool {
+			if ports[i].device != ports[j].device {
+				return ports[i].device < ports[j].device
+			}
+			return ports[i].number < ports[j].number
+		})
+		index[netdev] = ports
+	}
+
+	s.softwareRDMA = index
+	return index
+}
+
+// sharedPortNote explains, for a link that already carries a reason, that more than one software
+// RDMA port serves the interface and which of them the verdict came from.
+//
+// Two software devices may be bound to one netdev. One interface record carries one verdict, so the
+// first device by name answers and the others are named here: a choice made silently would read as
+// a lookup that found only one.
+func sharedPortNote(ports []softwareRDMAport) string {
+	names := make([]string, len(ports))
+	for i := range ports {
+		names[i] = ports[i].name()
+	}
+	return fmt.Sprintf("software RDMA ports naming this interface: %s; %s was used",
+		strings.Join(names, ", "), names[0])
+}
+
+// attachSoftwareRDMA records the software RDMA device that serves the interface, when one does.
+//
+// rxe and its peers bind an RDMA device to an ordinary netdev — a bond, a VLAN or a plain NIC — and
+// that device has no PCI parent, so the PCI lookup cannot reach it. Its ports name the netdevs they
+// serve, and the match is this interface's own name against that table (softwareRDMAIndex). The
+// lookup runs where the PCI one had nothing to say: on a virtual interface, which has no device to
+// look up, and on a physical one that came back with no device and no read failure. A hardware
+// adapter is never in the index, which is what keeps a VLAN on a RoCE adapter from claiming the
+// adapter a second time; such an interface reads as it did before this lookup existed. iWARP names
+// no netdev, so a `siw` port is not reached either.
+//
+// triggersDetect keeps whatever is recorded here, so a change on the interface takes the detect
+// round like any other RDMA endpoint.
+//
+// RDMADevice stays empty ON PURPOSE. The software device is advertised under its own name
+// (rxe0/rxe0:0000). Naming it on the interface instead would tie the allocation identity to the
+// interface, and the GID table empties when a bond is taken administratively down or loses its
+// address — this record with it. The advertised IDs would then flip to the device's own and back,
+// and an advertised ID that disappears strands the allocation kubelet recorded against it. With
+// the name empty the device keeps its identity in every state.
+func (s *sysfsTree) attachSoftwareRDMA(iface *workercore.DeviceInterface) {
+	ports := s.softwareRDMAIndex()[iface.Name]
+	if len(ports) == 0 {
+		return
+	}
+
+	iface.RDMA, iface.RDMASoftware = true, true
+	iface.Link = s.checkRDMAPortLink(ports[0].rel())
+	if len(ports) <= 1 {
+		return
+	}
+
+	// The interface record has no channel for notes, so a shared netdev is noted only on a link
+	// that already carries a reason: the two states that need explaining. A verified link keeps no
+	// reason — preflight's report documents it as "empty exactly when the link verified" — so the
+	// note is dropped there. The fact is not lost: the RDMA inventory lists the netdev under both
+	// devices.
+	if iface.Link.Reason != "" {
+		iface.Link.Reason += "; " + sharedPortNote(ports)
+	}
 }
 
 // readVirtualFunctions collects a physical function's virtual functions, nested under it and
@@ -452,24 +621,9 @@ func (s *sysfsTree) readInterface(
 	}
 	iface.Bus, iface.Virtual = s.classifyBus(resolvedIface)
 	if iface.Virtual {
-		// A virtual interface stops here, BEFORE the RDMA resolution below, and that is a limit
-		// worth naming: every path to an RDMA device in this reader starts from a PCI device
-		// directory, and a bond, a VLAN or a veth has none. So this reader cannot produce a
-		// virtual interface carrying an RDMA device or a link verdict, on any host.
-		//
-		// This is a defect for software RDMA: rxe and siw bind an RDMA device to an ordinary
-		// netdev, which may be a bond or VLAN. The endpoint works but is invisible here. Moving
-		// this return cannot help because the other branch is unreachable, not skipped. Fixing it
-		// needs an RDMA lookup by netdev name, for example through
-		// /sys/class/infiniband/<device>/ports/*/gid_attrs/ndevs/*, rather than a PCI lookup.
-		//
-		// triggersDetect nonetheless exempts only virtual interfaces with NO RDMA record, which
-		// reads as if such records existed. It is written on the verdict rather than on virtuality
-		// deliberately: the predicate is "cannot affect the gate", so if a future reader ever
-		// reaches RDMA through something other than a PCI device, the trigger already handles it
-		// and does not have to be found and changed. Today that branch is unreachable, and saying
-		// so here is the point — an exemption for a shape nothing produces otherwise reads as
-		// coverage.
+		// A virtual interface has no device for the PCI lookup below, so software RDMA is the one
+		// way it can carry any. attachSoftwareRDMA records that and nothing else.
+		s.attachSoftwareRDMA(&iface)
 		return iface, false, nil
 	}
 
@@ -544,6 +698,12 @@ func (s *sysfsTree) readInterface(
 			State:  workercore.DeviceInterfaceLinkStateUnverified,
 			Reason: "the RDMA tree is present but could not be read; tried " + strings.Join(tried, ", "),
 		}
+	default:
+		// No hardware device, and nothing unreadable that might have been one. A software device
+		// can still serve this interface by name: `rdma link add rxe0 type rxe netdev eth0` is the
+		// common Soft-RoCE shape, and its netdev is a plain NIC like this one. The interface keeps
+		// its own PCI coordinates in the record; the node labels keep it out of RDMA locality.
+		s.attachSoftwareRDMA(&iface)
 	}
 
 	return iface, false, nil

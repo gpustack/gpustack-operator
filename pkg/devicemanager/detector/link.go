@@ -63,10 +63,11 @@ func interfacesChanged(
 // "cannot affect the gate", not "is virtual", so a bonded or overlay interface with an RDMA verdict
 // takes the loop round like any other.
 //
-// No such interface exists today: readInterface returns a virtual one before resolving RDMA,
-// because every path to an RDMA device there starts from a PCI device directory. This branch is
-// therefore unreachable, and kept because the predicate is the correct one — a reader that later
-// reaches RDMA some other way needs no change here. Stated so it is not mistaken for coverage.
+// Such an interface exists: readInterface matches an interface by name against the ports of the
+// node's software RDMA devices, so a bond, a VLAN or a plain NIC carrying Soft-RoCE carries a record
+// and a verdict.
+// A software device bound to a Pod veth is matched the same way, and every Pod then changes the
+// triggering subset. That shape is a limit of the lookup and is not excluded here.
 //
 // The published inventory still records every interface including the ephemeral ones, which is a
 // boundary this feature keeps: what is narrowed is only what forces a re-read. The cost is that a
@@ -217,6 +218,40 @@ func (s *sysfsTree) checkRDMALink(rdmaRel string) *workercore.DeviceInterfaceLin
 		return &workercore.DeviceInterfaceLink{
 			State:  workercore.DeviceInterfaceLinkStateFailed,
 			Reason: "the RDMA link is not usable: " + strings.Join(observed, "; "),
+		}
+	}
+}
+
+// checkRDMAPortLink verifies ONE port of an RDMA device: the one a netdev-keyed lookup named for an
+// interface, at a path relative to the sysfs root.
+//
+// It exists beside checkRDMALink because the two answer different questions. The whole-device check
+// reads every port because a hardware adapter's ports are not attributed to their interfaces, so the
+// device's verdict is copied to each of them. Here the attribution is in hand — the port named this
+// interface — and a sibling port says nothing about it: on a two-port software device with one port
+// active and one down, the device verdict would report OK for the interface served by the down one.
+//
+// The rule on which reads may reach which state is the same as the whole-device check, and for the
+// same reason. `failed` withholds a node label, so it is reached only when both attributes were read
+// and neither carried the link; a file that could not be read leaves that unestablished.
+func (s *sysfsTree) checkRDMAPortLink(portRel string) *workercore.DeviceInterfaceLink {
+	state, serr := s.attr(filepath.Join(portRel, "state"))
+	physState, perr := s.attr(filepath.Join(portRel, "phys_state"))
+	switch {
+	case serr != nil || perr != nil:
+		return &workercore.DeviceInterfaceLink{
+			State:  workercore.DeviceInterfaceLinkStateUnverified,
+			Reason: fmt.Sprintf("the RDMA port state could not be read under %q", portRel),
+		}
+	case sysfsEnumName(state) == "ACTIVE" && sysfsEnumName(physState) == "LinkUp":
+		return &workercore.DeviceInterfaceLink{State: workercore.DeviceInterfaceLinkStateOK}
+	default:
+		// Both values go into the reason verbatim, as in the whole-device check: they are the
+		// kernel's own words, and an operator reading a withheld label needs what was read.
+		return &workercore.DeviceInterfaceLink{
+			State: workercore.DeviceInterfaceLinkStateFailed,
+			Reason: fmt.Sprintf("the RDMA link is not usable: port %s: state=%q phys_state=%q",
+				filepath.Base(portRel), state, physState),
 		}
 	}
 }
