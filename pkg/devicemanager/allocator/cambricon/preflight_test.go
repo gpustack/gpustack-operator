@@ -355,8 +355,9 @@ func TestPreflightResponder_RecordsWhatItWithheld(t *testing.T) {
 // The anti-drift test, adapted to the one place Cambricon cannot be Ascend: the instance's
 // device node. A real create reads its device node back from the driver, which the recording
 // driver deliberately never reaches (that read-back is exactly the hardware state a simulated
-// pass must not provision), so the concrete node -- and consequently VIRTUAL_DEVICES -- cannot be
-// asked to agree between the two paths without also making the simulated one create for real.
+// pass must not provision); it creates a plain file under the redirected operator lib dir instead,
+// so the responder's rule that the node exists holds on both paths while the node's VALUE differs
+// by design and is not what the two paths are asked to agree on.
 //
 // What can and must agree, without exception, is what the two paths ASKED the driver to do: they
 // must reserve the identical instance -- the same card, the same compute/VRAM quota, the same
@@ -375,7 +376,7 @@ func TestPreflightResponder_RequestsTheSameInstanceProductionWould(t *testing.T)
 	// creates. A distinct pod UID from the preflight side below, so the two runs never share a
 	// correlation marker on disk.
 	restoreProd := deviceplugin.RedirectHostWrites(t.TempDir())
-	prodDriver := newFakeDriver()
+	prodDriver := stagedFakeDriver(t)
 	prodSrv := newSlicedServer(prodDriver)
 	prodPod, prodCtr := slicedPod("drift-prod", "train", 25, 50)
 	_, err := prodSrv.GetContainerAllocateResponse(context.Background(), prodPod, prodCtr, devs, allocated)

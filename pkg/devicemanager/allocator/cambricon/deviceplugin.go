@@ -295,9 +295,10 @@ func appendNodeDevices(resp *deviceplugin.ContainerAllocateResponse) {
 // A VIRTUAL_DEVICES env is set as the fallback for --use-runtime deployments (sMLU/mim do
 // not support CDI).
 //
-// The instance's own node and the card's node are both required: a response missing either
-// refuses the allocation and releases the instance, rather than granting a container no
-// accelerator or, with the card node alone, the whole card.
+// The instance's own node and the card's node are both required, empty or absent from the host: a
+// response missing either refuses the allocation and releases the instance, rather than granting a
+// container no accelerator or, with the card node alone, the whole card. A readback naming a node
+// the host does not have yet is refused the same way; kubelet retries once the node is there.
 //
 // An sMLU request is 1 pod / 1 container / 1 accelerator, so a multi-accelerator sliced
 // allocation is rejected (the Ascend single-accelerator pattern) rather than silently slicing
@@ -379,7 +380,14 @@ func (s *server) getSlicedContainerAllocateResponse(
 	if pDev := deviceplugin.NewRWDevice(cardIPCMDevicePath(slot)); pDev != nil {
 		ctrResp.Devices = append(ctrResp.Devices, pDev)
 	}
-	if pDev := deviceplugin.NewRWDevice(inst.devNode); pDev != nil {
+	// The instance's node is required the way the card's is: with the card node alone the container
+	// holds the whole card under a slice ledger entry.
+	if pDev := deviceplugin.NewRWDevice(inst.devNode); pDev == nil {
+		return nil, releaseReservedInstance(s.smlu, inst, marker, fmt.Errorf(
+			"accelerator %q of card %q has no instance device node %q: the driver readback named a node the host does not have",
+			accel.ID, card, inst.devNode,
+		), s.Logger)
+	} else {
 		ctrResp.Devices = append(ctrResp.Devices, pDev)
 	}
 	// A slice needs the node-level control devices for the same reasons a whole card does, and the

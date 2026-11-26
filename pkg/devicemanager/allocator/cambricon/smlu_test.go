@@ -72,7 +72,13 @@ type fakeSMLUDriver struct {
 	destroyedInsts []smluRef
 	// emptyDevNode makes CreateInstance read back no device node: the shape of a driver that
 	// instantiates an instance but names no node for it.
-	emptyDevNode        bool
+	emptyDevNode bool
+	// nodeDir is where CreateInstance materializes the node it reads back, the way a real driver
+	// hands the host a node with the instance. Empty names the legacy /dev path no host here has,
+	// which the responder refuses; absentDevNode names the node but leaves it uncreated, the
+	// shape of a node not yet there.
+	nodeDir             string
+	absentDevNode       bool
 	failCard            map[string]bool
 	failList            bool
 	failInstanceList    bool
@@ -152,13 +158,22 @@ func (f *fakeSMLUDriver) CreateInstance(card string, profileID int32, name strin
 		return smluInstance{}, fmt.Errorf("driver rejected create on %s", card)
 	}
 	q := f.profiles[profileKey{card: card, profileID: profileID}]
+	devNode := "/dev/cambricon_dev-" + name
+	if f.nodeDir != "" {
+		devNode = filepath.Join(f.nodeDir, "cambricon_smlu-"+name)
+		if !f.absentDevNode {
+			if err := os.WriteFile(devNode, nil, 0o600); err != nil {
+				return smluInstance{}, err
+			}
+		}
+	}
 	inst := smluInstance{
 		card:      card,
 		name:      name,
 		profileID: profileID,
 		coresPct:  q.cores,
 		memMiB:    q.mem,
-		devNode:   "/dev/cambricon_dev-" + name,
+		devNode:   devNode,
 	}
 	if f.emptyDevNode {
 		inst.devNode = ""

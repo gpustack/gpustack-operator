@@ -118,6 +118,20 @@ func stageCardNode(t *testing.T, index uint32) {
 	require.NoError(t, os.WriteFile(cardDevicePath(index), nil, 0o600))
 }
 
+// stagedFakeDriver is a fake driver whose CreateInstance materializes the instance's device node
+// under a test dir, the way a real driver hands the host a node with the instance.
+func stagedFakeDriver(t *testing.T) *fakeSMLUDriver {
+	t.Helper()
+	d := newFakeDriver()
+	d.nodeDir = t.TempDir()
+	return d
+}
+
+// instanceNodePath is the node stagedFakeDriver's CreateInstance materializes for an instance.
+func instanceNodePath(d *fakeSMLUDriver, name string) string {
+	return filepath.Join(d.nodeDir, "cambricon_smlu-"+name)
+}
+
 // hostPaths renders the device nodes a response carries, for a containment assertion.
 func hostPaths(devs []*deviceplugin.DeviceSpec) []string {
 	paths := make([]string, 0, len(devs))
@@ -260,7 +274,7 @@ func TestSliced_PartialSlice(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	redirectCardDevicePath(t)
 	stageCardNode(t, testMLU0Index)
-	d := newFakeDriver()
+	d := stagedFakeDriver(t)
 	s := newSlicedServer(d)
 	devs := cambriconDevicesFixture()
 
@@ -270,7 +284,7 @@ func TestSliced_PartialSlice(t *testing.T) {
 
 	name := encodeInstanceName("pod-uid-1", "train")
 	assert.True(t, d.hasInstance(name), "the sMLU instance was created")
-	assert.Equal(t, "/dev/cambricon_dev-"+name, resp.Envs["VIRTUAL_DEVICES"])
+	assert.Equal(t, instanceNodePath(d, name), resp.Envs["VIRTUAL_DEVICES"])
 
 	m, err := parseMarker(markerPath("pod-uid-1", "train"))
 	require.NoError(t, err)
@@ -285,7 +299,7 @@ func TestSliced_DefaultCores(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	redirectCardDevicePath(t)
 	stageCardNode(t, testMLU0Index)
-	d := newFakeDriver()
+	d := stagedFakeDriver(t)
 	s := newSlicedServer(d)
 	devs := cambriconDevicesFixture()
 
@@ -408,6 +422,9 @@ func TestSliced_RefusesWithoutInstanceOrCardNode(t *testing.T) {
 		name         string
 		cardNode     bool // the host exposes the card node
 		instanceNode bool // the driver readback populated the instance's device node
+		// absentNode is set when the readback names a node the host does not have: the node not yet
+		// created, or a driver build naming it differently.
+		absentNode bool
 		// wantRefusal is what the refusal must say beyond the accelerator and its card; empty for
 		// the one case that succeeds.
 		wantRefusal string
@@ -442,6 +459,15 @@ func TestSliced_RefusesWithoutInstanceOrCardNode(t *testing.T) {
 			wantRefusal:  "driver readback",
 		},
 		{
+			// The same break one step later: the readback names a node, but the host has none there,
+			// and with the card node alone the container still holds the whole card.
+			name:         "instance node absent from the host",
+			cardNode:     true,
+			instanceNode: true,
+			absentNode:   true,
+			wantRefusal:  "has no instance device node",
+		},
+		{
 			// The silent grant: zero devices and no VIRTUAL_DEVICES, with the pod Running.
 			name:         "neither node",
 			instanceNode: false,
@@ -465,8 +491,9 @@ func TestSliced_RefusesWithoutInstanceOrCardNode(t *testing.T) {
 			if tc.cardNode {
 				stageCardNode(t, testMLU0Index)
 			}
-			d := newFakeDriver()
+			d := stagedFakeDriver(t)
 			d.emptyDevNode = !tc.instanceNode
+			d.absentDevNode = tc.absentNode
 			if tc.releaseFails {
 				d.failDestroy[testCard0] = errors.New("IN_PROBLEM")
 			}
@@ -481,7 +508,8 @@ func TestSliced_RefusesWithoutInstanceOrCardNode(t *testing.T) {
 				require.NoError(t, err)
 				assert.True(t, markerExists("pod-refuse", "train"), "a grant keeps its marker")
 				assert.Empty(t, d.destroyedInsts, "a grant never releases its instance")
-				assert.Equal(t, "/dev/cambricon_dev-"+name, resp.Envs["VIRTUAL_DEVICES"])
+				assert.Equal(t, instanceNodePath(d, name), resp.Envs["VIRTUAL_DEVICES"])
+				assert.Contains(t, hostPaths(resp.Devices), instanceNodePath(d, name), "the response carries the instance's node")
 				assert.Contains(t, hostPaths(resp.Devices), cardDevicePath(testMLU0Index), "the response carries the card node")
 				return
 			}
@@ -493,6 +521,9 @@ func TestSliced_RefusesWithoutInstanceOrCardNode(t *testing.T) {
 			}
 			if tc.wantCardPath {
 				assert.Containsf(t, err.Error(), cardDevicePath(testMLU0Index), "the refusal must name the card node")
+			}
+			if tc.absentNode {
+				assert.Containsf(t, err.Error(), instanceNodePath(d, name), "the refusal must name the instance's node")
 			}
 			assert.Equal(t, []smluRef{{card: testCard0, name: name}}, d.destroyedInsts,
 				"the reserved instance is released exactly once, by card and name")
