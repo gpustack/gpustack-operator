@@ -554,9 +554,6 @@ applies `gpustack-cpu-info`, so the existing NFD installation must satisfy six r
 
 [^2]: NVIDIA GPU Operator's bundled NFD whitelists only `0300` and `0302` under `node-feature-discovery.worker.config.sources.pci`, omitting `0b` and `12` NPUs unless extended.
 
-Hardware validation used GPUStack's bundled NFD; external NFD handover is a configuration checklist
-and has not been tested end to end.
-
 ### Resource removal lag
 
 Disabling a vendor device plugin does not clear its extended resource from `Node.status.allocatable`

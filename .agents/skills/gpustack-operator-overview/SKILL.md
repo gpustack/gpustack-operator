@@ -10,20 +10,29 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 
 ## Architecture in brief
 
-The `gpustack-operator` binary provides these subcommands: `worker` ([pkg/worker](../../../pkg/worker/),
-the control plane), `worker-gateway` ([pkg/workergateway](../../../pkg/workergateway/), the fleet
-view), `device-manager` ([pkg/devicemanager](../../../pkg/devicemanager/), one DaemonSet per
-manufacturer) and `model-manager` ([pkg/modelmanager](../../../pkg/modelmanager/), a per-node CSI
-plugin that delivers Hugging Face weights), and `model-transfer` ([pkg/modeltransfer](../../../pkg/modeltransfer/),
-the remote weight source broker). The scheduling chain proceeds as follows: NFD labels the nodes; the
-Device Manager detects accelerators and network interfaces into a per-node `Devices` ledger; the
-worker derives per-card capacity labels ([pkg/nodefeature](../../../pkg/nodefeature/) is the label
-algebra); worker controllers materialize them into Kueue `ResourceFlavor`, `ClusterQueue` (one
-isolated queue per pool), `LocalQueue`, `AcceleratorType` and `InstanceType` CRDs, gated per card by an
-AdmissionCheck. Vendor runtime bindings under [binding/](../../../binding/) are generated from
-[gen/binding/](../../../gen/binding/). Hand-written slicing preload libraries live in
-[csrc/](../../../csrc/). [architecture.md](../../../docs/getting-started/architecture.md) is the
-one-page version: the scheduling chain, the life of a sliced-GPU request, and the vocabulary.
+The `gpustack-operator` binary has these subcommands: `worker` (control plane, [pkg/worker](../../../pkg/worker/)),
+`device-manager` (one DaemonSet per manufacturer, [pkg/devicemanager](../../../pkg/devicemanager/)),
+`model-manager` (per-node CSI plugin for model weights, [pkg/modelmanager](../../../pkg/modelmanager/)),
+`model-transfer` (remote weight source broker, [pkg/modeltransfer](../../../pkg/modeltransfer/)) and
+`worker-gateway` (fleet view across clusters, [pkg/workergateway](../../../pkg/workergateway/)).
+
+**Device chain.** NFD labels nodes. The Device Manager records accelerators and NICs in a per-node
+`Devices` ledger. The worker derives per-card capacity labels from it
+([pkg/nodefeature](../../../pkg/nodefeature/) is the label algebra) and materializes Kueue
+`ResourceFlavor`, `ClusterQueue` (one isolated queue per pool) and `LocalQueue`, plus the
+`AcceleratorType` and `InstanceType` CRDs, gated per card by an `AdmissionCheck`. Vendor runtime
+bindings in [binding/](../../../binding/) are generated from [gen/binding/](../../../gen/binding/);
+slicing preload libraries in [csrc/](../../../csrc/) are hand-written.
+
+**Serving chain.** The same controller directory, `pkg/worker/controllers/worker/`, groups by
+filename prefix. `node_*` and `topology_source_*` place workloads; `instance_*` runs `Instance`s;
+`model_*` delivers weights; `kv_cache_*` shares cache. `model_deployment_*` serves models: render,
+rollout, router, scaler, elastic resize, runtime control. Supporting packages: `pkg/worker/kvcache`,
+`pkg/worker/scaling`, `pkg/worker/runtimecontrol`, `pkg/worker/elasticengine`, and
+[engine-sentinel/python](../../../engine-sentinel/python/), staged into engine `Pod`s.
+
+[architecture.md](../../../docs/getting-started/architecture.md) is the one-page version: the
+scheduling chain, the life of a sliced-GPU request, and the vocabulary.
 
 ## Routing
 
@@ -49,17 +58,20 @@ page is the `gpustack-operator-docs` skill. Every page is listed in
 ## Contributor invariants
 
 - Manufacturers: nvidia, amd, ascend, cambricon, hygon, iluvatar, metax, mthreads, thead.
-- **Kueue object names**: `gpustack--${gKey}--${aKey}-${os}-${arch}-${count}d` for an accelerated `ResourceFlavor`;
-  canonical pool queues use `gpustack--${aKey}-${os}-${arch}`,
-  `gpustack--${gKey}--${aKey}-${os}-${arch}`, or `gpustack--generic-${os}-${arch}`.
-  An `AcceleratorType` and all `InstanceType`s on a pool share that queue.
+- **Kueue object names**: `ResourceFlavor` is `gpustack--${gKey}[--${aKey}]-${os}-${arch}-${count}`
+  with suffix `c` (CPU) or `d` (accelerated); the `--` separator is deliberate because the keys
+  contain single dashes. Never hand-derive a pool queue name: `formatNodeFlavorName` and
+  `CanonicalPoolQueueName` in `pkg/nodefeature/helper.go` are the single source. An
+  `AcceleratorType` and its `InstanceType`s share one pool `ClusterQueue`.
 - **LocalQueue names**: `gpustack-fnv64-<fnv64a-hash>` — always 31 chars (the full ClusterQueue
   name goes in the `schedule.gpustack.ai/queue` annotation).
 - **Label domains**: `feature.gpustack.ai/` (CPU/PCI facts), `acceleratable.feature.gpustack.ai/`
   (device models + `.sliced.*` / `.partitioned.*` capacities), `general.feature.gpustack.ai/`
-  (CPU-only capacity), `credits.gpustack.ai/<mfr>` (Kueue quota resource), `schedule.gpustack.ai/`
-  + `note.gpustack.ai/` (long names / unit-spec annotations); `gpustack.ai/managed` and
-  `gpustack.ai/controlled` mark node onboarding and queue teardown.
+  (CPU-only capacity), `credits.gpustack.ai/<mfr>` (Kueue quota resource), `topology.gpustack.ai/`
+  (region/zone/rack), `device.gpustack.ai/` (extended resources). `schedule.gpustack.ai/` and
+  `note.gpustack.ai/` carry long names and unit specs as annotations; controllers add their own
+  `<kind>.gpustack.ai/` families. `gpustack.ai/managed=true` marks an onboarded node;
+  `gpustack.ai/controlled` is the `systemmeta.Lock` finalizer on owned resources.
 - **63-char rule**: Kubernetes label *values* cap at 63 chars — names that exceed it live in
   annotations, not labels. Always check when generating a name that flows into a label value.
 - **Build-constrained files**: `_linux.go` / `_other.go` split platform-specific code.

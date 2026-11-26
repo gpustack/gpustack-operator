@@ -107,8 +107,7 @@ echo "$GPUSTACK_RDMA_DEVICES"
   endpoints of a new grant, the response injects empty `NCCL_IB_HCA=""` and
   `GPUSTACK_RDMA_DEVICES=""` with no character devices; already-running containers are untouched.
 - **Consumer adapters**: `Pod` `env[].value` cannot expand plugin-injected variables, and HIXL or
-  NIXL consumers require their own startup adapters. Injection is verified on RoCE and unverified on
-  classic InfiniBand transport libraries.
+  NIXL consumers require their own startup adapters.
 
 ### RDMA quota limits
 

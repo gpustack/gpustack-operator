@@ -263,8 +263,7 @@ kubectl get devices -o json
 
 ## Limitations
 
-- Measurements cover single-node cross-`Pod` TCP; multi-node placement, *External DP* combined with
-  *PD*, and hybrid load balancing were not tested.
+- Measurements cover single-node cross-`Pod` TCP.
 - Fixed *External DP* groups do not resize in place; edits to *`size`* roll the entire four-`Pod`
   replica ([Admission constraints](../../modules/model-deployment/external-dp.md#admission-constraints)).
 
