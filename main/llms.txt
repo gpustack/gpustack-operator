@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers accelerators, organizes capacity into pools, and schedules Kubernetes workloads for interactive use and model serving.
 
-Documentation version: main. Source revision: 31be1b40f01e3a3491999625460f4e6220b1ed00.
+Documentation version: main. Source revision: 2afa8140419ac169bad3738f544fcdf53903d4eb.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -126,7 +126,7 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/31be1b40f01e3a3491999625460f4e6220b1ed00/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
-- [Development](https://github.com/gpustack/gpustack-operator/blob/31be1b40f01e3a3491999625460f4e6220b1ed00/docs/contribute/development.md): Build, generate, test, and lint the repository
-- [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/31be1b40f01e3a3491999625460f4e6220b1ed00/docs/contribute/local-cluster-setup.md): Provision a local kind cluster and CPU-only mock devices for tests
-- [Internals](https://github.com/gpustack/gpustack-operator/blob/31be1b40f01e3a3491999625460f4e6220b1ed00/docs/contribute/internals.md): Review startup order, bindings, and naming limits
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/2afa8140419ac169bad3738f544fcdf53903d4eb/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Development](https://github.com/gpustack/gpustack-operator/blob/2afa8140419ac169bad3738f544fcdf53903d4eb/docs/contribute/development.md): Build, generate, test, and lint the repository
+- [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/2afa8140419ac169bad3738f544fcdf53903d4eb/docs/contribute/local-cluster-setup.md): Provision a local kind cluster and CPU-only mock devices for tests
+- [Internals](https://github.com/gpustack/gpustack-operator/blob/2afa8140419ac169bad3738f544fcdf53903d4eb/docs/contribute/internals.md): Review startup order, bindings, and naming limits
