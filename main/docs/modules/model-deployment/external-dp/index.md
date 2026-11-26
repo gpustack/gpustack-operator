@@ -255,9 +255,6 @@ Admission rejects these managed-role configurations:
 - *Encode* paired with `External` or *hybrid load balancing (Hybrid LB)*.
 - *Elastic EP* (`elastic.dataParallelWidth`) combined with `External` or *Hybrid LB*.
 
-*Prefill* and *Decode* roles with *External DP* are admitted but unvalidated
-([#754](https://github.com/gpustack/gpustack-operator/issues/754)).
-
 ## Limitations
 
 - **Scale-down grace**: Disaggregated handoff grace adds `60 s` before member drain gauges are read;
@@ -294,7 +291,7 @@ honored the 60 s handoff grace (workers withdrew at 482 s and 310 s).
 
 Without `--dp-aware`, the gateway registered at most one worker per group
 ([Traffic targets](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md#traffic-targets)), and the surviving group did not republish
-`Eligible` within the 900 s budget (post-scale-down survivor recovery remains unverified).
+`Eligible` within the 900 s budget.
 
 ---
 

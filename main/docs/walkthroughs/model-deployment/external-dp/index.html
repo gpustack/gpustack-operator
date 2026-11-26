@@ -1491,8 +1491,7 @@ request = 1,137 total), router counters matched engine access logs on every rank
 </div>
 <h2 id="limitations">Limitations</h2>
 <ul>
-<li>Measurements cover single-node cross-<code>Pod</code> TCP; multi-node placement, <em>External DP</em> combined with
-<em>PD</em>, and hybrid load balancing were not tested.</li>
+<li>Measurements cover single-node cross-<code>Pod</code> TCP.</li>
 <li>Fixed <em>External DP</em> groups do not resize in place; edits to <em><code>size</code></em> roll the entire four-<code>Pod</code>
 replica (<a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/#admission-constraints">Admission constraints</a>
 ).</li>

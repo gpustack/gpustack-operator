@@ -1271,6 +1271,12 @@ enables deferred offload (<code>-enable_offload=true -offload_on_evict=true</cod
 </table>
 <p>The tier always runs in deferred mode, keeping queued objects in memory until their disk bucket
 flushes.</p>
+<blockquote>
+<p><strong>Why</strong> — Mooncake&rsquo;s write-through mode (<code>-offload_on_evict=false</code>) can evict an object&rsquo;s last
+in-memory replica before its offload has landed, so a failure in that window loses the object. The
+leader&rsquo;s <code>-enable_offload=true -offload_on_evict=true</code> pair therefore renders together, and
+admission refuses both keys in <em><code>leader.extraArgs</code></em>.</p>
+</blockquote>
 <h3 id="host-directory-requirements">Host directory requirements</h3>
 <p><em><code>localDisks[].path</code></em> mounts with <code>hostPath.type: Directory</code> (<code>fsGroup</code> does not apply to
 <code>hostPath</code>). Pre-create the directory on every selected <code>Node</code>, owned by the member image&rsquo;s UID

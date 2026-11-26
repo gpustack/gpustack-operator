@@ -1483,12 +1483,7 @@ converge. Verify image support in <a href="/gpustack-operator/main/docs/modules/
 </ul>
 <h3 id="role-links-and-connectors">Role links and connectors</h3>
 <ul>
-<li><strong>Leader routing</strong>: Multi-<code>Pod</code> <em>PD</em> replicas route HTTP to member <code>0</code> (<code>member-index=0</code>).
-<em>External data parallelism (External DP)</em> inside <em>Prefill</em> or <em>Decode</em> is unvalidated
-(<a href="https://github.com/gpustack/gpustack-operator/issues/754">#754</a>
-); see
-<a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/">External DP</a>
-.</li>
+<li><strong>Leader routing</strong>: Multi-<code>Pod</code> <em>PD</em> replicas route HTTP to member <code>0</code> (<code>member-index=0</code>).</li>
 <li><strong>Combined pool + direct KV</strong>: On vLLM pairs with <em><code>spec.kvCache</code></em>, <em>Prefill</em> wraps the direct
 connector first in <code>MultiConnector</code> beside the store connector; <em>Decode</em> runs the direct connector
 alone while keeping pool dtype and block-size alignment.</li>

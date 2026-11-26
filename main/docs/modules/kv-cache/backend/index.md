@@ -225,9 +225,6 @@ spec:
               value: all  # requires accept-nvidia-visible-devices-envvar-when-unprivileged or runtimeClassName: nvidia
 ```
 
-Pairing a custom `VRAM` group with a [local disk tier](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md) is verified on NVIDIA
-and unmeasured on Ascend and AMD.
-
 ## Status and conditions
 
 Inspect backend phase, client endpoint, observed capacity, and conditions:

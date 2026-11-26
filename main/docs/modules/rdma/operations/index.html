@@ -1344,8 +1344,7 @@ devices and HCA environment variables into the container:</p>
 endpoints of a new grant, the response injects empty <code>NCCL_IB_HCA=&quot;&quot;</code> and
 <code>GPUSTACK_RDMA_DEVICES=&quot;&quot;</code> with no character devices; already-running containers are untouched.</li>
 <li><strong>Consumer adapters</strong>: <code>Pod</code> <code>env[].value</code> cannot expand plugin-injected variables, and HIXL or
-NIXL consumers require their own startup adapters. Injection is verified on RoCE and unverified on
-classic InfiniBand transport libraries.</li>
+NIXL consumers require their own startup adapters.</li>
 </ul>
 <h3 id="rdma-quota-limits">RDMA quota limits</h3>
 <p>Kueue&rsquo;s <code>ResourceFlavor</code>s and <code>gpustack-node-devices</code> check do not meter <code>device.gpustack.ai/rdma*</code>

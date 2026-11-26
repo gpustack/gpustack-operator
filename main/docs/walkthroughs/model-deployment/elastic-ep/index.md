@@ -280,8 +280,7 @@ Deleting `ModelDeployment` preserves prefetched weights in `NodeModelStore`
 
 ## Limitations
 
-- Measurements cover single-node cross-`Pod` TCP (*DP* width 2 → 4, *TP* = 2); cross-node resizing,
-  *RDMA* *EP* collectives, and other models or widths were not tested.
+- Measurements cover single-node cross-`Pod` TCP (*DP* width 2 → 4, *TP* = 2).
 - Only the master serves HTTP (`Internal LB`), and width shrink (`4 → 2`) is refused in this release.
 - See [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md) for steady-state
   latency and throughput trade-offs.

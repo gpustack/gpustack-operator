@@ -1304,7 +1304,7 @@ or <code>sgl-router</code> for SGLang because <code>llm-d-router</code> has no p
 <ul>
 <li><strong>External selectors</strong>: Qualified <em>External</em> <em>Server</em> roles omit <code>member-index=0</code> while keeping
 the <code>endpoint-eligible</code> selector; the headless <code>Service</code> always publishes all members for peer
-communication. Hybrid GPU behavior is untested.</li>
+communication.</li>
 <li><strong>Shared serving port</strong>: Managed roles expose one HTTP port (<code>8000</code> default; all routed roles must
 match). Admission rejects vLLM <code>MultiPort</code>. See
 <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
@@ -1397,7 +1397,7 @@ label marks membership only; actual routing intersects it with native role and m
 <p>Under <code>llm-d-router</code> + vLLM, the <code>encode</code> profile omits queue, KV-cache and prefix scorers, sends
 media requests through <em>Encode</em> first, and routes text-only requests straight to <em>Prefill</em> and
 <em>Decode</em>. See <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#supported-serving-configurations">Supported serving configurations</a>
- for verified combinations.</p>
+ for the accepted combinations.</p>
 <h2 id="default-routing-policies">Default routing policies</h2>
 <p><code>vllm-router</code> and <code>sglang-gateway</code> default to <code>cache_aware</code> (logging
 <code>policy: CacheAware { cache_threshold: 0.3, ... }</code>), <code>sgl-router</code> defaults to <code>power_of_two</code> under

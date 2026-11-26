@@ -1552,8 +1552,7 @@ effective width <code>4</code>.</li>
 ).</p>
 <h2 id="limitations">Limitations</h2>
 <ul>
-<li>Measurements cover single-node cross-<code>Pod</code> TCP (<em>DP</em> width 2 → 4, <em>TP</em> = 2); cross-node resizing,
-<em>RDMA</em> <em>EP</em> collectives, and other models or widths were not tested.</li>
+<li>Measurements cover single-node cross-<code>Pod</code> TCP (<em>DP</em> width 2 → 4, <em>TP</em> = 2).</li>
 <li>Only the master serves HTTP (<code>Internal LB</code>), and width shrink (<code>4 → 2</code>) is refused in this release.</li>
 <li>See <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/">Elastic EP Benchmark</a>
  for steady-state

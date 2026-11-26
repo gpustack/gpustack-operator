@@ -1599,7 +1599,7 @@ exchange the largest payloads without blocking scheduling
 <h2 id="limitations">Limitations</h2>
 <ul>
 <li>Role kinds (<em>Encode</em>, <em>Prefill</em>, <em>Decode</em>, <em>Server</em>) are frozen after creation.</li>
-<li>Measurements cover single-node TCP transfer; multi-node placement and GPU contention were not tested.</li>
+<li>Measurements cover single-node TCP transfer.</li>
 <li>Retiring an <em>Encode</em> replica drains for a fixed ~300 s window because encoders expose no in-flight
 request counter; transfers still active when that window expires fail at the client.</li>
 </ul>

@@ -16,7 +16,7 @@ runtime. Choose one mode per cluster.
 ## Prerequisites
 
 The Helm chart accepts Kubernetes 1.23 and newer. Use Kubernetes 1.29 or newer for the Kueue
-scheduling chain and node model delivery; simple allocation on 1.23–1.28 is untested.
+scheduling chain and node model delivery.
 [Model Image Source](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md#image-prerequisites) requires newer
 Kubernetes and container-runtime versions.
 

@@ -1539,9 +1539,6 @@ unchecked).</li>
 <li><em>Encode</em> paired with <code>External</code> or <em>hybrid load balancing (Hybrid LB)</em>.</li>
 <li><em>Elastic EP</em> (<code>elastic.dataParallelWidth</code>) combined with <code>External</code> or <em>Hybrid LB</em>.</li>
 </ul>
-<p><em>Prefill</em> and <em>Decode</em> roles with <em>External DP</em> are admitted but unvalidated
-(<a href="https://github.com/gpustack/gpustack-operator/issues/754">#754</a>
-).</p>
 <h2 id="limitations">Limitations</h2>
 <ul>
 <li><strong>Scale-down grace</strong>: Disaggregated handoff grace adds <code>60 s</code> before member drain gauges are read;
@@ -1596,7 +1593,7 @@ honored the 60 s handoff grace (workers withdrew at 482 s and 310 s).</p>
 <p>Without <code>--dp-aware</code>, the gateway registered at most one worker per group
 (<a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#traffic-targets">Traffic targets</a>
 ), and the surviving group did not republish
-<code>Eligible</code> within the 900 s budget (post-scale-down survivor recovery remains unverified).</p>
+<code>Eligible</code> within the 900 s budget.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>

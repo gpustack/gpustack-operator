@@ -44,7 +44,7 @@ or `sgl-router` for SGLang because `llm-d-router` has no policy switch
 
 - **External selectors**: Qualified *External* *Server* roles omit `member-index=0` while keeping
   the `endpoint-eligible` selector; the headless `Service` always publishes all members for peer
-  communication. Hybrid GPU behavior is untested.
+  communication.
 - **Shared serving port**: Managed roles expose one HTTP port (`8000` default; all routed roles must
   match). Admission rejects vLLM `MultiPort`. See
   [External DP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md).
@@ -97,7 +97,7 @@ Send all client requests to *`status.endpoint`*. *Encode* `Pod`s stay excluded f
 
 Under `llm-d-router` + vLLM, the `encode` profile omits queue, KV-cache and prefix scorers, sends
 media requests through *Encode* first, and routes text-only requests straight to *Prefill* and
-*Decode*. See [Supported serving configurations](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#supported-serving-configurations) for verified combinations.
+*Decode*. See [Supported serving configurations](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md#supported-serving-configurations) for the accepted combinations.
 
 ## Default routing policies
 

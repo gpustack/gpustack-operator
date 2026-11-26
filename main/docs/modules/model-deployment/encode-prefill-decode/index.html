@@ -1290,7 +1290,6 @@ their <code>AcceleratorType</code>; mixed or unknown platforms are refused.</li>
 					<th>Platform</th>
 					<th>Encoder transfer</th>
 					<th>Minimum version</th>
-					<th>Hardware status</th>
 			</tr>
 	</thead>
 	<tbody>
@@ -1300,7 +1299,6 @@ their <code>AcceleratorType</code>; mixed or unknown platforms are refused.</li>
 					<td><code>nvidia</code></td>
 					<td><code>ECCPUConnector</code> over NIXL</td>
 					<td><code>0.30.0</code></td>
-					<td>Verified on 4 × NVIDIA L40S</td>
 			</tr>
 			<tr>
 					<td><code>llm-d-router</code></td>
@@ -1308,7 +1306,6 @@ their <code>AcceleratorType</code>; mixed or unknown platforms are refused.</li>
 					<td><code>amd</code> (ROCm)</td>
 					<td><code>ECCPUConnector</code> over NIXL</td>
 					<td><code>0.30.0</code></td>
-					<td>Not verified</td>
 			</tr>
 			<tr>
 					<td><code>llm-d-router</code></td>
@@ -1316,7 +1313,6 @@ their <code>AcceleratorType</code>; mixed or unknown platforms are refused.</li>
 					<td><code>ascend</code></td>
 					<td><code>ECExampleConnector</code> over shared volume</td>
 					<td><code>0.30.0rc1</code></td>
-					<td>Verified on Ascend 910B2</td>
 			</tr>
 			<tr>
 					<td><code>vllm-router</code></td>
@@ -1324,7 +1320,6 @@ their <code>AcceleratorType</code>; mixed or unknown platforms are refused.</li>
 					<td><code>nvidia</code></td>
 					<td><code>ECCPUConnector</code> over NIXL</td>
 					<td><code>0.30.0</code></td>
-					<td>Verified on 4 × NVIDIA L40S</td>
 			</tr>
 			<tr>
 					<td><code>vllm-router</code></td>
@@ -1332,7 +1327,6 @@ their <code>AcceleratorType</code>; mixed or unknown platforms are refused.</li>
 					<td><code>amd</code> (ROCm)</td>
 					<td><code>ECCPUConnector</code> over NIXL</td>
 					<td><code>0.30.0</code></td>
-					<td>Not verified</td>
 			</tr>
 			<tr>
 					<td><code>llm-d-router</code></td>
@@ -1340,7 +1334,6 @@ their <code>AcceleratorType</code>; mixed or unknown platforms are refused.</li>
 					<td><code>nvidia</code></td>
 					<td><code>encoder-urls</code></td>
 					<td><code>0.5.10</code></td>
-					<td>Verified on 2 × NVIDIA L40S</td>
 			</tr>
 			<tr>
 					<td><code>llm-d-router</code></td>
@@ -1348,7 +1341,6 @@ their <code>AcceleratorType</code>; mixed or unknown platforms are refused.</li>
 					<td><code>amd</code> (ROCm)</td>
 					<td><code>encoder-urls</code></td>
 					<td><code>0.5.10</code></td>
-					<td>Not verified</td>
 			</tr>
 			<tr>
 					<td><code>llm-d-router</code></td>
@@ -1356,7 +1348,27 @@ their <code>AcceleratorType</code>; mixed or unknown platforms are refused.</li>
 					<td><code>ascend</code></td>
 					<td><code>encoder-urls</code></td>
 					<td><code>0.5.10</code></td>
-					<td>Not verified</td>
+			</tr>
+			<tr>
+					<td><code>sgl-router</code></td>
+					<td><code>SGLang</code></td>
+					<td><code>nvidia</code></td>
+					<td><code>encoder-urls</code></td>
+					<td><code>0.5.10</code></td>
+			</tr>
+			<tr>
+					<td><code>sgl-router</code></td>
+					<td><code>SGLang</code></td>
+					<td><code>amd</code> (ROCm)</td>
+					<td><code>encoder-urls</code></td>
+					<td><code>0.5.10</code></td>
+			</tr>
+			<tr>
+					<td><code>sgl-router</code></td>
+					<td><code>SGLang</code></td>
+					<td><code>ascend</code></td>
+					<td><code>encoder-urls</code></td>
+					<td><code>0.5.10</code></td>
 			</tr>
 			<tr>
 					<td><code>sglang-gateway</code></td>
@@ -1364,7 +1376,6 @@ their <code>AcceleratorType</code>; mixed or unknown platforms are refused.</li>
 					<td><code>nvidia</code></td>
 					<td><code>encoder-urls</code></td>
 					<td><code>0.5.10</code></td>
-					<td>Verified on 2 × NVIDIA L40S</td>
 			</tr>
 			<tr>
 					<td><code>sglang-gateway</code></td>
@@ -1372,7 +1383,6 @@ their <code>AcceleratorType</code>; mixed or unknown platforms are refused.</li>
 					<td><code>amd</code> (ROCm)</td>
 					<td><code>encoder-urls</code></td>
 					<td><code>0.5.10</code></td>
-					<td>Not verified</td>
 			</tr>
 			<tr>
 					<td><code>sglang-gateway</code></td>
@@ -1380,14 +1390,9 @@ their <code>AcceleratorType</code>; mixed or unknown platforms are refused.</li>
 					<td><code>ascend</code></td>
 					<td><code>encoder-urls</code></td>
 					<td><code>0.5.10</code></td>
-					<td>Not verified</td>
 			</tr>
 	</tbody>
 </table>
-<p>Verified rows served multimodal requests through the router on the listed hardware. Unverified rows
-(AMD ROCm and SGLang Ascend) are tracked in
-<a href="https://github.com/gpustack/gpustack-operator/issues/763">#763</a>
-.</p>
 <h3 id="version-and-configuration-limits">Version and configuration limits</h3>
 <p>Apply the image floor to <em><code>spec.engine.image</code></em> or <em><code>roles[].image</code></em>. Unlike text-only <em>prefill/decode
 (PD)</em>, <code>llm-d-router</code> uses its built-in token estimator for <em>EPD</em>, so do not add

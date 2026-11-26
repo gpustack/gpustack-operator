@@ -1360,8 +1360,6 @@ instances block node-wide reclaim.</li>
 <li><strong>Single partition per PPU request</strong>: Request one <code>Pod</code> per partition (<a href="/gpustack-operator/main/docs/modules/devices/requests/#rule-3-partition-count">Rule 3</a>
 ),
 and leave a brief gap when replacing a deleted <code>Pod</code> to avoid the reclaim-debounce window.</li>
-<li><strong>Unconfirmed reboot persistence</strong>: Mode persistence across host reboots is unverified on hardware;
-always verify and re-apply after a reboot.</li>
 </ul>
 <nav class="reading-footer" aria-label="Further reading">
     <section>

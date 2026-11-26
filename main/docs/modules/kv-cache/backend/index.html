@@ -1431,9 +1431,6 @@ driver access via <em><code>runtimeClassName</code></em>, <em><code>extraEnv</co
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">NVIDIA_VISIBLE_DEVICES</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">all </span><span class="w"> </span><span class="c"># requires accept-nvidia-visible-devices-envvar-when-unprivileged or runtimeClassName: nvidia</span></span></span></code></pre></div>
 </div>
-<p>Pairing a custom <code>VRAM</code> group with a <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
- is verified on NVIDIA
-and unmeasured on Ascend and AMD.</p>
 <h2 id="status-and-conditions">Status and conditions</h2>
 <p>Inspect backend phase, client endpoint, observed capacity, and conditions:</p>
 <div class="code-block">

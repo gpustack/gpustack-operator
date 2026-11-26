@@ -1856,8 +1856,6 @@ cluster.</li>
 <li>Allow <code>acceleratable.feature.gpustack.ai</code> and <code>general.feature.gpustack.ai</code> in <code>denyLabelNs</code>.</li>
 <li>Keep a single Helm release owning the NFD CRDs (both GPUStack and NVIDIA vendor NFD 0.19.0).</li>
 </ol>
-<p>Hardware validation used GPUStack&rsquo;s bundled NFD; external NFD handover is a configuration checklist
-and has not been tested end to end.</p>
 <h3 id="resource-removal-lag">Resource removal lag</h3>
 <p>Disabling a vendor device plugin does not clear its extended resource from <code>Node.status.allocatable</code>
 instantaneously. Wait until kubelet reconverges and removes the vendor key before installing GPUStack.</p>
