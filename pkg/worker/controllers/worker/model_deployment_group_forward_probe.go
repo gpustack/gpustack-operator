@@ -30,13 +30,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	core "k8s.io/api/core/v1"
 
@@ -602,9 +601,10 @@ func defaultGroupForwardPairFetch(
 // later rank pairs would have used.
 const modelDeploymentGroupForwardPairBound = 60 * time.Second
 
-// modelDeploymentGroupForwardPairMaxTokens is how many tokens the copied answer may take. The
-// answer is one short line, and the cap is what keeps a probe from turning into a generation.
-const modelDeploymentGroupForwardPairMaxTokens = 80
+// modelDeploymentGroupForwardPairMaxTokens is how many tokens the pair warmup probe requests. Two
+// tokens ensure the decode engine runs at least one autoregressive step on the transferred KV cache
+// while keeping the probe fast and independent of model instruction-following behavior.
+const modelDeploymentGroupForwardPairMaxTokens = 2
 
 // modelDeploymentGroupForwardPairPrefillerHeader names the header the decoder's routing proxy
 // reads the prefiller from.
@@ -658,10 +658,15 @@ type modelDeploymentGroupForwardPairAttempt struct {
 	// BootstrapRooms are the rooms the attempt joined the legs on, one per pair it probed. The
 	// proxy path records none, because the proxy picks the room there.
 	BootstrapRooms []int64
-	// Mooncake carries the mooncake exposition lines both halves answered with, one entry per
-	// series, prefixed by the half. The prefill half's series are push evidence; the connector
-	// exports no counter for a successful read, so the copied answer stays the read-side proof.
+	// Mooncake carries the mooncake exposition lines both halves answered with after the warmup
+	// request, one entry per series, prefixed by the half.
 	Mooncake []string
+	// PrefillMetricsConfirmed reports whether prefill metrics advanced during the probe window
+	// (true when vLLM /metrics exported request or transfer counters that increased).
+	PrefillMetricsConfirmed bool
+	// DecodeMetricsChecked reports whether decode /metrics answered both before and after the
+	// warmup request so zero new decode transfer failures were actually observed.
+	DecodeMetricsChecked bool
 }
 
 // modelDeploymentGroupForwardPairResult is the outcome of one directed pair probe: one result per
@@ -703,17 +708,13 @@ type modelDeploymentGroupForwardPairFetch func(
 	ctx context.Context, request modelDeploymentGroupForwardPairRequest,
 ) ([]byte, error)
 
-// modelDeploymentGroupForwardPairLeg is one request of a directed pair: where it goes, what it
-// carries, and what its answer must show.
+// modelDeploymentGroupForwardPairLeg is one request of a directed pair: where it goes and what it
+// carries.
 type modelDeploymentGroupForwardPairLeg struct {
 	// Name is what the leg is called in a reason.
 	Name string
 	// Request is the request this leg carries.
 	Request modelDeploymentGroupForwardPairRequest
-	// Copied says the leg's answer must carry the copied text. A leg that does not is checked for
-	// its binding alone: the prefiller hands over the KV and answers with a partial generation,
-	// which says nothing about whether the transfer happened.
-	Copied bool
 }
 
 // modelDeploymentGroupForwardPairReply is what one leg's answer says.
@@ -725,8 +726,6 @@ type modelDeploymentGroupForwardPairReply struct {
 	Bound bool
 	// Reason is the finish reason the engine recorded.
 	Reason string
-	// Content is the text the answer produced.
-	Content string
 }
 
 // modelDeploymentGroupForwardPairInput is what one pair's requests are built from.
@@ -735,13 +734,8 @@ type modelDeploymentGroupForwardPairInput struct {
 	Model string
 	// RequestID is the identifier the legs of this pair carry.
 	RequestID string
-	// Expected is the text the decoder must copy back.
-	Expected string
 	// RequestIDField is the body field the engine reads the request identifier from.
 	RequestIDField string
-	// ChatFields are the fields beside the identifier and the messages that the engine's chat
-	// route reads.
-	ChatFields map[string]any
 	// PrefillURL and DecodeURL are where the two heads are asked. The decode URL is the front door
 	// of a decoder the routing proxy fronts, and the engine's own address otherwise.
 	PrefillURL string
@@ -766,8 +760,9 @@ type modelDeploymentGroupForwardPairInput struct {
 }
 
 // modelDeploymentGroupForwardPairEngine is everything one engine contributes to a directed pair
-// probe: the route its requests go to, the fields its chat route reads, and the requests the two
-// heads of one rank pair carry.
+// probe: the completions route its requests go to, how it binds request identifiers, whether it
+// exports Prometheus counters checked before and after the warmup request, and how to render each
+// head's request.
 //
 // THE ENGINE'S DIFFERENCES LIVE HERE AND NOT IN THE PROBE, because the probe is the part that has
 // to be right about failure, and a per-engine flow would be a second place where that is decided.
@@ -778,13 +773,9 @@ type modelDeploymentGroupForwardPairEngine struct {
 	RequestIDField string
 	// IDPrefix is what the engine puts in front of the request identifier in its answer's id.
 	IDPrefix string
-	// ChatFields are the fields beside the identifier and the messages that the engine's chat
-	// route reads.
-	ChatFields map[string]any
-	// Mooncake says the engine's transfer connector exports the mooncake series the observation
-	// records beside the pair. An engine without them is not scraped for them, so its observation
-	// carries no line about a connector it does not run.
-	Mooncake bool
+	// Metrics says the engine exposes Prometheus /metrics scraped before and after the first pair
+	// request to verify prefill participation and transfer counters.
+	Metrics bool
 	// Heads renders the requests the two heads of one rank pair carry.
 	Heads func(in modelDeploymentGroupForwardPairInput) ([]modelDeploymentGroupForwardPairLeg, error)
 }
@@ -794,15 +785,13 @@ type modelDeploymentGroupForwardPairEngine struct {
 // at a reason.
 var modelDeploymentGroupForwardPairEngines = map[string]modelDeploymentGroupForwardPairEngine{
 	workercore.ModelDeploymentEngineSGLang: {
-		// The chat route is the one that takes a request identifier and answers with it, and it is
-		// the route the measured pair ran on.
-		Path:           "/v1/chat/completions",
+		// /v1/completions accepts rid, bootstrap_host/port/room, and routed_dp_rank without
+		// requiring a chat template, so base, vision, and reasoning models all run the same 2-token
+		// warmup path.
+		Path:           "/v1/completions",
 		RequestIDField: "rid",
 		// The engine puts nothing in front of the identifier in its answer's id.
 		IDPrefix: "",
-		// The thinking switch is what keeps a model that reasons out loud from answering with the
-		// reasoning, which the copy would then not match.
-		ChatFields: map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": false}},
 		Heads: func(in modelDeploymentGroupForwardPairInput) ([]modelDeploymentGroupForwardPairLeg, error) {
 			prefill, err := modelDeploymentGroupForwardPairSGLangBody(in, in.PrefillRank)
 			if err != nil {
@@ -819,21 +808,20 @@ var modelDeploymentGroupForwardPairEngines = map[string]modelDeploymentGroupForw
 					Request: modelDeploymentGroupForwardPairRequest{URL: in.PrefillURL, Body: prefill},
 				},
 				{
-					Name: "decode",
-					Request: modelDeploymentGroupForwardPairRequest{
-						URL: in.DecodeURL, Body: decode,
-					},
-					Copied: true,
+					Name:    "decode",
+					Request: modelDeploymentGroupForwardPairRequest{URL: in.DecodeURL, Body: decode},
 				},
 			}, nil
 		},
 	},
 	workercore.ModelDeploymentEngineVLLM: {
-		Path:           "/v1/chat/completions",
+		// /v1/completions is intercepted by the llm-d routing proxy sidecar across all connectors
+		// and requires no chat template, returning id = "cmpl-" + request_id.
+		Path:           "/v1/completions",
 		RequestIDField: "request_id",
 		// The engine prefixes the identifier with the kind of completion it answered.
-		IDPrefix: "chatcmpl-",
-		Mooncake: true,
+		IDPrefix: "cmpl-",
+		Metrics:  true,
 		Heads: func(in modelDeploymentGroupForwardPairInput) ([]modelDeploymentGroupForwardPairLeg, error) {
 			// THE ENGINE ID OF THE PREFILLER'S RANK IS WHAT THE HANDSHAKE NAMES THE PREFILLER BY,
 			// and this operator does not read the prefiller's own registry to learn it. A pair that
@@ -874,11 +862,8 @@ var modelDeploymentGroupForwardPairEngines = map[string]modelDeploymentGroupForw
 					},
 				},
 				{
-					Name: "decode",
-					Request: modelDeploymentGroupForwardPairRequest{
-						URL: in.DecodeURL, Body: decode,
-					},
-					Copied: true,
+					Name:    "decode",
+					Request: modelDeploymentGroupForwardPairRequest{URL: in.DecodeURL, Body: decode},
 				},
 			}, nil
 		},
@@ -995,7 +980,9 @@ func observeModelDeploymentGroupForwardPair(
 	probeCtx, cancel := context.WithTimeout(ctx, modelDeploymentGroupForwardPairBound)
 	defer cancel()
 
-	var mooncakeRead bool
+	var metricsChecked bool
+	prefillMetricsURL := modelDeploymentGroupForwardPairMetricsURL(prefillHead, prefillURL, engine.Path)
+	decodeMetricsURL := modelDeploymentGroupForwardPairMetricsURL(decodeHead, decodeURL, engine.Path)
 
 	for prefillRank := 0; prefillRank < prefillWidth; prefillRank++ {
 		for decodeRank := 0; decodeRank < decodeWidth; decodeRank++ {
@@ -1005,6 +992,20 @@ func observeModelDeploymentGroupForwardPair(
 				// the shape is one question whatever they are.
 				continue
 			}
+
+			var beforePrefillMetrics, beforeDecodeMetrics []byte
+			var beforePrefillErr, beforeDecodeErr error
+			// Only the proxy shape needs /metrics corroboration: in head-to-head both halves
+			// answer bound /v1/completions directly, whereas the proxy streams back only decode.
+			if viaProxy && !metricsChecked && engine.Metrics {
+				beforePrefillMetrics, beforePrefillErr = modelDeploymentGroupForwardPairMetricsScrape(
+					probeCtx, prefillMetricsURL, fetch,
+				)
+				beforeDecodeMetrics, beforeDecodeErr = modelDeploymentGroupForwardPairMetricsScrape(
+					probeCtx, decodeMetricsURL, fetch,
+				)
+			}
+
 			reply, room, reason := modelDeploymentGroupForwardPairProbe(
 				probeCtx, md, engine, prefillHead, prefillURL, decodeURL,
 				prefillWidth, prefillRank, decodeRank, viaProxy, fetch,
@@ -1021,17 +1022,22 @@ func observeModelDeploymentGroupForwardPair(
 				// the room it joins the pair on and this operator never builds one there.
 				attempt.BootstrapRooms = append(attempt.BootstrapRooms, room)
 			}
-			if !mooncakeRead && engine.Mooncake {
-				// THE MOONCAKE SERIES ARE READ FROM BOTH HALVES ONCE, after the first pair and while
-				// its transfer is fresh: the prefill half's exposition carries the push evidence, and
-				// the decode half's carries whatever its connector did about it. The halves' addresses
-				// do not vary by rank and the exposition is cumulative, so a later pair would repeat
-				// the same lines.
-				mooncakeRead = true
-				attempt.Mooncake = append(attempt.Mooncake,
-					modelDeploymentGroupForwardPairMooncakeSeries(probeCtx, prefillURL, engine.Path, "prefill", fetch)...)
-				attempt.Mooncake = append(attempt.Mooncake,
-					modelDeploymentGroupForwardPairMooncakeSeries(probeCtx, decodeURL, engine.Path, "decode", fetch)...)
+			if viaProxy && !metricsChecked && engine.Metrics {
+				metricsChecked = true
+				verdict, mooncakeLines := modelDeploymentGroupForwardPairCheckMetrics(
+					probeCtx, prefillMetricsURL, decodeMetricsURL,
+					beforePrefillMetrics, beforePrefillErr,
+					beforeDecodeMetrics, beforeDecodeErr,
+					fetch,
+				)
+				attempt.Mooncake = append(attempt.Mooncake, mooncakeLines...)
+				if verdict.reason != "" {
+					return modelDeploymentGroupForwardPairHeld(attempt, modelDeploymentGroupForward{
+						State: modelDeploymentGroupForwardUnknown, Reason: verdict.reason,
+					})
+				}
+				attempt.PrefillMetricsConfirmed = verdict.prefillAdvanced
+				attempt.DecodeMetricsChecked = verdict.decodeChecked
 			}
 		}
 	}
@@ -1052,14 +1058,10 @@ func modelDeploymentGroupForwardPairProbe(
 	}
 	requestID := modelDeploymentQualifyRIDPrefix + "pd-" + nonce
 
-	expected := modelDeploymentGroupForwardPairExpected(prefillRank, decodeRank)
-
 	input := modelDeploymentGroupForwardPairInput{
 		Model:          md.Spec.Model.Name,
 		RequestID:      requestID,
-		Expected:       expected,
 		RequestIDField: engine.RequestIDField,
-		ChatFields:     engine.ChatFields,
 		PrefillURL:     prefillURL,
 		DecodeURL:      decodeURL,
 		PrefillRank:    prefillRank,
@@ -1108,92 +1110,123 @@ func modelDeploymentGroupForwardPairProbe(
 			return "", 0, "the " + legs[i].Name + " leg answered, but not bound to this operator's own " +
 				"request, so the answer is not evidence that the pair carried one"
 		}
-		if !legs[i].Copied {
-			if !modelDeploymentQualifyFinishRan(reply.Reason) {
-				return "", 0, "the " + legs[i].Name + " leg answered, but its finish reason reports " +
-					"the request did not complete, so the answer is not evidence that the pair " +
-					"carried one"
-			}
-			continue
-		}
 		if !modelDeploymentQualifyFinishRan(reply.Reason) {
 			return "", 0, "the " + legs[i].Name + " leg answered, but its finish reason reports " +
 				"the request did not complete, so the answer is not evidence that the pair carried one"
-		}
-		// THE COMPARE READS THE ANSWER'S VISIBLE TEXT. The chat template wraps its answer in a
-		// <think>…</think> block on this route whatever the thinking switch says -- case-9 run2's
-		// enriched reason caught the byte-perfect copy sitting behind an EMPTY wrapper -- and the
-		// wrapper is the template's noise, not the model's answer. The block is stripped before the
-		// compare; the rejected answer stays RAW in the reason, where the wrapper is still visible
-		// for the next classification.
-		if visible := modelDeploymentGroupForwardPairVisibleCopy(reply.Content); visible != expected {
-			// THE ANSWER IS NAMED IN THE REASON, bounded and unstripped, so the run's evidence can
-			// tell a model that drifted from a context that was never whole. A reason that discarded
-			// the answer left the classification — answer drift, a broken read, a thinking leak — to
-			// a rerun this probe exists to avoid.
-			return "", 0, "the " + legs[i].Name + " leg answered, but it did not carry the text the " +
-				"request asked to be copied, so nothing shows the prefill's KV reached it (answer: \"" +
-				modelDeploymentGroupForwardPairBounded(reply.Content, modelDeploymentGroupForwardPairAnswerBound) + "\")"
 		}
 	}
 
 	return requestID, input.BootstrapRoom, ""
 }
 
-// modelDeploymentGroupForwardPairThinkWrapper matches a leading <think>…</think> block, across
-// lines, at the head of an answer, with whitespace tolerated on either side of the block: chat
-// templates emit a leading newline or space before the wrapper on some variants, and an anchored
-// match that refused it would leave the wrapper in place and reject the copy behind it.
-var modelDeploymentGroupForwardPairThinkWrapper = regexp.MustCompile(`(?s)^\s*<think>.*?</think>\s*`)
+const (
+	// modelDeploymentVLLMMetricRequestSuccess is vLLM's universal per-request completion counter.
+	modelDeploymentVLLMMetricRequestSuccess = "vllm:request_success_total"
+	// modelDeploymentVLLMMetricMooncakeTransferred is vLLM MooncakeConnector's sender push count.
+	modelDeploymentVLLMMetricMooncakeTransferred = "vllm:mooncake_bytes_transferred_count"
+	// modelDeploymentVLLMMetricMooncakeFailedRecvs is vLLM MooncakeConnector's receiver failure count.
+	modelDeploymentVLLMMetricMooncakeFailedRecvs = "vllm:mooncake_num_failed_recvs"
+	// modelDeploymentGroupForwardPairMetricsRetries bounds post-probe re-scrapes when an engine
+	// accounts counters asynchronously after the HTTP completion flushes.
+	modelDeploymentGroupForwardPairMetricsRetries = 2
+)
 
-// modelDeploymentGroupForwardPairVisibleCopy strips a leading <think>…</think> block, whitespace,
-// and trivial surrounding quotes or sentence punctuation from an answer, leaving the single token
-// the decode leg was asked to copy.
-//
-// THE WRAPPER IS TEMPLATE NOISE, NOT CONTENT. Chat templates may emit a <think> block even with
-// thinking disabled, and small models may append a trailing period or wrap a single word in quotes.
-// Trimming only those outer delimiters keeps the match exact on the token itself; rejected answers
-// stay raw in their reasons, where the wrapper and punctuation remain visible.
-func modelDeploymentGroupForwardPairVisibleCopy(answer string) string {
-	visible := modelDeploymentGroupForwardPairThinkWrapper.ReplaceAllString(answer, "")
-	return strings.TrimFunc(visible, func(r rune) bool {
-		return unicode.IsSpace(r) || unicode.IsPunct(r) || r == '`'
-	})
-}
+// modelDeploymentGroupForwardPairMetricsRetryDelay is the pause between post-probe re-scrapes when
+// prefill counters have not yet advanced. Overridden to 0 in unit tests.
+var modelDeploymentGroupForwardPairMetricsRetryDelay = 100 * time.Millisecond
 
-// modelDeploymentGroupForwardPairAnswerBound is how much of a rejected answer the failure reason
-// carries. Two hundred characters is enough to tell a drifted copy from an unrelated answer, and
-// small enough that a reason stays a line.
-const modelDeploymentGroupForwardPairAnswerBound = 200
-
-// modelDeploymentGroupForwardPairBounded cuts a text to at most limit characters on rune
-// boundaries and marks the cut with an ellipsis. The engines answer in more than one script, and
-// a bound that splits a character corrupts the very evidence it carries.
-func modelDeploymentGroupForwardPairBounded(text string, limit int) string {
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
+// modelDeploymentGroupForwardPairMetricsURL builds the /metrics endpoint for one half using the
+// engine's own prometheus.io/port annotation (bypassing any routing-proxy front door), falling back
+// to the request endpoint URL when the annotation is absent.
+func modelDeploymentGroupForwardPairMetricsURL(head *core.Pod, fallbackURL, enginePath string) string {
+	if head != nil {
+		if url, err := modelDeploymentGroupForwardURL(head, "/metrics"); err == nil {
+			return url
+		}
 	}
-	return string(runes[:limit]) + "…"
+
+	return strings.TrimSuffix(fallbackURL, enginePath) + "/metrics"
 }
 
-// modelDeploymentGroupForwardPairMooncakeSeries reads one half's metrics exposition and reduces it
-// to the mooncake series the observation records.
-//
-// THE PUSH IS NOT THE PULL. vllm:mooncake_bytes_transferred is the sender's histogram, and its
-// _count is the number of transfers the prefill half completed; the connector exports no counter
-// for a successful read — vllm:mooncake_num_failed_recvs counts failed pulls only — so the series
-// are recorded as what they are, push evidence, and the copied answer stays the read-side proof.
-func modelDeploymentGroupForwardPairMooncakeSeries(
-	ctx context.Context, chatURL, enginePath, half string, fetch modelDeploymentGroupForwardPairFetch,
-) []string {
-	body, err := fetch(ctx, modelDeploymentGroupForwardPairRequest{
+// modelDeploymentGroupForwardPairMetricsScrape fetches one half's /metrics exposition.
+func modelDeploymentGroupForwardPairMetricsScrape(
+	ctx context.Context, metricsURL string, fetch modelDeploymentGroupForwardPairFetch,
+) ([]byte, error) {
+	return fetch(ctx, modelDeploymentGroupForwardPairRequest{
 		Method: http.MethodGet,
-		URL:    strings.TrimSuffix(chatURL, enginePath) + "/metrics",
+		URL:    metricsURL,
 	})
-	if err != nil {
-		return []string{half + ": the mooncake exposition did not answer: " + err.Error()}
+}
+
+// modelDeploymentGroupForwardPairMetricsVerdict is the structured outcome of comparing pre- and
+// post-probe Prometheus expositions on a vLLM routing-proxy pair.
+type modelDeploymentGroupForwardPairMetricsVerdict struct {
+	// prefillAdvanced is true when at least one exported prefill counter increased during the probe.
+	prefillAdvanced bool
+	// decodeChecked is true when both pre- and post-probe decode /metrics scrapes succeeded.
+	decodeChecked bool
+	// failedRecvs is true when decode recorded an increase in failed mooncake receives (non-retryable).
+	failedRecvs bool
+	// reason is non-empty when an exported counter contradicted disaggregation or recorded a failure.
+	reason string
+}
+
+// modelDeploymentGroupForwardPairCheckMetrics scrapes post-probe /metrics and verifies counter
+// deltas against the pre-probe baseline, retrying briefly if asynchronous counter flushes lag the
+// HTTP response. Scrape failures degrade to the bound-completion verdict rather than deadlocking
+// healthy deployments whose metrics port is disabled or unreachable.
+func modelDeploymentGroupForwardPairCheckMetrics(
+	ctx context.Context, prefillMetricsURL, decodeMetricsURL string,
+	beforePrefill []byte, beforePrefillErr error,
+	beforeDecode []byte, beforeDecodeErr error,
+	fetch modelDeploymentGroupForwardPairFetch,
+) (modelDeploymentGroupForwardPairMetricsVerdict, []string) {
+	var (
+		afterPrefill, afterDecode       []byte
+		afterPrefillErr, afterDecodeErr error
+		verdict                         modelDeploymentGroupForwardPairMetricsVerdict
+	)
+retryLoop:
+	for attempt := 0; attempt <= modelDeploymentGroupForwardPairMetricsRetries; attempt++ {
+		if attempt > 0 && modelDeploymentGroupForwardPairMetricsRetryDelay > 0 {
+			timer := time.NewTimer(modelDeploymentGroupForwardPairMetricsRetryDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				break retryLoop
+			case <-timer.C:
+			}
+		}
+		afterPrefill, afterPrefillErr = modelDeploymentGroupForwardPairMetricsScrape(ctx, prefillMetricsURL, fetch)
+		afterDecode, afterDecodeErr = modelDeploymentGroupForwardPairMetricsScrape(ctx, decodeMetricsURL, fetch)
+
+		verdict = modelDeploymentGroupForwardPairVerifyMetricsDelta(
+			beforePrefill, afterPrefill, beforePrefillErr == nil && afterPrefillErr == nil,
+			beforeDecode, afterDecode, beforeDecodeErr == nil && afterDecodeErr == nil,
+		)
+		if verdict.reason == "" || verdict.failedRecvs {
+			break
+		}
 	}
+
+	var lines []string
+	if afterPrefillErr != nil {
+		lines = append(lines, "prefill: the mooncake exposition did not answer: "+afterPrefillErr.Error())
+	} else {
+		lines = append(lines, modelDeploymentGroupForwardPairMooncakeLines(afterPrefill, "prefill")...)
+	}
+	if afterDecodeErr != nil {
+		lines = append(lines, "decode: the mooncake exposition did not answer: "+afterDecodeErr.Error())
+	} else {
+		lines = append(lines, modelDeploymentGroupForwardPairMooncakeLines(afterDecode, "decode")...)
+	}
+
+	return verdict, lines
+}
+
+// modelDeploymentGroupForwardPairMooncakeLines extracts non-bucket vllm:mooncake_ series lines
+// from a Prometheus exposition body, prefixed by half.
+func modelDeploymentGroupForwardPairMooncakeLines(body []byte, half string) []string {
 	series := make([]string, 0)
 	for _, line := range strings.Split(string(body), "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -1206,6 +1239,126 @@ func modelDeploymentGroupForwardPairMooncakeSeries(
 		return []string{half + ": the mooncake exposition carries no vllm:mooncake_ series"}
 	}
 	return series
+}
+
+// modelDeploymentGroupForwardPairVerifyMetricsDelta compares pre- and post-probe Prometheus
+// expositions to corroborate that prefill counters advanced during the probe window without
+// decode-side transfer failures.
+//
+// Note: Prometheus counters are engine-wide rather than per-request, so on an already-serving
+// prefill engine concurrent traffic can also advance counters; this is window-level corroboration,
+// not per-request cryptographic attribution.
+func modelDeploymentGroupForwardPairVerifyMetricsDelta(
+	beforePrefill, afterPrefill []byte, prefillAvailable bool,
+	beforeDecode, afterDecode []byte, decodeAvailable bool,
+) modelDeploymentGroupForwardPairMetricsVerdict {
+	verdict := modelDeploymentGroupForwardPairMetricsVerdict{
+		decodeChecked: decodeAvailable,
+	}
+	if decodeAvailable {
+		if afterFailed, ok := modelDeploymentGroupForwardMetricSum(afterDecode, modelDeploymentVLLMMetricMooncakeFailedRecvs); ok {
+			beforeFailed, _ := modelDeploymentGroupForwardMetricSum(beforeDecode, modelDeploymentVLLMMetricMooncakeFailedRecvs)
+			if afterFailed > beforeFailed {
+				verdict.failedRecvs = true
+				verdict.reason = "the decode half recorded failed mooncake receives during the pair probe"
+				return verdict
+			}
+		}
+	}
+
+	if !prefillAvailable {
+		return verdict
+	}
+
+	if afterPush, ok := modelDeploymentGroupForwardMetricSum(afterPrefill, modelDeploymentVLLMMetricMooncakeTransferred); ok {
+		beforePush, _ := modelDeploymentGroupForwardMetricSum(beforePrefill, modelDeploymentVLLMMetricMooncakeTransferred)
+		if afterPush <= beforePush {
+			verdict.reason = "the decode routing proxy answered, but prefill " +
+				modelDeploymentVLLMMetricMooncakeTransferred +
+				" did not advance, so nothing shows KV crossed from prefill"
+			return verdict
+		}
+		verdict.prefillAdvanced = true
+	}
+
+	if afterSuccess, ok := modelDeploymentGroupForwardMetricSum(afterPrefill, modelDeploymentVLLMMetricRequestSuccess); ok {
+		beforeSuccess, _ := modelDeploymentGroupForwardMetricSum(beforePrefill, modelDeploymentVLLMMetricRequestSuccess)
+		if afterSuccess <= beforeSuccess {
+			verdict.reason = "the decode routing proxy answered, but prefill " +
+				modelDeploymentVLLMMetricRequestSuccess +
+				" did not advance, so nothing shows the request crossed from prefill"
+			return verdict
+		}
+		verdict.prefillAdvanced = true
+	}
+
+	return verdict
+}
+
+// modelDeploymentGroupForwardMetricSum sums all sample values for metricName in a Prometheus text
+// exposition body, returning (sum, true) when at least one valid sample is present.
+func modelDeploymentGroupForwardMetricSum(body []byte, metricName string) (float64, bool) {
+	var sum float64
+	var found bool
+	for _, raw := range strings.Split(string(body), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		rest, ok := strings.CutPrefix(line, metricName)
+		if !ok || len(rest) == 0 {
+			continue
+		}
+		switch rest[0] {
+		case ' ', '\t':
+			rest = strings.TrimSpace(rest)
+		case '{':
+			end := modelDeploymentGroupForwardMetricLabelEnd(rest)
+			if end < 0 {
+				continue
+			}
+			rest = strings.TrimSpace(rest[end+1:])
+		default:
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			continue
+		}
+		value, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+			continue
+		}
+		sum += value
+		found = true
+	}
+	return sum, found
+}
+
+// modelDeploymentGroupForwardMetricLabelEnd returns the index of the closing '}' of a Prometheus
+// label block starting at s[0] == '{', skipping quoted label values and backslash escapes.
+func modelDeploymentGroupForwardMetricLabelEnd(s string) int {
+	inQuote := false
+	escaped := false
+	for i := 1; i < len(s); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch s[i] {
+		case '\\':
+			if inQuote {
+				escaped = true
+			}
+		case '"':
+			inQuote = !inQuote
+		case '}':
+			if !inQuote {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // modelDeploymentGroupForwardPairSend asks every leg of a pair and reads the answers.
@@ -1230,7 +1383,7 @@ func modelDeploymentGroupForwardPairSend(
 				failures[index] = err
 				return
 			}
-			replies[index] = modelDeploymentGroupForwardPairChatRead(body, requestID, idPrefix)
+			replies[index] = modelDeploymentGroupForwardPairCompletionRead(body, requestID, idPrefix)
 		}(i)
 	}
 	group.Wait()
@@ -1238,21 +1391,18 @@ func modelDeploymentGroupForwardPairSend(
 	return replies, failures
 }
 
-// modelDeploymentGroupForwardPairChatRead reads one leg's answer.
+// modelDeploymentGroupForwardPairCompletionRead reads one leg's /v1/completions answer.
 //
 // THE BINDING IS THE ENGINE'S OWN: the answer's id has to carry the identifier this operator sent,
-// with whatever the engine puts in front of it. An answer that carries an id is read as bound only
-// when the whole id is the one this operator asked for.
-func modelDeploymentGroupForwardPairChatRead(
+// with whatever the engine puts in front of it. Generated text is intentionally not compared, so
+// base, vision, reasoning, and small models never deadlock on output formatting.
+func modelDeploymentGroupForwardPairCompletionRead(
 	body []byte, requestID, idPrefix string,
 ) modelDeploymentGroupForwardPairReply {
 	var response struct {
 		ID      string `json:"id"`
 		Choices []struct {
 			FinishReason *string `json:"finish_reason"`
-			Message      struct {
-				Content string `json:"content"`
-			} `json:"message"`
 		} `json:"choices"`
 	}
 	if json.Unmarshal(body, &response) != nil {
@@ -1264,27 +1414,23 @@ func modelDeploymentGroupForwardPairChatRead(
 		return reply
 	}
 	reply.Reason = *response.Choices[0].FinishReason
-	reply.Content = strings.TrimSpace(response.Choices[0].Message.Content)
 
 	return reply
 }
 
-// modelDeploymentGroupForwardPairChatFields are the fields every leg of a directed pair carries
-// besides the engine's own handshake: the model, the identifier, the messages and the shape of the
-// answer.
-func modelDeploymentGroupForwardPairChatFields(in modelDeploymentGroupForwardPairInput) map[string]any {
+// modelDeploymentGroupForwardPairRequestFields are the fields every leg of a directed pair carries
+// besides the engine's own handshake: the model, the identifier, a minimal warmup prompt, and a
+// 2-token budget.
+func modelDeploymentGroupForwardPairRequestFields(in modelDeploymentGroupForwardPairInput) map[string]any {
 	fields := map[string]any{
 		"model":       in.Model,
-		"messages":    []map[string]string{{"role": "user", "content": modelDeploymentGroupForwardPairCopy(in.Expected)}},
+		"prompt":      modelDeploymentQualifyPrompt,
 		"max_tokens":  modelDeploymentGroupForwardPairMaxTokens,
 		"temperature": 0,
 		"stream":      false,
 	}
 	if in.RequestIDField != "" {
 		fields[in.RequestIDField] = in.RequestID
-	}
-	for name, value := range in.ChatFields {
-		fields[name] = value
 	}
 
 	return fields
@@ -1295,7 +1441,7 @@ func modelDeploymentGroupForwardPairChatFields(in modelDeploymentGroupForwardPai
 func modelDeploymentGroupForwardPairSGLangBody(
 	in modelDeploymentGroupForwardPairInput, rank int,
 ) ([]byte, error) {
-	fields := modelDeploymentGroupForwardPairChatFields(in)
+	fields := modelDeploymentGroupForwardPairRequestFields(in)
 	fields["bootstrap_host"] = in.BootstrapHost
 	fields["bootstrap_port"] = in.BootstrapPort
 	fields["bootstrap_room"] = in.BootstrapRoom
@@ -1309,7 +1455,7 @@ func modelDeploymentGroupForwardPairSGLangBody(
 func modelDeploymentGroupForwardPairVLLMBody(
 	in modelDeploymentGroupForwardPairInput, transfer map[string]any,
 ) ([]byte, error) {
-	fields := modelDeploymentGroupForwardPairChatFields(in)
+	fields := modelDeploymentGroupForwardPairRequestFields(in)
 	fields["kv_transfer_params"] = transfer
 
 	return json.Marshal(fields)
@@ -1325,13 +1471,9 @@ func modelDeploymentGroupForwardPairVLLMBody(
 // prefiller is named by its own engine address, because no proxy fronts it.
 //
 // THE RANK COVERAGE IS NOT ASSERTED HERE, and this shape cannot show it. The routing proxy drives
-// the pair, and the probe observes its response, this operator's own request identifier and the
-// copied text. It does not observe the prefiller's response, because the proxy runs the prefill
-// alongside the decode and streams back only the decode answer. It does not cover the individual
-// data-parallel ranks either: the proxy picks the room it joins the pair on and the rank inside the
-// engine it fronts, so this operator's room arithmetic steers nothing here. And with the prefiller
-// header absent the proxy skips disaggregation and forwards decode-only, so a bound answer
-// carrying the copied text is producible by the decode engine alone.
+// the pair, and the probe observes its bound completion response and, on vLLM, prefill/decode
+// Prometheus counter deltas before and after the warmup request. It does not cover individual
+// data-parallel ranks because the proxy picks the room and rank inside the engine it fronts.
 func modelDeploymentGroupForwardPairProxyLeg(
 	in modelDeploymentGroupForwardPairInput, prefillHead *core.Pod,
 ) (modelDeploymentGroupForwardPairLeg, error) {
@@ -1341,7 +1483,7 @@ func modelDeploymentGroupForwardPairProxyLeg(
 			"the prefill group has no address to name to the decode side: %w", err,
 		)
 	}
-	body, err := json.Marshal(modelDeploymentGroupForwardPairChatFields(in))
+	body, err := json.Marshal(modelDeploymentGroupForwardPairRequestFields(in))
 	if err != nil {
 		return modelDeploymentGroupForwardPairLeg{}, err
 	}
@@ -1355,7 +1497,6 @@ func modelDeploymentGroupForwardPairProxyLeg(
 				modelDeploymentGroupForwardPairPrefillerHeader: address,
 			},
 		},
-		Copied: true,
 	}, nil
 }
 
@@ -1495,23 +1636,6 @@ func modelDeploymentGroupForwardPairWidthBound(
 		"rank arithmetic can address"
 }
 
-// modelDeploymentGroupForwardPairExpected is the single plain ASCII token one pair's decoder must
-// copy back.
-//
-// IT NAMES THE PAIR WITHOUT PUNCTUATION, because an answer carrying another pair's token is not
-// this pair's answer, and an opaque alphanumeric word avoids colon or quote splitting by small
-// models.
-func modelDeploymentGroupForwardPairExpected(prefillRank, decodeRank int) string {
-	return fmt.Sprintf("PROBEP%dD%d", prefillRank, decodeRank)
-}
-
-// modelDeploymentGroupForwardPairCopy is the instruction the decoder's answer is checked against.
-// It uses plain English with minimal punctuation and asks for only the single token so small and
-// non-Chinese models echo it verbatim, while keeping /no_think on its own line for thinking models.
-func modelDeploymentGroupForwardPairCopy(expected string) string {
-	return "Reply with only this word " + expected + "\n/no_think"
-}
-
 // modelDeploymentGroupForwardPairHeld answers both roles with the same verdict, which is what a
 // pair that could not be observed says: neither side is at fault, and neither side is proven.
 func modelDeploymentGroupForwardPairHeld(
@@ -1525,36 +1649,35 @@ func modelDeploymentGroupForwardPairHeld(
 }
 
 // modelDeploymentGroupForwardPairVerified answers both roles with the verdict a pair that carried
-// the request earns, each with the generation of its own group.
+// the warmup request earns, each with the generation of its own group.
 //
 // THE REASON FOLLOWS THE SHAPE, because the two shapes show different things. The head-to-head
-// shape drove both heads and can read the transfer in the decode answer. The proxy shape asked the
-// decode group's routing proxy one question, and that answer shows the proxy was alive, bound to
-// this operator's own identifier, and returned the text the request asked to be copied. It does not
-// show which rank pair served, because the proxy picked the rank, and it does not show the transfer
-// itself, because the proxy drove that leg.
+// shape drove both heads on /v1/completions and observed both halves complete the bound warmup
+// request. The proxy shape asked the decode group's routing proxy one warmup request while naming
+// the prefiller and, on vLLM, checked prefill and decode Prometheus counter deltas before and after
+// the request.
 func modelDeploymentGroupForwardPairVerified(
 	attempt modelDeploymentGroupForwardPairAttempt, pairs int,
 ) modelDeploymentGroupForwardPairResult {
-	reason := "the prefill and decode legs both carried this operator's own request, and the " +
-		"decode leg's answer shows the prefill's KV reached it"
-	observation := fmt.Sprintf("%d rank pairs carried the request, each bound to its own identifier",
+	reason := "the prefill and decode legs both completed this operator's own warmup request, " +
+		"confirming the pair transfer path"
+	observation := fmt.Sprintf("%d rank pairs completed the warmup request, each bound to its own identifier",
 		pairs)
 	if attempt.Shape == modelDeploymentGroupForwardPairShapeViaRoutingProxy {
-		reason = "the decode group's routing proxy answered the probe while driving the pair with " +
-			"the named prefiller, and its response matched this operator's own request identifier " +
-			"and the exact text requested for copying"
-		observation = "the routing proxy answered one request, bound to this operator's own identifier"
+		reason = "the decode group's routing proxy completed the warmup probe while driving the pair " +
+			"with the named prefiller, matching this operator's own request identifier"
+		observation = "the routing proxy completed one warmup request, bound to this operator's own identifier"
+		if attempt.PrefillMetricsConfirmed {
+			if attempt.DecodeMetricsChecked {
+				reason += ", and prefill metrics advanced during the probe window with zero new decode transfer failures"
+			} else {
+				reason += ", and prefill metrics advanced during the probe window (decode metrics unavailable)"
+			}
+			observation += "; prefill metrics window delta observed"
+		}
 	}
 	if len(attempt.Mooncake) > 0 {
 		observation += "; the mooncake exposition: " + strings.Join(attempt.Mooncake, "; ")
-		// THE READ SIDE HAS NO SUCCESS COUNTER. The connector's exported series count the sender's
-		// pushes and failed pulls only, so the observation says explicitly that the copied answer is
-		// the evidence a pull happened; a reader cannot take the counters for it. The sentence rides
-		// the exposition, so a shape that carries no mooncake series says nothing about a connector
-		// it does not run.
-		observation += "; the mooncake connector exports no read-side success counter " +
-			"(vllm:mooncake_num_failed_recvs counts failed pulls only), so the copied answer is the read-side evidence"
 	}
 
 	return modelDeploymentGroupForwardPairResult{

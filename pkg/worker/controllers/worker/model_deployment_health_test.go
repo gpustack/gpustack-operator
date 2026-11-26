@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -961,6 +962,8 @@ type healthPairFetch struct {
 	mutex sync.Mutex
 	// asked records every request, in the order the legs were sent.
 	asked []modelDeploymentGroupForwardPairRequest
+	// completed counts non-failed POST requests so GET /metrics advances across the probe.
+	completed atomic.Int64
 	// prefillerHosts are the authorities the prefillers answer at.
 	prefillHosts map[string]bool
 	// failures maps an authority to the error that authority answers with.
@@ -978,16 +981,19 @@ func (f *healthPairFetch) fetch(
 	if slash := strings.Index(authority, "/"); slash >= 0 {
 		authority = authority[:slash]
 	}
-	// THE METRICS SCRAPE IS ANSWERED BY THE STUB ITSELF, minimally: the observation reads the
-	// mooncake series of both halves, and a GET that fell through to the chat answer would hand it
-	// a document that reads as no series at all.
 	if request.Method == http.MethodGet {
-		return []byte("vllm:mooncake_bytes_transferred_count 0.0\n" +
-			"vllm:mooncake_num_failed_recvs 0.0\n"), nil
+		count := strconvx.Itoa(int(f.completed.Load()))
+		return []byte(
+			"vllm:request_success_total{finished_reason=\"length\",model_name=\"test\"} " + count + ".0\n" +
+				"vllm:mooncake_bytes_transferred_count " + count + ".0\n" +
+				"vllm:mooncake_num_failed_recvs 0.0\n",
+		), nil
 	}
 	if err, failed := f.failures[authority]; failed {
 		return nil, err
 	}
+
+	f.completed.Add(1)
 
 	return probePairAnswer(request.Body, f.prefillHosts[authority]), nil
 }
