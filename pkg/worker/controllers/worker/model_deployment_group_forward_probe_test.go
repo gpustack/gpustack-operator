@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -675,17 +676,15 @@ func probePairView(role string, ordinal int, members ...*core.Pod) modelDeployme
 	}
 }
 
-// probePairFetch answers a directed pair probe the way the engine does: the prefiller's answer
-// carries the request's own identifier and a partial generation, and the decoder's answer carries
-// the identifier and the exact text the request asked to be copied.
-//
-// THE TEXT IS READ OUT OF THE REQUEST, so the fixture answers what the probe asked for without the
-// test having to restate it, and a probe that asked for something else would be answered with
-// something else.
+// probePairFetch answers a directed pair probe the way the engine does: each POST /v1/completions
+// leg returns a bound completion with a normal finish reason and advances the stub's Prometheus
+// counters so pre/post /metrics delta checks observe the request.
 type probePairFetch struct {
 	mutex sync.Mutex
 	// asked records every request, in the order the legs were sent.
 	asked []modelDeploymentGroupForwardPairRequest
+	// completed counts non-failed POST requests so GET /metrics advances across the probe.
+	completed atomic.Int64
 	// prefillHost is the address the prefiller is asked at, which is how the fixture knows which
 	// leg it is answering.
 	prefillHost string
@@ -706,16 +705,20 @@ func (f *probePairFetch) fetch(
 	if slash := strings.Index(authority, "/"); slash >= 0 {
 		authority = authority[:slash]
 	}
-	// THE METRICS SCRAPE IS ANSWERED BY THE STUB ITSELF, minimally: the observation reads the
-	// mooncake series of both halves, and a GET that fell through to the chat answer would hand it
-	// a document that reads as no series at all.
 	if request.Method == http.MethodGet {
-		return []byte("vllm:mooncake_bytes_transferred_count 0.0\n" +
-			"vllm:mooncake_num_failed_recvs 0.0\n"), nil
+		count := strconv.FormatInt(f.completed.Load(), 10)
+		return []byte(
+			"vllm:request_success_total{finished_reason=\"length\",model_name=\"test\"} " + count + ".0\n" +
+				"vllm:mooncake_bytes_transferred_count " + count + ".0\n" +
+				"vllm:mooncake_num_failed_recvs 0.0\n",
+		), nil
 	}
 	if err, failed := f.failures[authority]; failed {
 		return nil, err
 	}
+
+	f.completed.Add(1)
+
 	if answer, scripted := f.answers[authority]; scripted {
 		return []byte(strings.ReplaceAll(answer, probeRIDPlaceholder, probePairRequestRID(request.Body))), nil
 	}
@@ -723,24 +726,21 @@ func (f *probePairFetch) fetch(
 	return probePairAnswer(request.Body, authority == f.prefillHost), nil
 }
 
-// probePairAnswer renders the answer one leg of a pair gives.
-//
-// THE PREFILLER ANSWERS WITH A PARTIAL GENERATION AND A CUT-SHORT FINISH REASON, because it hands
-// over the KV and stops there. The decoder answers with the copied text and a normal finish.
+// probePairAnswer renders the /v1/completions answer one leg of a pair gives.
 func probePairAnswer(body []byte, isPrefill bool) []byte {
 	rid := probePairRequestRID(body)
 	prefix := ""
 	if probePairCarriesRequestIDField(body) {
-		prefix = "chatcmpl-"
+		prefix = "cmpl-"
 	}
 
 	if isPrefill {
 		return []byte(`{"id":"` + prefix + rid +
-			`","choices":[{"message":{"content":"PROBE"},"finish_reason":"length"}]}`)
+			`","choices":[{"text":"ok","finish_reason":"length"}]}`)
 	}
 
-	return []byte(`{"id":"` + prefix + rid + `","choices":[{"message":{"content":"` +
-		probePairExpectedText(body) + `"},"finish_reason":"stop"}]}`)
+	return []byte(`{"id":"` + prefix + rid +
+		`","choices":[{"text":"ok","finish_reason":"stop"}]}`)
 }
 
 // probePairRequestRID reads the identifier a leg's request carried.
@@ -758,8 +758,7 @@ func probePairRequestRID(body []byte) string {
 }
 
 // probePairCarriesRequestIDField says whether the request carried the identifier in the field the
-// other engine reads it from, which is how the fixture knows which prefix the engine puts in front
-// of the identifier in its answer.
+// vLLM engine reads it from, which is how the fixture knows to add the "cmpl-" id prefix.
 func probePairCarriesRequestIDField(body []byte) bool {
 	var sent struct {
 		RequestID string `json:"request_id"`
@@ -767,30 +766,6 @@ func probePairCarriesRequestIDField(body []byte) bool {
 	_ = json.Unmarshal(body, &sent)
 
 	return sent.RequestID != ""
-}
-
-// probePairExpectedText reads the text a leg's request asked to be copied.
-func probePairExpectedText(body []byte) string {
-	var sent struct {
-		Messages []struct {
-			Content string `json:"content"`
-		} `json:"messages"`
-	}
-	_ = json.Unmarshal(body, &sent)
-	if len(sent.Messages) == 0 {
-		return ""
-	}
-	const prefix = "Reply with only this word "
-	content := sent.Messages[0].Content
-	rest, ok := strings.CutPrefix(content, prefix)
-	if !ok {
-		return ""
-	}
-	if idx := strings.IndexAny(rest, " \t\r\n"); idx >= 0 {
-		return rest[:idx]
-	}
-
-	return rest
 }
 
 // probePairBody reads one recorded request's fields back.
@@ -851,9 +826,15 @@ func TestGroupForwardProbePDPairCarriesTheRequestOnBothHeads(t *testing.T) {
 			"the request names the prefiller's own address, for the transfer endpoints")
 		assert.Equal(t, float64(8998), body["bootstrap_port"],
 			"the request names the port the prefiller published")
+		assert.Equal(t, modelDeploymentQualifyPrompt, body["prompt"],
+			"the warmup probe sends the minimal completion prompt without a chat template")
+		assert.Equal(t, float64(modelDeploymentGroupForwardPairMaxTokens), body["max_tokens"],
+			"the warmup probe caps generation to 2 tokens")
+		assert.NotContains(t, body, "messages",
+			"the completions warmup probe does not require chat templates")
 
 		rank, _ := body["routed_dp_rank"].(float64)
-		if request.URL == "http://"+probeHost(0, 0)+"/v1/chat/completions" {
+		if request.URL == "http://"+probeHost(0, 0)+"/v1/completions" {
 			assert.Equal(t, int64(rank), int64(room)%2,
 				"the room's residue names the prefiller rank the request is routed to")
 		}
@@ -861,183 +842,201 @@ func TestGroupForwardProbePDPairCarriesTheRequestOnBothHeads(t *testing.T) {
 	assert.Len(t, rooms, 4, "each rank pair is joined on its own room")
 }
 
-// TestGroupForwardProbePDPairNamesTheAnswerItRejected holds that the copied check's failure
-// reason carries the answer it rejected, bounded, so the run's evidence can tell a model that
-// drifted from a context that was never whole.
-//
-// THE REASON USED TO DISCARD THE ANSWER. A hold that said only that the text did not match left
-// the classification — answer drift, a broken read, a thinking leak — to a rerun this probe exists
-// to avoid. D12/A.1.
-func TestGroupForwardProbePDPairNamesTheAnswerItRejected(t *testing.T) {
+// TestGroupForwardProbePDPairIgnoresGeneratedText verifies that the warmup pair probe does not
+// depend on instruction-following text output, so base, vision, reasoning, and small models never
+// deadlock on formatting or phrasing differences.
+func TestGroupForwardProbePDPairIgnoresGeneratedText(t *testing.T) {
+	testCases := []struct {
+		name   string
+		answer string
+	}{
+		{
+			name:   "empty generated text passes when bound and finished",
+			answer: `{"id":"` + probeRIDPlaceholder + `","choices":[{"text":"","finish_reason":"stop"}]}`,
+		},
+		{
+			name:   "arbitrary completion text passes when bound and finished",
+			answer: `{"id":"` + probeRIDPlaceholder + `","choices":[{"text":"unrelated continuation","finish_reason":"length"}]}`,
+		},
+		{
+			name:   "reasoning tag text passes when bound and finished",
+			answer: `{"id":"` + probeRIDPlaceholder + `","choices":[{"text":"<think>reasoning","finish_reason":"length"}]}`,
+		},
+		{
+			name:   "non-ASCII output passes when bound and finished",
+			answer: `{"id":"` + probeRIDPlaceholder + `","choices":[{"text":"éàü","finish_reason":"stop"}]}`,
+		},
+	}
+
 	md := probePairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1, "")
 	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
 	decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
 
-	t.Run("a short wrong answer is named in full", func(t *testing.T) {
-		fetch := &probePairFetch{
-			prefillHost: probeHost(0, 0),
-			answers: map[string]string{
-				probeHost(1, 0): `{"id":"{{rid}}","choices":[{"message":{"content":"wrong text"},"finish_reason":"stop"}]}`,
-			},
-		}
-		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, fetch.fetch,
-		)
-
-		assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
-			"a decoder that did not carry the copy holds the pair")
-		assert.Contains(t, got.Prefill.Reason, `(answer: "wrong text")`,
-			"the reason names the answer it rejected, so drift is tellable from a broken read")
-	})
-
-	t.Run("a long answer is bounded on rune boundaries", func(t *testing.T) {
-		long := strings.Repeat("é", 300)
-		fetch := &probePairFetch{
-			prefillHost: probeHost(0, 0),
-			answers: map[string]string{
-				probeHost(1, 0): `{"id":"{{rid}}","choices":[{"message":{"content":"` + long + `"},"finish_reason":"stop"}]}`,
-			},
-		}
-		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, fetch.fetch,
-		)
-
-		assert.Contains(t, got.Prefill.Reason, strings.Repeat("é", 200),
-			"the bound keeps the first two hundred characters")
-		assert.NotContains(t, got.Prefill.Reason, strings.Repeat("é", 201),
-			"the bound stops at two hundred characters")
-		assert.Contains(t, got.Prefill.Reason, "…",
-			"the cut is marked")
-	})
-}
-
-// TestGroupForwardProbePDPairRecordsTheMooncakeCountersOfBothHalves holds that the observation
-// records the mooncake series of both halves and says explicitly that the connector exports no
-// read-side success counter, so a reader can tell push evidence from pull evidence.
-//
-// THE COUNTER THE RUN READ WAS THE SENDER'S. vllm:mooncake_bytes_transferred is the prefill half's
-// histogram, and its _count says pushes happened; nothing exported counts a successful pull, which
-// is why the copied answer is the read-side proof. D12/A.2.
-func TestGroupForwardProbePDPairRecordsTheMooncakeCountersOfBothHalves(t *testing.T) {
-	md := probePairDeployment(workercore.ModelDeploymentEngineVLLM, 1, 1, "llm-d-router")
-	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
-	decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
-	exposition := "# HELP vllm:mooncake_bytes_transferred transferred bytes\n" +
-		"vllm:mooncake_bytes_transferred_count 2.0\n" +
-		"# HELP vllm:mooncake_num_failed_recvs failed receives\n" +
-		"vllm:mooncake_num_failed_recvs 0.0\n"
-	fetch := func(_ context.Context, request modelDeploymentGroupForwardPairRequest) ([]byte, error) {
-		if strings.HasSuffix(request.URL, "/metrics") {
-			return []byte(exposition), nil
-		}
-		return probePairAnswer(request.Body, strings.Contains(request.URL, probeHost(0, 0))), nil
-	}
-
-	got := observeModelDeploymentGroupForwardPair(
-		context.Background(), md, prefill, decode, fetch,
-	)
-
-	assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
-		"a pair that carried the request is still verified")
-	assert.Contains(t, got.Prefill.Observation, "prefill: vllm:mooncake_bytes_transferred_count 2.0",
-		"the prefill half's mooncake series are recorded as push evidence")
-	assert.Contains(t, got.Decode.Observation, "decode: vllm:mooncake_num_failed_recvs 0.0",
-		"the decode half's mooncake series are recorded beside them")
-	assert.Contains(t, got.Decode.Observation, "no read-side success counter",
-		"the observation says explicitly that no exported series counts a successful pull")
-
-	t.Run("an SGLang pair records no mooncake lines", func(t *testing.T) {
-		md := probePairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1, "")
-		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, fetch,
-		)
-
-		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
-			"the pair itself still verifies")
-		assert.NotContains(t, got.Prefill.Observation, "mooncake",
-			"SGLang exports no vllm:mooncake_ series, so its observation carries no line about them")
-	})
-}
-
-// TestGroupForwardProbePDPairCopySurvivesAThinkWrapper holds that the copied compare reads the
-// answer's visible text: a leading <think>…</think> block is the chat template's noise and is
-// stripped before the compare, whatever the block carries, and trivial outer quotes or trailing
-// punctuation do not reject an otherwise exact token copy.
-func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
-	md := probePairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1, "")
-	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
-	decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
-	answer := func(content string) *probePairFetch {
-		return &probePairFetch{
-			prefillHost: probeHost(0, 0),
-			answers: map[string]string{
-				probeHost(1, 0): `{"id":"{{rid}}","choices":[{"message":{"content":` + strconv.Quote(content) + `},"finish_reason":"stop"}]}`,
-			},
-		}
-	}
-
-	t.Run("an empty wrapper ahead of the copy passes", func(t *testing.T) {
-		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, answer("<think></think>\n\nPROBEP0D0").fetch,
-		)
-
-		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
-			"the wrapper is the chat template's noise; the copy behind it is the answer")
-	})
-
-	t.Run("a reasoning block ahead of the copy passes", func(t *testing.T) {
-		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode,
-			answer("<think>\nsome reasoning\n</think>\nPROBEP0D0").fetch,
-		)
-
-		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
-			"the wrapper is stripped whatever it carries")
-	})
-
-	t.Run("leading whitespace ahead of the wrapper still passes", func(t *testing.T) {
-		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode,
-			answer("\n <think></think>\n\nPROBEP0D0").fetch,
-		)
-
-		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
-			"a template that opens with a newline or a space ahead of the wrapper is as noise as the wrapper")
-	})
-
-	t.Run("trivial trailing punctuation or quotes around the exact token still pass", func(t *testing.T) {
-		for _, wrapped := range []string{"PROBEP0D0.", `"PROBEP0D0"`, "`PROBEP0D0`", "\u201cPROBEP0D0\u201d", "PROBEP0D0\u3002"} {
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			fetch := &probePairFetch{
+				prefillHost: probeHost(0, 0),
+				answers:     map[string]string{probeHost(1, 0): tc.answer},
+			}
 			got := observeModelDeploymentGroupForwardPair(
-				context.Background(), md, prefill, decode, answer(wrapped).fetch,
+				context.Background(), md, prefill, decode, fetch.fetch,
 			)
-			assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
-				"outer punctuation around %q should not reject an exact token copy", wrapped)
-		}
-	})
 
-	t.Run("a wrapper does not rescue a wrong copy", func(t *testing.T) {
-		fetch := answer("<think></think>\n\nwrong text")
-		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, fetch.fetch,
-		)
+			assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State)
+			assert.Equal(t, modelDeploymentGroupForwardVerified, got.Decode.State)
+		})
+	}
+}
 
-		assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
-			"the visible text still has to be the copy")
-		assert.Contains(t, got.Prefill.Reason, "wrong text",
-			"the raw answer stays in the reason for classification")
-		assert.Contains(t, got.Prefill.Reason, "<think>",
-			"the raw answer keeps its wrapper visible in the reason")
-	})
+// TestGroupForwardProbePDPairVerifiesVLLMMetricsDelta covers the pre- and post-probe Prometheus
+// counter delta checks on vLLM pairs driven through the llm-d routing proxy.
+func TestGroupForwardProbePDPairVerifiesVLLMMetricsDelta(t *testing.T) {
+	testCases := []struct {
+		name              string
+		beforePrefill     string
+		afterPrefill      string
+		beforeDecode      string
+		afterDecode       string
+		failStage         string
+		wantState         modelDeploymentGroupForwardState
+		wantConfirmed     bool
+		wantInReason      string
+		wantInObservation string
+	}{
+		{
+			name: "mooncake and request_success advance with zero failed recvs",
+			beforePrefill: "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 1.0\n" +
+				"vllm:mooncake_bytes_transferred_count 1.0\n",
+			afterPrefill: "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 2.0\n" +
+				"vllm:mooncake_bytes_transferred_count 2.0\n",
+			beforeDecode:      "vllm:mooncake_num_failed_recvs 0.0\n",
+			afterDecode:       "vllm:mooncake_num_failed_recvs 0.0\n",
+			wantState:         modelDeploymentGroupForwardVerified,
+			wantConfirmed:     true,
+			wantInReason:      "prefill metrics advanced with zero decode transfer failures",
+			wantInObservation: "prefill: vllm:mooncake_bytes_transferred_count 2.0",
+		},
+		{
+			name:              "non-mooncake connector verified via universal prefill request_success_total",
+			beforePrefill:     "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 0.0\n",
+			afterPrefill:      "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 1.0\n",
+			beforeDecode:      "# no mooncake series\n",
+			afterDecode:       "# no mooncake series\n",
+			wantState:         modelDeploymentGroupForwardVerified,
+			wantConfirmed:     true,
+			wantInReason:      "prefill metrics advanced with zero decode transfer failures",
+			wantInObservation: "prefill metrics delta confirmed",
+		},
+		{
+			name:          "stalled prefill request_success_total holds pair as decode-only fallback",
+			beforePrefill: "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 0.0\n",
+			afterPrefill:  "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 0.0\n",
+			beforeDecode:  "# no mooncake series\n",
+			afterDecode:   "# no mooncake series\n",
+			wantState:     modelDeploymentGroupForwardUnknown,
+			wantInReason:  "vllm:request_success_total did not advance",
+		},
+		{
+			name: "stalled prefill mooncake push counter holds pair",
+			beforePrefill: "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 1.0\n" +
+				"vllm:mooncake_bytes_transferred_count 2.0\n",
+			afterPrefill: "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 2.0\n" +
+				"vllm:mooncake_bytes_transferred_count 2.0\n",
+			beforeDecode: "vllm:mooncake_num_failed_recvs 0.0\n",
+			afterDecode:  "vllm:mooncake_num_failed_recvs 0.0\n",
+			wantState:    modelDeploymentGroupForwardUnknown,
+			wantInReason: "vllm:mooncake_bytes_transferred_count did not advance",
+		},
+		{
+			name: "increased decode failed mooncake receives holds pair",
+			beforePrefill: "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 0.0\n" +
+				"vllm:mooncake_bytes_transferred_count 0.0\n",
+			afterPrefill: "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 1.0\n" +
+				"vllm:mooncake_bytes_transferred_count 1.0\n",
+			beforeDecode: "vllm:mooncake_num_failed_recvs 0.0\n",
+			afterDecode:  "vllm:mooncake_num_failed_recvs 1.0\n",
+			wantState:    modelDeploymentGroupForwardUnknown,
+			wantInReason: "failed mooncake receives",
+		},
+		{
+			name:         "prefill metrics unreachable before probe holds pair",
+			failStage:    "before-prefill",
+			wantState:    modelDeploymentGroupForwardUnknown,
+			wantInReason: "prefill half's metrics endpoint did not answer before",
+		},
+		{
+			name:          "decode metrics unreachable after probe holds pair",
+			beforePrefill: "vllm:request_success_total{finished_reason=\"length\"} 0.0\n",
+			afterPrefill:  "vllm:request_success_total{finished_reason=\"length\"} 1.0\n",
+			beforeDecode:  "vllm:mooncake_num_failed_recvs 0.0\n",
+			failStage:     "after-decode",
+			wantState:     modelDeploymentGroupForwardUnknown,
+			wantInReason:  "decode half's metrics endpoint did not answer after",
+		},
+		{
+			name:          "stats disabled (no prefill counters exported) verifies on bound completion alone",
+			beforePrefill: "# empty exposition\n",
+			afterPrefill:  "# empty exposition\n",
+			beforeDecode:  "# empty exposition\n",
+			afterDecode:   "# empty exposition\n",
+			wantState:     modelDeploymentGroupForwardVerified,
+			wantConfirmed: false,
+			wantInReason:  "routing proxy completed the warmup probe",
+		},
+	}
 
-	t.Run("the marker inside the wrapper is not the copy", func(t *testing.T) {
-		fetch := answer("<think>PROBEP0D0</think>\n\nwrong text")
-		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, fetch.fetch,
-		)
+	md := probePairDeployment(workercore.ModelDeploymentEngineVLLM, 1, 1, workercore.ModelDeploymentRouterLLMD)
+	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
+	decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
 
-		assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
-			"a copy the template swallowed is not a copy the decoder made")
-	})
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var postDone atomic.Bool
+			fetch := func(_ context.Context, request modelDeploymentGroupForwardPairRequest) ([]byte, error) {
+				isPrefill := strings.Contains(request.URL, probeHost(0, 0))
+				if request.Method == http.MethodGet {
+					stage := "before-"
+					if postDone.Load() {
+						stage = "after-"
+					}
+					if isPrefill {
+						stage += "prefill"
+					} else {
+						stage += "decode"
+					}
+					if tc.failStage == stage {
+						return nil, errors.New("connection refused")
+					}
+					switch stage {
+					case "before-prefill":
+						return []byte(tc.beforePrefill), nil
+					case "after-prefill":
+						return []byte(tc.afterPrefill), nil
+					case "before-decode":
+						return []byte(tc.beforeDecode), nil
+					default:
+						return []byte(tc.afterDecode), nil
+					}
+				}
+				postDone.Store(true)
+				return probePairAnswer(request.Body, isPrefill), nil
+			}
+
+			got := observeModelDeploymentGroupForwardPair(
+				context.Background(), md, prefill, decode, fetch,
+			)
+
+			assert.Equal(t, tc.wantState, got.Prefill.State)
+			assert.Equal(t, tc.wantState, got.Decode.State)
+			assert.Equal(t, tc.wantConfirmed, got.Attempt.PrefillMetricsConfirmed)
+			if tc.wantInReason != "" {
+				assert.Contains(t, got.Decode.Reason, tc.wantInReason)
+			}
+			if tc.wantInObservation != "" {
+				assert.Contains(t, got.Decode.Observation, tc.wantInObservation)
+			}
+		})
+	}
 }
 
 // TestGroupForwardProbePDPairHoldsOnAnythingItCannotSee is the fail-closed contract of the directed
@@ -1056,27 +1055,27 @@ func TestGroupForwardProbePDPairHoldsOnAnythingItCannotSee(t *testing.T) {
 		wantInWords string
 	}{
 		{
-			name:        "the decoder answering with another pair's text is a hold",
+			name:        "an unreadable decode response is a hold",
 			engine:      workercore.ModelDeploymentEngineSGLang,
-			answer:      `{"id":"` + probeRIDPlaceholder + `","choices":[{"message":{"content":"PROBEP1D0"},"finish_reason":"stop"}]}`,
-			wantInWords: "did not carry the text",
+			answer:      `not-json`,
+			wantInWords: "could not be read",
 		},
 		{
 			name:        "the decoder answering for another request is a hold",
 			engine:      workercore.ModelDeploymentEngineSGLang,
-			answer:      `{"id":"someone-else","choices":[{"message":{"content":"PROBEP0D0"},"finish_reason":"stop"}]}`,
+			answer:      `{"id":"someone-else","choices":[{"text":"ok","finish_reason":"stop"}]}`,
 			wantInWords: "not bound to this operator's own request",
 		},
 		{
-			name:        "the decoder answering without an answer is a hold",
+			name:        "the decoder answering without a finish reason is a hold",
 			engine:      workercore.ModelDeploymentEngineSGLang,
-			answer:      `{"id":"` + probeRIDPlaceholder + `","choices":[{"message":{"content":""},"finish_reason":"stop"}]}`,
-			wantInWords: "did not carry the text",
+			answer:      `{"id":"` + probeRIDPlaceholder + `","choices":[{"text":"ok"}]}`,
+			wantInWords: "finish reason reports",
 		},
 		{
 			name:        "the decoder that aborted its answer is a hold",
 			engine:      workercore.ModelDeploymentEngineSGLang,
-			answer:      `{"id":"` + probeRIDPlaceholder + `","choices":[{"message":{"content":"PROBEP0D0"},"finish_reason":"abort"}]}`,
+			answer:      `{"id":"` + probeRIDPlaceholder + `","choices":[{"text":"ok","finish_reason":"abort"}]}`,
 			wantInWords: "finish reason reports",
 		},
 		{
@@ -1248,23 +1247,29 @@ func TestGroupForwardProbePDPairNamesThePrefillerToTheRoutingProxy(t *testing.T)
 				"a decode group whose pair carried the request is verified")
 			assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
 				"the prefill group the proxy paired with is verified with it")
-			// The proxy drives the transfer leg, so the operator asks it one question. A vLLM pair
-			// follows it with each half's metrics scrape; an SGLang pair scrapes nothing, because
-			// its connector exports no vllm:mooncake_ series.
+			// The proxy drives the transfer leg, so the operator asks it one warmup question. A
+			// vLLM pair wraps it with before/after /metrics scrapes on both halves (4 GETs + 1
+			// POST = 5 calls); an SGLang pair sends only the POST.
 			want := 1
 			if tc.engine == workercore.ModelDeploymentEngineVLLM {
-				want = 3
+				want = 5
 			}
 			assert.Len(t, fetch.asked, want,
-				"the proxy is asked one question, and only a vLLM pair scrapes metrics after it")
+				"the proxy is asked one question, and a vLLM pair checks before/after metrics around it")
 			assert.Len(t, got.Attempt.RequestIDs, 1,
 				"the one question carries its own identifier")
 
-			request := fetch.asked[0]
-			assert.Contains(t, request.URL, probeHost(1, 0),
-				"the decoder is reached at its own serving address")
+			var postReq modelDeploymentGroupForwardPairRequest
+			for _, req := range fetch.asked {
+				if req.Method != http.MethodGet {
+					postReq = req
+					break
+				}
+			}
+			assert.Equal(t, "http://"+probeHost(1, 0)+"/v1/completions", postReq.URL,
+				"the decoder is reached at its /v1/completions serving address")
 			assert.Equal(t, probeHost(0, 0),
-				request.Headers[modelDeploymentGroupForwardPairPrefillerHeader],
+				postReq.Headers[modelDeploymentGroupForwardPairPrefillerHeader],
 				"the request names the prefiller the proxy is to pair with")
 		})
 	}
@@ -1272,10 +1277,6 @@ func TestGroupForwardProbePDPairNamesThePrefillerToTheRoutingProxy(t *testing.T)
 
 // TestGroupForwardProbePDPairAttemptRecordsTheShape pins the typed shape value, so a reader can
 // tell a proxy-path answer from a rank-covering one without reading the reason.
-//
-// THE TWO PATHS SHOW DIFFERENT THINGS: the head-to-head path drove both heads and can read the
-// transfer in the decode answer, and the proxy path asked one question whose answer shows that
-// the front door was alive and returned the text the request asked to be copied.
 func TestGroupForwardProbePDPairAttemptRecordsTheShape(t *testing.T) {
 	testCases := []struct {
 		name          string
@@ -1286,18 +1287,18 @@ func TestGroupForwardProbePDPairAttemptRecordsTheShape(t *testing.T) {
 		wantRooms     int
 	}{
 		{
-			name:        "the head-to-head path names the transfer it read",
+			name:        "the head-to-head path names the transfer path it confirmed",
 			router:      "",
 			wantShape:   modelDeploymentGroupForwardPairShapeHeadToHead,
-			wantInWords: "the prefill's KV reached it",
+			wantInWords: "confirming the pair transfer path",
 			wantRooms:   1,
 		},
 		{
-			name:          "the proxy path names the proxy and claims no transfer",
+			name:          "the proxy path names the routing proxy",
 			router:        workercore.ModelDeploymentRouterLLMD,
 			wantShape:     modelDeploymentGroupForwardPairShapeViaRoutingProxy,
-			wantInWords:   "the decode group's routing proxy answered the probe",
-			wantNotInText: "the prefill's KV reached it",
+			wantInWords:   "the decode group's routing proxy completed the warmup probe",
+			wantNotInText: "confirming the pair transfer path",
 			wantRooms:     0,
 		},
 	}
@@ -1349,8 +1350,7 @@ func TestGroupForwardProbePDPairAsksTheFrontedDecoderAtItsFrontDoor(t *testing.T
 	fetch := &probePairFetch{
 		prefillHost: probeHost(0, 0),
 		answers: map[string]string{
-			probeMemberIP(1, 0) + ":8200": `{"id":"` + probeRIDPlaceholder +
-				`","choices":[{"message":{"content":"wrong text"},"finish_reason":"stop"}]}`,
+			probeMemberIP(1, 0) + ":8200": `{"id":"someone-else","choices":[{"text":"ok","finish_reason":"abort"}]}`,
 		},
 	}
 
@@ -1362,7 +1362,7 @@ func TestGroupForwardProbePDPairAsksTheFrontedDecoderAtItsFrontDoor(t *testing.T
 		"the front door is the address the proxy answers on")
 	assert.Len(t, fetch.asked, 1,
 		"the proxy drives the transfer leg, so the operator asks it one question, and an SGLang pair scrapes no metrics")
-	assert.Equal(t, "http://"+probeHost(1, 0)+"/v1/chat/completions", fetch.asked[0].URL,
+	assert.Equal(t, "http://"+probeHost(1, 0)+"/v1/completions", fetch.asked[0].URL,
 		"the front door is the port the Service targets, not the engine's port behind it")
 	assert.Equal(t, probeHost(0, 0),
 		fetch.asked[0].Headers[modelDeploymentGroupForwardPairPrefillerHeader],
