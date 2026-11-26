@@ -301,6 +301,9 @@ func TestPreflightAccelerator_NotDeclaredOutranksMissingPciBusID(t *testing.T) {
 // than inferred from the response it produced.
 func TestPreflightResponder_WritesNothing(t *testing.T) {
 	defer deviceplugin.RedirectHostWrites(t.TempDir())()
+	// The card node is required of a sliced response, and this host has none to offer.
+	redirectCardDevicePath(t)
+	stageCardNode(t, testMLU0Index)
 
 	// The mode is off, which is the case an allocation would write on: a pass over an
 	// already-enabled card would leave it untouched for the wrong reason.
@@ -329,6 +332,8 @@ func TestPreflightResponder_WritesNothing(t *testing.T) {
 // because nothing ever reached the driver.
 func TestPreflightResponder_RecordsWhatItWithheld(t *testing.T) {
 	defer deviceplugin.RedirectHostWrites(t.TempDir())()
+	redirectCardDevicePath(t)
+	stageCardNode(t, testMLU0Index)
 
 	rec := &recordingSMLUDriver{read: newFakeDriver()}
 	srv := newSlicedServer(rec)
@@ -350,8 +355,9 @@ func TestPreflightResponder_RecordsWhatItWithheld(t *testing.T) {
 // The anti-drift test, adapted to the one place Cambricon cannot be Ascend: the instance's
 // device node. A real create reads its device node back from the driver, which the recording
 // driver deliberately never reaches (that read-back is exactly the hardware state a simulated
-// pass must not provision), so the concrete node -- and consequently VIRTUAL_DEVICES -- cannot be
-// asked to agree between the two paths without also making the simulated one create for real.
+// pass must not provision); it creates a plain file under the redirected operator lib dir instead,
+// so the responder's rule that the node exists holds on both paths while the node's VALUE differs
+// by design and is not what the two paths are asked to agree on.
 //
 // What can and must agree, without exception, is what the two paths ASKED the driver to do: they
 // must reserve the identical instance -- the same card, the same compute/VRAM quota, the same
@@ -363,12 +369,14 @@ func TestPreflightResponder_RecordsWhatItWithheld(t *testing.T) {
 func TestPreflightResponder_RequestsTheSameInstanceProductionWould(t *testing.T) {
 	devs := cambriconDevicesFixture()
 	allocated := allocateMLU0()
+	redirectCardDevicePath(t)
+	stageCardNode(t, testMLU0Index)
 
 	// Production: the server an allocation is served by, over a driver that answers and really
 	// creates. A distinct pod UID from the preflight side below, so the two runs never share a
 	// correlation marker on disk.
 	restoreProd := deviceplugin.RedirectHostWrites(t.TempDir())
-	prodDriver := newFakeDriver()
+	prodDriver := stagedFakeDriver(t)
 	prodSrv := newSlicedServer(prodDriver)
 	prodPod, prodCtr := slicedPod("drift-prod", "train", 25, 50)
 	_, err := prodSrv.GetContainerAllocateResponse(context.Background(), prodPod, prodCtr, devs, allocated)
@@ -563,6 +571,8 @@ func TestPreflightResponder_IsolatedFromNodeListError(t *testing.T) {
 			smlu := newFakeDriver()
 			smlu.failList = true
 			smlu.failCardList[testCard1] = errors.New("IN_PROBLEM")
+			redirectCardDevicePath(t)
+			stageCardNode(t, testMLU0Index)
 
 			p := &preflighter{logger: klog.Background(), smlu: smlu}
 			responder, restore, err := p.PreflightResponder(workercore.DeviceAllocationModeSliced)

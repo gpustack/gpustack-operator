@@ -62,11 +62,23 @@ type fakeSMLUDriver struct {
 	profiles  map[profileKey]fakeQuota
 	// modes is the per-card sMLU mode the driver holds, so a test can start a card already on,
 	// already off, and then assert which way the preflight moved it.
-	modes               map[string]bool
-	nextProfileID       int32
-	profileCreates      int
-	instanceCreates     int
-	destroyedProfs      []profileKey
+	modes           map[string]bool
+	nextProfileID   int32
+	profileCreates  int
+	instanceCreates int
+	destroyedProfs  []profileKey
+	// destroyedInsts names each instance DestroyInstance was asked to destroy, in call order,
+	// whether or not the call succeeded, so a test can assert the release a refusal made.
+	destroyedInsts []smluRef
+	// emptyDevNode makes CreateInstance read back no device node: the shape of a driver that
+	// instantiates an instance but names no node for it.
+	emptyDevNode bool
+	// nodeDir is where CreateInstance materializes the node it reads back, the way a real driver
+	// hands the host a node with the instance. Empty names the legacy /dev path no host here has,
+	// which the responder refuses; absentDevNode names the node but leaves it uncreated, the
+	// shape of a node not yet there.
+	nodeDir             string
+	absentDevNode       bool
 	failCard            map[string]bool
 	failList            bool
 	failInstanceList    bool
@@ -146,13 +158,25 @@ func (f *fakeSMLUDriver) CreateInstance(card string, profileID int32, name strin
 		return smluInstance{}, fmt.Errorf("driver rejected create on %s", card)
 	}
 	q := f.profiles[profileKey{card: card, profileID: profileID}]
+	devNode := "/dev/cambricon_dev-" + name
+	if f.nodeDir != "" {
+		devNode = filepath.Join(f.nodeDir, "cambricon_smlu-"+name)
+		if !f.absentDevNode {
+			if err := os.WriteFile(devNode, nil, 0o600); err != nil {
+				return smluInstance{}, err
+			}
+		}
+	}
 	inst := smluInstance{
 		card:      card,
 		name:      name,
 		profileID: profileID,
 		coresPct:  q.cores,
 		memMiB:    q.mem,
-		devNode:   "/dev/cambricon_dev-" + name,
+		devNode:   devNode,
+	}
+	if f.emptyDevNode {
+		inst.devNode = ""
 	}
 	f.instances[name] = inst
 	f.instanceCreates++
@@ -162,6 +186,7 @@ func (f *fakeSMLUDriver) CreateInstance(card string, profileID int32, name strin
 func (f *fakeSMLUDriver) DestroyInstance(card, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.destroyedInsts = append(f.destroyedInsts, smluRef{card: card, name: name})
 	if err := f.failDestroy[card]; err != nil {
 		return err
 	}

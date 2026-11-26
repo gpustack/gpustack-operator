@@ -3,6 +3,8 @@ package cambricon
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	klog "k8s.io/klog/v2"
@@ -133,6 +135,8 @@ type recordingSMLUDriver struct {
 	// nextProfileID hands back a distinct profile ID per withheld create, so a sliced pass that
 	// creates more than one instance in one call does not collide two of them onto the same ID.
 	nextProfileID int32
+	// devNode is the node the pass created for the instances it records, created once per pass.
+	devNode string
 }
 
 var _ smluDriver = (*recordingSMLUDriver)(nil)
@@ -158,11 +162,34 @@ func (d *recordingSMLUDriver) DestroyProfile(string, int32) error {
 
 func (d *recordingSMLUDriver) CreateInstance(card string, profileID int32, name string) (smluInstance, error) {
 	d.instanceCreates = append(d.instanceCreates, instanceRequest{card: card, profileID: profileID, name: name})
-	// No device node: the real one is assigned by the driver at create time, which this call
-	// deliberately never reaches. A responder that needs it (VIRTUAL_DEVICES, the instance's own
-	// node) simply omits what it cannot know, the same way it omits them today when the driver
-	// reports none.
-	return smluInstance{card: card, profileID: profileID, name: name}, nil
+	// The device node is synthesized, not read: the real one is assigned by the driver at create
+	// time, which this call deliberately never reaches, and the responder refuses an instance whose
+	// node is empty or absent from the host. The node is a plain file this pass creates under the
+	// operator lib dir, which a one-shot pass points at a root it owns and removes, so the responder's
+	// rule holds here as in production. The name is deliberately not a /dev/cambricon_smlu<N> shape,
+	// so a reader of the recorded response can tell it from a driver-assigned node.
+	node, err := d.simulatedDevNode()
+	if err != nil {
+		return smluInstance{}, fmt.Errorf("create the simulated smlu device node: %w", err)
+	}
+	return smluInstance{card: card, profileID: profileID, name: name, devNode: node}, nil
+}
+
+// simulatedDevNode creates, once per pass, the plain file that stands in for the instances' device
+// node and returns its path. The responder only stats the node, so a plain file serves.
+func (d *recordingSMLUDriver) simulatedDevNode() (string, error) {
+	if d.devNode != "" {
+		return d.devNode, nil
+	}
+	path := filepath.Join(deviceplugin.OperatorLibDir, "cambricon-smlu-simulated")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		return "", err
+	}
+	d.devNode = path
+	return path, nil
 }
 
 func (d *recordingSMLUDriver) DestroyInstance(string, string) error {
