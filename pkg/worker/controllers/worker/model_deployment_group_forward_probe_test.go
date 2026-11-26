@@ -1006,7 +1006,7 @@ func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
 	})
 
 	t.Run("trivial trailing punctuation or quotes around the exact token still pass", func(t *testing.T) {
-		for _, wrapped := range []string{"PROBEP0D0.", `"PROBEP0D0"`, "`PROBEP0D0`"} {
+		for _, wrapped := range []string{"PROBEP0D0.", `"PROBEP0D0"`, "`PROBEP0D0`", "\u201cPROBEP0D0\u201d", "PROBEP0D0\u3002"} {
 			got := observeModelDeploymentGroupForwardPair(
 				context.Background(), md, prefill, decode, answer(wrapped).fetch,
 			)

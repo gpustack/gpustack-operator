@@ -36,6 +36,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	core "k8s.io/api/core/v1"
 
@@ -1154,8 +1155,10 @@ var modelDeploymentGroupForwardPairThinkWrapper = regexp.MustCompile(`(?s)^\s*<t
 // Trimming only those outer delimiters keeps the match exact on the token itself; rejected answers
 // stay raw in their reasons, where the wrapper and punctuation remain visible.
 func modelDeploymentGroupForwardPairVisibleCopy(answer string) string {
-	visible := strings.TrimSpace(modelDeploymentGroupForwardPairThinkWrapper.ReplaceAllString(answer, ""))
-	return strings.Trim(visible, "\"'`.,! \t\r\n")
+	visible := modelDeploymentGroupForwardPairThinkWrapper.ReplaceAllString(answer, "")
+	return strings.TrimFunc(visible, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsPunct(r) || r == '`'
+	})
 }
 
 // modelDeploymentGroupForwardPairAnswerBound is how much of a rejected answer the failure reason
