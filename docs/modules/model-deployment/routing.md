@@ -44,7 +44,7 @@ or `sgl-router` for SGLang because `llm-d-router` has no policy switch
 
 - **External selectors**: Qualified *External* *Server* roles omit `member-index=0` while keeping
   the `endpoint-eligible` selector; the headless `Service` always publishes all members for peer
-  communication. Hybrid GPU behavior is untested.
+  communication.
 - **Shared serving port**: Managed roles expose one HTTP port (`8000` default; all routed roles must
   match). Admission rejects vLLM `MultiPort`. See
   [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md).

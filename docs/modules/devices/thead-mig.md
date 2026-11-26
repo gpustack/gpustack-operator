@@ -159,8 +159,6 @@ instances.
   instances block node-wide reclaim.
 - **Single partition per PPU request**: Request one `Pod` per partition ([Rule 3](requests.md#rule-3-partition-count)),
   and leave a brief gap when replacing a deleted `Pod` to avoid the reclaim-debounce window.
-- **Unconfirmed reboot persistence**: Mode persistence across host reboots is unverified on hardware;
-  always verify and re-apply after a reboot.
 
 ---
 

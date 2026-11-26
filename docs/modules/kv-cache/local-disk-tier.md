@@ -51,6 +51,11 @@ spec:
 The tier always runs in deferred mode, keeping queued objects in memory until their disk bucket
 flushes.
 
+> **Why** — Mooncake's write-through mode (`-offload_on_evict=false`) can evict an object's last
+> in-memory replica before its offload has landed, so a failure in that window loses the object. The
+> leader's `-enable_offload=true -offload_on_evict=true` pair therefore renders together, and
+> admission refuses both keys in *`leader.extraArgs`*.
+
 ### Host directory requirements
 
 *`localDisks[].path`* mounts with `hostPath.type: Directory` (`fsGroup` does not apply to

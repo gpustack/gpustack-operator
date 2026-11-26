@@ -86,23 +86,22 @@ Admission enforces every rule below except the image version floor:
 
 Admission accepts only these combinations:
 
-| Router | Engine | Platform | Encoder transfer | Minimum version | Hardware status |
-|---|---|---|---|---|---|
-| `llm-d-router` | `vLLM` | `nvidia` | `ECCPUConnector` over NIXL | `0.30.0` | Verified on 4 × NVIDIA L40S |
-| `llm-d-router` | `vLLM` | `amd` (ROCm) | `ECCPUConnector` over NIXL | `0.30.0` | Not verified |
-| `llm-d-router` | `vLLM` | `ascend` | `ECExampleConnector` over shared volume | `0.30.0rc1` | Verified on Ascend 910B2 |
-| `vllm-router` | `vLLM` | `nvidia` | `ECCPUConnector` over NIXL | `0.30.0` | Verified on 4 × NVIDIA L40S |
-| `vllm-router` | `vLLM` | `amd` (ROCm) | `ECCPUConnector` over NIXL | `0.30.0` | Not verified |
-| `llm-d-router` | `SGLang` | `nvidia` | `encoder-urls` | `0.5.10` | Verified on 2 × NVIDIA L40S |
-| `llm-d-router` | `SGLang` | `amd` (ROCm) | `encoder-urls` | `0.5.10` | Not verified |
-| `llm-d-router` | `SGLang` | `ascend` | `encoder-urls` | `0.5.10` | Not verified |
-| `sglang-gateway` | `SGLang` | `nvidia` | `encoder-urls` | `0.5.10` | Verified on 2 × NVIDIA L40S |
-| `sglang-gateway` | `SGLang` | `amd` (ROCm) | `encoder-urls` | `0.5.10` | Not verified |
-| `sglang-gateway` | `SGLang` | `ascend` | `encoder-urls` | `0.5.10` | Not verified |
-
-Verified rows served multimodal requests through the router on the listed hardware. Unverified rows
-(AMD ROCm and SGLang Ascend) are tracked in
-[#763](https://github.com/gpustack/gpustack-operator/issues/763).
+| Router | Engine | Platform | Encoder transfer | Minimum version |
+|---|---|---|---|---|
+| `llm-d-router` | `vLLM` | `nvidia` | `ECCPUConnector` over NIXL | `0.30.0` |
+| `llm-d-router` | `vLLM` | `amd` (ROCm) | `ECCPUConnector` over NIXL | `0.30.0` |
+| `llm-d-router` | `vLLM` | `ascend` | `ECExampleConnector` over shared volume | `0.30.0rc1` |
+| `vllm-router` | `vLLM` | `nvidia` | `ECCPUConnector` over NIXL | `0.30.0` |
+| `vllm-router` | `vLLM` | `amd` (ROCm) | `ECCPUConnector` over NIXL | `0.30.0` |
+| `llm-d-router` | `SGLang` | `nvidia` | `encoder-urls` | `0.5.10` |
+| `llm-d-router` | `SGLang` | `amd` (ROCm) | `encoder-urls` | `0.5.10` |
+| `llm-d-router` | `SGLang` | `ascend` | `encoder-urls` | `0.5.10` |
+| `sgl-router` | `SGLang` | `nvidia` | `encoder-urls` | `0.5.10` |
+| `sgl-router` | `SGLang` | `amd` (ROCm) | `encoder-urls` | `0.5.10` |
+| `sgl-router` | `SGLang` | `ascend` | `encoder-urls` | `0.5.10` |
+| `sglang-gateway` | `SGLang` | `nvidia` | `encoder-urls` | `0.5.10` |
+| `sglang-gateway` | `SGLang` | `amd` (ROCm) | `encoder-urls` | `0.5.10` |
+| `sglang-gateway` | `SGLang` | `ascend` | `encoder-urls` | `0.5.10` |
 
 ### Version and configuration limits
 

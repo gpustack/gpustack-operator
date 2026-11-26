@@ -203,9 +203,6 @@ router paths:
 ### Role links and connectors
 
 - **Leader routing**: Multi-`Pod` *PD* replicas route HTTP to member `0` (`member-index=0`).
-  *External data parallelism (External DP)* inside *Prefill* or *Decode* is unvalidated
-  ([#754](https://github.com/gpustack/gpustack-operator/issues/754)); see
-  [External DP](external-dp.md).
 - **Combined pool + direct KV**: On vLLM pairs with *`spec.kvCache`*, *Prefill* wraps the direct
   connector first in `MultiConnector` beside the store connector; *Decode* runs the direct connector
   alone while keeping pool dtype and block-size alignment.

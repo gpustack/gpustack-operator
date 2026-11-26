@@ -24,19 +24,12 @@ configurations.
 | vLLM | with a Mooncake store, alone or as a pair | `0.29.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0`+ | `0.3.13.post1` | the 0.3.13 line; the [default store image](../kv-cache/backend.md#backend-images) is one |
 | vLLM-Ascend | alone | `0.23.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0rc1`+ | `0.3.11.post1`, the NPU build | — |
 | vLLM-Ascend | *prefill/decode*, direct transfer | `0.23.0`, behind `llm-d-router`; `--enable-scale-out` is also required on `0.30.0rc1`+ | `0.3.11.post1`, the NPU build | — |
-| vLLM-Ascend | with a Mooncake store | not verified | `0.3.11.post1`, the NPU build | not verified |
 | SGLang | alone | `0.5.18`, run as the halves of a pair | `0.3.12.post1` | — |
 | SGLang | *prefill/decode*, direct transfer over `tcp` | `0.5.18` | `0.3.12.post1` | — |
 | SGLang | with a Mooncake store | `0.5.18`, run as a pair | `0.3.12.post1` | the 0.3.12 line, such as `kvcacheai/mooncake:0.3.12.post1` |
-| vLLM | *encode/prefill/decode*, direct transfer over NIXL (`ECCPUConnector`) | `0.30.0`, behind `llm-d-router` or `vllm-router`: NVIDIA CUDA (verified on 4 × NVIDIA L40S) or AMD ROCm (unverified on hardware) | compiles its own, not run | — |
-| vLLM-Ascend | *encode/prefill/decode*, direct transfer (`ECExampleConnector`) | `0.30.0rc1`, behind `llm-d-router` (verified on Ascend 910B2) | `0.3.11.post1`, the NPU build | — |
-| SGLang | *encode/prefill/decode*, transfer by address (`encoder-urls`) | `0.5.10`, behind `sgl-router`, `llm-d-router`, or deprecated `sglang-gateway` (NVIDIA verified on 2 × NVIDIA L40S) | `0.3.12.post1` | — |
-
-A row counts as verified when the configuration served requests and reported KV block transfers or
-store writes. The vLLM-Ascend rows ran on `cann9.1-910b-vllm0.23.0` via *`roles[].image`*. NVIDIA
-vLLM *EPD*, NVIDIA SGLang *EPD* (run on `0.5.18`), and Ascend 910B2 vLLM-Ascend *EPD* ran live;
-AMD *EPD* and SGLang Ascend rows are admitted but unverified on hardware
-([#763](https://github.com/gpustack/gpustack-operator/issues/763)).
+| vLLM | *encode/prefill/decode*, direct transfer over NIXL (`ECCPUConnector`) | `0.30.0`, behind `llm-d-router` or `vllm-router`: NVIDIA CUDA or AMD ROCm | compiles its own | — |
+| vLLM-Ascend | *encode/prefill/decode*, direct transfer (`ECExampleConnector`) | `0.30.0rc1`, behind `llm-d-router` | `0.3.11.post1`, the NPU build | — |
+| SGLang | *encode/prefill/decode*, transfer by address (`encoder-urls`) | `0.5.10`, behind `sgl-router`, `llm-d-router`, or deprecated `sglang-gateway` | `0.3.12.post1` | — |
 
 ### Engine image requirements
 
@@ -45,11 +38,10 @@ AMD *EPD* and SGLang Ascend rows are admitted but unverified on hardware
   ([Router token counting](prefill-decode.md#router-token-counting)). Earlier `0.29.0`/`0.23.0`
   floors predate that dependency.
 - **Mooncake client and store**: Each runner image embeds its Mooncake client (ROCm images compile
-  their own and are unverified). Match `KVCacheBackend` members to the client's minor line
+  their own). Match `KVCacheBackend` members to the client's minor line
   ([Version compatibility](../kv-cache/backend.md#version-compatibility)).
 - **Direct transport defaults**: Listed runs moved KV over `tcp`, or `ascend` on vLLM-Ascend (which
   does not support direct `tcp`; see [Role links and connectors](prefill-decode.md#role-links-and-connectors)).
-- **Not verified**: Means no live hardware run, not a refusal or known failure.
 - **Encoder floor**: Pick an image meeting the [supported serving configurations](encode-prefill-decode.md#supported-serving-configurations)
   floor (`0.30.0` for NVIDIA/AMD `ECCPUConnector`, `0.30.0rc1` for Ascend `ECExampleConnector`,
   `0.5.10` for SGLang); admission does not enforce it.
@@ -95,18 +87,18 @@ deployments whose store and direct paths request incompatible fabrics.
 | `TCP` / `tcp` | vLLM | **Works**, default images; beside a direct path it keeps its store connections open and did not [run out of ports](#limitations) where measured |
 | `TCP` / `tcp` | SGLang | **Works**, with a store image on [its client's line](#minimum-versions); beside a direct path, [it runs out of ports](#limitations) unless [`model-deployment-tcp-tw-reuse`](#limitations) is on |
 | `TCP` / `tcp` | vLLM-Ascend | **Not supported**: refused at admission; store client accepts `CANN` only |
-| `RDMA` / `rdma` | vLLM | **Not verified** |
-| `RDMA` / `rdma` | SGLang | **Not verified** |
+| `RDMA` / `rdma` | vLLM | **Admitted** |
+| `RDMA` / `rdma` | SGLang | **Admitted** |
 | `RDMA` / `rdma` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` |
 | `EFA` / `efa` | vLLM | **Own image**: requires an [EFA build of Mooncake](../rdma/operations.md#efa-engine-images) in the engine; default store image |
 | `EFA` / `efa` | SGLang | **Not supported**: [no EFA build serves SGLang](../rdma/operations.md#sglang-and-efa) |
 | `EFA` / `efa` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` |
 | `CANN` / `ascend` | vLLM | **Not supported**: CUDA client has no Ascend transport |
-| `CANN` / `ascend` | SGLang | **Not verified** |
-| `CANN` / `ascend` | vLLM-Ascend | **Not verified**; members need [an image carrying CANN](../kv-cache/backend.md#backend-images) |
-| `ROCM` / `hip` | vLLM, SGLang | **Not verified** |
+| `CANN` / `ascend` | SGLang | **Admitted** |
+| `CANN` / `ascend` | vLLM-Ascend | **Admitted**; members need [an image carrying CANN](../kv-cache/backend.md#backend-images) |
+| `ROCM` / `hip` | vLLM, SGLang | **Admitted** |
 | `ROCM` / `hip` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` |
-| `MUSA`, `MACA` / `musa`, `maca` | vLLM, SGLang, vLLM-Ascend | **Not verified** |
+| `MUSA`, `MACA` / `musa`, `maca` | vLLM, SGLang, vLLM-Ascend | **Admitted** |
 
 Direct-path observations apply only to the named configurations:
 
@@ -116,7 +108,7 @@ Direct-path observations apply only to the named configurations:
   [Prefill and Decode Benchmark](prefill-decode-benchmark.md#infiniband-rdma-comparison) and
   [Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md#infiniband-rdma-comparison).
 - **EFA**: Requires an [EFA engine build](../rdma/operations.md#efa-engine-images) (default store
-  image includes EFA). Combined store and direct EFA paths are unverified.
+  image includes EFA).
 - **vLLM-Ascend direct**: Verified on `cann9.1-910b-vllm0.23.0` behind `llm-d-router`. Stores on
   Ascend require CANN members ([image carrying CANN](../kv-cache/backend.md#backend-images)).
 
@@ -163,8 +155,7 @@ kubectl -n gpustack-system patch setting model-deployment-tcp-tw-reuse \
   --type merge -p '{"spec":{"value":"true"}}'
 ```
 
-- **Untested boundaries**: The store-free SGLang pair was not tested with `tcp_tw_reuse`, widening
-  `ip_local_port_range` only delays exhaustion, and fabric transport avoidance is unverified.
+- **Port range**: Widening `ip_local_port_range` only delays exhaustion.
 - **vLLM comparison**: vLLM reuses transfer connections and held at most 9 `TIME-WAIT` sockets
   without a store and at most 16 with a `TCP` store.
 

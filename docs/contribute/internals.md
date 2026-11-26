@@ -15,18 +15,23 @@ changes to the operator's services. Vendor libraries and object names have their
 
 ## Operator subcommands
 
-`cmd/gpustack-operator/main.go` wires one binary with the four cobra subcommands
+`cmd/gpustack-operator/main.go` wires one binary with the cobra subcommands
 [Architecture](../getting-started/architecture.md#components) tabulates. Beyond that table:
 
 - **`worker`** (alias `w`) runs an aggregated extension API server *and* a controller-runtime manager in
   one process, plus the scheduling-chain controllers ([Scheduling Chain](../reference/devices-scheduling.md)). It can
   install the bundled operator chart itself ([Installation Modes](../operate/installation-modes.md)), but does not by
   default.
-- **`device-manager`** has subcommands `serve` / `detect` / `monitor`: it detects and monitors local
-  accelerators, reports a `NodeFeature` + `Devices` CR, and runs the device-plugin allocator.
+- **`worker-gateway`** (alias `wg`) folds upstream clusters' `InstanceType`s into one fleet-wide
+  `AggregatedInstanceType`; see [Worker gateway](#worker-gateway).
+- **`device-manager`** (alias `dm`) has subcommands `serve` / `detect` / `monitor` / `preflight`: it
+  detects and monitors local accelerators, reports a `NodeFeature` + `Devices` CR, runs the
+  device-plugin allocator, and checks once whether local devices can serve their allocation modes.
 - **`model-manager`** (alias `mm`) is a CSI node plugin on every node, not tied to a manufacturer:
   it materializes and mounts model weights and writes only its own node's `NodeModelStore`
   status ([Node Model Store](../reference/model-delivery-node-store.md)).
+- **`model-transfer`** (alias `mx`) serves authorized source generations for remote weight loading
+  ([Remote Weight Delivery](../modules/model-delivery/remote.md)).
 
 ## Worker startup order
 

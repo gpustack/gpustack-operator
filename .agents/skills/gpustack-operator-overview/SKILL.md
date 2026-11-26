@@ -22,7 +22,14 @@ algebra); worker controllers materialize them into Kueue `ResourceFlavor`, `Clus
 isolated queue per pool), `LocalQueue`, `AcceleratorType` and `InstanceType` CRDs, gated per card by an
 AdmissionCheck. Vendor runtime bindings under [binding/](../../../binding/) are generated from
 [gen/binding/](../../../gen/binding/). Hand-written slicing preload libraries live in
-[csrc/](../../../csrc/). [architecture.md](../../../docs/getting-started/architecture.md) is the
+[csrc/](../../../csrc/). The serving chain lives beside the device chain under the same
+`pkg/worker/controllers/worker/` directory, grouped by filename prefix: `model_deployment_*` (render,
+rollout, retirement, drain, router, elastic resize, scaler, KV events, runtime control), `kv_cache_*`,
+`model_*` (artifact, store, prefetch, transfer), `node_*`, `topology_source_*` and `instance_*`. Their
+supporting packages are `pkg/worker/scaling` (capacity priors and the planner), `pkg/worker/kvcache`
+(Mooncake rendering and injection), `pkg/worker/runtimecontrol` and `pkg/worker/elasticengine`
+(online parameter tuning and Elastic EP), and the staged [engine-sentinel/python](../../../engine-sentinel/python/)
+package. [architecture.md](../../../docs/getting-started/architecture.md) is the
 one-page version: the scheduling chain, the life of a sliced-GPU request, and the vocabulary.
 
 ## Routing
@@ -49,17 +56,25 @@ page is the `gpustack-operator-docs` skill. Every page is listed in
 ## Contributor invariants
 
 - Manufacturers: nvidia, amd, ascend, cambricon, hygon, iluvatar, metax, mthreads, thead.
-- **Kueue object names**: `gpustack--${gKey}--${aKey}-${os}-${arch}-${count}d` for an accelerated `ResourceFlavor`;
-  canonical pool queues use `gpustack--${aKey}-${os}-${arch}`,
-  `gpustack--${gKey}--${aKey}-${os}-${arch}`, or `gpustack--generic-${os}-${arch}`.
+- **Kueue object names**: a `ResourceFlavor` is `gpustack--${gKey}--${aKey}-${os}-${arch}-${count}d`
+  when accelerated and `gpustack--${gKey}-${os}-${arch}-${count}c` when CPU-only. A canonical pool
+  `ClusterQueue` is `gpustack--${aKey}-${os}-${arch}`, or `gpustack--${gKey}--${aKey}-${os}-${arch}`
+  when topology-aware with a non-generic CPU group; a CPU pool uses `gpustack--${gKey}-${os}-${arch}`
+  when aware and `gpustack--generic-${os}-${arch}` otherwise. `CanonicalPoolQueueName` in
+  `pkg/nodefeature/helper.go` is the single source.
   An `AcceleratorType` and all `InstanceType`s on a pool share that queue.
 - **LocalQueue names**: `gpustack-fnv64-<fnv64a-hash>` — always 31 chars (the full ClusterQueue
   name goes in the `schedule.gpustack.ai/queue` annotation).
 - **Label domains**: `feature.gpustack.ai/` (CPU/PCI facts), `acceleratable.feature.gpustack.ai/`
   (device models + `.sliced.*` / `.partitioned.*` capacities), `general.feature.gpustack.ai/`
   (CPU-only capacity), `credits.gpustack.ai/<mfr>` (Kueue quota resource), `schedule.gpustack.ai/`
-  + `note.gpustack.ai/` (long names / unit-spec annotations); `gpustack.ai/managed` and
-  `gpustack.ai/controlled` mark node onboarding and queue teardown.
+  + `note.gpustack.ai/` (long names / unit-spec annotations), `topology.gpustack.ai/` (region,
+  zone, rack, profile), `device.gpustack.ai/` (extended-resource prefix and allocation
+  annotations), and per-controller families `modeldeployment.gpustack.ai/`,
+  `worker.gpustack.ai/`, `kvcache.gpustack.ai/`, `model.csi.gpustack.ai/`.
+  `gpustack.ai/managed=true` is the node onboarding mark. `gpustack.ai/controlled` is the finalizer
+  `systemmeta.Lock` adds to owned resources (pool kinds, `Instance`s, `ModelDeployment`s, KV cache
+  kinds) while the system holds them; it gates each one's teardown, not only queues.
 - **63-char rule**: Kubernetes label *values* cap at 63 chars — names that exceed it live in
   annotations, not labels. Always check when generating a name that flows into a label value.
 - **Build-constrained files**: `_linux.go` / `_other.go` split platform-specific code.

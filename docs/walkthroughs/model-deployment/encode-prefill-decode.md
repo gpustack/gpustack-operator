@@ -312,7 +312,7 @@ kubectl get pods,services -n gpustack-bench -l app.kubernetes.io/instance=epd-ar
 ## Limitations
 
 - Role kinds (*Encode*, *Prefill*, *Decode*, *Server*) are frozen after creation.
-- Measurements cover single-node TCP transfer; multi-node placement and GPU contention were not tested.
+- Measurements cover single-node TCP transfer.
 - Retiring an *Encode* replica drains for a fixed ~300 s window because encoders expose no in-flight
   request counter; transfers still active when that window expires fail at the client.
 
