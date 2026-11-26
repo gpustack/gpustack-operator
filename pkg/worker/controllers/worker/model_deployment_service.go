@@ -550,13 +550,13 @@ func modelDeploymentEligibilitySelectorActive(
 	if len(role.Command) > 0 {
 		return false
 	}
+	if !modelDeploymentGroupForwardActivatable(md, role) {
+		return false
+	}
 	if modelDeploymentProtectedRole(md, role) ||
 		modelDeploymentRoleDeclaresPauseOrRuntimeControl(role) ||
 		modelDeploymentRoleHasObservedRuntimeControl(md, role.Name) {
 		return true
-	}
-	if !modelDeploymentGroupForwardActivatable(md, role) {
-		return false
 	}
 	if passDecided || modelDeploymentEligibilityDecided(md) {
 		return true

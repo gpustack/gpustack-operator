@@ -358,6 +358,11 @@ COPY --from=vllm-router-builder /out/vllm-router /usr/local/bin/vllm-router
 COPY --from=sglang-gateway-builder /out/sgl-model-gateway /usr/local/bin/sgl-model-gateway
 COPY --from=sgl-router-builder /out/sgl-router /usr/local/bin/sgl-router
 
+# nonroot is created with --no-create-home; point HOME and HF_HOME at writable /tmp so
+# tokenizers downloaded at startup (such as sgl-router --policy=cache_aware) can write cache files.
+ENV HOME=/tmp \
+    HF_HOME=/tmp/huggingface
+
 USER 65532:65532
 
 # llm-d endpoint picker: ext_proc gRPC, gRPC health, Prometheus, KV-events ZMQ SUB.

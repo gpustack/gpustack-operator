@@ -150,7 +150,10 @@ func TestObserveModelDeploymentKVEventsPublishing(t *testing.T) {
 					workercore.ModelDeploymentRoleKindPrefill,
 					workercore.ModelDeploymentRoleKindDecode,
 				}, func(md *workercore.ModelDeployment) {
-					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Router = &workercore.ModelDeploymentRouter{
+						Name:      workercore.ModelDeploymentRouterVLLM,
+						ExtraArgs: []string{"--policy=kv_aware"},
+					}
 				}),
 			status: meta.ConditionTrue, reason: modelDeploymentReasonKVEventsPublishing,
 		},
@@ -164,7 +167,10 @@ func TestObserveModelDeploymentKVEventsPublishing(t *testing.T) {
 					workercore.ModelDeploymentRoleKindDecode,
 					workercore.ModelDeploymentRoleKindEncode,
 				}, func(md *workercore.ModelDeployment) {
-					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Router = &workercore.ModelDeploymentRouter{
+						Name:      workercore.ModelDeploymentRouterVLLM,
+						ExtraArgs: []string{"--policy=kv_aware"},
+					}
 				}),
 			status: meta.ConditionTrue, reason: modelDeploymentReasonKVEventsPublishing,
 		},
@@ -177,10 +183,25 @@ func TestObserveModelDeploymentKVEventsPublishing(t *testing.T) {
 					workercore.ModelDeploymentRoleKindPrefill,
 					workercore.ModelDeploymentRoleKindDecode,
 				}, func(md *workercore.ModelDeployment) {
-					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Router = &workercore.ModelDeploymentRouter{
+						Name:      workercore.ModelDeploymentRouterVLLM,
+						ExtraArgs: []string{"--policy=kv_aware"},
+					}
 					md.Spec.Roles[0].Command = []string{"/bin/custom-encoder"}
 				}),
 			status: meta.ConditionTrue, reason: modelDeploymentReasonKVEventsPublishing,
+		},
+		{
+			// llm-d-router@v1.0.0 EPD uses bare token-producer + approx-prefix-cache-producer.
+			name: "llm_d_router_vllm_epd_is_not_applicable", deployment: epdDeployment(t,
+				[]workercore.ModelDeploymentRoleKind{
+					workercore.ModelDeploymentRoleKindEncode,
+					workercore.ModelDeploymentRoleKindPrefill,
+					workercore.ModelDeploymentRoleKindDecode,
+				}, func(md *workercore.ModelDeployment) {
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				}),
+			status: meta.ConditionTrue, reason: modelDeploymentReasonKVEventsNotApplicable,
 		},
 		{
 			// THE UNROUTED BRANCH READS THE SAME DECLARED ROLES. With no router there is nothing
@@ -260,7 +281,14 @@ func TestObserveModelDeploymentKVEventsPublishing_CountsOnlyTheRolesThatProduce(
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := epdDeployment(t, tc.order)
-			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			if modelDeploymentDeclaresEncoder(md) {
+				md.Spec.Router = &workercore.ModelDeploymentRouter{
+					Name:      workercore.ModelDeploymentRouterVLLM,
+					ExtraArgs: []string{"--policy=kv_aware"},
+				}
+			} else {
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			}
 			holder := new(workercore.ModelDeployment)
 
 			observeModelDeploymentKVEvents(md, holder, nil)

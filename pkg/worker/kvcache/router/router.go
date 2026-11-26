@@ -397,7 +397,7 @@ func renderLLMD(input Input) (Output, error) {
 		metricsSource["parameters"] = map[string]any{"port": input.Metrics.Port}
 	}
 	prefixProducer := "approx-prefix-cache-producer"
-	if input.KVEvents.Port > 0 {
+	if input.KVEvents.Port > 0 && !encode {
 		prefixProducer = "precise-prefix-cache-producer"
 		// Excludes every role that keeps no KV cache from the set of Pods the producer
 		// subscribes to. The exclusion is keyed on each kind's own label, so a term exists only
@@ -428,23 +428,12 @@ func renderLLMD(input Input) (Output, error) {
 				publisherSelector += "," + exclusion
 			}
 		}
-		// AN ENCODER STAGE GETS THE BUILT-IN ESTIMATOR, AND EVERY OTHER DEPLOYMENT GETS THE HTTP
-		// RENDERER. Naming the vLLM URL here selects llm-d-router's vllmHTTPRenderer, which POSTs to
-		// <url>/v1/chat/completions/render -- an endpoint vLLM 0.30.0 serves only under
-		// --enable-scale-out, so on a default server the call answers 404 and no request is routed
-		// at all. A bare token-producer instead selects the built-in estimator, which reads PNG and
-		// JPEG dimensions out of a data: URL with no HTTP call.
-		//
-		// The two are also not interchangeable on an encoder: the request is forwarded to the
-		// encoder with its media still attached, and the multimodal decider reads the estimator's
-		// MultiModalFeatures to decide the stage exists at all. The HTTP renderer would have to ask
-		// the prefiller to render, which is the wrong server for the question.
-		tokenProducer := map[string]any{"type": "token-producer"}
-		if !encode {
-			tokenProducer["parameters"] = map[string]any{
+		tokenProducer := map[string]any{
+			"type": "token-producer",
+			"parameters": map[string]any{
 				"modelName": input.ModelName,
 				"vllm":      map[string]any{"url": input.TokenizerEndpoint},
-			}
+			},
 		}
 		plugins = append(plugins,
 			tokenProducer,
@@ -467,6 +456,15 @@ func renderLLMD(input Input) (Output, error) {
 				},
 			})
 	} else {
+		// AN ENCODER STAGE GETS THE BUILT-IN ESTIMATOR + APPROXIMATE PREFIX PRODUCER.
+		// Naming the vLLM URL on token-producer calls /v1/chat/completions/render (which requires
+		// --enable-scale-out and cannot populate MultiModalFeatures for the multimodal decider),
+		// while llm-d-router@v1.0.0 rejects pairing a bare token-producer with
+		// precise-prefix-cache-producer. Emit bare token-producer alongside
+		// approx-prefix-cache-producer for EPD instead.
+		if encode {
+			plugins = append(plugins, map[string]any{"type": "token-producer"})
+		}
 		plugins = append(plugins, map[string]any{"type": prefixProducer})
 	}
 	prefixScorer := map[string]any{"type": "prefix-cache-scorer"}

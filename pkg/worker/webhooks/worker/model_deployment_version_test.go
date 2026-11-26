@@ -903,7 +903,7 @@ func TestModelDeploymentWebhook_KVEventsPortReservations(t *testing.T) {
 			},
 		},
 		{
-			name:       "llm-d-router + vLLM EPD reserves on Prefill only",
+			name:       "llm-d-router + vLLM EPD reserves on no role (approx-prefix-cache-producer)",
 			engine:     workercore.ModelDeploymentEngineVLLM,
 			routerName: workercore.ModelDeploymentRouterLLMD,
 			kinds: []workercore.ModelDeploymentRoleKind{
@@ -913,7 +913,7 @@ func TestModelDeploymentWebhook_KVEventsPortReservations(t *testing.T) {
 			},
 			wantReserved: map[string]bool{
 				"Encode":  false,
-				"Prefill": true,
+				"Prefill": false,
 				"Decode":  false,
 			},
 		},

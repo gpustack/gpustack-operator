@@ -101,6 +101,8 @@ func TestRenderModelDeploymentRouterObjects_DiscoversTheEncoderStage(t *testing.
 // the encoder is kept out of on the router's side. An encoder keeps no KV cache, so it publishes no
 // events, and the published contract is what tells the picker which Pods publish.
 func TestRenderModelDeploymentRouterObjects_TakesTheEncoderOutOfTheKVEventContract(t *testing.T) {
+	// llm-d-router@v1.0.0 EPD uses bare token-producer + approx-prefix-cache-producer, so no role
+	// publishes KV events under llm-d-router EPD.
 	objects := epdRouterObjects(t, []workercore.ModelDeploymentRoleKind{
 		workercore.ModelDeploymentRoleKindEncode,
 		workercore.ModelDeploymentRoleKindPrefill,
@@ -113,8 +115,32 @@ func TestRenderModelDeploymentRouterObjects_TakesTheEncoderOutOfTheKVEventContra
 	}
 	require.Contains(t, byName, "encode")
 	assert.Nil(t, byName["encode"].KVEvents, "an encoder publishes no KV events")
-	assert.NotNil(t, byName["prefill"].KVEvents, "the prefiller still does")
-	assert.Nil(t, byName["decode"].KVEvents, "and the decoder consumes them rather than publishing")
+	assert.Nil(t, byName["prefill"].KVEvents, "llm-d-router EPD falls back to approx-prefix-cache-producer")
+	assert.Nil(t, byName["decode"].KVEvents, "the decoder publishes no KV events")
+
+	// Under vllm-router with kv_aware, only prefill carries KVEvents (encode and decode do not).
+	md := epdDeployment(t, []workercore.ModelDeploymentRoleKind{
+		workercore.ModelDeploymentRoleKindEncode,
+		workercore.ModelDeploymentRoleKindPrefill,
+		workercore.ModelDeploymentRoleKindDecode,
+	})
+	md.Spec.Router = &workercore.ModelDeploymentRouter{
+		Name:      workercore.ModelDeploymentRouterVLLM,
+		ExtraArgs: []string{"--policy=kv_aware"},
+	}
+	for i := range md.Spec.Roles {
+		md.Spec.Roles[i].ExtraArgs = nil
+		md.Spec.Roles[i].Ports = nil
+	}
+	vrouterObjs, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+	require.NoError(t, err)
+	vByName := map[string]workercore.ModelDeploymentRouterRoleStatus{}
+	for _, role := range vrouterObjs.Contract.Roles {
+		vByName[role.Name] = role
+	}
+	assert.Nil(t, vByName["encode"].KVEvents, "an encoder publishes no KV events")
+	assert.NotNil(t, vByName["prefill"].KVEvents, "the prefiller still publishes under vllm-router kv_aware")
+	assert.Nil(t, vByName["decode"].KVEvents, "the decoder consumes rather than publishing")
 }
 
 // TestRenderModelDeploymentRouterObjects_IsDeterministicAcrossEncoderRoleOrder holds the encoder's

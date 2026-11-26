@@ -858,6 +858,15 @@ func renderModelDeploymentArgvRouterWorkload(
 	// names something the operator did not set.
 	args := slices.Concat(in.Rendered.Arguments, md.Spec.Router.ExtraArgs)
 	isSGLRouter := md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL
+	var routerEnv []core.EnvVar
+	if isSGLRouter {
+		// The router image runs non-root (uid 65532) without a home directory; point HOME and
+		// HF_HOME to writable /tmp so sgl-router can cache tokenizers under --policy=cache_aware.
+		routerEnv = []core.EnvVar{
+			{Name: "HOME", Value: "/tmp"},
+			{Name: "HF_HOME", Value: "/tmp/huggingface"},
+		}
+	}
 
 	if !in.RequireAllowlistProxy {
 		ports := []core.ContainerPort{{Name: "http", ContainerPort: modelDeploymentRouterHTTPPort}}
@@ -869,7 +878,7 @@ func renderModelDeploymentArgvRouterWorkload(
 				// The command comes from the render beside the arguments, because the image holds three
 				// programs and declares no entrypoint. Arguments without it are handed to the image's
 				// own CMD position, where the first flag is read as the program name.
-				Name: "router", Image: image, Command: in.Rendered.Command, Args: args,
+				Name: "router", Image: image, Command: in.Rendered.Command, Args: args, Env: routerEnv,
 				ImagePullPolicy: kvcache.ResolvePullPolicy(md.Spec.Router.ImagePullPolicy, image),
 				Ports:           ports,
 				// The router answers on the port the Service targets, so a TCP probe on it is the same
@@ -905,7 +914,7 @@ func renderModelDeploymentArgvRouterWorkload(
 		Containers: []core.Container{
 			envoyContainer,
 			{
-				Name: "router", Image: image, Command: in.Rendered.Command, Args: args,
+				Name: "router", Image: image, Command: in.Rendered.Command, Args: args, Env: routerEnv,
 				ImagePullPolicy: kvcache.ResolvePullPolicy(md.Spec.Router.ImagePullPolicy, image),
 				Ports:           routerPorts,
 				// The router binds 127.0.0.1:8001 behind the Envoy allowlist sidecar, so a bare TCP probe on

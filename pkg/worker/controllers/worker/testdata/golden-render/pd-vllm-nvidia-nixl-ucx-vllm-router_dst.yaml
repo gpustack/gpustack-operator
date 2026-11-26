@@ -355,7 +355,6 @@ spec:
     app.kubernetes.io/component: prefill
     app.kubernetes.io/instance: qwen
     app.kubernetes.io/name: model-deployment
-    modeldeployment.gpustack.ai/endpoint-eligible: "true"
   type: ClusterIP
 status:
   loadBalancer: {}
@@ -389,7 +388,6 @@ spec:
     app.kubernetes.io/component: decode
     app.kubernetes.io/instance: qwen
     app.kubernetes.io/name: model-deployment
-    modeldeployment.gpustack.ai/endpoint-eligible: "true"
   type: ClusterIP
 status:
   loadBalancer: {}
@@ -423,7 +421,6 @@ spec:
     app.kubernetes.io/component: prefill
     app.kubernetes.io/instance: qwen
     app.kubernetes.io/name: model-deployment
-    modeldeployment.gpustack.ai/endpoint-eligible: "true"
   type: ClusterIP
 status:
   loadBalancer: {}

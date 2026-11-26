@@ -664,7 +664,27 @@ func TestModelDeploymentWebhook_EncoderKindIsFrozen(t *testing.T) {
 // require every routed role to serve on one port, so putting the number on all three would have the
 // prefiller refuse the whole object.
 func TestModelDeploymentWebhook_EncoderReservesNoKVTransferPort(t *testing.T) {
-	md := epdDeployment(nil)
+	// Under llm-d-router, vLLM EPD uses approx-prefix-cache-producer (no KV event ports), so only
+	// the Mooncake bootstrap port is reserved on prefill.
+	mdLLMD := epdDeployment(nil)
+	reservedLLMD := map[string][]int32{}
+	for i := range mdLLMD.Spec.Roles {
+		r := &mdLLMD.Spec.Roles[i]
+		reservedLLMD[r.Name] = modelDeploymentRouterReservedPorts(mdLLMD, r)
+	}
+	assert.Contains(t, reservedLLMD["prefill"], inject.VLLMMooncakeBootstrapPort)
+	assert.NotContains(t, reservedLLMD["prefill"], inject.VLLMKVEventsPort)
+	assert.Empty(t, reservedLLMD["encode"])
+	assert.Empty(t, reservedLLMD["decode"])
+
+	// Under vllm-router with kv_aware, the prefiller publishes KV events and reserves 5557/5558,
+	// while the encoder and decoder reserve neither.
+	md := epdDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Router = &workercore.ModelDeploymentRouter{
+			Name:      workercore.ModelDeploymentRouterVLLM,
+			ExtraArgs: []string{"--policy=kv_aware"},
+		}
+	})
 
 	reserved := map[string][]int32{}
 	for i := range md.Spec.Roles {
@@ -732,7 +752,7 @@ func TestModelDeploymentWebhook_ReservedTransferPortIsRefusedWhereRendered(t *te
 	w := newModelDeploymentWebhookWith(epdPlatformTypes())
 	md := epdDeployment(func(md *workercore.ModelDeployment) {
 		for i := range md.Spec.Roles {
-			md.Spec.Roles[i].ExtraArgs = []string{fmt.Sprintf("--port=%d", inject.VLLMKVEventsPort)}
+			md.Spec.Roles[i].ExtraArgs = []string{fmt.Sprintf("--port=%d", inject.VLLMMooncakeBootstrapPort)}
 		}
 	})
 

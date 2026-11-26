@@ -644,14 +644,6 @@ func TestModelDeploymentMultiDP_KVEventsReplayPort(t *testing.T) {
 				name: "EPD Encode(dp=1) Prefill(dp=2) Decode(dp=1) uses replayPort 5559",
 				roles: []workercore.ModelDeploymentRole{
 					{
-						Name:            "encode",
-						Kind:            workercore.ModelDeploymentRoleKindEncode,
-						AcceleratorType: at.Name,
-						Replicas:        1,
-						ReplicaSize:     1,
-						Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
-					},
-					{
 						Name:            "prefill",
 						Kind:            workercore.ModelDeploymentRoleKindPrefill,
 						AcceleratorType: at.Name,
@@ -1023,5 +1015,55 @@ func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
 		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: md.Namespace, Name: "qwen-server"}, roleSvc))
 		assert.Equal(t, "server", roleSvc.Labels[modelDeploymentLabelKeyRoleKind])
 		assert.Equal(t, modelDeploymentEndpointEligibleValue, roleSvc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible])
+
+		// sgl-router container receives writable HOME and HF_HOME in /tmp for --policy=cache_aware tokenizers.
+		routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+		require.NoError(t, err)
+		var routerCtr *core.Container
+		for i := range routerObjs.Deployment.Spec.Template.Spec.Containers {
+			if routerObjs.Deployment.Spec.Template.Spec.Containers[i].Name == "router" {
+				routerCtr = &routerObjs.Deployment.Spec.Template.Spec.Containers[i]
+				break
+			}
+		}
+		require.NotNil(t, routerCtr)
+		assert.Contains(t, routerCtr.Env, core.EnvVar{Name: "HOME", Value: "/tmp"})
+		assert.Contains(t, routerCtr.Env, core.EnvVar{Name: "HF_HOME", Value: "/tmp/huggingface"})
+	})
+
+	t.Run("vllm-router PD does not require endpoint-eligible=true when GroupForward is Unsupported", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Engine.Version = "0.34.0"
+			md.Spec.Router = &workercore.ModelDeploymentRouter{
+				Name:      workercore.ModelDeploymentRouterVLLM,
+				ExtraArgs: []string{"--policy=kv_aware"},
+			}
+			md.Spec.Roles = []workercore.ModelDeploymentRole{
+				{
+					Name:            "prefill",
+					Kind:            workercore.ModelDeploymentRoleKindPrefill,
+					AcceleratorType: at.Name,
+					Replicas:        1,
+					ReplicaSize:     1,
+					Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+				},
+				{
+					Name:            "decode",
+					Kind:            workercore.ModelDeploymentRoleKindDecode,
+					AcceleratorType: at.Name,
+					Replicas:        1,
+					ReplicaSize:     1,
+					Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+				},
+			}
+		})
+		assert.False(t, modelDeploymentEligibilitySelectorActive(md, &md.Spec.Roles[0], nil, false))
+		assert.False(t, modelDeploymentEligibilitySelectorActive(md, &md.Spec.Roles[1], nil, false))
+
+		routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+		require.NoError(t, err)
+		args := strings.Join(routerContainerArgs(routerObjs.Deployment.Spec.Template.Spec.Containers), " ")
+		assert.NotContains(t, args, modelDeploymentLabelKeyEndpointEligible)
 	})
 }

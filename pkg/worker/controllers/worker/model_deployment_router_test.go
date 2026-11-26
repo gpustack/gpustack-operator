@@ -896,20 +896,30 @@ func TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged(t *tes
 			"no stage filter may demand a label no pass writes for this shape")
 	}
 
-	// The two argv profiles render no ConfigMap, so their whole configuration is the argument list
-	// a Pod is rolled by. Each discovers its halves by per-role selectors, and a MANAGED pair
-	// narrows those selectors from the first enable, one label per argument.
-	for _, routerName := range []string{
-		workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentRouterSGLang,
+	// The argv profiles render only the Envoy allowlist ConfigMap, never picker discovery files.
+	// SGLang pairs are GroupForward-activatable and narrow both role selectors from the first
+	// enable; vLLM pairs under vllm-router have no decode proxy (GroupForward Unsupported) and must
+	// NOT require endpoint-eligible=true, or the router selects zero workers.
+	for _, tc := range []struct {
+		routerName   string
+		engineName   string
+		wantNarrowed int
+	}{
+		{workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentEngineVLLM, 0},
+		{workercore.ModelDeploymentRouterSGLang, workercore.ModelDeploymentEngineSGLang, 2},
+		// sgl-router discovers EndpointSlices via role-kind on per-role Services (whose selectors
+		// carry endpoint-eligible=true), so its own router args omit endpoint-eligible.
+		{workercore.ModelDeploymentRouterSGL, workercore.ModelDeploymentEngineSGLang, 0},
 	} {
 		objects, err := renderModelDeploymentRouterObjects(context.Background(),
 			routedModelDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Router.Name = routerName
+				md.Spec.Engine.Name = tc.engineName
+				md.Spec.Router.Name = tc.routerName
 			}), nil, false)
 		require.NoError(t, err)
-		require.NotNil(t, objects.ConfigMap, "%s renders the Envoy allowlist ConfigMap for sentinel-capable roles", routerName)
+		require.NotNil(t, objects.ConfigMap, "%s renders the Envoy allowlist ConfigMap for sentinel-capable roles", tc.routerName)
 		assert.Equal(t, []string{modelDeploymentRouterEnvoyConfigKey}, slices.Collect(maps.Keys(objects.ConfigMap.Data)),
-			"%s publishes only the Envoy allowlist document, never picker discovery files", routerName)
+			"%s publishes only the Envoy allowlist document, never picker discovery files", tc.routerName)
 		narrowed := 0
 		for _, container := range objects.Deployment.Spec.Template.Spec.Containers {
 			for _, arg := range container.Args {
@@ -918,9 +928,9 @@ func TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged(t *tes
 				}
 			}
 		}
-		assert.Equal(t, 2, narrowed,
-			"%s discovers by per-role selectors, and both halves of a managed protected pair narrow them (%s)",
-			routerName, routerName)
+		assert.Equal(t, tc.wantNarrowed, narrowed,
+			"%s/%s endpoint-eligible narrowing must match GroupForward activatability",
+			tc.routerName, tc.engineName)
 	}
 }
 

@@ -224,29 +224,25 @@ func TestRenderLLMD_LeavesTheEncoderStageOutOfAPair(t *testing.T) {
 	}
 }
 
-// TestRenderLLMD_KeepsTheEncoderOutOfTheKVEventPublishers holds the encoder out of the set of Pods
-// the prefix producer subscribes to. The set is the deployment's own selector, which every role
-// carries, so an encoder left in it is a subscriber dialing a socket it never opens -- the encoder
-// keeps no KV cache and publishes no events.
+// TestRenderLLMD_KeepsTheEncoderOutOfTheKVEventPublishers verifies that an EPD deployment falls
+// back to approx-prefix-cache-producer alongside bare token-producer: llm-d-router@v1.0.0 rejects
+// pairing precise-prefix-cache-producer with a bare token-producer (no vllm backend), while EPD
+// requires the bare token-producer for built-in multimodal feature estimation.
 func TestRenderLLMD_KeepsTheEncoderOutOfTheKVEventPublishers(t *testing.T) {
 	output, err := Render(LLMD, epdInput())
 	require.NoError(t, err)
 
-	var selector string
 	document := parseLLMDDocument(t, output.Document)
+	hasApprox := false
 	for _, plugin := range document.Plugins {
-		if plugin.Type != "precise-prefix-cache-producer" {
-			continue
+		assert.NotEqual(t, "precise-prefix-cache-producer", plugin.Type,
+			"llm-d-router@v1.0.0 EPD cannot pair precise-prefix-cache-producer with bare token-producer")
+		assert.NotEqual(t, "endpoint-notification-source", plugin.Type)
+		if plugin.Type == "approx-prefix-cache-producer" {
+			hasApprox = true
 		}
-		events, ok := plugin.Parameters["kvEventsConfig"].(map[string]any)
-		require.True(t, ok, "the precise producer carries its events contract")
-		discovery, ok := events["podDiscoveryConfig"].(map[string]any)
-		require.True(t, ok)
-		selector, _ = discovery["podLabelSelector"].(string)
 	}
-	require.NotEmpty(t, selector, "the precise producer carries the publisher selector")
-	assert.Contains(t, selector, "modeldeployment.gpustack.ai/role-kind!=decode")
-	assert.Contains(t, selector, "modeldeployment.gpustack.ai/role-kind!=encode")
+	assert.True(t, hasApprox, "EPD renders approx-prefix-cache-producer")
 }
 
 // TestRenderLLMD_UsesTheBuiltInTokenProducerWhenAnEncoderRoleIsPresent pins the estimator an
@@ -273,11 +269,10 @@ func TestRenderLLMD_UsesTheBuiltInTokenProducerWhenAnEncoderRoleIsPresent(t *tes
 	assert.Equal(t, 1, producers, "the token producer is rendered exactly once")
 }
 
-// TestRenderLLMD_WiresThePrecisePrefixProducerIntoThePrefillDeciderOnEPD holds the prefiller's
-// decider to the producer that feeds it. With the precise producer active, the decider reads token
-// counts from the producer named in prefixMatchInfoProducerName; left out, it falls back to the
-// approximate producer, which this document does not define, so the router creates an unconfigured
-// one and then reports "failed to read prefix plugin state: not found" per request.
+// TestRenderLLMD_WiresThePrecisePrefixProducerIntoThePrefillDeciderOnEPD verifies that EPD's
+// prefix-based-pd-decider stays on the default approx-prefix-cache-producer alongside bare
+// token-producer (omitting prefixMatchInfoProducerName rather than pointing at an absent precise
+// producer).
 func TestRenderLLMD_WiresThePrecisePrefixProducerIntoThePrefillDeciderOnEPD(t *testing.T) {
 	output, err := Render(LLMD, epdInput())
 	require.NoError(t, err)
@@ -289,8 +284,8 @@ func TestRenderLLMD_WiresThePrecisePrefixProducerIntoThePrefillDeciderOnEPD(t *t
 			continue
 		}
 		deciders++
-		assert.Equal(t, "precise-prefix-cache-producer", plugin.Parameters["prefixMatchInfoProducerName"],
-			"the decider reads the producer this document defines, not the default it does not")
+		assert.Nil(t, plugin.Parameters["prefixMatchInfoProducerName"],
+			"EPD falls back to approx-prefix-cache-producer so the decider uses its default producer")
 	}
 	assert.Equal(t, 1, deciders, "the prefill decider is rendered exactly once")
 }

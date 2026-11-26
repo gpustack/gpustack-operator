@@ -245,13 +245,20 @@ func modelDeploymentVLLMMultiPodDP(role *workercore.ModelDeploymentRole) bool {
 }
 
 // modelDeploymentLLMDRouterDisablesKVEvents reports whether llm-d-router fronts a vLLM deployment
-// with any managed non-Decode/non-Encode multi-Pod data-parallel role, where llm-d-router's single
-// RankIndex=0 ZMQ subscriber cannot address member k >= 1 publisher sockets.
+// where precise KV-event routing must fall back to approx-prefix-cache-producer:
+//   - EPD deployments (an Encode role is present), because llm-d-router@v1.0.0 requires a bare
+//     built-in token-producer for MultiModalFeatures and rejects pairing it with
+//     precise-prefix-cache-producer;
+//   - Any managed non-Decode/non-Encode multi-Pod data-parallel role, where llm-d-router's single
+//     RankIndex=0 ZMQ subscriber cannot address member k >= 1 publisher sockets.
 func modelDeploymentLLMDRouterDisablesKVEvents(md *workercore.ModelDeployment) bool {
 	if md == nil || md.Spec.Router == nil ||
 		md.Spec.Router.Name != workercore.ModelDeploymentRouterLLMD ||
 		md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM {
 		return false
+	}
+	if modelDeploymentDeclaresEncoder(md) {
+		return true
 	}
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
