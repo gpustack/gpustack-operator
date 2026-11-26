@@ -626,6 +626,9 @@ One node-level variable feeds the same decision:
   whether the engine resolves CDI requests and which runtime handler a `Pod` naming no
   *`runtimeClassName`* runs under; unreadable keeps the node on `envvar`.
 
+  Imported fragments are expanded and merged with containerd's precedence: before configuration
+  version 3 a named plugin section is replaced whole, afterwards merged key by key.
+
 ### Manufacturer toolkit paths
 
 The DM device bindings locate manufacturer libraries through conventional toolkit-home variables, each

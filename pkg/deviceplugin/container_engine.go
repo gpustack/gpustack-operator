@@ -1,9 +1,12 @@
 package deviceplugin
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
+	"dario.cat/mergo"
 	"github.com/BurntSushi/toml"
 
 	"gpustack.ai/gpustack/pkg/utils/osx"
@@ -46,13 +49,14 @@ type ContainerEngineFacts struct {
 	DefaultHandlerIsVendor bool
 }
 
-// ReadContainerEngineFacts reads the container engine's configuration. Every read is best-effort: a
-// configuration that cannot be read is reported as unknown.
+// ReadContainerEngineFacts reads the container engine's configuration together with the files it
+// imports. Every read is best-effort: a configuration that cannot be read, or that imports a file
+// that cannot be read, is reported as unknown.
 func ReadContainerEngineFacts() ContainerEngineFacts {
 	path := filepath.Join(osx.Getenv(ContainerdConfigDirEnv, defaultContainerdConfigDir), containerdConfigFile)
 
-	var cfg map[string]any
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	cfg, err := loadContainerdConfig(path)
+	if err != nil {
 		// The path is carried even though nothing was read from it: it is the one thing an operator
 		// needs to see when a node did not take the channel it was expected to, and the evidence a
 		// resolution is logged with has nothing else to name.
@@ -73,6 +77,114 @@ func ReadContainerEngineFacts() ContainerEngineFacts {
 	}
 
 	return f
+}
+
+// loadContainerdConfig reads one configuration file and every file it imports, directly or through
+// further imports, and returns them merged into one document. It mirrors containerd's LoadConfig: the
+// files are taken breadth-first from the given one, so it has the lowest priority and whatever is
+// imported later overrides it; each file is read at most once, by its exact path, which is what makes
+// two files importing each other terminate; and a file that cannot be read fails the whole load, as it
+// fails containerd's own start. Each file is decoded into a plain document, as loadConfigFile does, so
+// the merge sees keys rather than a fixed schema.
+func loadContainerdConfig(path string) (map[string]any, error) {
+	var cfg map[string]any
+	loaded := map[string]bool{}
+	pending := []string{path}
+
+	for len(pending) > 0 {
+		current := pending[0]
+		pending = pending[1:]
+
+		if loaded[current] {
+			continue
+		}
+		loaded[current] = true
+
+		var doc map[string]any
+		if _, err := toml.DecodeFile(current, &doc); err != nil {
+			return nil, fmt.Errorf("%s: %w", current, err)
+		}
+		if err := mergeContainerdConfig(&cfg, doc); err != nil {
+			return nil, err
+		}
+
+		imports, err := resolveContainerdImports(current, doc)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", current, err)
+		}
+		pending = append(pending, imports...)
+	}
+
+	return cfg, nil
+}
+
+// resolveContainerdImports lists the files a document imports, as paths, the way resolveImports does.
+// Only the top-level key counts, as in containerd's schema, so an imports key inside a table is an
+// ordinary setting; a value that is not a list of strings fails the load, as it fails containerd's own
+// decoding. Each entry is cleaned, a relative one is taken relative to the importing file's directory,
+// one naming a glob is expanded in the glob's order (which may be empty), and any other is taken
+// literally, so a missing one is not skipped here but fails when it is read.
+func resolveContainerdImports(parent string, doc map[string]any) ([]string, error) {
+	var items []any
+	switch raw := doc["imports"].(type) {
+	case nil:
+		return nil, nil
+	case []any:
+		items = raw
+	default:
+		return nil, fmt.Errorf("imports must be a list of strings, not %T", raw)
+	}
+
+	var out []string
+	for _, item := range items {
+		entry, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("imports must be a list of strings, found %T", item)
+		}
+
+		path := filepath.Clean(entry)
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(filepath.Dir(parent), path)
+		}
+
+		if strings.Contains(path, "*") {
+			matches, err := filepath.Glob(path)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, matches...)
+			continue
+		}
+
+		out = append(out, path)
+	}
+
+	return out, nil
+}
+
+// mergeContainerdConfig folds one file's document into the accumulated one the way mergeConfig does:
+// mergo with override, so a later file's keys win and the keys it omits survive. Then the plugin
+// sections. Before configuration version 3 containerd held each as a whole tree and replaced it when a
+// later file named it, dropping the keys that file did not repeat; from version 3 on they are plain
+// maps that mergo merges key by key, which is the merge already done. The version that decides this is
+// the accumulated one, since a later file's version overrides too.
+func mergeContainerdConfig(acc *map[string]any, doc map[string]any) error {
+	if err := mergo.Merge(acc, doc, mergo.WithOverride); err != nil {
+		return err
+	}
+
+	if version, ok := (*acc)["version"].(int64); ok && version >= 3 {
+		return nil
+	}
+
+	sections, _ := doc["plugins"].(map[string]any)
+	if merged, ok := (*acc)["plugins"].(map[string]any); ok {
+		for id, section := range sections {
+			merged[id] = section
+		}
+	}
+
+	return nil
 }
 
 // isVendorRuntimeHandler reports whether a runtime handler name is something other than the generic
