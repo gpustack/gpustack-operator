@@ -102,7 +102,7 @@ func loadContainerdConfig(path string) (map[string]any, error) {
 
 		var doc map[string]any
 		if _, err := toml.DecodeFile(current, &doc); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%s: %w", current, err)
 		}
 		if err := mergeContainerdConfig(&cfg, doc); err != nil {
 			return nil, err

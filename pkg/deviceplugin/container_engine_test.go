@@ -253,6 +253,32 @@ func TestReadContainerEngineFactsFollowsTheConfiguredDirectory(t *testing.T) {
 	assert.False(t, ReadContainerEngineFacts().Known)
 }
 
+// TestLoadContainerdConfig_ImportErrorsNameTheImportingFile pins that a failure inside an import
+// says which file declared the import: an operator with several fragments has nothing else to go
+// on, and the TOML decoder's own error names only a line.
+func TestLoadContainerdConfig_ImportErrorsNameTheImportingFile(t *testing.T) {
+	cases := []struct {
+		name     string
+		fragment string
+	}{
+		{name: "a malformed fragment", fragment: "version = = 3\n"},
+		{name: "a fragment with a bad glob", fragment: "imports = [\"*[.toml\"]\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTestFile(t, filepath.Join(dir, "frag.toml"), c.fragment)
+			writeTestFile(t, filepath.Join(dir, containerdConfigFile), "version = 3\nimports = [\"frag.toml\"]\n")
+
+			_, err := loadContainerdConfig(filepath.Join(dir, containerdConfigFile))
+			if !assert.Error(t, err) {
+				return
+			}
+			assert.Contains(t, err.Error(), "frag.toml", "the error names the importing file")
+		})
+	}
+}
+
 func TestIsVendorRuntimeHandler(t *testing.T) {
 	for name, want := range map[string]bool{
 		"":       false,
