@@ -1145,15 +1145,17 @@ func modelDeploymentGroupForwardPairProbe(
 // match that refused it would leave the wrapper in place and reject the copy behind it.
 var modelDeploymentGroupForwardPairThinkWrapper = regexp.MustCompile(`(?s)^\s*<think>.*?</think>\s*`)
 
-// modelDeploymentGroupForwardPairVisibleCopy strips a leading <think>…</think> block from an
-// answer and trims what remains, leaving the copy the decode leg was asked for.
+// modelDeploymentGroupForwardPairVisibleCopy strips a leading <think>…</think> block, whitespace,
+// and trivial surrounding quotes or sentence punctuation from an answer, leaving the single token
+// the decode leg was asked to copy.
 //
-// THE WRAPPER IS TEMPLATE NOISE, NOT CONTENT. The Qwen3 chat template emits the block on this
-// route whatever the thinking switch says -- case-9 run2's enriched reason caught the byte-perfect
-// copy sitting behind an EMPTY wrapper -- so the exact compare reads the answer with the block
-// removed. Rejected answers stay raw in their reasons, where the wrapper is still visible.
+// THE WRAPPER IS TEMPLATE NOISE, NOT CONTENT. Chat templates may emit a <think> block even with
+// thinking disabled, and small models may append a trailing period or wrap a single word in quotes.
+// Trimming only those outer delimiters keeps the match exact on the token itself; rejected answers
+// stay raw in their reasons, where the wrapper and punctuation remain visible.
 func modelDeploymentGroupForwardPairVisibleCopy(answer string) string {
-	return strings.TrimSpace(modelDeploymentGroupForwardPairThinkWrapper.ReplaceAllString(answer, ""))
+	visible := strings.TrimSpace(modelDeploymentGroupForwardPairThinkWrapper.ReplaceAllString(answer, ""))
+	return strings.Trim(visible, "\"'`.,! \t\r\n")
 }
 
 // modelDeploymentGroupForwardPairAnswerBound is how much of a rejected answer the failure reason
@@ -1490,19 +1492,21 @@ func modelDeploymentGroupForwardPairWidthBound(
 		"rank arithmetic can address"
 }
 
-// modelDeploymentGroupForwardPairExpected is the text one pair's decoder must copy back.
+// modelDeploymentGroupForwardPairExpected is the single plain ASCII token one pair's decoder must
+// copy back.
 //
-// IT NAMES THE PAIR, because an answer carrying another pair's text is not this pair's answer,
-// and the comparison is exact: anything else the decoder produced is not the copy.
+// IT NAMES THE PAIR WITHOUT PUNCTUATION, because an answer carrying another pair's token is not
+// this pair's answer, and an opaque alphanumeric word avoids colon or quote splitting by small
+// models.
 func modelDeploymentGroupForwardPairExpected(prefillRank, decodeRank int) string {
-	return fmt.Sprintf("探测P%dD%d：星河春风。", prefillRank, decodeRank)
+	return fmt.Sprintf("PROBEP%dD%d", prefillRank, decodeRank)
 }
 
 // modelDeploymentGroupForwardPairCopy is the instruction the decoder's answer is checked against.
-// It asks for the text inside the quotes and for nothing else, so the answer is a copy this
-// operator can compare exactly.
+// It uses plain English with minimal punctuation and asks for only the single token so small and
+// non-Chinese models echo it verbatim, while keeping /no_think on its own line for thinking models.
 func modelDeploymentGroupForwardPairCopy(expected string) string {
-	return "逐字复制引号内文字，只输出文字本身：『" + expected + "』 /no_think"
+	return "Reply with only this word " + expected + "\n/no_think"
 }
 
 // modelDeploymentGroupForwardPairHeld answers both roles with the same verdict, which is what a

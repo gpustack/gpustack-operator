@@ -736,7 +736,7 @@ func probePairAnswer(body []byte, isPrefill bool) []byte {
 
 	if isPrefill {
 		return []byte(`{"id":"` + prefix + rid +
-			`","choices":[{"message":{"content":"探测"},"finish_reason":"length"}]}`)
+			`","choices":[{"message":{"content":"PROBE"},"finish_reason":"length"}]}`)
 	}
 
 	return []byte(`{"id":"` + prefix + rid + `","choices":[{"message":{"content":"` +
@@ -780,14 +780,17 @@ func probePairExpectedText(body []byte) string {
 	if len(sent.Messages) == 0 {
 		return ""
 	}
+	const prefix = "Reply with only this word "
 	content := sent.Messages[0].Content
-	start := strings.Index(content, "『")
-	end := strings.Index(content, "』")
-	if start < 0 || end < 0 || end < start {
+	rest, ok := strings.CutPrefix(content, prefix)
+	if !ok {
 		return ""
 	}
+	if idx := strings.IndexAny(rest, " \t\r\n"); idx >= 0 {
+		return rest[:idx]
+	}
 
-	return content[start+3 : end]
+	return rest
 }
 
 // probePairBody reads one recorded request's fields back.
@@ -874,7 +877,7 @@ func TestGroupForwardProbePDPairNamesTheAnswerItRejected(t *testing.T) {
 		fetch := &probePairFetch{
 			prefillHost: probeHost(0, 0),
 			answers: map[string]string{
-				probeHost(1, 0): `{"id":"{{rid}}","choices":[{"message":{"content":"别的文字"},"finish_reason":"stop"}]}`,
+				probeHost(1, 0): `{"id":"{{rid}}","choices":[{"message":{"content":"wrong text"},"finish_reason":"stop"}]}`,
 			},
 		}
 		got := observeModelDeploymentGroupForwardPair(
@@ -883,12 +886,12 @@ func TestGroupForwardProbePDPairNamesTheAnswerItRejected(t *testing.T) {
 
 		assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
 			"a decoder that did not carry the copy holds the pair")
-		assert.Contains(t, got.Prefill.Reason, `(answer: "别的文字")`,
+		assert.Contains(t, got.Prefill.Reason, `(answer: "wrong text")`,
 			"the reason names the answer it rejected, so drift is tellable from a broken read")
 	})
 
 	t.Run("a long answer is bounded on rune boundaries", func(t *testing.T) {
-		long := strings.Repeat("长", 300)
+		long := strings.Repeat("é", 300)
 		fetch := &probePairFetch{
 			prefillHost: probeHost(0, 0),
 			answers: map[string]string{
@@ -899,9 +902,9 @@ func TestGroupForwardProbePDPairNamesTheAnswerItRejected(t *testing.T) {
 			context.Background(), md, prefill, decode, fetch.fetch,
 		)
 
-		assert.Contains(t, got.Prefill.Reason, strings.Repeat("长", 200),
+		assert.Contains(t, got.Prefill.Reason, strings.Repeat("é", 200),
 			"the bound keeps the first two hundred characters")
-		assert.NotContains(t, got.Prefill.Reason, strings.Repeat("长", 201),
+		assert.NotContains(t, got.Prefill.Reason, strings.Repeat("é", 201),
 			"the bound stops at two hundred characters")
 		assert.Contains(t, got.Prefill.Reason, "…",
 			"the cut is marked")
@@ -958,12 +961,8 @@ func TestGroupForwardProbePDPairRecordsTheMooncakeCountersOfBothHalves(t *testin
 
 // TestGroupForwardProbePDPairCopySurvivesAThinkWrapper holds that the copied compare reads the
 // answer's visible text: a leading <think>…</think> block is the chat template's noise and is
-// stripped before the compare, whatever the block carries.
-//
-// THE WRAPPER IS TEMPLATE NOISE. case-9 run2's enriched reason caught the byte-perfect copy
-// sitting behind an EMPTY wrapper (`<think>\n\n</think>\n\n探测P0D0：星河春风。`), which the exact
-// compare rejected -- a template artifact rejecting a pair that carried the request. D12/A.3,
-// approved on that classification.
+// stripped before the compare, whatever the block carries, and trivial outer quotes or trailing
+// punctuation do not reject an otherwise exact token copy.
 func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
 	md := probePairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1, "")
 	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
@@ -979,7 +978,7 @@ func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
 
 	t.Run("an empty wrapper ahead of the copy passes", func(t *testing.T) {
 		got := observeModelDeploymentGroupForwardPair(
-			context.Background(), md, prefill, decode, answer("<think></think>\n\n探测P0D0：星河春风。").fetch,
+			context.Background(), md, prefill, decode, answer("<think></think>\n\nPROBEP0D0").fetch,
 		)
 
 		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
@@ -989,7 +988,7 @@ func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
 	t.Run("a reasoning block ahead of the copy passes", func(t *testing.T) {
 		got := observeModelDeploymentGroupForwardPair(
 			context.Background(), md, prefill, decode,
-			answer("<think>\nsome reasoning\n</think>\n探测P0D0：星河春风。").fetch,
+			answer("<think>\nsome reasoning\n</think>\nPROBEP0D0").fetch,
 		)
 
 		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
@@ -999,29 +998,39 @@ func TestGroupForwardProbePDPairCopySurvivesAThinkWrapper(t *testing.T) {
 	t.Run("leading whitespace ahead of the wrapper still passes", func(t *testing.T) {
 		got := observeModelDeploymentGroupForwardPair(
 			context.Background(), md, prefill, decode,
-			answer("\n <think></think>\n\n探测P0D0：星河春风。").fetch,
+			answer("\n <think></think>\n\nPROBEP0D0").fetch,
 		)
 
 		assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
 			"a template that opens with a newline or a space ahead of the wrapper is as noise as the wrapper")
 	})
 
+	t.Run("trivial trailing punctuation or quotes around the exact token still pass", func(t *testing.T) {
+		for _, wrapped := range []string{"PROBEP0D0.", `"PROBEP0D0"`, "`PROBEP0D0`"} {
+			got := observeModelDeploymentGroupForwardPair(
+				context.Background(), md, prefill, decode, answer(wrapped).fetch,
+			)
+			assert.Equal(t, modelDeploymentGroupForwardVerified, got.Prefill.State,
+				"outer punctuation around %q should not reject an exact token copy", wrapped)
+		}
+	})
+
 	t.Run("a wrapper does not rescue a wrong copy", func(t *testing.T) {
-		fetch := answer("<think></think>\n\n别的文字")
+		fetch := answer("<think></think>\n\nwrong text")
 		got := observeModelDeploymentGroupForwardPair(
 			context.Background(), md, prefill, decode, fetch.fetch,
 		)
 
 		assert.Equal(t, modelDeploymentGroupForwardUnknown, got.Prefill.State,
 			"the visible text still has to be the copy")
-		assert.Contains(t, got.Prefill.Reason, "别的文字",
+		assert.Contains(t, got.Prefill.Reason, "wrong text",
 			"the raw answer stays in the reason for classification")
 		assert.Contains(t, got.Prefill.Reason, "<think>",
 			"the raw answer keeps its wrapper visible in the reason")
 	})
 
 	t.Run("the marker inside the wrapper is not the copy", func(t *testing.T) {
-		fetch := answer("<think>探测P0D0：星河春风。</think>\n\n别的文字")
+		fetch := answer("<think>PROBEP0D0</think>\n\nwrong text")
 		got := observeModelDeploymentGroupForwardPair(
 			context.Background(), md, prefill, decode, fetch.fetch,
 		)
@@ -1049,13 +1058,13 @@ func TestGroupForwardProbePDPairHoldsOnAnythingItCannotSee(t *testing.T) {
 		{
 			name:        "the decoder answering with another pair's text is a hold",
 			engine:      workercore.ModelDeploymentEngineSGLang,
-			answer:      `{"id":"` + probeRIDPlaceholder + `","choices":[{"message":{"content":"别的文字"},"finish_reason":"stop"}]}`,
+			answer:      `{"id":"` + probeRIDPlaceholder + `","choices":[{"message":{"content":"PROBEP1D0"},"finish_reason":"stop"}]}`,
 			wantInWords: "did not carry the text",
 		},
 		{
 			name:        "the decoder answering for another request is a hold",
 			engine:      workercore.ModelDeploymentEngineSGLang,
-			answer:      `{"id":"someone-else","choices":[{"message":{"content":"探测P0D0：星河春风。"},"finish_reason":"stop"}]}`,
+			answer:      `{"id":"someone-else","choices":[{"message":{"content":"PROBEP0D0"},"finish_reason":"stop"}]}`,
 			wantInWords: "not bound to this operator's own request",
 		},
 		{
@@ -1067,7 +1076,7 @@ func TestGroupForwardProbePDPairHoldsOnAnythingItCannotSee(t *testing.T) {
 		{
 			name:        "the decoder that aborted its answer is a hold",
 			engine:      workercore.ModelDeploymentEngineSGLang,
-			answer:      `{"id":"` + probeRIDPlaceholder + `","choices":[{"message":{"content":"探测P0D0：星河春风。"},"finish_reason":"abort"}]}`,
+			answer:      `{"id":"` + probeRIDPlaceholder + `","choices":[{"message":{"content":"PROBEP0D0"},"finish_reason":"abort"}]}`,
 			wantInWords: "finish reason reports",
 		},
 		{
@@ -1341,7 +1350,7 @@ func TestGroupForwardProbePDPairAsksTheFrontedDecoderAtItsFrontDoor(t *testing.T
 		prefillHost: probeHost(0, 0),
 		answers: map[string]string{
 			probeMemberIP(1, 0) + ":8200": `{"id":"` + probeRIDPlaceholder +
-				`","choices":[{"message":{"content":"别的文字"},"finish_reason":"stop"}]}`,
+				`","choices":[{"message":{"content":"wrong text"},"finish_reason":"stop"}]}`,
 		},
 	}
 
