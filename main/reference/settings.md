@@ -490,7 +490,7 @@ The Worker (WK) copies every `GPUSTACK_`-prefixed variable from its own `Pod` sp
 | `GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE` | `true` | DM | Whether `Allocate` refuses a logical slice its accelerator cannot hold: one with no free slot, or without the units the slice needs. The `Pod` fails with `UnexpectedAdmissionError` and its controller recreates it. `false` allocates it anyway and clamps the ledger at zero, as before the refusal existed; see [Disabling an allocator safeguard](#disabling-an-allocator-safeguard). |
 | `GPUSTACK_DEVICE_PLUGIN_IDENTIFY_BY_KUBELET` | `true` | DM | Whether `Allocate` asks the kubelet's pod-resources API which container it serves. `false` identifies it by the pending-`Pod` heuristic alone, as before the lookup existed; a node whose kubelet cannot be reached falls back to that heuristic by itself. See [Disabling an allocator safeguard](#disabling-an-allocator-safeguard). |
 | `GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS` | `true` | WK, DM | Whether the accelerator ledger stops charging a `Pod` in phase `Succeeded` or `Failed` for the exclusive cards, shared cards and logical slices kubelet has taken back from it, so a finished `Job` that nobody deletes no longer keeps its card from the fit labels, the `InstanceType` views and the node-devices check. A hardware partition, and a MetaX or Cambricon slice, stay charged until the `Pod` object is gone, because only then are they destroyed. `false` charges every finished `Pod` until its object is gone, as before, and makes the sliced `Allocate` gate charge it too, which it did not do before; set it through the chart value `ledgerReleaseTerminatedPods`, which renders it on the worker and every Device Manager so the two sides agree. |
-| `GPUSTACK_MOCK_DEVICES_FILE` | — | DM | Path to a YAML or JSON mock hardware specification file for CPU-only testing (`--mock-devices-file` overrides this variable). When empty or unset, mock mode is disabled. When set, the DM bypasses vendor hardware probes, host `sysfs` scans, and host device injection, logs a startup warning, stamps `device.gpustack.ai/mock: "true"` on the node's `Devices` object, and hot-reloads the specification on file changes. See [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/84105e6b08571b4080014e38a7cb19e40be2141e/docs/contribute/local-cluster-setup.md#mock-device-manager) for the schema and built-in presets. |
+| `GPUSTACK_MOCK_DEVICES_FILE` | — | DM | Path to a YAML or JSON mock hardware specification file for CPU-only testing (`--mock-devices-file` overrides this variable). When empty or unset, mock mode is disabled. When set, the DM bypasses vendor hardware probes, host `sysfs` scans, and host device injection, logs a startup warning, stamps `device.gpustack.ai/mock: "true"` on the node's `Devices` object, and hot-reloads the specification on file changes. See [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/915a76dceb934c1c276c702982df9d71deb9b671/docs/contribute/local-cluster-setup.md#mock-device-manager) for the schema and built-in presets. |
 
 ### Disabling an allocator safeguard
 
@@ -617,7 +617,7 @@ injection path. `auto` doing nothing on such a node is the correct answer, not a
 
 Which channel a node settled on, and why, is logged once per answer, but at the allocator's own
 verbosity, above what the `DaemonSet` ships with. [Runtime log
-verbosity](https://github.com/gpustack/gpustack-operator/blob/84105e6b08571b4080014e38a7cb19e40be2141e/docs/contribute/development.md#runtime-log-verbosity) raises it on a running `Pod`.
+verbosity](https://github.com/gpustack/gpustack-operator/blob/915a76dceb934c1c276c702982df9d71deb9b671/docs/contribute/development.md#runtime-log-verbosity) raises it on a running `Pod`.
 
 One node-level variable feeds the same decision:
 
@@ -625,6 +625,9 @@ One node-level variable feeds the same decision:
   the chart's `deviceManager.containerdConfigDir` (default `/etc/containerd`). `auto` reads it to learn
   whether the engine resolves CDI requests and which runtime handler a `Pod` naming no
   *`runtimeClassName`* runs under; unreadable keeps the node on `envvar`.
+
+  Imported fragments are expanded and merged with containerd's precedence: before configuration
+  version 3 a named plugin section is replaced whole, afterwards merged key by key.
 
 ### Manufacturer toolkit paths
 

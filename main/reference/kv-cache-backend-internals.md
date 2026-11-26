@@ -25,7 +25,7 @@ not member groups:
 | `LocalDisk` | Tier on members already holding a memory replica | `members[].localDisks` |
 | `NoF` | NVMe-oF target coordinate registered once with no `Pod` | No API surface |
 | `CXL` | DAX device allocated by the leader process | Refused (`enable_cxl`, `cxl_path`, `cxl_size` rejected in *`leader.extraArgs`*) |
-| `DFS` | Distributed filesystem configured in leader env | Not rendered by this API |
+| `DFS` | Distributed filesystem configured in leader env | Refused in `leader.extraEnv` |
 
 ### CRD validation ratcheting
 
