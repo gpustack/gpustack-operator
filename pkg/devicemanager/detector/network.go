@@ -69,12 +69,13 @@ type rdmaClassIndex struct {
 	// NIC on a Soft-RoCE host unverified, which the node label counted as usable RDMA and a distance
 	// was computed from.
 	unresolvable bool
-	// unreadableSoftwarePorts lists, by path relative to the sysfs root, the ports directories of
-	// software devices that exist and could not be listed. Such a device names no netdev, so which
-	// interfaces it serves is unknown, and an interface the netdev-keyed lookup does not name gets an
-	// unverified record rather than none. Empty when every software device's ports were read or are
-	// truly absent. Written by softwareRDMAIndex, which is the reader of those directories. It is
-	// deliberately not `unresolvable`: that flag is about a hardware candidate and is read as an
+	// unreadableSoftwarePorts lists, by path relative to the sysfs root, what could not be read under
+	// the software devices: a ports directory that exists and could not be listed, or a port's
+	// association table (gid_attrs/ndevs) that exists and could not be read. Either leaves a device
+	// naming no netdev, so which interfaces it serves is unknown, and an interface the netdev-keyed
+	// lookup does not name gets an unverified record rather than none. Empty when every such path was
+	// read or is truly absent. Written by softwareRDMAIndex, which is the reader of those paths. It
+	// is deliberately not `unresolvable`: that flag is about a hardware candidate and is read as an
 	// open question on every PCI path, where this one is the software lookup's alone.
 	unreadableSoftwarePorts []string
 }
@@ -433,8 +434,12 @@ func (p softwareRDMAport) name() string {
 // went further than that: the interface it serves came back with no record at all, and a
 // software-only node lost both labels over a directory that could not be read. So the failure is
 // recorded on the class index, and attachSoftwareRDMA turns it into an unverified record for every
-// interface the index does not name. A ports directory that is truly absent is a portless device, an
-// observation that leaves nothing unknown, and is not recorded.
+// interface the index does not name. The same holds one level down: a port whose association table
+// is present and cannot be read names nothing, and its reader says so in a note, so that note is
+// kept and the port is recorded the same way instead of being dropped with the note discarded. A
+// ports directory that is truly absent is a portless device, an observation that leaves nothing
+// unknown, and is not recorded; neither is a port with no association table, which a native
+// InfiniBand port does not have.
 func (s *sysfsTree) softwareRDMAIndex() map[string][]softwareRDMAport {
 	if s.softwareRDMA != nil {
 		return s.softwareRDMA
@@ -460,7 +465,18 @@ func (s *sysfsTree) softwareRDMAIndex() map[string][]softwareRDMAport {
 			}
 			port := softwareRDMAport{device: device, number: uint32(number)}
 			var notes []string
-			for _, netdev := range enumerateRDMAPortNetdevs(s, port.rel(), port.number, &notes) {
+			netdevs := enumerateRDMAPortNetdevs(s, port.rel(), port.number, &notes)
+			if netdevs == nil && len(notes) > 0 {
+				// The port's association table is there and could not be read, so the netdev it serves
+				// is unknown: the ports-directory case one level down, recorded the same way and by
+				// the directory that failed. A port with no table at all leaves no note and stays out
+				// silently. A truncated table returns the netdevs it did name and stays in; truncation
+				// is a diagnostic, not a failure.
+				class.unreadableSoftwarePorts = append(class.unreadableSoftwarePorts,
+					filepath.Join(port.rel(), "gid_attrs", "ndevs"))
+				continue
+			}
+			for _, netdev := range netdevs {
 				index[netdev] = append(index[netdev], port)
 			}
 		}

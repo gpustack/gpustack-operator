@@ -1071,6 +1071,46 @@ func TestEnumerateInterfacesJoinsSoftwareRDMAByNetdev(t *testing.T) {
 			},
 		},
 		{
+			// A port with no association table is not a read failure: a native InfiniBand port has
+			// none, and a software port whose table is simply absent names nothing. No netdev is left
+			// unknown, so no interface gets a record, verified or not.
+			name: "a software device whose port has no netdev table leaves no record",
+			build: func(f *sysfsFixture) {
+				f.physicalNIC("eth0", "0000:01:00.0")
+				f.addVirtualNetDevice("bond0", nil)
+				soft("rxe0", port(1, active)).build(t, f)
+			},
+			want: map[string]ifaceVerdict{
+				"bond0": {},
+				"eth0":  {},
+			},
+			wantLabels: map[string]string{},
+		},
+		{
+			// A truncated association table was READ. Truncation is a diagnostic the per-port reader
+			// notes, not a read failure, so it is not recorded as one: the port stays in the index with
+			// the netdevs it did name, and the interface nobody named keeps no record. Only a port that
+			// read nothing and said why is a failure.
+			name: "a truncated association table still names the netdevs it read",
+			build: func(f *sysfsFixture) {
+				f.addVirtualNetDevice("bond0", nil)
+				f.addVirtualNetDevice("br0", nil)
+				names := []string{"bond0"}
+				for i := 0; i < 3*rdmaPortAttrMaxEntries; i++ {
+					names = append(names, fmt.Sprintf("veth%04d", i))
+				}
+				soft("rxe0", port(1, active, names...)).build(t, f)
+			},
+			want: map[string]ifaceVerdict{
+				"bond0": {rdma: true, software: true, link: workercore.DeviceInterfaceLinkStateOK},
+				"br0":   {},
+			},
+			wantLabels: map[string]string{
+				nodefeature.NodeRDMACapableLabelKey:  "true",
+				nodefeature.NodeRDMASoftwareLabelKey: "true",
+			},
+		},
+		{
 			// A VLAN on a hardware RoCE adapter is named by the adapter's port too. A lookup over every
 			// device would hand the adapter to the VLAN as well, so it would be advertised twice and
 			// past the partitioning a physical function's record enforces. The lookup reads software
@@ -1354,6 +1394,90 @@ func TestEnumerateInterfacesDegradesWhenSoftwarePortsAreUnreadable(t *testing.T)
 	if !maps.Equal(labels, want) {
 		t.Errorf("labels = %v, want %v: the node keeps rdma.capable, and rdma.software is absent because "+
 			"no endpoint is known to be software-carried", labels, want)
+	}
+}
+
+// TestEnumerateInterfacesDegradesWhenSoftwareNetdevsAreUnreadable is the ports-directory case one
+// level down: the ports directory lists, and one port's association table is present and cannot be
+// read. The per-port reader reports that as a note and returns nothing, so the port named no netdev
+// and the index held nothing for the interface it serves. The note was discarded there, and the
+// interface came back with no record at all, which withdraws rdma.capable over a read failure.
+//
+// The rule is the one the ports-directory case keeps: a port that read nothing and said why is
+// recorded, and the interface it might have named gets an unverified record. A port with no table
+// at all says nothing and is not recorded; that is the sibling case of the table test.
+func TestEnumerateInterfacesDegradesWhenSoftwareNetdevsAreUnreadable(t *testing.T) {
+	f := newSysfsFixture(t)
+	f.physicalNIC("eth0", "0000:01:00.0")
+	f.addVirtualNetDevice("bond0", nil)
+	rel := f.addClassRDMA("rxe0", "", "")
+	f.write(filepath.Join(rel, "ports/1/state"), "4: ACTIVE")
+	f.write(filepath.Join(rel, "ports/1/phys_state"), "5: LinkUp")
+	f.write(filepath.Join(rel, "ports/1/gid_attrs/ndevs/0"), "bond0")
+
+	ndevsDir := filepath.Join(f.root, rel, "ports/1/gid_attrs/ndevs")
+	if err := os.Chmod(ndevsDir, 0o000); err != nil {
+		t.Fatalf("chmod %s: %v", ndevsDir, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(ndevsDir, 0o755) })
+	// A process with CAP_DAC_OVERRIDE reads through the mode bits. A case whose trigger never fired
+	// reads exactly like one that passed, so it is skipped instead of counted.
+	if _, err := os.ReadDir(ndevsDir); err == nil {
+		t.Skip("this process can list a mode-0000 directory, so an unreadable one cannot be staged here")
+	}
+
+	ifaces, err := enumerateInterfaces(f.root)
+	if err != nil {
+		t.Fatalf("enumerateInterfaces: %v — an unreadable association table degrades, it does not fail the pass",
+			err)
+	}
+
+	for _, name := range []string{"bond0", "eth0"} {
+		got := findInterface(ifaces, name)
+		if got == nil {
+			t.Fatalf("%s missing from the inventory", name)
+		}
+		if got.Link == nil || got.Link.State != workercore.DeviceInterfaceLinkStateUnverified {
+			t.Errorf("%s link = %+v, want unverified: the port that might name it could not be read, and no "+
+				"record at all would withdraw the node label over it", name, got.Link)
+			continue
+		}
+		if got.RDMA || got.RDMASoftware || got.RDMADevice != "" {
+			t.Errorf("%s rdma/software/device = %v/%v/%q, want all empty: the device that serves it is not known",
+				name, got.RDMA, got.RDMASoftware, got.RDMADevice)
+		}
+		for _, want := range []string{"software RDMA", "/gid_attrs/ndevs"} {
+			if !strings.Contains(got.Link.Reason, want) {
+				t.Errorf("%s reason %q does not carry %q", name, got.Link.Reason, want)
+			}
+		}
+	}
+
+	tree, err := newSysfsTree(f.root)
+	if err != nil {
+		t.Fatalf("newSysfsTree: %v", err)
+	}
+	tree.softwareRDMAIndex()
+	class := tree.rdmaClassIndex()
+	if class.unresolvable {
+		t.Error("an unreadable association table set the general unresolvable flag; that flag is for a " +
+			"hardware candidate and is read as an open question on every PCI path")
+	}
+	want := []string{filepath.Join(sysfsInfinibandDir, "rxe0", "ports", "1", "gid_attrs", "ndevs")}
+	if !slices.Equal(class.unreadableSoftwarePorts, want) {
+		t.Errorf("unreadable software paths = %v, want %v: the directory that could not be read, so the "+
+			"reason can name it", class.unreadableSoftwarePorts, want)
+	}
+
+	labels := nodefeature.ConstructRDMANodeLabels(rdmaLabelGroups(), ifaces)
+	wantLabels := map[string]string{
+		nodefeature.NodeRDMACapableLabelKey:  "true",
+		nodefeature.NodeRDMANumaLabelKey:     "0",
+		nodefeature.NodeRDMADistanceLabelKey: "PIX",
+	}
+	if !maps.Equal(labels, wantLabels) {
+		t.Errorf("labels = %v, want %v: the node keeps rdma.capable, and rdma.software is absent because "+
+			"no endpoint is known to be software-carried", labels, wantLabels)
 	}
 }
 
