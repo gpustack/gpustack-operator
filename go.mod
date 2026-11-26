@@ -20,6 +20,7 @@ replace (
 )
 
 require (
+	dario.cat/mergo v1.0.1
 	github.com/BurntSushi/toml v1.6.0
 	github.com/akerl/go-indefinite-article v0.0.1
 	github.com/alitto/pond/v2 v2.7.1
@@ -90,7 +91,6 @@ require (
 
 require (
 	cel.dev/expr v0.25.2 // indirect
-	dario.cat/mergo v1.0.1 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/MakeNowJust/heredoc v1.0.0 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
