@@ -978,6 +978,8 @@ func observeModelDeploymentGroupForwardPair(
 	defer cancel()
 
 	var metricsChecked bool
+	prefillMetricsURL := modelDeploymentGroupForwardPairMetricsURL(prefillHead, prefillURL, engine.Path)
+	decodeMetricsURL := modelDeploymentGroupForwardPairMetricsURL(decodeHead, decodeURL, engine.Path)
 
 	for prefillRank := 0; prefillRank < prefillWidth; prefillRank++ {
 		for decodeRank := 0; decodeRank < decodeWidth; decodeRank++ {
@@ -989,26 +991,14 @@ func observeModelDeploymentGroupForwardPair(
 			}
 
 			var beforePrefillMetrics, beforeDecodeMetrics []byte
-			if !metricsChecked && engine.Metrics {
-				var err error
-				beforePrefillMetrics, err = modelDeploymentGroupForwardPairMetricsScrape(
-					probeCtx, prefillURL, engine.Path, fetch,
+			var beforePrefillErr, beforeDecodeErr error
+			if viaProxy && !metricsChecked && engine.Metrics {
+				beforePrefillMetrics, beforePrefillErr = modelDeploymentGroupForwardPairMetricsScrape(
+					probeCtx, prefillMetricsURL, fetch,
 				)
-				if err != nil {
-					return modelDeploymentGroupForwardPairHeld(attempt, modelDeploymentGroupForward{
-						State:  modelDeploymentGroupForwardUnknown,
-						Reason: "the prefill half's metrics endpoint did not answer before the probe: " + err.Error(),
-					})
-				}
-				beforeDecodeMetrics, err = modelDeploymentGroupForwardPairMetricsScrape(
-					probeCtx, decodeURL, engine.Path, fetch,
+				beforeDecodeMetrics, beforeDecodeErr = modelDeploymentGroupForwardPairMetricsScrape(
+					probeCtx, decodeMetricsURL, fetch,
 				)
-				if err != nil {
-					return modelDeploymentGroupForwardPairHeld(attempt, modelDeploymentGroupForward{
-						State:  modelDeploymentGroupForwardUnknown,
-						Reason: "the decode half's metrics endpoint did not answer before the probe: " + err.Error(),
-					})
-				}
 			}
 
 			reply, room, reason := modelDeploymentGroupForwardPairProbe(
@@ -1027,35 +1017,15 @@ func observeModelDeploymentGroupForwardPair(
 				// the room it joins the pair on and this operator never builds one there.
 				attempt.BootstrapRooms = append(attempt.BootstrapRooms, room)
 			}
-			if !metricsChecked && engine.Metrics {
+			if viaProxy && !metricsChecked && engine.Metrics {
 				metricsChecked = true
-				afterPrefillMetrics, err := modelDeploymentGroupForwardPairMetricsScrape(
-					probeCtx, prefillURL, engine.Path, fetch,
+				confirmed, mooncakeLines, deltaReason := modelDeploymentGroupForwardPairCheckMetrics(
+					probeCtx, prefillMetricsURL, decodeMetricsURL,
+					beforePrefillMetrics, beforePrefillErr,
+					beforeDecodeMetrics, beforeDecodeErr,
+					fetch,
 				)
-				if err != nil {
-					return modelDeploymentGroupForwardPairHeld(attempt, modelDeploymentGroupForward{
-						State:  modelDeploymentGroupForwardUnknown,
-						Reason: "the prefill half's metrics endpoint did not answer after the probe: " + err.Error(),
-					})
-				}
-				afterDecodeMetrics, err := modelDeploymentGroupForwardPairMetricsScrape(
-					probeCtx, decodeURL, engine.Path, fetch,
-				)
-				if err != nil {
-					return modelDeploymentGroupForwardPairHeld(attempt, modelDeploymentGroupForward{
-						State:  modelDeploymentGroupForwardUnknown,
-						Reason: "the decode half's metrics endpoint did not answer after the probe: " + err.Error(),
-					})
-				}
-				attempt.Mooncake = append(attempt.Mooncake,
-					modelDeploymentGroupForwardPairMooncakeLines(afterPrefillMetrics, "prefill")...)
-				attempt.Mooncake = append(attempt.Mooncake,
-					modelDeploymentGroupForwardPairMooncakeLines(afterDecodeMetrics, "decode")...)
-
-				confirmed, deltaReason := modelDeploymentGroupForwardPairVerifyMetricsDelta(
-					beforePrefillMetrics, afterPrefillMetrics,
-					beforeDecodeMetrics, afterDecodeMetrics,
-				)
+				attempt.Mooncake = append(attempt.Mooncake, mooncakeLines...)
 				if deltaReason != "" {
 					return modelDeploymentGroupForwardPairHeld(attempt, modelDeploymentGroupForward{
 						State: modelDeploymentGroupForwardUnknown, Reason: deltaReason,
@@ -1150,16 +1120,98 @@ const (
 	modelDeploymentVLLMMetricMooncakeTransferred = "vllm:mooncake_bytes_transferred_count"
 	// modelDeploymentVLLMMetricMooncakeFailedRecvs is vLLM MooncakeConnector's receiver failure count.
 	modelDeploymentVLLMMetricMooncakeFailedRecvs = "vllm:mooncake_num_failed_recvs"
+	// modelDeploymentGroupForwardPairMetricsRetries bounds post-probe re-scrapes when an engine
+	// accounts counters asynchronously after the HTTP completion flushes.
+	modelDeploymentGroupForwardPairMetricsRetries = 2
 )
+
+// modelDeploymentGroupForwardPairMetricsRetryDelay is the pause between post-probe re-scrapes when
+// prefill counters have not yet advanced. Overridden to 0 in unit tests.
+var modelDeploymentGroupForwardPairMetricsRetryDelay = 100 * time.Millisecond
+
+// modelDeploymentGroupForwardPairMetricsURL builds the /metrics endpoint for one half using the
+// engine's own prometheus.io/port annotation (bypassing any routing-proxy front door), falling back
+// to the request endpoint URL when the annotation is absent.
+func modelDeploymentGroupForwardPairMetricsURL(head *core.Pod, fallbackURL, enginePath string) string {
+	if head != nil {
+		if url, err := modelDeploymentGroupForwardURL(head, "/metrics"); err == nil {
+			return url
+		}
+	}
+
+	return strings.TrimSuffix(fallbackURL, enginePath) + "/metrics"
+}
 
 // modelDeploymentGroupForwardPairMetricsScrape fetches one half's /metrics exposition.
 func modelDeploymentGroupForwardPairMetricsScrape(
-	ctx context.Context, endpointURL, enginePath string, fetch modelDeploymentGroupForwardPairFetch,
+	ctx context.Context, metricsURL string, fetch modelDeploymentGroupForwardPairFetch,
 ) ([]byte, error) {
 	return fetch(ctx, modelDeploymentGroupForwardPairRequest{
 		Method: http.MethodGet,
-		URL:    strings.TrimSuffix(endpointURL, enginePath) + "/metrics",
+		URL:    metricsURL,
 	})
+}
+
+// modelDeploymentGroupForwardPairCheckMetrics scrapes post-probe /metrics and verifies counter
+// deltas against the pre-probe baseline, retrying briefly if asynchronous counter flushes lag the
+// HTTP response. Scrape failures degrade to the bound-completion verdict rather than deadlocking
+// healthy deployments whose metrics port is disabled or unreachable.
+func modelDeploymentGroupForwardPairCheckMetrics(
+	ctx context.Context, prefillMetricsURL, decodeMetricsURL string,
+	beforePrefill []byte, beforePrefillErr error,
+	beforeDecode []byte, beforeDecodeErr error,
+	fetch modelDeploymentGroupForwardPairFetch,
+) (bool, []string, string) {
+	var (
+		afterPrefill, afterDecode       []byte
+		afterPrefillErr, afterDecodeErr error
+		confirmed                       bool
+		deltaReason                     string
+	)
+retryLoop:
+	for attempt := 0; attempt <= modelDeploymentGroupForwardPairMetricsRetries; attempt++ {
+		if attempt > 0 && modelDeploymentGroupForwardPairMetricsRetryDelay > 0 {
+			timer := time.NewTimer(modelDeploymentGroupForwardPairMetricsRetryDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				break retryLoop
+			case <-timer.C:
+			}
+		}
+		afterPrefill, afterPrefillErr = modelDeploymentGroupForwardPairMetricsScrape(ctx, prefillMetricsURL, fetch)
+		afterDecode, afterDecodeErr = modelDeploymentGroupForwardPairMetricsScrape(ctx, decodeMetricsURL, fetch)
+
+		var decodeCheck, prefillCheck bool
+		if beforeDecodeErr == nil && afterDecodeErr == nil {
+			decodeCheck = true
+		}
+		if beforePrefillErr == nil && afterPrefillErr == nil {
+			prefillCheck = true
+		}
+
+		confirmed, deltaReason = modelDeploymentGroupForwardPairVerifyMetricsDelta(
+			beforePrefill, afterPrefill, prefillCheck,
+			beforeDecode, afterDecode, decodeCheck,
+		)
+		if deltaReason == "" || strings.Contains(deltaReason, "failed mooncake receives") {
+			break
+		}
+	}
+
+	var lines []string
+	if afterPrefillErr != nil {
+		lines = append(lines, "prefill: the mooncake exposition did not answer: "+afterPrefillErr.Error())
+	} else {
+		lines = append(lines, modelDeploymentGroupForwardPairMooncakeLines(afterPrefill, "prefill")...)
+	}
+	if afterDecodeErr != nil {
+		lines = append(lines, "decode: the mooncake exposition did not answer: "+afterDecodeErr.Error())
+	} else {
+		lines = append(lines, modelDeploymentGroupForwardPairMooncakeLines(afterDecode, "decode")...)
+	}
+
+	return confirmed, lines, deltaReason
 }
 
 // modelDeploymentGroupForwardPairMooncakeLines extracts non-bucket vllm:mooncake_ series lines
@@ -1180,23 +1232,34 @@ func modelDeploymentGroupForwardPairMooncakeLines(body []byte, half string) []st
 }
 
 // modelDeploymentGroupForwardPairVerifyMetricsDelta compares pre- and post-probe Prometheus
-// expositions to verify that a vLLM pair request actually traversed the prefill half without
+// expositions to corroborate that prefill counters advanced during the probe window without
 // decode-side transfer failures.
+//
+// Note: Prometheus counters are engine-wide rather than per-request, so on an already-serving
+// prefill engine concurrent traffic can also advance counters; this is window-level corroboration,
+// not per-request cryptographic attribution.
 //
 // Returns (confirmed, reason):
 //   - reason != "" means an exported counter contradicted disaggregation or recorded a failed receive.
 //   - confirmed == true means at least one prefill counter advanced (request_success_total or
 //     mooncake_bytes_transferred_count) and decode recorded zero new failed receives.
-//   - confirmed == false with reason == "" means the engine exported neither prefill counter (e.g.
-//     metrics stats disabled), so the probe relies on the bound completion alone without deadlocking.
+//   - confirmed == false with reason == "" means metrics were unavailable or exported neither prefill
+//     counter, so the probe falls back to the bound completion alone without deadlocking.
 func modelDeploymentGroupForwardPairVerifyMetricsDelta(
-	beforePrefill, afterPrefill, beforeDecode, afterDecode []byte,
+	beforePrefill, afterPrefill []byte, prefillAvailable bool,
+	beforeDecode, afterDecode []byte, decodeAvailable bool,
 ) (bool, string) {
-	if afterFailed, ok := modelDeploymentGroupForwardMetricSum(afterDecode, modelDeploymentVLLMMetricMooncakeFailedRecvs); ok {
-		beforeFailed, _ := modelDeploymentGroupForwardMetricSum(beforeDecode, modelDeploymentVLLMMetricMooncakeFailedRecvs)
-		if afterFailed > beforeFailed {
-			return false, "the decode half recorded failed mooncake receives during the pair probe"
+	if decodeAvailable {
+		if afterFailed, ok := modelDeploymentGroupForwardMetricSum(afterDecode, modelDeploymentVLLMMetricMooncakeFailedRecvs); ok {
+			beforeFailed, _ := modelDeploymentGroupForwardMetricSum(beforeDecode, modelDeploymentVLLMMetricMooncakeFailedRecvs)
+			if afterFailed > beforeFailed {
+				return false, "the decode half recorded failed mooncake receives during the pair probe"
+			}
 		}
+	}
+
+	if !prefillAvailable {
+		return false, ""
 	}
 
 	var confirmed bool
@@ -1596,8 +1659,8 @@ func modelDeploymentGroupForwardPairVerified(
 			"with the named prefiller, matching this operator's own request identifier"
 		observation = "the routing proxy completed one warmup request, bound to this operator's own identifier"
 		if attempt.PrefillMetricsConfirmed {
-			reason += ", and prefill metrics advanced with zero decode transfer failures"
-			observation += "; prefill metrics delta confirmed"
+			reason += ", and prefill metrics advanced during the probe window with zero new decode transfer failures"
+			observation += "; prefill metrics window delta observed"
 		}
 	}
 	if len(attempt.Mooncake) > 0 {

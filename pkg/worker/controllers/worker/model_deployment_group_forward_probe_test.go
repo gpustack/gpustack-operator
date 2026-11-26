@@ -891,17 +891,26 @@ func TestGroupForwardProbePDPairIgnoresGeneratedText(t *testing.T) {
 // TestGroupForwardProbePDPairVerifiesVLLMMetricsDelta covers the pre- and post-probe Prometheus
 // counter delta checks on vLLM pairs driven through the llm-d routing proxy.
 func TestGroupForwardProbePDPairVerifiesVLLMMetricsDelta(t *testing.T) {
+	origDelay := modelDeploymentGroupForwardPairMetricsRetryDelay
+	modelDeploymentGroupForwardPairMetricsRetryDelay = 0
+	t.Cleanup(func() {
+		modelDeploymentGroupForwardPairMetricsRetryDelay = origDelay
+	})
+
 	testCases := []struct {
-		name              string
-		beforePrefill     string
-		afterPrefill      string
-		beforeDecode      string
-		afterDecode       string
-		failStage         string
-		wantState         modelDeploymentGroupForwardState
-		wantConfirmed     bool
-		wantInReason      string
-		wantInObservation string
+		name               string
+		beforePrefill      string
+		afterPrefill       string
+		afterPrefillRetry  string
+		beforeDecode       string
+		afterDecode        string
+		failStage          string
+		decodeEnginePort   string
+		wantState          modelDeploymentGroupForwardState
+		wantConfirmed      bool
+		wantInReason       string
+		wantInObservation  string
+		wantDecodeMetricOn string
 	}{
 		{
 			name: "mooncake and request_success advance with zero failed recvs",
@@ -909,12 +918,14 @@ func TestGroupForwardProbePDPairVerifiesVLLMMetricsDelta(t *testing.T) {
 				"vllm:mooncake_bytes_transferred_count 1.0\n",
 			afterPrefill: "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 2.0\n" +
 				"vllm:mooncake_bytes_transferred_count 2.0\n",
-			beforeDecode:      "vllm:mooncake_num_failed_recvs 0.0\n",
-			afterDecode:       "vllm:mooncake_num_failed_recvs 0.0\n",
-			wantState:         modelDeploymentGroupForwardVerified,
-			wantConfirmed:     true,
-			wantInReason:      "prefill metrics advanced with zero decode transfer failures",
-			wantInObservation: "prefill: vllm:mooncake_bytes_transferred_count 2.0",
+			beforeDecode:       "vllm:mooncake_num_failed_recvs 0.0\n",
+			afterDecode:        "vllm:mooncake_num_failed_recvs 0.0\n",
+			decodeEnginePort:   "8200",
+			wantState:          modelDeploymentGroupForwardVerified,
+			wantConfirmed:      true,
+			wantInReason:       "prefill metrics advanced during the probe window with zero new decode transfer failures",
+			wantInObservation:  "prefill: vllm:mooncake_bytes_transferred_count 2.0",
+			wantDecodeMetricOn: ":8200/metrics",
 		},
 		{
 			name:              "non-mooncake connector verified via universal prefill request_success_total",
@@ -924,8 +935,19 @@ func TestGroupForwardProbePDPairVerifiesVLLMMetricsDelta(t *testing.T) {
 			afterDecode:       "# no mooncake series\n",
 			wantState:         modelDeploymentGroupForwardVerified,
 			wantConfirmed:     true,
-			wantInReason:      "prefill metrics advanced with zero decode transfer failures",
-			wantInObservation: "prefill metrics delta confirmed",
+			wantInReason:      "prefill metrics advanced during the probe window",
+			wantInObservation: "prefill metrics window delta observed",
+		},
+		{
+			name:              "delayed async counter flush succeeds on post-probe re-scrape",
+			beforePrefill:     "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 0.0\n",
+			afterPrefill:      "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 0.0\n",
+			afterPrefillRetry: "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 1.0\n",
+			beforeDecode:      "vllm:mooncake_num_failed_recvs 0.0\n",
+			afterDecode:       "vllm:mooncake_num_failed_recvs 0.0\n",
+			wantState:         modelDeploymentGroupForwardVerified,
+			wantConfirmed:     true,
+			wantInReason:      "prefill metrics advanced during the probe window",
 		},
 		{
 			name:          "stalled prefill request_success_total holds pair as decode-only fallback",
@@ -959,19 +981,24 @@ func TestGroupForwardProbePDPairVerifiesVLLMMetricsDelta(t *testing.T) {
 			wantInReason: "failed mooncake receives",
 		},
 		{
-			name:         "prefill metrics unreachable before probe holds pair",
-			failStage:    "before-prefill",
-			wantState:    modelDeploymentGroupForwardUnknown,
-			wantInReason: "prefill half's metrics endpoint did not answer before",
+			name:              "prefill metrics unreachable degrades cleanly to bound completion verdict",
+			failStage:         "before-prefill",
+			beforeDecode:      "vllm:mooncake_num_failed_recvs 0.0\n",
+			afterDecode:       "vllm:mooncake_num_failed_recvs 0.0\n",
+			wantState:         modelDeploymentGroupForwardVerified,
+			wantConfirmed:     false,
+			wantInReason:      "routing proxy completed the warmup probe",
+			wantInObservation: "prefill: the mooncake exposition did not answer",
 		},
 		{
-			name:          "decode metrics unreachable after probe holds pair",
-			beforePrefill: "vllm:request_success_total{finished_reason=\"length\"} 0.0\n",
-			afterPrefill:  "vllm:request_success_total{finished_reason=\"length\"} 1.0\n",
-			beforeDecode:  "vllm:mooncake_num_failed_recvs 0.0\n",
-			failStage:     "after-decode",
-			wantState:     modelDeploymentGroupForwardUnknown,
-			wantInReason:  "decode half's metrics endpoint did not answer after",
+			name:              "decode metrics unreachable after probe degrades cleanly without deadlocking",
+			beforePrefill:     "vllm:request_success_total{finished_reason=\"length\"} 0.0\n",
+			afterPrefill:      "vllm:request_success_total{finished_reason=\"length\"} 1.0\n",
+			beforeDecode:      "vllm:mooncake_num_failed_recvs 0.0\n",
+			failStage:         "after-decode",
+			wantState:         modelDeploymentGroupForwardVerified,
+			wantConfirmed:     true,
+			wantInObservation: "decode: the mooncake exposition did not answer",
 		},
 		{
 			name:          "stats disabled (no prefill counters exported) verifies on bound completion alone",
@@ -987,14 +1014,24 @@ func TestGroupForwardProbePDPairVerifiesVLLMMetricsDelta(t *testing.T) {
 
 	md := probePairDeployment(workercore.ModelDeploymentEngineVLLM, 1, 1, workercore.ModelDeploymentRouterLLMD)
 	prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
-	decode := probePairView("decode", 0, probePairMember(1, 0, "uid-d", ""))
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			decodeMember := probePairMember(1, 0, "uid-d", "")
+			if tc.decodeEnginePort != "" {
+				decodeMember = probePairEnginePortMember(1, 0, "uid-d", tc.decodeEnginePort)
+			}
+			decode := probePairView("decode", 0, decodeMember)
+
 			var postDone atomic.Bool
+			var afterPrefillScrapes atomic.Int64
+			var seenDecodeMetricsURL string
 			fetch := func(_ context.Context, request modelDeploymentGroupForwardPairRequest) ([]byte, error) {
-				isPrefill := strings.Contains(request.URL, probeHost(0, 0))
+				isPrefill := strings.Contains(request.URL, probeMemberIP(0, 0))
 				if request.Method == http.MethodGet {
+					if !isPrefill {
+						seenDecodeMetricsURL = request.URL
+					}
 					stage := "before-"
 					if postDone.Load() {
 						stage = "after-"
@@ -1004,13 +1041,17 @@ func TestGroupForwardProbePDPairVerifiesVLLMMetricsDelta(t *testing.T) {
 					} else {
 						stage += "decode"
 					}
-					if tc.failStage == stage {
+					if tc.failStage == stage || (tc.failStage == "before-prefill" && stage == "after-prefill") {
 						return nil, errors.New("connection refused")
 					}
 					switch stage {
 					case "before-prefill":
 						return []byte(tc.beforePrefill), nil
 					case "after-prefill":
+						n := afterPrefillScrapes.Add(1)
+						if n > 1 && tc.afterPrefillRetry != "" {
+							return []byte(tc.afterPrefillRetry), nil
+						}
 						return []byte(tc.afterPrefill), nil
 					case "before-decode":
 						return []byte(tc.beforeDecode), nil
@@ -1035,8 +1076,38 @@ func TestGroupForwardProbePDPairVerifiesVLLMMetricsDelta(t *testing.T) {
 			if tc.wantInObservation != "" {
 				assert.Contains(t, got.Decode.Observation, tc.wantInObservation)
 			}
+			if tc.wantDecodeMetricOn != "" {
+				assert.Contains(t, seenDecodeMetricsURL, tc.wantDecodeMetricOn,
+					"decode /metrics should scrape the engine's own prometheus.io/port rather than the proxy port")
+			}
 		})
 	}
+}
+
+// TestGroupForwardMetricSumEdgeCases covers Prometheus text parsing edge cases including quoted
+// braces/escapes in label values, prefix collisions, timestamps, NaN/Inf, and multi-series sums.
+func TestGroupForwardMetricSumEdgeCases(t *testing.T) {
+	exposition := strings.Join([]string{
+		"# HELP vllm:request_success_total Count of successfully processed requests.",
+		"# TYPE vllm:request_success_total counter",
+		`vllm:request_success_total_extra 99.0`,
+		`vllm:request_success_total{model="a}b\"c",finished_reason="stop"} 2.0 1700000000000`,
+		`vllm:request_success_total{model="a}b\"c",finished_reason="length"} 3.5`,
+		`vllm:request_success_total{finished_reason="bad"} NaN`,
+		`vllm:request_success_total{finished_reason="inf"} +Inf`,
+		`vllm:mooncake_bytes_transferred_count 4`,
+	}, "\n")
+
+	sum, ok := modelDeploymentGroupForwardMetricSum([]byte(exposition), modelDeploymentVLLMMetricRequestSuccess)
+	assert.True(t, ok)
+	assert.InDelta(t, 5.5, sum, 1e-9)
+
+	push, ok := modelDeploymentGroupForwardMetricSum([]byte(exposition), modelDeploymentVLLMMetricMooncakeTransferred)
+	assert.True(t, ok)
+	assert.InDelta(t, 4.0, push, 1e-9)
+
+	_, ok = modelDeploymentGroupForwardMetricSum([]byte(exposition), modelDeploymentVLLMMetricMooncakeFailedRecvs)
+	assert.False(t, ok)
 }
 
 // TestGroupForwardProbePDPairHoldsOnAnythingItCannotSee is the fail-closed contract of the directed
