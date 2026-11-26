@@ -3,11 +3,18 @@ package worker
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
 
 	core "k8s.io/api/core/v1"
+	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 )
 
 // ModelDeploymentConditionCacheAttached reports whether the cache is observed to be in effect,
@@ -19,6 +26,12 @@ import (
 // fails loudly instead. One switch's failure mode cannot be inferred from another's, so this
 // condition is judged downstream of the engine and never on a render or a log line.
 const ModelDeploymentConditionCacheAttached kubeapistatus.ConditionType = "CacheAttached"
+
+// modelDeploymentCacheRequeue is how often a deployment bound to a pool is looked at again once it
+// has converged, so that CacheAttached follows the traffic it reports. Bounded and named: a scrape
+// of every ready store client runs on each of these passes, and an unbounded interval would be the
+// multi-hour resync this exists to replace.
+const modelDeploymentCacheRequeue = 30 * time.Second
 
 const (
 	modelDeploymentReasonCacheActive            = "CacheActive"
@@ -59,6 +72,20 @@ const (
 	ModelDeploymentCacheActive
 )
 
+// ModelDeploymentCacheAccount is one replica's own account of its KV cache client, as one scrape read
+// it: the verdict the account supports and the transfer counts it rests on.
+type ModelDeploymentCacheAccount struct {
+	// Reading is the verdict. Unreadable is the zero value, which is also what a scrape that carried
+	// no store family returns.
+	Reading ModelDeploymentCacheReading
+	// Attempted is how many transfer operations (save_put and load_get) the replica's process has
+	// attempted, over every status, since it started.
+	Attempted float64
+	// Failed is how many of those failed in full, which is the client's status "error": every key of
+	// that operation was refused.
+	Failed float64
+}
+
 // ModelDeploymentCacheScraper reads one replica's own account of its KV cache client.
 //
 // It is an INTERFACE THE RECONCILER TAKES rather than a dial it makes, because every case that
@@ -69,20 +96,16 @@ const (
 // domain-level figure cannot attribute — with a healthy deployment and a broken one on one Binding,
 // the healthy one's writes would report the broken one as attached.
 //
-// TODO: nothing in production assigns a scraper to the reconciler, so every ready replica reads as
-// giving no account and the two verdicts that need one — CacheActive from a succeeding replica, and
-// CacheOperationsFailing — are UNREACHABLE. A serving deployment whose every store operation fails
-// therefore reports Unknown. The tests pass because they inject a fake, so reading this file alone
-// suggests the path runs. Wiring a real one belongs with the per-Pod scrape path that metrics
-// aggregation has to build regardless; a second path built only for this condition would duplicate
-// it.
+// A NIL SCRAPER IS THE PRODUCTION ONE, which reads the engine's own Prometheus exposition, the way
+// a nil groupForwardFetch is the production transport. Wired where it is read rather than in
+// SetupController, so a pass never depends on a seam somebody remembered to assign.
 type ModelDeploymentCacheScraper interface {
 	// ScrapeCache reads one replica's account.
 	//
 	// A non-nil error means the account could not be read at all, and the reading is then
 	// Unreadable. Unreadable with a nil error is the other way to not have an account: the endpoint
-	// answered, and carried no store metric family.
-	ScrapeCache(ctx context.Context, pod *core.Pod) (ModelDeploymentCacheReading, error)
+	// answered, and carried no store transfer.
+	ScrapeCache(ctx context.Context, pod *core.Pod) (ModelDeploymentCacheAccount, error)
 }
 
 // observeModelDeploymentCache folds the cache-attachment reading into the status.
@@ -118,13 +141,49 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentCache(
 		return
 	}
 
-	active, failing, unreadable := r.readModelDeploymentCache(ctx, ready)
+	// ONLY THE ROLES THAT RENDER A STORE CLIENT ARE ASKED. An encoder stage holds no KV cache, and
+	// a disaggregated vLLM decode half receives its blocks from its prefiller; neither carries a
+	// client, so asking either would return no account and count it as a replica that stayed
+	// silent. Which roles carry one is the renderer's own answer, asked through
+	// ModelDeploymentRoleRendersStore rather than restated here per engine.
+	ready = modelDeploymentStoreClientReplicas(md, ready)
+	if len(ready) == 0 {
+		ModelDeploymentConditionCacheAttached.Unknown(holder, modelDeploymentReasonNoObservationAvailable,
+			"no ready replica belongs to a role that renders a store client, so no engine has an account to give")
+
+		return
+	}
+
+	accounts := r.readModelDeploymentCache(ctx, ready)
+	pool := r.resolveModelDeploymentCachePool(ctx, md, domain)
+	var active, failing, unreadable int
+	for _, account := range accounts {
+		switch account.account.Reading {
+		case ModelDeploymentCacheActive:
+			active++
+		case ModelDeploymentCacheFailing:
+			failing++
+		default:
+			unreadable++
+		}
+	}
 
 	switch {
 	case active > 0:
-		ModelDeploymentConditionCacheAttached.True(holder, modelDeploymentReasonCacheActive,
-			fmt.Sprintf("%d of %d ready replicas report succeeding store operations",
-				active, len(ready)))
+		message := fmt.Sprintf("%s; %d of %d ready replicas report succeeding store transfers (%s)",
+			pool.describe(), active, len(ready),
+			modelDeploymentCacheAccountsLine(md, accounts, ModelDeploymentCacheActive))
+		// A SIBLING'S FAILURE IS NAMED RATHER THAN OUTVOTED. One replica succeeding says the cache is
+		// in effect for the deployment, and the replica that fails says something about its own node
+		// that the count alone would hide.
+		if failing > 0 {
+			message += fmt.Sprintf("; %d report transfers of which none succeeded (%s)", failing,
+				modelDeploymentCacheAccountsLine(md, accounts, ModelDeploymentCacheFailing))
+		}
+		if unreadable > 0 {
+			message += fmt.Sprintf("; %d gave no account", unreadable)
+		}
+		ModelDeploymentConditionCacheAttached.True(holder, modelDeploymentReasonCacheActive, message)
 
 	case failing > 0:
 		// NOT an absence, and this is the one state with no nearer observer. A connector that
@@ -132,10 +191,22 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentCache(
 		// failure is already reported as a replica that never becomes Ready. This one is different:
 		// the engine is Ready and serving, and every store operation it attempts fails. Nothing else
 		// in the status says so, which is why it is False here rather than Unknown.
-		ModelDeploymentConditionCacheAttached.False(holder,
-			modelDeploymentReasonCacheOperationsFailing,
-			fmt.Sprintf("%d of %d ready replicas report store operations of which none succeeded; "+
-				"the engine is serving without the cache", failing, len(ready)))
+		message := fmt.Sprintf("%s; %d of %d ready replicas report store transfers of which none succeeded, "+
+			"so the engine is serving without the cache (%s)",
+			pool.describe(), failing, len(ready),
+			modelDeploymentCacheAccountsLine(md, accounts, ModelDeploymentCacheFailing))
+		if unreadable > 0 {
+			message += fmt.Sprintf("; %d gave no account", unreadable)
+		}
+		// THE ONE CAUSE THE OBJECT ITSELF CAN NAME. A pool whose every transport reaches the host
+		// fabric refuses a client that holds no fabric interface, and a role that requests none says
+		// so in its own spec. Named here because it is the difference between a pool to fix and a
+		// field to set.
+		for _, role := range modelDeploymentCacheInterfacelessRoles(md, accounts, pool) {
+			message += fmt.Sprintf("; role %q requests resources.interface: %s, so this engine has no RDMA "+
+				"interface while every transport of the pool requires one", role.Name, modelDeploymentRoleInterface(role))
+		}
+		ModelDeploymentConditionCacheAttached.False(holder, modelDeploymentReasonCacheOperationsFailing, message)
 
 	case domain != nil && modelDeploymentDomainHoldsData(domain):
 		// The corroborating signal, used only where no replica gave an account. It is the master's
@@ -158,41 +229,254 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentCache(
 		// domain holds nothing either.
 		ModelDeploymentConditionCacheAttached.Unknown(holder,
 			modelDeploymentReasonNoObservationAvailable,
-			fmt.Sprintf("none of the %d ready replicas gave an account of its cache client and the "+
-				"reuse domain reports nothing held; an attached deployment that is idle looks "+
-				"exactly like this, so it is not reported as detached", unreadable))
+			fmt.Sprintf("%s; no store transfer was observed: none of the %d ready replicas gave an account "+
+				"of its cache client and the reuse domain reports nothing held; an attached deployment "+
+				"that is idle looks exactly like this, so it is not reported as detached",
+				pool.describe(), len(ready)))
 	}
 }
 
-// readModelDeploymentCache scrapes every ready replica and counts what came back.
+// modelDeploymentCacheReplicaAccount is one ready replica's account, with the replica that gave it.
+type modelDeploymentCacheReplicaAccount struct {
+	pod     *core.Pod
+	account ModelDeploymentCacheAccount
+}
+
+// readModelDeploymentCache scrapes every ready replica it is given and returns what came back.
 //
-// A scraper the reconciler was built without is every replica unreadable rather than an error: the
-// condition's whole contract is that an unread signal is Unknown.
+// A scrape that failed is an Unreadable account rather than an error: the condition's whole contract
+// is that an unread signal is Unknown.
 func (r *ModelDeploymentReconciler) readModelDeploymentCache(
 	ctx context.Context, ready []*core.Pod,
-) (active, failing, unreadable int) {
-	if r.CacheScraper == nil {
-		return 0, 0, len(ready)
+) []modelDeploymentCacheReplicaAccount {
+	scraper := r.CacheScraper
+	if scraper == nil {
+		scraper = defaultModelDeploymentCacheScraper
 	}
 
+	accounts := make([]modelDeploymentCacheReplicaAccount, 0, len(ready))
 	for _, pod := range ready {
-		reading, err := r.CacheScraper.ScrapeCache(ctx, pod)
+		account, err := scraper.ScrapeCache(ctx, pod)
 		if err != nil {
-			unreadable++
+			account = ModelDeploymentCacheAccount{}
+		}
+		accounts = append(accounts, modelDeploymentCacheReplicaAccount{pod: pod, account: account})
+	}
 
+	return accounts
+}
+
+// modelDeploymentStoreClientReplicas keeps the ready replicas of the roles that render a store client.
+//
+// A replica of a role the spec no longer declares was already dropped by the caller, so a nil role
+// here is not a shape this filter has to decide on.
+func modelDeploymentStoreClientReplicas(md *workercore.ModelDeployment, ready []*core.Pod) []*core.Pod {
+	declared := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		declared[md.Spec.Roles[i].Name] = &md.Spec.Roles[i]
+	}
+
+	kept := make([]*core.Pod, 0, len(ready))
+	for _, pod := range ready {
+		role := declared[modelDeploymentPodRole(pod)]
+		if role != nil && ModelDeploymentRoleRendersStore(md, role) {
+			kept = append(kept, pod)
+		}
+	}
+
+	return kept
+}
+
+// modelDeploymentBoundRoleAddress stands in for the pool's address where the question is only WHICH
+// roles render a store client. The renderer's predicate reads the address for presence alone, and
+// presence is not in question for a deployment that declares a pool: whether the pool currently
+// publishes its endpoint decides what a replica was rendered with, which the scrape itself reports.
+const modelDeploymentBoundRoleAddress = "bound"
+
+// ModelDeploymentRoleRendersStore reports whether this operator renders the shared store client onto
+// one role of a pool-bound deployment.
+//
+// IT IS THE RENDERER'S OWN ANSWER, asked through inject.RendersStore with the role's kind, the
+// engine family and the point-to-point leg, and never a second table: a decoder keeps off the store
+// under vLLM and keeps it under SGLang, and which is which is that package's to know.
+//
+// THREE ROLES NEVER CARRY A CLIENT AND SO NEVER ANSWER. A take-over role runs a command line this
+// operator adds nothing to. An encoder stage holds no KV cache. A disaggregated vLLM decode half
+// receives its blocks from its prefiller. Admission asks this before warning about a missing fabric
+// interface, and adding one to a decode role would move the direct transfer onto the fabric.
+//
+// A deployment that declares no pool renders no client on any role.
+func ModelDeploymentRoleRendersStore(md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole) bool {
+	if md.Spec.KVCache == nil || len(role.Command) > 0 {
+		return false
+	}
+	injectRole, ok := modelDeploymentInjectRole(ModelDeploymentEffectiveRoleKind(role))
+	if !ok {
+		return false
+	}
+	engine, err := ModelDeploymentInjectEngine(md.Spec.Engine.Name, "")
+	if err != nil {
+		return false
+	}
+
+	return inject.RendersStore(inject.Input{
+		Engine:     engine,
+		Role:       injectRole,
+		Connection: inject.Connection{MasterAddress: modelDeploymentBoundRoleAddress},
+		KVTransfer: modelDeploymentUsesKVTransfer(md, role),
+	})
+}
+
+// modelDeploymentCachePoolFact is what the cache condition can say about the pool a deployment
+// writes to. Every field is for the message; nothing in the verdict reads it.
+type modelDeploymentCachePoolFact struct {
+	// kind and name name the object the fact was read down to: "pool" once the pool resolved, and
+	// "binding" while only the deployment's own reference is known.
+	kind string
+	name string
+	// transports is what the pool's backend offers an engine, in group order. nil when the backend
+	// could not be read.
+	transports []string
+	// needsInterface says whether every transport reaches the host's fabric.
+	needsInterface bool
+}
+
+// describe names the pool and its transports for a condition message.
+func (f modelDeploymentCachePoolFact) describe() string {
+	transports := "unresolved"
+	if len(f.transports) > 0 {
+		transports = fmt.Sprintf("%v", f.transports)
+	}
+
+	return fmt.Sprintf("%s %q (transports: %s)", f.kind, f.name, transports)
+}
+
+// resolveModelDeploymentCachePool reads the pool and the backend the deployment's Binding points at,
+// through the same chain the connection resolves through.
+//
+// IT IS LENIENT AT EVERY STEP, because it feeds a message and not a verdict: an unreadable object
+// leaves the fact at whatever it resolved down to, and the condition's Unknown is the verdict's own
+// answer to a Binding that does not resolve.
+func (r *ModelDeploymentReconciler) resolveModelDeploymentCachePool(
+	ctx context.Context, md *workercore.ModelDeployment, domain *modelDeploymentDomain,
+) modelDeploymentCachePoolFact {
+	fact := modelDeploymentCachePoolFact{kind: "binding", name: md.Spec.KVCache.PoolRef.Name}
+	if domain == nil || domain.KVCache == nil {
+		return fact
+	}
+	fact.kind, fact.name = "pool", domain.KVCache.Pool
+
+	pool := new(workercore.KVCachePool)
+	if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: fact.name}, pool); err != nil || len(pool.Spec.Backends) == 0 {
+		return fact
+	}
+	backend := new(workercore.KVCacheBackend)
+	if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: pool.Spec.Backends[0]}, backend); err != nil {
+		return fact
+	}
+	fact.transports = mooncake.MemberProtocols(backend)
+	fact.needsInterface = ModelDeploymentPoolTransportsNeedInterface(backend)
+
+	return fact
+}
+
+// ModelDeploymentPoolTransportsNeedInterface reports whether every member group of a backend reaches
+// the host's fabric, which is what makes an engine with no fabric interface of its own unable to
+// transfer to the pool at all.
+//
+// rdma and efa reach it unconditionally. ascend reaches it only when the group opts into Ascend A5
+// Host RoCE with a positive fabricInterfaceCount; the same protocol with the count left unset is
+// the shape that stays off the host fabric, and never needs the interface. tcp never does. An
+// external backend that declares no member group is judged on its one backend-wide transport.
+//
+// It is EXPORTED because admission asks the same question before warning about a role that writes
+// to such a pool without requesting an interface, and a second copy of the rule would disagree with
+// this one on the first protocol added.
+func ModelDeploymentPoolTransportsNeedInterface(kvcb *workercore.KVCacheBackend) bool {
+	managed := kvcb.Spec.Connection.Managed
+	if managed == nil || len(managed.Members) == 0 {
+		return mooncake.MemberGroupIsHostFabric(kvcb, workercore.KVCacheBackendMember{})
+	}
+	for i := range managed.Members {
+		if !mooncake.MemberGroupIsHostFabric(kvcb, managed.Members[i]) &&
+			!mooncake.MemberGroupUsesCANNHostRoCE(kvcb, managed.Members[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// modelDeploymentRoleInterface spells a role's resources.interface for a message: the value it
+// requests, or that it requests none.
+func modelDeploymentRoleInterface(role *workercore.ModelDeploymentRole) string {
+	if role == nil || role.Resources == nil || role.Resources.Interface == nil {
+		return "unset"
+	}
+
+	return role.Resources.Interface.String()
+}
+
+// modelDeploymentCacheAccountsLine renders the replicas whose account reads the given reading, each
+// with its role, the interface that role requests and its transfer counts. A replica that gave no
+// account has no counts to print, so it is not rendered here; the message counts it instead.
+func modelDeploymentCacheAccountsLine(
+	md *workercore.ModelDeployment, accounts []modelDeploymentCacheReplicaAccount,
+	reading ModelDeploymentCacheReading,
+) string {
+	roles := modelDeploymentRolesByName(md)
+	parts := make([]string, 0, len(accounts))
+	for _, entry := range accounts {
+		if entry.account.Reading != reading {
 			continue
 		}
-		switch reading {
-		case ModelDeploymentCacheActive:
-			active++
-		case ModelDeploymentCacheFailing:
-			failing++
-		case ModelDeploymentCacheUnreadable:
-			unreadable++
-		}
+		parts = append(parts, fmt.Sprintf("%s (role %q, resources.interface: %s): %s transfer operations "+
+			"attempted, %s failed", entry.pod.Name, modelDeploymentPodRole(entry.pod),
+			modelDeploymentRoleInterface(roles[modelDeploymentPodRole(entry.pod)]),
+			modelDeploymentCacheCount(entry.account.Attempted), modelDeploymentCacheCount(entry.account.Failed)))
 	}
 
-	return active, failing, unreadable
+	return strings.Join(parts, "; ")
+}
+
+// modelDeploymentRolesByName indexes the declared roles by name.
+func modelDeploymentRolesByName(md *workercore.ModelDeployment) map[string]*workercore.ModelDeploymentRole {
+	roles := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		roles[md.Spec.Roles[i].Name] = &md.Spec.Roles[i]
+	}
+
+	return roles
+}
+
+// modelDeploymentCacheInterfacelessRoles names the roles whose failing replicas request no fabric
+// interface while the pool needs one. A role is named once however many of its replicas fail.
+func modelDeploymentCacheInterfacelessRoles(
+	md *workercore.ModelDeployment, accounts []modelDeploymentCacheReplicaAccount, pool modelDeploymentCachePoolFact,
+) []*workercore.ModelDeploymentRole {
+	if !pool.needsInterface {
+		return nil
+	}
+
+	roles := modelDeploymentRolesByName(md)
+	var named []*workercore.ModelDeploymentRole
+	for _, entry := range accounts {
+		if entry.account.Reading != ModelDeploymentCacheFailing {
+			continue
+		}
+		role := roles[modelDeploymentPodRole(entry.pod)]
+		if role == nil || modelDeploymentRoleRequestsInterfaces(role) || slices.Contains(named, role) {
+			continue
+		}
+		named = append(named, role)
+	}
+
+	return named
+}
+
+// modelDeploymentCacheCount prints a counter the way an operator reads a count.
+func modelDeploymentCacheCount(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
 // modelDeploymentUnclaimableReplica names a replica of a declared role whose running command line

@@ -51,7 +51,7 @@ spec:
 | *`model.name`* | Supply the weights from the hub, role volumes or *`model.artifactRef`* ([Model Artifact](../model-delivery/artifact.md)). |
 | *`resources`* | Mirrors [Accelerator Requests](../devices/requests.md). The operator injects only the `cpu`, `ram` and `localStorage` values you set, with no unit preset. |
 | *`acceleratorType`* | If omitted, kube-scheduler places the `Pod`s directly without Kueue, and admission rejects accelerator requests. |
-| *`resources.interface`* | Optional. Requests `device.gpustack.ai/rdma.shared` for `1`, `device.gpustack.ai/rdma` for `> 1`, or `vpc.amazonaws.com/efa`, per `Pod`. |
+| *`resources.interface`* | Optional. Requests `device.gpustack.ai/rdma.shared` for `1`, `device.gpustack.ai/rdma` for `> 1`, or `vpc.amazonaws.com/efa`, per `Pod`. A role that writes to a pool whose every transport is `rdma`, `efa` or Ascend A5 Host RoCE needs it, and admission warns when it is unset or `0` on such a role. |
 
 See [Rollout behavior](#rollout-behavior) for how edits to *`replicas`* and *`size`* apply. Request
 *`resources.interface`* only when an effective RDMA or EFA transfer path exists; see

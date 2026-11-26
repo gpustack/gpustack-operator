@@ -351,20 +351,31 @@ Whether the cache is observed to be in effect, which is a different question
 from whether it was configured. It is judged downstream of the engine and **never** on a rendered flag
 or a log line.
 
+The operator reads each ready replica that carries a store client at its own `/metrics`. An *Encode*
+stage, a disaggregated vLLM *Decode* role and a take-over role carry none and are not asked.
+
+The verdict counts `vllm:mooncake_store_operation_total` for `operation` `save_put` and `load_get`
+alone. Lookups and `save_exists` travel the master's TCP RPC and stay `ok` while a fabric-only pool
+refuses every transfer, so they never decide it. A deployment bound to a pool is looked at again on
+its own once converged, because no event carries a change in this traffic.
+
 | Value | Reason | Meaning |
 |---|---|---|
 | `True` | `NotApplicable` | the deployment declares no *`kvCache`*, so there is no cache to attach |
-| `True` | `CacheActive` | a ready replica reports succeeding store operations |
+| `True` | `CacheActive` | at least one asked replica reports a transfer that succeeded (`ok` or `partial_failure`); the message names the pool, its transports, each replica's role with its *`resources.interface`* value and attempted and failed transfer counts, and any ready replica whose transfers all failed |
 | `True` | `CacheActive` | no replica gave an account, and the reuse domain holds data — this attributes to the domain, which is shared by every deployment on its Binding |
-| `False` | `CacheOperationsFailing` | a ready replica reports store operations of which **none** succeeded; the engine is serving without the cache |
+| `False` | `CacheOperationsFailing` | no asked replica reports a succeeding transfer and at least one reports transfers of which **none** succeeded; the engine is serving without the cache. The message names the pool, its transports and per-replica counts, and says the engine has no RDMA interface where the failing role requests no *`resources.interface`* and every transport of the pool needs one |
 | `Unknown` | `Unmanaged` | a role took over its command line, so the operator rendered no cache client |
 | `Unknown` | `NoReplicaReady` | no replica is ready, so no engine has an account to give |
-| `Unknown` | `NoObservationAvailable` | ready replicas gave no account and the domain reports nothing held |
+| `Unknown` | `NoObservationAvailable` | no ready replica carries a store client, or the asked ones reported no transfer; the message says that no store transfer was observed |
 
 `NoObservationAvailable` is `Unknown` rather than `False` because an attached deployment that is
 simply idle looks exactly like an unread one: no supported engine signals "the connector
 initialized" before any traffic, so silence is the most common steady state. A connector that
 cannot come up keeps its replica from ever becoming Ready, which is reported there.
+
+Counters are cumulative since the engine process started. A replica that failed once and succeeded
+since reads `CacheActive`; one that has only ever failed reads `CacheOperationsFailing`.
 
 ### ReplicasUpToDate
 

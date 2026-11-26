@@ -248,6 +248,17 @@ kubectl -n <namespace> exec <pod-name> -- python3 -c \
   "import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print('reader present')"
 ```
 
+### Cache transfer troubleshooting
+
+A `ModelDeployment` bound through a `KVCachePoolBinding` reports on *`status.conditions`* whether its
+engines write to the pool. The verdict counts `save_put` and `load_get` operations alone; lookups
+answer over TCP and stay successful while a fabric-only pool refuses every transfer.
+
+| Symptom | Expected signal | Resolution |
+|---|---|---|
+| `CacheAttached=False` with reason `CacheOperationsFailing` | The deployment stays `Ready` and serves every request. The message names the pool, its transports and each replica's failed transfers. | If the message says the engine has no RDMA interface, set *`spec.roles[i].resources.interface`* on the named role and let the replicas roll. Otherwise read the engine logs and the `KVCacheBackend` member logs for the transport error. |
+| Admission warning that a role writes to a pool over `[rdma]` or `[efa]` and needs a fabric interface | The request is admitted. The warning names the role, the pool and *`spec.roles[i].resources.interface`*. | Set *`resources.interface`* on the named role before sending traffic. Without it every engine-to-store transfer is refused while the deployment keeps reporting `Ready`. |
+
 ### Tenant compatibility
 
 `tenantInjected: true` confirms only that the webhook wrote `tenant_id` (vLLM) or

@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -496,7 +497,7 @@ func modelDeploymentGroupForwardURLOnPort(member *core.Pod, port int32, path str
 		scheme = "http"
 	}
 
-	return fmt.Sprintf("%s://%s:%d%s", scheme, member.Status.PodIP, port, path), nil
+	return fmt.Sprintf("%s://%s%s", scheme, net.JoinHostPort(member.Status.PodIP, strconv.FormatInt(int64(port), 10)), path), nil
 }
 
 // modelDeploymentGroupForwardHostPort is a member's own serving address in the form a handshake

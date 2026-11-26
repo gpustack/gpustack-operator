@@ -22,6 +22,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
@@ -7005,5 +7006,279 @@ func TestModelDeploymentWebhook_AscendA5RemotePolicyReadFailClosed(t *testing.T)
 		_, err := w.ValidateCreate(context.Background(), md)
 		require.NoError(t, err)
 		assert.Zero(t, policyReadCalls)
+	})
+}
+
+// fabricPoolFixture is kvCacheFixture with the backend's transport replaced and, when members are
+// given, its managed member groups, for the cases about what a pool's transport asks of the engine
+// that writes to it.
+func fabricPoolFixture(protocol string, members ...workercore.KVCacheBackendMember) []ctrlcli.Object {
+	objs := kvCacheFixture()
+	backend := objs[2].(*workercore.KVCacheBackend)
+	backend.Spec.Transport.Protocol = protocol
+	if members != nil {
+		backend.Spec.Connection.Managed = &workercore.KVCacheBackendManaged{Members: members}
+	}
+
+	return objs
+}
+
+// atFixturePool points a deployment at the Binding kvCacheFixture carries.
+func atFixturePool(md *workercore.ModelDeployment) *workercore.ModelDeployment {
+	md.Spec.KVCache.PoolRef.Name = "chat"
+	return md
+}
+
+// storeRole is a role of the given kind requesting the given interface count, or none when the
+// count is "unset".
+func storeRole(name string, kind workercore.ModelDeploymentRoleKind, iface, acceleratorType string) workercore.ModelDeploymentRole {
+	return role(func(r *workercore.ModelDeploymentRole) {
+		r.Name, r.Kind, r.AcceleratorType = name, kind, acceleratorType
+		if iface != "unset" {
+			r.Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(resource.MustParse(iface))}
+		}
+	})
+}
+
+// countingReaderWebhook builds the handler over one API-server view and counts, by kind, every read
+// of the Binding, the pool and the backend, so "performs no read" is an observation rather than an
+// inference from state that looks unchanged. The view is expanded the way newModelDeploymentWebhookWith
+// expands it.
+func countingReaderWebhook(live []ctrlcli.Object, reads *map[string]int) *ModelDeploymentWebhook {
+	var expanded []ctrlcli.Object
+	hasAcc := make(map[string]bool)
+	for _, obj := range live {
+		if at, ok := obj.(*worker.AcceleratorType); ok {
+			hasAcc[at.Name] = true
+		}
+	}
+	for _, obj := range live {
+		expanded = append(expanded, obj)
+		if it, ok := obj.(*worker.InstanceType); ok && !hasAcc[it.Name] && it.Spec.Acceleratable {
+			expanded = append(expanded, acceleratorTypeFromInstanceType(it))
+		}
+	}
+
+	return &ModelDeploymentWebhook{
+		APIReader: ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(expanded...).
+			WithInterceptorFuncs(ctrlinterceptor.Funcs{
+				Get: func(ctx context.Context, c ctrlcli.WithWatch, key ctrlcli.ObjectKey, obj ctrlcli.Object,
+					opts ...ctrlcli.GetOption,
+				) error {
+					// The object's kind is empty until the client fills it, so the count is keyed
+					// on the Go type.
+					switch obj.(type) {
+					case *workercore.KVCachePoolBinding:
+						(*reads)["KVCachePoolBinding"]++
+					case *workercore.KVCachePool:
+						(*reads)["KVCachePool"]++
+					case *workercore.KVCacheBackend:
+						(*reads)["KVCacheBackend"]++
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build(),
+	}
+}
+
+// TestModelDeploymentWebhook_WarnsAStoreRoleWithoutAnInterface covers the admission warning end to
+// end: every case admits (err == nil), and the ones that warn say the role, the pool, its transports
+// and the field to set.
+//
+// IT WARNS AND NEVER REFUSES. A pool whose every transport reaches the host's fabric refuses a client
+// that holds no fabric interface, and the deployment then serves every request while writing nothing
+// to the pool. Nothing in the object says so until traffic, so admission points at the field.
+func TestModelDeploymentWebhook_WarnsAStoreRoleWithoutAnInterface(t *testing.T) {
+	const nvidia, ascend = "h20-8x", "ascend-pool"
+	ascendType := servingInstanceType(ascend, 8, func(it *worker.InstanceType) {
+		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+		it.Status.Detail.Family = nodefeature.AcceleratorFamilyAscend950
+	})
+	nvidiaType := servingInstanceType(nvidia, 8)
+	managed := func(count *int32) workercore.KVCacheBackendMember {
+		return workercore.KVCacheBackendMember{
+			NodeSelector: map[string]string{"cache": "dram"}, Medium: "DRAM",
+			CapacityPerMember: resource.MustParse("64Gi"), FabricInterfaceCount: count,
+		}
+	}
+	server := func(iface, acceleratorType string) *workercore.ModelDeployment {
+		return atFixturePool(modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			storeRole("server", workercore.ModelDeploymentRoleKindServer, iface, acceleratorType)))
+	}
+	routed := func() *workercore.ModelDeployment {
+		return atFixturePool(modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			storeRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "1", nvidia),
+			storeRole("decode", workercore.ModelDeploymentRoleKindDecode, "0", nvidia)))
+	}
+	one := int32(1)
+
+	testCases := []struct {
+		name        string
+		md          *workercore.ModelDeployment
+		live        []ctrlcli.Object
+		wantWarning string
+	}{
+		{
+			name:        "an rdma pool",
+			md:          server("0", nvidia),
+			live:        append([]ctrlcli.Object{nvidiaType.DeepCopy()}, fabricPoolFixture("RDMA")...),
+			wantWarning: `spec.roles[0].resources.interface: role "server" writes to kv cache pool "shared" over [rdma]`,
+		},
+		{
+			name:        "an efa pool and the interface left unset",
+			md:          server("unset", nvidia),
+			live:        append([]ctrlcli.Object{nvidiaType.DeepCopy()}, fabricPoolFixture("EFA")...),
+			wantWarning: `spec.roles[0].resources.interface: role "server" writes to kv cache pool "shared" over [efa]`,
+		},
+		{
+			name: "a tcp pool never warns",
+			md:   server("0", nvidia),
+			live: append([]ctrlcli.Object{nvidiaType.DeepCopy()}, fabricPoolFixture("TCP")...),
+		},
+		{
+			name:        "an ascend pool on host roce",
+			md:          server("0", ascend),
+			live:        append([]ctrlcli.Object{ascendType.DeepCopy()}, fabricPoolFixture("CANN", managed(&one))...),
+			wantWarning: `spec.roles[0].resources.interface: role "server" writes to kv cache pool "shared" over [ascend]`,
+		},
+		{
+			name: "an ascend pool that stays off the host fabric never warns",
+			md:   server("0", ascend),
+			live: append([]ctrlcli.Object{ascendType.DeepCopy()}, fabricPoolFixture("CANN", managed(nil))...),
+		},
+		{
+			name: "an ascend pool mixing host roce and ub never warns",
+			md:   server("0", ascend),
+			live: append([]ctrlcli.Object{ascendType.DeepCopy()}, fabricPoolFixture("CANN", managed(&one), managed(nil))...),
+		},
+		{
+			// A disaggregated vLLM decoder keeps off the store, and adding an interface to it would
+			// move the direct transfer onto the fabric.
+			name: "a routed pair whose decoder requests no interface",
+			md: func() *workercore.ModelDeployment {
+				md := routed()
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			}(),
+			live: append([]ctrlcli.Object{nvidiaType.DeepCopy()}, fabricPoolFixture("RDMA")...),
+		},
+		{
+			// An encoder stage holds no KV cache, and admission refuses a pool on a deployment that
+			// carries one; the pair behind it requests its interfaces.
+			name: "an encoder stage that requests no interface",
+			md: func() *workercore.ModelDeployment {
+				md := routed()
+				md.Spec.KVCache = nil
+				md.Spec.Roles[1].Resources.Interface = ptr.To(resource.MustParse("1"))
+				md.Spec.Roles = append([]workercore.ModelDeploymentRole{
+					storeRole("encode", workercore.ModelDeploymentRoleKindEncode, "0", nvidia),
+				}, md.Spec.Roles...)
+				md.Spec.Roles[0].ReplicaSize = 1
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			}(),
+			live: append([]ctrlcli.Object{nvidiaType.DeepCopy()}, fabricPoolFixture("RDMA")...),
+		},
+		{
+			name: "a take-over role renders no store client",
+			md: atFixturePool(modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Command = []string{"/bin/my-server"}
+					r.Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(resource.MustParse("0"))}
+				}))),
+			live: append([]ctrlcli.Object{nvidiaType.DeepCopy()}, fabricPoolFixture("RDMA")...),
+		},
+		{
+			name: "a role that requests an interface",
+			md:   server("1", nvidia),
+			live: append([]ctrlcli.Object{nvidiaType.DeepCopy()}, fabricPoolFixture("RDMA")...),
+		},
+		{
+			// A Binding that does not exist yet is admitted today; a warning is not the place to
+			// turn that into a refusal.
+			name: "a binding that does not exist",
+			md:   server("0", nvidia),
+			live: append([]ctrlcli.Object{nvidiaType.DeepCopy()}, fabricPoolFixture("RDMA")[:2]...),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newModelDeploymentWebhookWith(tc.live)
+
+			warnings, err := w.ValidateCreate(context.Background(), tc.md)
+			require.NoError(t, err, "the warning never refuses")
+			if tc.wantWarning == "" {
+				assert.Empty(t, warnings)
+				return
+			}
+			require.Len(t, warnings, 1)
+			assert.Contains(t, warnings[0], tc.wantWarning)
+			assert.Contains(t, warnings[0], "needs a fabric interface on the engine")
+		})
+	}
+}
+
+// TestModelDeploymentWebhook_StoreInterfaceWarningOnUpdate pins when an update repeats the warning:
+// only for a role whose own inputs moved. The reconciler's writes are updates too, and one that
+// scales replicas alone must neither repeat a warning nobody reads nor read a single object.
+func TestModelDeploymentWebhook_StoreInterfaceWarningOnUpdate(t *testing.T) {
+	live := func() []ctrlcli.Object {
+		return append([]ctrlcli.Object{servingInstanceType("h20-8x", 8)}, fabricPoolFixture("RDMA")...)
+	}
+	bound := func(iface string) *workercore.ModelDeployment {
+		return atFixturePool(modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			storeRole("server", workercore.ModelDeploymentRoleKindServer, iface, "h20-8x")))
+	}
+
+	t.Run("a_replicas_only_update_reads_nothing", func(t *testing.T) {
+		reads := map[string]int{}
+		w := countingReaderWebhook(live(), &reads)
+		old := bound("0")
+		md := old.DeepCopy()
+		md.Spec.Roles[0].Replicas++
+
+		warnings, err := w.ValidateUpdate(context.Background(), old, md)
+		require.NoError(t, err)
+		assert.Empty(t, warnings)
+		assert.Empty(t, reads,
+			"neither the Binding, the pool nor the backend is read for an update that moved no input")
+	})
+
+	t.Run("a_deleting_object_is_never_warned", func(t *testing.T) {
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+		old := bound("0")
+		now := meta.Now()
+		old.DeletionTimestamp, old.DeletionGracePeriodSeconds = &now, ptr.To[int64](30)
+		md := old.DeepCopy()
+		md.SetFinalizers(append(md.GetFinalizers(), "gpustack.ai/finalizer"))
+
+		warnings, err := w.ValidateUpdate(context.Background(), old, md)
+		require.NoError(t, err)
+		assert.Empty(t, warnings)
+	})
+
+	// THE SAME COUNTER ON AN UPDATE THAT MOVED AN INPUT is what shows the empty count above is a
+	// property of the update and not of the counter.
+	t.Run("dropping_the_interface_warns_again", func(t *testing.T) {
+		reads := map[string]int{}
+		w := countingReaderWebhook(live(), &reads)
+
+		warnings, err := w.ValidateUpdate(context.Background(), bound("1"), bound("0"))
+		require.NoError(t, err)
+		assert.Len(t, warnings, 1)
+		assert.Equal(t, map[string]int{
+			"KVCachePoolBinding": 1, "KVCachePool": 1, "KVCacheBackend": 1,
+		}, reads, "the Binding, the pool and the backend are each read once to judge the transports")
+	})
+
+	t.Run("a_take_over_role_turned_managed_warns", func(t *testing.T) {
+		w := newModelDeploymentWebhookWith(live())
+		old := bound("0")
+		old.Spec.Roles[0].Command = []string{"/bin/my-server"}
+
+		warnings, err := w.ValidateUpdate(context.Background(), old, bound("0"))
+		require.NoError(t, err)
+		assert.Len(t, warnings, 1)
 	})
 }

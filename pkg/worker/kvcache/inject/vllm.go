@@ -280,6 +280,30 @@ type vllmKVEventsConfig struct {
 	Topic               string `json:"topic"`
 }
 
+// RendersStore reports whether Render composes the shared store client onto this role.
+//
+// BOTH RENDERERS READ IT, so the answer cannot drift from what a Pod ends up carrying, and a
+// caller that has to know which Pods carry a store client asks this instead of re-deriving it
+// per engine.
+//
+// A role needs a connected pool and a KV cache to put on it: an encoder stage renders the
+// encoder-cache leg alone and is refused a store. For the vLLM family a disaggregated decode half
+// keeps off the store as well, because it receives its prompt blocks from its prefiller, which
+// reads and writes the store. SGLang's store client is role-blind, so its decode half keeps it.
+func RendersStore(in Input) bool {
+	if in.Role == RoleEncode || in.Connection.MasterAddress == "" {
+		return false
+	}
+	switch in.Engine {
+	case EngineVLLM, EngineVLLMAscend:
+		return !in.KVTransfer || in.Role != RoleDecode
+	case EngineSGLang:
+		return true
+	}
+
+	return false
+}
+
 func renderVLLM(in Input) (*Result, error) {
 	// The encoder-cache leg is a separate input rather than a field on Input, so every call that
 	// predates it renders through here and cannot reach it. That is what makes the output of a
@@ -350,7 +374,7 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 	// completion for the same request on prompts at or above one block, crashing vLLM's V1
 	// scheduler (`_update_from_kv_xfer_finished`: `assert req_id in self.requests`). Standalone
 	// decode without a point-to-point transfer leg still renders the store connector as a consumer.
-	rendersStore := hasPool && (!in.KVTransfer || in.Role != RoleDecode)
+	rendersStore := RendersStore(in)
 
 	// The connector configuration is a JSON document on the command line, marshaled from a type so an
 	// unreadable key is a compile error. Key order is not part of the contract - JSON defines none -
