@@ -16,18 +16,23 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/httpx"
 )
 
-// The Mooncake store families vLLM's store connector exposes, read from upstream vLLM
-// (`vllm/distributed/kv_transfer/kv_connector/v1/mooncake_store/metrics.py`). Every series carries
-// `operation` in {save_exists, save_put, load_get, lookup_exists, lookup_lease} and `status` in
-// {ok, error, partial_failure}.
+// The Mooncake store families vLLM's store connector exposes, read from upstream vLLM at v0.25.1 and
+// v0.30.0 (`vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/metrics.py`; main moved the
+// directory to `mooncake_store/` and kept the families). Every series carries `operation` in
+// {save_exists, save_put, load_get, lookup_exists, lookup_lease} and `status` in {ok, error,
+// partial_failure}.
 //
-// THE VERDICT READS THE OPERATION COUNTER ALONE. Keys, bytes and time describe transfers that
-// happened; whether they happened is the counter's question, and a second family asked the same
-// way would be a second opinion about one fact.
+// THESE ARE vLLM'S FAMILIES. SGLang and vLLM-Ascend store metrics are not read and read Unknown
+// until their exposition is measured.
+//
+// THREE COUNTERS DECIDE THE VERDICT, and the status label alone cannot: for the reason, read
+// modelDeploymentCacheAccount before changing what counts as success.
 const (
-	modelDeploymentCacheMetricOperation = "vllm:mooncake_store_operation_total"
-	modelDeploymentCacheLabelOperation  = "operation"
-	modelDeploymentCacheLabelStatus     = "status"
+	modelDeploymentCacheMetricOperations = "vllm:mooncake_store_operation_total"
+	modelDeploymentCacheMetricKeys       = "vllm:mooncake_store_operation_keys_total"
+	modelDeploymentCacheMetricFailedKeys = "vllm:mooncake_store_operation_failed_keys_total"
+	modelDeploymentCacheLabelOperation   = "operation"
+	modelDeploymentCacheLabelStatus      = "status"
 
 	modelDeploymentCacheStatusOK      = "ok"
 	modelDeploymentCacheStatusError   = "error"
@@ -56,6 +61,9 @@ var defaultModelDeploymentCacheScraper ModelDeploymentCacheScraper = newModelDep
 
 // modelDeploymentMetricsCacheScraper reads one replica's account off its engine's Prometheus
 // exposition.
+//
+// IT READS vLLM'S FAMILIES ALONE. SGLang and vLLM-Ascend store metrics are not read and read
+// Unknown until their exposition is measured.
 type modelDeploymentMetricsCacheScraper struct{}
 
 func newModelDeploymentMetricsCacheScraper() *modelDeploymentMetricsCacheScraper {
@@ -114,13 +122,26 @@ func (s *modelDeploymentMetricsCacheScraper) fetch(ctx context.Context, url stri
 
 // modelDeploymentCacheAccount reads one replica's account out of a Prometheus text exposition.
 //
-// TRANSFER OPERATIONS ALONE DECIDE, and they are save_put and load_get. save_exists and the two
+// TRANSFER OPERATIONS ALONE ARE COUNTED, and they are save_put and load_get. save_exists and the two
 // lookups travel the master's TCP RPC, so on the failure this account exists to report they answer
 // ok while every transfer is refused; counting them would read a broken replica as healthy.
 //
+// THE VERDICT IS KEY-LEVEL BECAUSE THE STATUS LABEL DOES NOT MEAN WHAT IT LOOKS LIKE. On the images
+// this operator pins, the NORMAL return of save_put and load_get is recorded as
+// `status="partial_failure" if failed else "ok"` with `num_failed_keys=len(failed)` (vLLM v0.25.1 and
+// v0.30.0, `vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py`), so a transfer
+// whose every key was refused is partial_failure; the issue's own `batch_put failed: 2/2 keys failed`
+// line is logged beside that record. `error` is the exception path alone, with
+// `num_failed_keys=len(keys)`. main (`vllm/distributed/kv_transfer/kv_connector/v1/mooncake_store/
+// worker.py`) keeps both transfer operations on that same shape; what it changed is save_exists and
+// lookup_exists, which now record error when every key fails, and which this reader does not count.
+// A reader that counts partial_failure as success therefore reports the pinned image's total failure
+// as active. The key counters hold under every shape: a replica is active when at least one key
+// succeeded or an operation completed with no failed key, and failing when no key ever did.
+//
 // Counters are cumulative since the process started, which is what keeps the verdict level-based:
-// a replica that failed once and succeeded since reads active, and one that has only ever failed
-// reads failing. A scrape that carries no transfer series is Unreadable and NOT active, because an
+// a replica that failed once and saved since reads active, and one that has only ever failed reads
+// failing. A scrape that carries no transfer series is Unreadable and NOT active, because an
 // attached idle engine and an engine whose client was never invoked look the same here.
 func modelDeploymentCacheAccount(body []byte) (ModelDeploymentCacheAccount, error) {
 	parser := expfmt.NewTextParser(model.LegacyValidation)
@@ -130,15 +151,20 @@ func modelDeploymentCacheAccount(body []byte) (ModelDeploymentCacheAccount, erro
 	}
 
 	account := ModelDeploymentCacheAccount{Reading: ModelDeploymentCacheUnreadable}
-	family, ok := families[modelDeploymentCacheMetricOperation]
-	if !ok || family.GetType() != dto.MetricType_COUNTER {
+	operations, ok := modelDeploymentCacheFamily(families, modelDeploymentCacheMetricOperations)
+	if !ok {
 		return account, nil
 	}
-	var succeeded bool
-	for _, metric := range family.GetMetric() {
-		operation, status := modelDeploymentCacheLabel(metric, modelDeploymentCacheLabelOperation),
-			modelDeploymentCacheLabel(metric, modelDeploymentCacheLabelStatus)
-		if operation != modelDeploymentCacheOpSavePut && operation != modelDeploymentCacheOpLoadGet {
+	keys := modelDeploymentCacheSeriesSum(families, modelDeploymentCacheMetricKeys)
+	failedKeys := modelDeploymentCacheSeriesSum(families, modelDeploymentCacheMetricFailedKeys)
+
+	var clean, unmeasured bool
+	for _, metric := range operations.GetMetric() {
+		series := modelDeploymentCacheSeries{
+			operation: modelDeploymentCacheLabel(metric, modelDeploymentCacheLabelOperation),
+			status:    modelDeploymentCacheLabel(metric, modelDeploymentCacheLabelStatus),
+		}
+		if !modelDeploymentCacheTransferOperation(series.operation) {
 			continue
 		}
 		calls := metric.GetCounter().GetValue()
@@ -146,24 +172,85 @@ func modelDeploymentCacheAccount(body []byte) (ModelDeploymentCacheAccount, erro
 			continue
 		}
 		account.Attempted += calls
-		switch status {
-		case modelDeploymentCacheStatusError:
-			account.Failed += calls
-		case modelDeploymentCacheStatusOK, modelDeploymentCacheStatusPartial:
-			succeeded = true
+		switch series.status {
+		case modelDeploymentCacheStatusError, modelDeploymentCacheStatusPartial:
+		case modelDeploymentCacheStatusOK:
+			clean = true
+		default:
+			// A status outside the measured vocabulary counts as attempted and decides nothing: the
+			// replica then gave an account this reader cannot classify, which is Unreadable rather
+			// than a verdict in either direction.
+			unmeasured = true
+
+			continue
 		}
+		account.Keys += keys[series]
+		account.Failed += failedKeys[series]
 	}
-	// A status outside the measured vocabulary counts as attempted and decides nothing: the
-	// replica then gave an account this reader cannot classify, which is Unreadable rather than a
-	// verdict in either direction.
+
 	switch {
-	case succeeded:
+	case account.Attempted == 0 || unmeasured:
+		// Unreadable: nothing was transferred, or the account cannot be classified.
+	case failedKeys == nil:
+		// The verdict rests on three counters. Transfer operations beside no failed-key counter are
+		// an account this reader cannot classify, and reading it as active is the one wrong answer
+		// that would hide the failure this condition exists to report.
+	case account.Failed < account.Keys || clean:
 		account.Reading = ModelDeploymentCacheActive
-	case account.Attempted > 0 && account.Failed == account.Attempted:
+	default:
 		account.Reading = ModelDeploymentCacheFailing
 	}
 
 	return account, nil
+}
+
+// modelDeploymentCacheSeries names one labeled child of the store families.
+type modelDeploymentCacheSeries struct {
+	operation string
+	status    string
+}
+
+// modelDeploymentCacheTransferOperation reports whether an operation moves bytes between the engine
+// and the store.
+func modelDeploymentCacheTransferOperation(operation string) bool {
+	return operation == modelDeploymentCacheOpSavePut || operation == modelDeploymentCacheOpLoadGet
+}
+
+// modelDeploymentCacheFamily returns one counter family, and false when the exposition does not
+// carry it as a counter.
+func modelDeploymentCacheFamily(
+	families map[string]*dto.MetricFamily, name string,
+) (*dto.MetricFamily, bool) {
+	family, ok := families[name]
+	if !ok || family.GetType() != dto.MetricType_COUNTER {
+		return nil, false
+	}
+
+	return family, true
+}
+
+// modelDeploymentCacheSeriesSum sums each labeled child of one counter family by series. nil when
+// the exposition does not carry the family as a counter.
+func modelDeploymentCacheSeriesSum(
+	families map[string]*dto.MetricFamily, name string,
+) map[modelDeploymentCacheSeries]float64 {
+	family, ok := modelDeploymentCacheFamily(families, name)
+	if !ok {
+		return nil
+	}
+	sums := make(map[modelDeploymentCacheSeries]float64, len(family.GetMetric()))
+	for _, metric := range family.GetMetric() {
+		value := metric.GetCounter().GetValue()
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			continue
+		}
+		sums[modelDeploymentCacheSeries{
+			operation: modelDeploymentCacheLabel(metric, modelDeploymentCacheLabelOperation),
+			status:    modelDeploymentCacheLabel(metric, modelDeploymentCacheLabelStatus),
+		}] += value
+	}
+
+	return sums
 }
 
 func modelDeploymentCacheLabel(metric *dto.Metric, name string) string {

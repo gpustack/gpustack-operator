@@ -14,20 +14,46 @@ import (
 	core "k8s.io/api/core/v1"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
-// storeOperation is one (operation, status) child of vLLM's Mooncake store families.
+// storeOperation is one (operation, status) child of vLLM's Mooncake store families: the operation
+// records it holds and, cumulative over them, the keys they touched and the keys that failed.
 type storeOperation struct {
-	operation string
-	status    string
-	calls     int
+	operation  string
+	status     string
+	calls      int
+	keys       int
+	failedKeys int
+}
+
+// saved is the return path with no failed key.
+func saved(operation string, calls, keys int) storeOperation {
+	return storeOperation{operation: operation, status: "ok", calls: calls, keys: keys}
+}
+
+// refusedKeys is the return path with EVERY key failed. vLLM v0.25.1 and v0.30.0 record it as
+// partial_failure, not error (worker.py: `status="partial_failure" if failed else "ok"`), and so does
+// main for save_put and load_get.
+func refusedKeys(operation string, calls, keys int) storeOperation {
+	return storeOperation{operation: operation, status: "partial_failure", calls: calls, keys: keys, failedKeys: keys}
+}
+
+// partlySaved is the return path with some keys failed and some not.
+func partlySaved(operation string, calls, keys, failed int) storeOperation {
+	return storeOperation{operation: operation, status: "partial_failure", calls: calls, keys: keys, failedKeys: failed}
+}
+
+// raised is the exception path: every version records error and counts every key as failed.
+func raised(operation string, calls, keys int) storeOperation {
+	return storeOperation{operation: operation, status: "error", calls: calls, keys: keys, failedKeys: keys}
 }
 
 // storeExposition writes the five Mooncake store families the way vLLM's client does: each family
 // once with its HELP and TYPE lines, then one labeled child per (operation, status) row. A child
-// carries the operation counter, the key, byte and failed-key counters, and a histogram. A row of
-// zero calls writes no series at all, because the client reaches `.labels()` only from an
-// observation path.
+// carries the operation counter, the key, byte and failed-key counters, and a histogram whose count
+// is the operation counter. A row of zero calls writes no series at all, because the client reaches
+// `.labels()` only from an observation path.
 func storeExposition(rows ...storeOperation) string {
 	var counters, keys, bytesTotal, failedKeys, histogram []string
 	for _, row := range rows {
@@ -36,11 +62,11 @@ func storeExposition(rows ...storeOperation) string {
 		}
 		labels := fmt.Sprintf(`engine_idx="0",operation=%q,status=%q`, row.operation, row.status)
 		counters = append(counters, fmt.Sprintf("vllm:mooncake_store_operation_total{%s} %d", labels, row.calls))
-		keys = append(keys, fmt.Sprintf("vllm:mooncake_store_operation_keys_total{%s} %d", labels, row.calls))
+		keys = append(keys, fmt.Sprintf("vllm:mooncake_store_operation_keys_total{%s} %d", labels, row.keys))
 		bytesTotal = append(bytesTotal,
-			fmt.Sprintf("vllm:mooncake_store_operation_bytes_total{%s} %d", labels, row.calls*3670016))
+			fmt.Sprintf("vllm:mooncake_store_operation_bytes_total{%s} %d", labels, row.keys*3670016))
 		failedKeys = append(failedKeys,
-			fmt.Sprintf("vllm:mooncake_store_operation_failed_keys_total{%s} %d", labels, row.calls))
+			fmt.Sprintf("vllm:mooncake_store_operation_failed_keys_total{%s} %d", labels, row.failedKeys))
 		for _, le := range []string{"0.001", "0.01", "0.1", "1.0", "+Inf"} {
 			histogram = append(histogram, fmt.Sprintf(
 				"vllm:mooncake_store_operation_time_seconds_bucket{%s,le=%q} %d", labels, le, row.calls,
@@ -75,55 +101,86 @@ func storeExposition(rows ...storeOperation) string {
 	return b.String()
 }
 
-// TestModelDeploymentCacheScraper_Table reads the verdict off real exposition text. The verdict
-// counts TRANSFER operations alone (save_put and load_get): in the failure this condition exists
-// for, every lookup and save_exists succeeds over the master's TCP RPC while every transfer is
-// refused, so a verdict over all operations would read healthy.
+// TestModelDeploymentCacheScraper_Table reads the verdict off real exposition text.
+//
+// TRANSFER OPERATIONS ALONE ARE COUNTED (save_put and load_get), because in the failure this
+// condition exists for every lookup and save_exists succeeds over the master's TCP RPC while every
+// transfer is refused.
+//
+// THE VERDICT IS KEY-LEVEL. On the pinned images a transfer whose every key failed is recorded as
+// partial_failure, so a reader that counts that status as success reports the failure as active. A
+// replica is active when at least one key succeeded or an operation completed with no failed key,
+// and failing when no key ever did.
 func TestModelDeploymentCacheScraper_Table(t *testing.T) {
 	testCases := []struct {
 		name          string
 		exposition    string
 		wantReading   ModelDeploymentCacheReading
 		wantAttempted float64
+		wantKeys      float64
 		wantFailed    float64
 	}{
 		{
-			name: "every transfer operation failed",
+			// THE PINNED-IMAGE SHAPE from the issue: lookups and save_exists answer ok over TCP,
+			// and batch_put returns one refused result per key, which worker.py records as
+			// partial_failure with num_failed_keys == num_keys.
+			name: "the pinned image: every save_put key refused under partial_failure",
 			exposition: storeExposition(
-				storeOperation{"save_exists", "ok", 2}, storeOperation{"save_put", "error", 3},
-				storeOperation{"lookup_lease", "ok", 2}, storeOperation{"load_get", "error", 2},
+				saved("lookup_exists", 4, 8), saved("lookup_lease", 4, 8), saved("save_exists", 2, 2),
+				refusedKeys("save_put", 2, 2), refusedKeys("load_get", 1, 4),
 			),
-			wantReading: ModelDeploymentCacheFailing, wantAttempted: 5, wantFailed: 5,
+			wantReading: ModelDeploymentCacheFailing, wantAttempted: 3, wantKeys: 6, wantFailed: 6,
 		},
 		{
-			name:          "one transfer succeeded",
-			exposition:    storeExposition(storeOperation{"save_put", "error", 2}, storeOperation{"save_put", "ok", 1}),
-			wantReading:   ModelDeploymentCacheActive,
-			wantAttempted: 3,
-			wantFailed:    2,
-		},
-		{
-			name:          "only partial failures",
-			exposition:    storeExposition(storeOperation{"save_put", "partial_failure", 2}),
+			name:          "partial failure with some keys saved",
+			exposition:    storeExposition(partlySaved("save_put", 2, 10, 4)),
 			wantReading:   ModelDeploymentCacheActive,
 			wantAttempted: 2,
+			wantKeys:      10,
+			wantFailed:    4,
+		},
+		{
+			// The exception path, which every version records as error with every key failed.
+			name:          "error operations with every key failed",
+			exposition:    storeExposition(raised("save_put", 3, 3)),
+			wantReading:   ModelDeploymentCacheFailing,
+			wantAttempted: 3,
+			wantKeys:      3,
+			wantFailed:    3,
+		},
+		{
+			name:          "every key failed across partial and error operations",
+			exposition:    storeExposition(refusedKeys("save_put", 2, 2), raised("load_get", 1, 4)),
+			wantReading:   ModelDeploymentCacheFailing,
+			wantAttempted: 3,
+			wantKeys:      6,
+			wantFailed:    6,
+		},
+		{
+			// No key succeeded and no operation completed clean, so nothing positive was seen.
+			name:          "an operation with no key and no clean operation",
+			exposition:    storeExposition(partlySaved("save_put", 1, 0, 0)),
+			wantReading:   ModelDeploymentCacheFailing,
+			wantAttempted: 1,
+			wantKeys:      0,
 			wantFailed:    0,
 		},
 		{
-			// The issue's shape: lookups and save_exists answer over TCP, so status is ok there,
-			// while every byte-moving operation is refused.
-			name: "lookups succeed while every transfer fails",
-			exposition: storeExposition(
-				storeOperation{"lookup_exists", "ok", 4}, storeOperation{"lookup_lease", "ok", 4},
-				storeOperation{"save_exists", "ok", 2}, storeOperation{"save_put", "error", 2},
-			),
-			wantReading: ModelDeploymentCacheFailing, wantAttempted: 2, wantFailed: 2,
+			name:          "an ok operation with no key",
+			exposition:    storeExposition(saved("save_put", 1, 0)),
+			wantReading:   ModelDeploymentCacheActive,
+			wantAttempted: 1,
+			wantKeys:      0,
+			wantFailed:    0,
 		},
 		{
-			name:          "lookups alone never make a replica active",
-			exposition:    storeExposition(storeOperation{"lookup_exists", "ok", 1}, storeOperation{"save_exists", "ok", 1}),
+			name: "lookups alone never make a replica active",
+			exposition: storeExposition(
+				saved("lookup_exists", 4, 8), saved("lookup_lease", 4, 8), saved("save_exists", 2, 2),
+			),
 			wantReading:   ModelDeploymentCacheUnreadable,
 			wantAttempted: 0,
+			wantKeys:      0,
 			wantFailed:    0,
 		},
 		{
@@ -131,6 +188,7 @@ func TestModelDeploymentCacheScraper_Table(t *testing.T) {
 			exposition:    storeExposition(),
 			wantReading:   ModelDeploymentCacheUnreadable,
 			wantAttempted: 0,
+			wantKeys:      0,
 			wantFailed:    0,
 		},
 		{
@@ -138,23 +196,38 @@ func TestModelDeploymentCacheScraper_Table(t *testing.T) {
 			exposition:    "",
 			wantReading:   ModelDeploymentCacheUnreadable,
 			wantAttempted: 0,
+			wantKeys:      0,
 			wantFailed:    0,
 		},
 		{
-			// Counters are cumulative since process start, so one error followed by thousands of
-			// successes reads active and never latches failing.
-			name:          "an early error followed by successes",
-			exposition:    storeExposition(storeOperation{"save_put", "error", 1}, storeOperation{"save_put", "ok", 50}),
+			// Counters are cumulative since process start, so one failure followed by thousands of
+			// saved keys reads active and never latches failing.
+			name:          "an early failure followed by saved keys",
+			exposition:    storeExposition(raised("save_put", 1, 1), saved("save_put", 50, 50)),
 			wantReading:   ModelDeploymentCacheActive,
 			wantAttempted: 51,
+			wantKeys:      51,
 			wantFailed:    1,
 		},
 		{
-			// A status outside the measured vocabulary is an account this reader cannot classify.
 			name:          "an unmeasured status stays unreadable",
-			exposition:    storeExposition(storeOperation{"save_put", "timeout", 2}),
+			exposition:    storeExposition(storeOperation{"save_put", "timeout", 2, 2, 2}),
 			wantReading:   ModelDeploymentCacheUnreadable,
 			wantAttempted: 2,
+			wantKeys:      0,
+			wantFailed:    0,
+		},
+		{
+			// Without the failed-key counter the rule cannot tell a refused key from a saved one, and
+			// reading that as active is the one answer that would hide the failure.
+			name: "transfer operations beside no failed-key counter",
+			exposition: "# TYPE vllm:mooncake_store_operation_total counter\n" +
+				"vllm:mooncake_store_operation_total{operation=\"save_put\",status=\"partial_failure\"} 2\n" +
+				"# TYPE vllm:mooncake_store_operation_keys_total counter\n" +
+				"vllm:mooncake_store_operation_keys_total{operation=\"save_put\",status=\"partial_failure\"} 2\n",
+			wantReading:   ModelDeploymentCacheUnreadable,
+			wantAttempted: 2,
+			wantKeys:      2,
 			wantFailed:    0,
 		},
 	}
@@ -165,6 +238,7 @@ func TestModelDeploymentCacheScraper_Table(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantReading, got.Reading)
 			assert.Equal(t, tc.wantAttempted, got.Attempted)
+			assert.Equal(t, tc.wantKeys, got.Keys)
 			assert.Equal(t, tc.wantFailed, got.Failed)
 		})
 	}
@@ -188,7 +262,7 @@ func scrapeReplica(t *testing.T, md *workercore.ModelDeployment, url, scheme str
 // TestModelDeploymentCacheScraper_ScrapeCache covers the transport around the parse: an endpoint
 // that refuses is an error, and an engine behind a self-signed certificate is still read.
 func TestModelDeploymentCacheScraper_ScrapeCache(t *testing.T) {
-	failing := storeExposition(storeOperation{"save_put", "error", 3})
+	failing := storeExposition(refusedKeys("save_put", 3, 3))
 	scraper := newModelDeploymentMetricsCacheScraper()
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 1 })
 
@@ -232,7 +306,7 @@ func TestModelDeploymentCacheScraper_ANilScraperIsTheProductionOne(t *testing.T)
 	var hits atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)
-		_, _ = w.Write([]byte(storeExposition(storeOperation{"save_put", "error", 3})))
+		_, _ = w.Write([]byte(storeExposition(refusedKeys("save_put", 3, 3))))
 	}))
 	defer server.Close()
 
@@ -252,7 +326,7 @@ func TestModelDeploymentCacheScraper_RequestShape(t *testing.T) {
 	var path, method string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path, method = r.URL.Path, r.Method
-		_, _ = w.Write([]byte(storeExposition(storeOperation{"load_get", "ok", 1})))
+		_, _ = w.Write([]byte(storeExposition(saved("load_get", 1, 1))))
 	}))
 	defer server.Close()
 
@@ -265,4 +339,51 @@ func TestModelDeploymentCacheScraper_RequestShape(t *testing.T) {
 	assert.Equal(t, "/metrics", path)
 	assert.Equal(t, http.MethodGet, method)
 	assert.Equal(t, ModelDeploymentCacheActive, got.Reading)
+}
+
+// TestModelDeploymentCacheScraper_RendersStoreIsInvariantAcrossTheVLLMEngines pins the equality the
+// scrape set relies on.
+//
+// ModelDeploymentRoleRendersStore asks inject.RendersStore for the plain vLLM engine because the
+// pool's manufacturer is not resolved on that path, and vLLM-Ascend is selected by the manufacturer
+// alone. The answer is therefore right for an Ascend replica only while the predicate does not
+// distinguish the two engines. Every cell of role, point-to-point leg and pool address is compared,
+// so a divergence fails here instead of silently skewing which replicas are asked.
+func TestModelDeploymentCacheScraper_RendersStoreIsInvariantAcrossTheVLLMEngines(t *testing.T) {
+	roles := []inject.Role{inject.RoleNone, inject.RolePrefill, inject.RoleDecode, inject.RoleEncode}
+	legs := []bool{false, true}
+	addresses := []string{"", "master:50051"}
+
+	cells := 0
+	for _, role := range roles {
+		for _, kvTransfer := range legs {
+			for _, address := range addresses {
+				input := inject.Input{
+					Role:       role,
+					KVTransfer: kvTransfer,
+					Connection: inject.Connection{MasterAddress: address},
+				}
+				input.Engine = inject.EngineVLLM
+				plain := inject.RendersStore(input)
+				input.Engine = inject.EngineVLLMAscend
+				ascend := inject.RendersStore(input)
+
+				assert.Equal(t, plain, ascend,
+					"role %q, kvTransfer %t, master address %q: the scrape set asks the plain engine for both",
+					role, kvTransfer, address)
+				cells++
+			}
+		}
+	}
+	assert.Equal(t, len(roles)*len(legs)*len(addresses), cells)
+
+	// The baseline every cell is compared against, so the matrix is known to contain both answers.
+	assert.True(t, inject.RendersStore(inject.Input{
+		Engine:     inject.EngineVLLM,
+		Connection: inject.Connection{MasterAddress: "master:50051"},
+	}))
+	assert.False(t, inject.RendersStore(inject.Input{
+		Engine: inject.EngineVLLM, Role: inject.RoleEncode,
+		Connection: inject.Connection{MasterAddress: "master:50051"},
+	}))
 }

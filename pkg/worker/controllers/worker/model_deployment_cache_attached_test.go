@@ -28,9 +28,9 @@ import (
 // Unknown path unreachable in tests while it is the common case in production.
 type fakeModelDeploymentCacheScraper struct {
 	readings map[string]ModelDeploymentCacheReading
-	// counts gives a replica's attempted and failed transfer operations, for the cases about what a
-	// message says rather than about which verdict it carries.
-	counts map[string][2]float64
+	// counts gives a replica's attempted transfer operations, the keys they touched and the keys
+	// that failed, for the cases about what a message says rather than about which verdict it carries.
+	counts map[string][3]float64
 	// errs marks replicas whose endpoint did not answer at all, which is the OTHER way to have no
 	// account — distinct from answering without the metric family.
 	errs  map[string]bool
@@ -47,7 +47,7 @@ func (f *fakeModelDeploymentCacheScraper) ScrapeCache(
 
 	account := ModelDeploymentCacheAccount{Reading: f.readings[pod.Name]}
 	counts := f.counts[pod.Name]
-	account.Attempted, account.Failed = counts[0], counts[1]
+	account.Attempted, account.Keys, account.Failed = counts[0], counts[1], counts[2]
 
 	return account, nil
 }
@@ -702,7 +702,7 @@ func TestModelDeploymentCacheAttached_Messages(t *testing.T) {
 				"qwen-server-0": ModelDeploymentCacheFailing,
 				"qwen-server-1": ModelDeploymentCacheFailing,
 			},
-			counts: map[string][2]float64{"qwen-server-0": {3, 3}, "qwen-server-1": {2, 2}},
+			counts: map[string][3]float64{"qwen-server-0": {3, 3, 3}, "qwen-server-1": {2, 2, 2}},
 		}
 	}
 	withInterface := func(value string) func(*workercore.ModelDeployment) {
@@ -730,9 +730,9 @@ func TestModelDeploymentCacheAttached_Messages(t *testing.T) {
 			newRenderPool(), rdmaBackend)
 
 		assert.Contains(t, got, `pool "shared" (transports: [rdma])`)
-		assert.Contains(t, got, "2 of 2 ready replicas report store transfers of which none succeeded")
-		assert.Contains(t, got, `qwen-server-0 (role "server", resources.interface: 0): 3 transfer operations attempted, 3 failed`)
-		assert.Contains(t, got, `qwen-server-1 (role "server", resources.interface: 0): 2 transfer operations attempted, 2 failed`)
+		assert.Contains(t, got, "2 of 2 ready replicas report store transfers of which every key failed")
+		assert.Contains(t, got, `qwen-server-0 (role "server", resources.interface: 0): 3 transfer operations attempted, 3 of 3 keys failed`)
+		assert.Contains(t, got, `qwen-server-1 (role "server", resources.interface: 0): 2 transfer operations attempted, 2 of 2 keys failed`)
 		assert.Contains(t, got, "this engine has no RDMA interface while every transport of the pool requires one")
 	})
 
@@ -766,16 +766,16 @@ func TestModelDeploymentCacheAttached_Messages(t *testing.T) {
 				"qwen-server-0": ModelDeploymentCacheActive,
 				"qwen-server-1": ModelDeploymentCacheFailing,
 			},
-			counts: map[string][2]float64{"qwen-server-0": {5, 1}, "qwen-server-1": {2, 2}},
+			counts: map[string][3]float64{"qwen-server-0": {5, 9, 1}, "qwen-server-1": {2, 2, 2}},
 		}
 
 		got := message(t, newRenderDeployment(withInterface("1")), scraper, readyDomain(),
 			newRenderPool(), rdmaBackend)
 
 		assert.Contains(t, got, "1 of 2 ready replicas report succeeding store transfers")
-		assert.Contains(t, got, `qwen-server-0 (role "server", resources.interface: 1): 5 transfer operations attempted, 1 failed`)
-		assert.Contains(t, got, "1 report transfers of which none succeeded")
-		assert.Contains(t, got, `qwen-server-1 (role "server", resources.interface: 1): 2 transfer operations attempted, 2 failed`)
+		assert.Contains(t, got, `qwen-server-0 (role "server", resources.interface: 1): 5 transfer operations attempted, 1 of 9 keys failed`)
+		assert.Contains(t, got, "1 report transfers of which every key failed")
+		assert.Contains(t, got, `qwen-server-1 (role "server", resources.interface: 1): 2 transfer operations attempted, 2 of 2 keys failed`)
 	})
 
 	t.Run("unreadable_says_no_transfer_was_observed", func(t *testing.T) {

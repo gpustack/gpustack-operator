@@ -63,12 +63,13 @@ const (
 	// ModelDeploymentCacheUnreadable is no account at all: the endpoint did not answer, or it
 	// answered and carried no store metric family. It is Unknown, never False.
 	ModelDeploymentCacheUnreadable ModelDeploymentCacheReading = iota
-	// ModelDeploymentCacheFailing is an account of store operations of which NONE succeeded. It is
-	// positive evidence rather than an absence: the metric families carry a status label whose
-	// measured values are "ok", "error" and "partial_failure", so a replica that tried and failed
-	// publishes series nothing else publishes.
+	// ModelDeploymentCacheFailing is an account of store transfers of which NO key ever succeeded.
+	// It is positive evidence rather than an absence: a replica that tried and failed publishes key
+	// counters nothing else publishes. It is read off the keys and not off the status label, because
+	// the pinned vLLM images record an all-refused transfer as partial_failure.
 	ModelDeploymentCacheFailing
-	// ModelDeploymentCacheActive is an account of store operations that succeeded.
+	// ModelDeploymentCacheActive is an account of store transfers of which at least one key
+	// succeeded, or that completed with no failed key.
 	ModelDeploymentCacheActive
 )
 
@@ -81,8 +82,9 @@ type ModelDeploymentCacheAccount struct {
 	// Attempted is how many transfer operations (save_put and load_get) the replica's process has
 	// attempted, over every status, since it started.
 	Attempted float64
-	// Failed is how many of those failed in full, which is the client's status "error": every key of
-	// that operation was refused.
+	// Keys is how many keys those operations touched.
+	Keys float64
+	// Failed is how many of those keys were refused, whatever status the operation recorded.
 	Failed float64
 }
 
@@ -177,7 +179,7 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentCache(
 		// in effect for the deployment, and the replica that fails says something about its own node
 		// that the count alone would hide.
 		if failing > 0 {
-			message += fmt.Sprintf("; %d report transfers of which none succeeded (%s)", failing,
+			message += fmt.Sprintf("; %d report transfers of which every key failed (%s)", failing,
 				modelDeploymentCacheAccountsLine(md, accounts, ModelDeploymentCacheFailing))
 		}
 		if unreadable > 0 {
@@ -189,10 +191,11 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentCache(
 		// NOT an absence, and this is the one state with no nearer observer. A connector that
 		// cannot come up takes its replica with it — vLLM raises without its config path — so that
 		// failure is already reported as a replica that never becomes Ready. This one is different:
-		// the engine is Ready and serving, and every store operation it attempts fails. Nothing else
-		// in the status says so, which is why it is False here rather than Unknown.
-		message := fmt.Sprintf("%s; %d of %d ready replicas report store transfers of which none succeeded, "+
-			"so the engine is serving without the cache (%s)",
+		// the engine is Ready and serving, and every key of every store transfer it attempts is
+		// refused. Nothing else in the status says so, which is why it is False here rather than
+		// Unknown.
+		message := fmt.Sprintf("%s; %d of %d ready replicas report store transfers of which every key "+
+			"failed, so the engine is serving without the cache (%s)",
 			pool.describe(), failing, len(ready),
 			modelDeploymentCacheAccountsLine(md, accounts, ModelDeploymentCacheFailing))
 		if unreadable > 0 {
@@ -299,6 +302,11 @@ const modelDeploymentBoundRoleAddress = "bound"
 // IT IS THE RENDERER'S OWN ANSWER, asked through inject.RendersStore with the role's kind, the
 // engine family and the point-to-point leg, and never a second table: a decoder keeps off the store
 // under vLLM and keeps it under SGLang, and which is which is that package's to know.
+//
+// THE SCRAPE SET RELIES ON inject.RendersStore ANSWERING THE SAME FOR BOTH vLLM ENGINES: the pool's
+// manufacturer is not resolved here, so the plain engine is asked on behalf of vLLM-Ascend too, and
+// TestModelDeploymentCacheScraper_RendersStoreIsInvariantAcrossTheVLLMEngines holds that equality so
+// a divergence fails a test instead of skewing the set.
 //
 // THREE ROLES NEVER CARRY A CLIENT AND SO NEVER ANSWER. A take-over role runs a command line this
 // operator adds nothing to. An encoder stage holds no KV cache. A disaggregated vLLM decode half
@@ -431,9 +439,10 @@ func modelDeploymentCacheAccountsLine(
 			continue
 		}
 		parts = append(parts, fmt.Sprintf("%s (role %q, resources.interface: %s): %s transfer operations "+
-			"attempted, %s failed", entry.pod.Name, modelDeploymentPodRole(entry.pod),
+			"attempted, %s of %s keys failed", entry.pod.Name, modelDeploymentPodRole(entry.pod),
 			modelDeploymentRoleInterface(roles[modelDeploymentPodRole(entry.pod)]),
-			modelDeploymentCacheCount(entry.account.Attempted), modelDeploymentCacheCount(entry.account.Failed)))
+			modelDeploymentCacheCount(entry.account.Attempted), modelDeploymentCacheCount(entry.account.Failed),
+			modelDeploymentCacheCount(entry.account.Keys)))
 	}
 
 	return strings.Join(parts, "; ")

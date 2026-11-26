@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
@@ -1104,19 +1105,31 @@ func modelDeploymentSameInterface(a, b *workercore.ModelDeploymentRoleResources)
 func (r *ModelDeploymentWebhook) resolveModelDeploymentPoolBackend(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) (*workercore.KVCachePool, *workercore.KVCacheBackend) {
+	// A missing object is no answer and no event. Any other read failure is logged, because the
+	// warning this feeds is the only place the shape surfaces at admission, and a warning dropped
+	// without a trace is indistinguishable from a shape that was never there.
+	swallow := func(err error, what string) {
+		if err != nil && !kerrors.IsNotFound(err) {
+			ctrllog.FromContext(ctx).Error(err, "read the "+what+" for the interface warning",
+				"modelDeployment", md.Name, "namespace", md.Namespace)
+		}
+	}
 	binding := &workercore.KVCachePoolBinding{}
 	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{
 		Namespace: md.Namespace, Name: md.Spec.KVCache.PoolRef.Name,
 	}, binding); err != nil {
+		swallow(err, "KV cache pool binding")
 		return nil, nil
 	}
 	pool := &workercore.KVCachePool{}
 	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: binding.Spec.PoolRef.Name}, pool); err != nil ||
 		len(pool.Spec.Backends) == 0 {
+		swallow(err, "KV cache pool")
 		return nil, nil
 	}
 	backend := &workercore.KVCacheBackend{}
 	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: pool.Spec.Backends[0]}, backend); err != nil {
+		swallow(err, "KV cache backend")
 		return nil, nil
 	}
 
