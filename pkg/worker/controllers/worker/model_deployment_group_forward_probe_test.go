@@ -991,13 +991,14 @@ func TestGroupForwardProbePDPairVerifiesVLLMMetricsDelta(t *testing.T) {
 			wantInObservation: "prefill: the mooncake exposition did not answer",
 		},
 		{
-			name:              "decode metrics unreachable after probe degrades cleanly without deadlocking",
+			name:              "decode metrics unreachable after probe degrades cleanly without claiming zero decode failures",
 			beforePrefill:     "vllm:request_success_total{finished_reason=\"length\"} 0.0\n",
 			afterPrefill:      "vllm:request_success_total{finished_reason=\"length\"} 1.0\n",
 			beforeDecode:      "vllm:mooncake_num_failed_recvs 0.0\n",
 			failStage:         "after-decode",
 			wantState:         modelDeploymentGroupForwardVerified,
 			wantConfirmed:     true,
+			wantInReason:      "decode metrics unavailable",
 			wantInObservation: "decode: the mooncake exposition did not answer",
 		},
 		{

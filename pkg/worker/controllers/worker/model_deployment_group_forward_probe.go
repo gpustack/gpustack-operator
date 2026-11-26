@@ -661,9 +661,12 @@ type modelDeploymentGroupForwardPairAttempt struct {
 	// Mooncake carries the mooncake exposition lines both halves answered with after the warmup
 	// request, one entry per series, prefixed by the half.
 	Mooncake []string
-	// PrefillMetricsConfirmed reports whether prefill metrics advanced during the probe without
-	// decode transfer failures (true when vLLM /metrics exported request or transfer counters).
+	// PrefillMetricsConfirmed reports whether prefill metrics advanced during the probe window
+	// (true when vLLM /metrics exported request or transfer counters that increased).
 	PrefillMetricsConfirmed bool
+	// DecodeMetricsChecked reports whether decode /metrics answered both before and after the
+	// warmup request so zero new decode transfer failures were actually observed.
+	DecodeMetricsChecked bool
 }
 
 // modelDeploymentGroupForwardPairResult is the outcome of one directed pair probe: one result per
@@ -992,6 +995,8 @@ func observeModelDeploymentGroupForwardPair(
 
 			var beforePrefillMetrics, beforeDecodeMetrics []byte
 			var beforePrefillErr, beforeDecodeErr error
+			// Only the proxy shape needs /metrics corroboration: in head-to-head both halves
+			// answer bound /v1/completions directly, whereas the proxy streams back only decode.
 			if viaProxy && !metricsChecked && engine.Metrics {
 				beforePrefillMetrics, beforePrefillErr = modelDeploymentGroupForwardPairMetricsScrape(
 					probeCtx, prefillMetricsURL, fetch,
@@ -1019,19 +1024,20 @@ func observeModelDeploymentGroupForwardPair(
 			}
 			if viaProxy && !metricsChecked && engine.Metrics {
 				metricsChecked = true
-				confirmed, mooncakeLines, deltaReason := modelDeploymentGroupForwardPairCheckMetrics(
+				verdict, mooncakeLines := modelDeploymentGroupForwardPairCheckMetrics(
 					probeCtx, prefillMetricsURL, decodeMetricsURL,
 					beforePrefillMetrics, beforePrefillErr,
 					beforeDecodeMetrics, beforeDecodeErr,
 					fetch,
 				)
 				attempt.Mooncake = append(attempt.Mooncake, mooncakeLines...)
-				if deltaReason != "" {
+				if verdict.reason != "" {
 					return modelDeploymentGroupForwardPairHeld(attempt, modelDeploymentGroupForward{
-						State: modelDeploymentGroupForwardUnknown, Reason: deltaReason,
+						State: modelDeploymentGroupForwardUnknown, Reason: verdict.reason,
 					})
 				}
-				attempt.PrefillMetricsConfirmed = confirmed
+				attempt.PrefillMetricsConfirmed = verdict.prefillAdvanced
+				attempt.DecodeMetricsChecked = verdict.decodeChecked
 			}
 		}
 	}
@@ -1152,6 +1158,19 @@ func modelDeploymentGroupForwardPairMetricsScrape(
 	})
 }
 
+// modelDeploymentGroupForwardPairMetricsVerdict is the structured outcome of comparing pre- and
+// post-probe Prometheus expositions on a vLLM routing-proxy pair.
+type modelDeploymentGroupForwardPairMetricsVerdict struct {
+	// prefillAdvanced is true when at least one exported prefill counter increased during the probe.
+	prefillAdvanced bool
+	// decodeChecked is true when both pre- and post-probe decode /metrics scrapes succeeded.
+	decodeChecked bool
+	// failedRecvs is true when decode recorded an increase in failed mooncake receives (non-retryable).
+	failedRecvs bool
+	// reason is non-empty when an exported counter contradicted disaggregation or recorded a failure.
+	reason string
+}
+
 // modelDeploymentGroupForwardPairCheckMetrics scrapes post-probe /metrics and verifies counter
 // deltas against the pre-probe baseline, retrying briefly if asynchronous counter flushes lag the
 // HTTP response. Scrape failures degrade to the bound-completion verdict rather than deadlocking
@@ -1161,12 +1180,11 @@ func modelDeploymentGroupForwardPairCheckMetrics(
 	beforePrefill []byte, beforePrefillErr error,
 	beforeDecode []byte, beforeDecodeErr error,
 	fetch modelDeploymentGroupForwardPairFetch,
-) (bool, []string, string) {
+) (modelDeploymentGroupForwardPairMetricsVerdict, []string) {
 	var (
 		afterPrefill, afterDecode       []byte
 		afterPrefillErr, afterDecodeErr error
-		confirmed                       bool
-		deltaReason                     string
+		verdict                         modelDeploymentGroupForwardPairMetricsVerdict
 	)
 retryLoop:
 	for attempt := 0; attempt <= modelDeploymentGroupForwardPairMetricsRetries; attempt++ {
@@ -1182,19 +1200,11 @@ retryLoop:
 		afterPrefill, afterPrefillErr = modelDeploymentGroupForwardPairMetricsScrape(ctx, prefillMetricsURL, fetch)
 		afterDecode, afterDecodeErr = modelDeploymentGroupForwardPairMetricsScrape(ctx, decodeMetricsURL, fetch)
 
-		var decodeCheck, prefillCheck bool
-		if beforeDecodeErr == nil && afterDecodeErr == nil {
-			decodeCheck = true
-		}
-		if beforePrefillErr == nil && afterPrefillErr == nil {
-			prefillCheck = true
-		}
-
-		confirmed, deltaReason = modelDeploymentGroupForwardPairVerifyMetricsDelta(
-			beforePrefill, afterPrefill, prefillCheck,
-			beforeDecode, afterDecode, decodeCheck,
+		verdict = modelDeploymentGroupForwardPairVerifyMetricsDelta(
+			beforePrefill, afterPrefill, beforePrefillErr == nil && afterPrefillErr == nil,
+			beforeDecode, afterDecode, beforeDecodeErr == nil && afterDecodeErr == nil,
 		)
-		if deltaReason == "" || strings.Contains(deltaReason, "failed mooncake receives") {
+		if verdict.reason == "" || verdict.failedRecvs {
 			break
 		}
 	}
@@ -1211,7 +1221,7 @@ retryLoop:
 		lines = append(lines, modelDeploymentGroupForwardPairMooncakeLines(afterDecode, "decode")...)
 	}
 
-	return confirmed, lines, deltaReason
+	return verdict, lines
 }
 
 // modelDeploymentGroupForwardPairMooncakeLines extracts non-bucket vllm:mooncake_ series lines
@@ -1238,52 +1248,51 @@ func modelDeploymentGroupForwardPairMooncakeLines(body []byte, half string) []st
 // Note: Prometheus counters are engine-wide rather than per-request, so on an already-serving
 // prefill engine concurrent traffic can also advance counters; this is window-level corroboration,
 // not per-request cryptographic attribution.
-//
-// Returns (confirmed, reason):
-//   - reason != "" means an exported counter contradicted disaggregation or recorded a failed receive.
-//   - confirmed == true means at least one prefill counter advanced (request_success_total or
-//     mooncake_bytes_transferred_count) and decode recorded zero new failed receives.
-//   - confirmed == false with reason == "" means metrics were unavailable or exported neither prefill
-//     counter, so the probe falls back to the bound completion alone without deadlocking.
 func modelDeploymentGroupForwardPairVerifyMetricsDelta(
 	beforePrefill, afterPrefill []byte, prefillAvailable bool,
 	beforeDecode, afterDecode []byte, decodeAvailable bool,
-) (bool, string) {
+) modelDeploymentGroupForwardPairMetricsVerdict {
+	verdict := modelDeploymentGroupForwardPairMetricsVerdict{
+		decodeChecked: decodeAvailable,
+	}
 	if decodeAvailable {
 		if afterFailed, ok := modelDeploymentGroupForwardMetricSum(afterDecode, modelDeploymentVLLMMetricMooncakeFailedRecvs); ok {
 			beforeFailed, _ := modelDeploymentGroupForwardMetricSum(beforeDecode, modelDeploymentVLLMMetricMooncakeFailedRecvs)
 			if afterFailed > beforeFailed {
-				return false, "the decode half recorded failed mooncake receives during the pair probe"
+				verdict.failedRecvs = true
+				verdict.reason = "the decode half recorded failed mooncake receives during the pair probe"
+				return verdict
 			}
 		}
 	}
 
 	if !prefillAvailable {
-		return false, ""
+		return verdict
 	}
 
-	var confirmed bool
 	if afterPush, ok := modelDeploymentGroupForwardMetricSum(afterPrefill, modelDeploymentVLLMMetricMooncakeTransferred); ok {
 		beforePush, _ := modelDeploymentGroupForwardMetricSum(beforePrefill, modelDeploymentVLLMMetricMooncakeTransferred)
 		if afterPush <= beforePush {
-			return false, "the decode routing proxy answered, but prefill " +
+			verdict.reason = "the decode routing proxy answered, but prefill " +
 				modelDeploymentVLLMMetricMooncakeTransferred +
 				" did not advance, so nothing shows KV crossed from prefill"
+			return verdict
 		}
-		confirmed = true
+		verdict.prefillAdvanced = true
 	}
 
 	if afterSuccess, ok := modelDeploymentGroupForwardMetricSum(afterPrefill, modelDeploymentVLLMMetricRequestSuccess); ok {
 		beforeSuccess, _ := modelDeploymentGroupForwardMetricSum(beforePrefill, modelDeploymentVLLMMetricRequestSuccess)
 		if afterSuccess <= beforeSuccess {
-			return false, "the decode routing proxy answered, but prefill " +
+			verdict.reason = "the decode routing proxy answered, but prefill " +
 				modelDeploymentVLLMMetricRequestSuccess +
 				" did not advance, so nothing shows the request crossed from prefill"
+			return verdict
 		}
-		confirmed = true
+		verdict.prefillAdvanced = true
 	}
 
-	return confirmed, ""
+	return verdict
 }
 
 // modelDeploymentGroupForwardMetricSum sums all sample values for metricName in a Prometheus text
@@ -1659,7 +1668,11 @@ func modelDeploymentGroupForwardPairVerified(
 			"with the named prefiller, matching this operator's own request identifier"
 		observation = "the routing proxy completed one warmup request, bound to this operator's own identifier"
 		if attempt.PrefillMetricsConfirmed {
-			reason += ", and prefill metrics advanced during the probe window with zero new decode transfer failures"
+			if attempt.DecodeMetricsChecked {
+				reason += ", and prefill metrics advanced during the probe window with zero new decode transfer failures"
+			} else {
+				reason += ", and prefill metrics advanced during the probe window (decode metrics unavailable)"
+			}
 			observation += "; prefill metrics window delta observed"
 		}
 	}
