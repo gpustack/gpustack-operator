@@ -1,6 +1,7 @@
 package inject
 
 import (
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -640,4 +641,147 @@ func TestRender_SGLangDisaggregationBackendsFollowTheInput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRender_SGLangKVEvents(t *testing.T) {
+	testCases := []struct {
+		name           string
+		in             Input
+		wantTopic      string
+		wantReplayPort int32
+	}{
+		{
+			name: "store-less single-role server publishes KV events with default topic",
+			in: Input{
+				Engine:          EngineSGLang,
+				Role:            RoleNone,
+				PublishKVEvents: true,
+				KVEventsHost:    "qwen-server.team-a.svc",
+			},
+			wantTopic:      "kv-events",
+			wantReplayPort: 5558,
+		},
+		{
+			name: "single-Pod multi-DP offsets replay_endpoint to 5559",
+			in: Input{
+				Engine:          EngineSGLang,
+				Role:            RoleNone,
+				PublishKVEvents: true,
+				KVEventsHost:    "qwen-server.team-a.svc",
+				KVEventsLocalDP: 2,
+			},
+			wantTopic:      "kv-events",
+			wantReplayPort: 5559,
+		},
+		{
+			name: "store-backed server publishes KV events with explicit topic",
+			in: Input{
+				Engine:          EngineSGLang,
+				Role:            RoleNone,
+				Connection:      testConnection(),
+				PublishKVEvents: true,
+				KVEventsHost:    "qwen-server.team-a.svc",
+				KVEventsTopic:   "custom-events",
+			},
+			wantTopic:      "custom-events",
+			wantReplayPort: 5558,
+		},
+		{
+			name: "PD prefill publishes KV events alongside disaggregation args",
+			in: Input{
+				Engine:          EngineSGLang,
+				Role:            RolePrefill,
+				Disaggregated:   true,
+				KVTransfer:      true,
+				PublishKVEvents: true,
+				KVEventsHost:    "qwen-prefill.team-a.svc",
+			},
+			wantTopic:      "kv-events",
+			wantReplayPort: 5558,
+		},
+		{
+			name: "EPD prefill places --kv-events-config before --encoder-urls",
+			in: Input{
+				Engine:          EngineSGLang,
+				Role:            RolePrefill,
+				Disaggregated:   true,
+				KVTransfer:      true,
+				Connection:      testConnection(),
+				EncoderURLs:     encoderURLs,
+				PublishKVEvents: true,
+				KVEventsHost:    "qwen-prefill.team-a.svc",
+			},
+			wantTopic:      "kv-events",
+			wantReplayPort: 5558,
+		},
+		{
+			name: "SGLang ignores vLLM CBOR hash alignment flag",
+			in: Input{
+				Engine:              EngineSGLang,
+				Role:                RoleNone,
+				PublishKVEvents:     true,
+				KVEventsHost:        "qwen-server.team-a.svc",
+				KVEventsUseCBORHash: true,
+			},
+			wantTopic:      "kv-events",
+			wantReplayPort: 5558,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(tc.in)
+			require.NoError(t, err)
+
+			evIdx := indexOfArg(result.Args, "--kv-events-config")
+			require.GreaterOrEqual(t, evIdx, 0, "expected --kv-events-config in %v", result.Args)
+			require.Less(t, evIdx+1, len(result.Args))
+			assert.JSONEq(t, fmt.Sprintf(`{
+				"publisher": "zmq",
+				"endpoint": "tcp://*:5557",
+				"replay_endpoint": "tcp://*:%d",
+				"topic": %q
+			}`, tc.wantReplayPort, tc.wantTopic), result.Args[evIdx+1])
+
+			if len(tc.in.EncoderURLs) > 0 {
+				encIdx := indexOfArg(result.Args, "--encoder-urls")
+				require.GreaterOrEqual(t, encIdx, 0)
+				assert.Less(t, evIdx, encIdx, "--kv-events-config must precede --encoder-urls (nargs='+')")
+			}
+
+			assert.Contains(t, result.Ports, core.ContainerPort{
+				Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557,
+			})
+			assert.Contains(t, result.Ports, core.ContainerPort{
+				Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: tc.wantReplayPort,
+			})
+			require.NotNil(t, result.KVEvents)
+			assert.Equal(t, "tcp://"+tc.in.KVEventsHost+":5557", result.KVEvents.Endpoint)
+			assert.Equal(t, fmt.Sprintf("tcp://%s:%d", tc.in.KVEventsHost, tc.wantReplayPort), result.KVEvents.ReplayEndpoint)
+			assert.Equal(t, tc.wantTopic, result.KVEvents.Topic)
+
+			assert.NotContains(t, result.Args, "--prefix-caching-hash-algo")
+			assert.NotContains(t, envNames(result.Env), "VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES")
+
+			seen := map[int32]string{}
+			for _, port := range result.Ports {
+				_, dup := seen[port.ContainerPort]
+				assert.False(t, dup, "duplicate container port %d", port.ContainerPort)
+				seen[port.ContainerPort] = port.Name
+				assert.Empty(t, utilvalidation.IsValidPortName(port.Name))
+			}
+		})
+	}
+}
+
+func TestRender_SGLangEncodeRefusesKVEvents(t *testing.T) {
+	result, err := Render(Input{
+		Engine:          EngineSGLang,
+		Role:            RoleEncode,
+		PublishKVEvents: true,
+		KVEventsHost:    "qwen-encode.team-a.svc",
+	})
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Equal(t, ReasonRoleUnsupported, reasonOf(t, err))
 }

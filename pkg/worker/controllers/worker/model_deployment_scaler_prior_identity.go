@@ -951,7 +951,8 @@ func modelDeploymentScalerConnectorRender(
 	}
 	roleKind := ModelDeploymentEffectiveRoleKind(role)
 	kvTransfer := modelDeploymentUsesKVTransfer(target, role)
-	publishKVEvents := modelDeploymentPublishesKVEvents(target, role, manufacturer)
+	publishKVEvents, kvEventsTopic, kvEventsUseCBORHash := modelDeploymentKVEventsConfig(target, role)
+	engineVersion := ModelDeploymentEffectiveEngineVersion(target, role)
 	routingSidecar := modelDeploymentFrontsDecodeWithSidecar(target, role)
 	encoderLeg := modelDeploymentEPDEncoderLeg(target, role, manufacturer)
 	encoderURLs := modelDeploymentEPDEncoderURLs(target)
@@ -978,34 +979,50 @@ func modelDeploymentScalerConnectorRender(
 		}
 		kvDirectProtocol := modelDeploymentAscendKVDirectProtocol(target, role, manufacturer, family)
 		in := ModelDeploymentConnectorInput{
-			Engine:             engine,
-			Manufacturer:       manufacturer,
-			AcceleratorFamily:  family,
-			AscendHostRoCE:     modelDeploymentAscendHostRoCE(engine, manufacturer, family, kvDirectProtocol, role),
-			Kind:               role.Kind,
-			Disaggregated:      ModelDeploymentDeclaresBothHalves(target),
-			Parallelism:        pair,
-			KVTransfer:         kvTransfer,
-			RoutingSidecar:     routingSidecar,
-			EncoderCache:       encoderLeg,
-			EncoderURLs:        encoderURLs,
-			KVTransferProtocol: kvTransferProtocol,
-			KVTransferBackend:  effectiveKVBackend,
-			PublishKVEvents:    publishKVEvents,
+			Engine:              engine,
+			EngineVersion:       engineVersion,
+			Manufacturer:        manufacturer,
+			AcceleratorFamily:   family,
+			AscendHostRoCE:      modelDeploymentAscendHostRoCE(engine, manufacturer, family, kvDirectProtocol, role),
+			Kind:                role.Kind,
+			Disaggregated:       ModelDeploymentDeclaresBothHalves(target),
+			Parallelism:         pair,
+			KVTransfer:          kvTransfer,
+			RoutingSidecar:      routingSidecar,
+			EncoderCache:        encoderLeg,
+			EncoderURLs:         encoderURLs,
+			KVTransferProtocol:  kvTransferProtocol,
+			KVTransferBackend:   effectiveKVBackend,
+			PublishKVEvents:     publishKVEvents,
+			KVEventsTopic:       kvEventsTopic,
+			KVEventsUseCBORHash: kvEventsUseCBORHash,
 		}
 		if in.PublishKVEvents {
 			in.KVEventsHost = target.Name + "-" + role.Name + "." + target.Namespace + ".svc"
+			in.KVEventsLocalDP = ModelDeploymentKVEventsLocalDP(target, role)
 		}
 		return SynthesizeModelDeploymentConnector(in)
 	}
 	if roleKind == workercore.ModelDeploymentRoleKindEncode &&
 		modelDeploymentEPDReachesEncoderStage(target, manufacturer) {
+		var ecSideChannelPort *int32
+		if encoderLeg.Connector == ModelDeploymentECConnectorCPU {
+			port, envIdx, err := ParseModelDeploymentVLLMECSideChannelPort(role.Env)
+			if err != nil {
+				return ModelDeploymentConnectorRender{}, err
+			}
+			if envIdx >= 0 {
+				ecSideChannelPort = &port
+			}
+		}
 		return SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
 			Engine:            engine,
+			EngineVersion:     engineVersion,
 			Manufacturer:      manufacturer,
 			AcceleratorFamily: family,
 			Kind:              role.Kind,
 			EncoderCache:      encoderLeg,
+			ECSideChannelPort: ecSideChannelPort,
 			EncoderURLs:       encoderURLs,
 		})
 	}
@@ -1079,6 +1096,7 @@ var modelDeploymentScalerCapacityNeutralEnvNames = []string{
 	"VLLM_EC_SIDE_CHANNEL_HOST",
 	"VLLM_EC_SIDE_CHANNEL_PORT",
 	"VLLM_USE_V2_MODEL_RUNNER",
+	inject.VLLMKVEventsUseIntBlockHashesEnv,
 	inject.SGLangDisaggregationNIXLBackendEnv,
 	inject.AscendAutoConnectEnv,
 	inject.AscendLocalCommResEnv,

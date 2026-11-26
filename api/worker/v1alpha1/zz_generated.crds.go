@@ -5577,6 +5577,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														},
 													},
 												},
+												"version": {
+													Description: "Version is the inference engine release version the deployment runs by default, such as\n\"0.34.0\" or \"0.5.23\".\n- When omitted on creation (or cleared when changing Image), admission derives it from\nstandard gpustack/runner image tags. Custom or digest-only images require an explicit\nvalue.\n- It is editable alongside Image. A role that overrides Image may also declare its own\nEngineVersion; otherwise roles inherit this value.",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](64),
+												},
 											},
 										},
 										"kvCache": {
@@ -5834,6 +5839,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															},
 															Nullable:  true,
 															XListType: ptr.To[string]("atomic"),
+														},
+														"engineVersion": {
+															Description: "EngineVersion overrides the deployment's engine version for this role, such as \"0.32.0\".\n- When omitted and Image is empty, the role inherits spec.engine.version.\n- When Image overrides the deployment image: when omitted on creation (or cleared when\nchanging Image), admission derives it from standard gpustack/runner image tags.\n- Custom or digest-only role images require an explicit value.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](64),
 														},
 														"env": {
 															Description: "Env is appended the same way and refused on the same terms. Keys the operator merely defaults\nare not owned: a user's value wins there and no rejection follows.\nThere is ONE list here rather than an overlay beside it: the former second tier was appended\nand refused for owned names on exactly the same terms, so the nesting expressed a precedence\nthat never existed.",
@@ -6173,7 +6183,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											XListType: ptr.To[string]("map"),
 										},
 										"router": {
-											Description: "Router optionally puts a request router in front of the roles.\nIT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides\nwhich shapes are legal behind it. Several plain servers is one of them: a router that scores on\na cache view picks between equals in a way a Service cannot, so \"there is no pair here\" is not a\nreason to refuse one. Several prefillers with several decoders is another. A rule admitting only\none prefiller and one decoder would describe a pairer rather than this field.\nBoth llm-d-router and vllm-router support vLLM prefill/decode transfer across Ascend and\nnon-Ascend pools. sglang-gateway is only valid when engine.name is SGLang.\nAbsent means no router, and that stays a supported shape rather than a broken one: the roles are\nindividually addressable through their own Services either way, so a deployment written before\nthis field existed serves exactly as it did.",
+											Description: "Router optionally puts a request router in front of the roles.\nIT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides\nwhich shapes are legal behind it. Several plain servers is one of them: a router that scores on\na cache view picks between equals in a way a Service cannot, so \"there is no pair here\" is not a\nreason to refuse one. Several prefillers with several decoders is another. A rule admitting only\none prefiller and one decoder would describe a pairer rather than this field.\nBoth llm-d-router and vllm-router support vLLM prefill/decode transfer across Ascend and\nnon-Ascend pools. sgl-router and deprecated sglang-gateway are only valid when engine.name\nis SGLang.\nAbsent means no router, and that stays a supported shape rather than a broken one: the roles are\nindividually addressable through their own Services either way, so a deployment written before\nthis field existed serves exactly as it did.",
 											Type:        "object",
 											Required: []string{
 												"name",
@@ -6228,7 +6238,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													XListType: ptr.To[string]("atomic"),
 												},
 												"name": {
-													Description: "Name selects which router implementation fronts this deployment.\nTHE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is\nvisible in the same word twice: the transport protocol on the cache backend types spells it\n\"Auto\" while the connector here spells it \"auto\". The casing convention is per API type, and the\nreason is the one ModelDeploymentRoleKind states about itself -- these values are terms the\noutside tool understands, not terms this operator invents. \"llm-d-router\" is how the llm-d\nproject spells this router in its module path, so it is spelled that way here.\nTHE RENAME FROM \"llm-d\" CARRIES NO CONVERSION, because that spelling never shipped in a\nrelease: it lived on main between this field's introduction and this rename, with no release\ncut in between, so no released CRD ever accepted it and every object a release could have\nwritten spells the value this enum requires. A cluster running an unreleased build of the\ninterval is outside that guarantee and edits such an object by hand.\nWIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set\nthat router needs, AND the wiring that threads this value to a dispatch point. The schema\nreservation covers the first of those and nothing else, which is why a second router is a piece\nof work rather than a constant.\nA VALUE IS ALSO ENGINE-MATCHED, and the match is a separate rule rather than something this\nenum can express: \"vllm-router\" and \"sglang-gateway\" are each one project's own router for\nits own engine, so each is refused in front of the other's. \"llm-d-router\" takes either\nengine, because upstream carries a handshake connector and a metrics configuration for each\nof them.",
+													Description: "Name selects which router implementation fronts this deployment.\nTHE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is\nvisible in the same word twice: the transport protocol on the cache backend types spells it\n\"Auto\" while the connector here spells it \"auto\". The casing convention is per API type, and the\nreason is the one ModelDeploymentRoleKind states about itself -- these values are terms the\noutside tool understands, not terms this operator invents. \"llm-d-router\" is how the llm-d\nproject spells this router in its module path, so it is spelled that way here.\nTHE RENAME FROM \"llm-d\" CARRIES NO CONVERSION, because that spelling never shipped in a\nrelease: it lived on main between this field's introduction and this rename, with no release\ncut in between, so no released CRD ever accepted it and every object a release could have\nwritten spells the value this enum requires. A cluster running an unreleased build of the\ninterval is outside that guarantee and edits such an object by hand.\nWIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set\nthat router needs, AND the wiring that threads this value to a dispatch point. The schema\nreservation covers the first of those and nothing else, which is why a second router is a piece\nof work rather than a constant.\nA VALUE IS ALSO ENGINE-MATCHED, and the match is a separate rule rather than something this\nenum can express: \"vllm-router\" accepts vLLM only, \"sgl-router\" and deprecated\n\"sglang-gateway\" accept SGLang only, and \"llm-d-router\" accepts both engines.\n\"sglang-gateway\" is deprecated and frozen at gateway-v0.3.1 because upstream removed\nsgl-model-gateway; new SGLang deployments should use \"sgl-router\" and existing deployments\nshould migrate to \"sgl-router\".",
 													Type:        "string",
 													Enum: []v1.JSON{
 														{
@@ -6239,6 +6249,9 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														},
 														{
 															Raw: []byte(`"sglang-gateway"`),
+														},
+														{
+															Raw: []byte(`"sgl-router"`),
 														},
 													},
 												},

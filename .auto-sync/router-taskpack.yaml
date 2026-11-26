@@ -6,13 +6,15 @@ spec:
   goal:
     candidate: >-
       Synchronize disaggregated inference router recipes and patches (llm-d-router, vllm-router,
-      sgl-model-gateway) in pack/llm-router/ for Stage A, or promote a published multi-arch
-      gpustack/llm-router image tag across settings, tests, and docs for Stage B using
-      preflight-staged resources, update .auto-sync/proposals/router.json, and pass all verification
+      sgl-router, with legacy sgl-model-gateway frozen at gateway-v0.3.1) in pack/llm-router/ for
+      Stage A, or promote a published multi-arch gpustack/llm-router image tag across settings,
+      tests, and docs for Stage B using preflight-staged resources, update
+      .auto-sync/proposals/router.json (including base_image_builds), and pass all verification
       gates.
     noChange: >-
-      Confirm llm-d-router, vllm-router, sgl-model-gateway, and the default gpustack/llm-router
-      image tag are already aligned with eligible upstream releases with zero repository modifications.
+      Confirm llm-d-router, vllm-router, sgl-router, frozen sglang-gateway, and the default
+      gpustack/llm-router image tag are already aligned with eligible upstream releases with zero
+      repository modifications.
   execution:
     mode: strict
     capabilities:
@@ -42,6 +44,7 @@ spec:
       - AUTOSYNC_ROUTER_LLMD_REPO_URL
       - AUTOSYNC_ROUTER_VLLM_REPO_URL
       - AUTOSYNC_ROUTER_SGLANG_REPO_URL
+      - AUTOSYNC_ROUTER_SGL_ROUTER_REPO_URL
       - AUTOSYNC_ROUTER_EPD_COMMIT
       - GITHUB_EVENT_NAME
       - GITHUB_STEP_SUMMARY
@@ -56,6 +59,7 @@ spec:
       - docs/modules/model-deployment/routing.md
       - .auto-sync/proposals/router.json
     protected:
+      - pack/llm-router/patches/sglang-gateway/**
       - pkg/worker/webhooks/**
       - .claude/**
       - .codex/**
@@ -73,11 +77,19 @@ spec:
       source: vllm-project/router
       watchedPaths: []
       allowPrerelease: false
+    # Frozen at gateway-v0.3.1 (upstream deleted sgl-model-gateway in sgl-project/sglang PR #50732).
     - id: sglang-gateway
       kind: git-tag
       source: sgl-project/sglang
       watchedPaths:
         - sgl-model-gateway
+      allowPrerelease: false
+    - id: sgl-router
+      kind: git-tag
+      source: sgl-project/sglang
+      watchedPaths:
+        - sgl-router
+        - rust
       allowPrerelease: false
   proposal:
     path: .auto-sync/proposals/router.json
@@ -87,6 +99,7 @@ spec:
       - summary
       - versions
       - subscriptions
+      - base_image_builds
     schemaVersion: 1
   verification:
     localChecks:

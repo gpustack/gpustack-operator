@@ -4,7 +4,8 @@ You maintain the disaggregated inference router build recipe, local patches, and
 
 - `llm-d/llm-d-router` -> `ARG LLMD_ROUTER_VERSION` -> `epp-builder` stage in `pack/llm-router/Dockerfile` (`pack/llm-router/patches/llm-d/*.patch`)
 - `vllm-project/router` -> `ARG VLLM_ROUTER_VERSION` -> `vllm-router-builder` stage in `pack/llm-router/Dockerfile` (`pack/llm-router/patches/vllm-router/*.patch`)
-- `sgl-project/sglang` (filtered strictly to `gateway-v*` tags; never engine `v0.4.*` tags) -> `ARG SGLANG_GATEWAY_VERSION` -> `sglang-gateway-builder` stage in `pack/llm-router/Dockerfile` (`pack/llm-router/patches/sglang-gateway/*.patch`)
+- `sgl-project/sglang` (filtered strictly to `router-v*` tags; sparse paths `sgl-router` and `rust`) -> `ARG SGL_ROUTER_VERSION` -> `sgl-router-builder` stage in `pack/llm-router/Dockerfile` (`pack/llm-router/patches/sgl-router/*.patch`)
+- `sgl-project/sglang` (`sglang-gateway`, **PERMANENTLY FROZEN** at `ARG SGLANG_GATEWAY_VERSION=gateway-v0.3.1` because upstream deleted `sgl-model-gateway` in PR `#50732`) -> NEVER modify `SGLANG_GATEWAY_VERSION`, `sglang-gateway-builder`, or anything under `pack/llm-router/patches/sglang-gateway/`
 - `pkg/worker/settings/value.go` and `docs/reference/settings.md` (Stage B tag promotion only)
 
 ## Taskpack 2.0 Preflight Resources
@@ -63,10 +64,12 @@ Stage B (`tag_promotion`) takes precedence over Stage A (`recipe_sync`): once un
    - Prepend the original patch's descriptive header (updating `AGAINST:` to the target tag) and write the updated `.patch` file under `pack/llm-router/patches/<subdir>/` (and rebase any remaining patches after `conflicted_patch` in order if a multi-patch series had further patches).
    - Verify `git apply --check` cleanly against a fresh copy of `/tmp/router-stage/target-files/<subdir>/` (with zero `.rej`).
 3. **Update `ARG GO_VERSION` and `ARG RUST_VERSION` when needed**: Check `toolchain.recommended_go_version_arg` in `router-preflight-report.json` (e.g., `1.27-bookworm` when `llm-d-router` `go.mod` advances to `go 1.27.*`) and update `ARG GO_VERSION=...` in `pack/llm-router/Dockerfile`.
-4. **Update router version ARGs** (`LLMD_ROUTER_VERSION`, `VLLM_ROUTER_VERSION`, `SGLANG_GATEWAY_VERSION`) in `pack/llm-router/Dockerfile` and any patch references/comments if patches were retired.
-5. Never drop `struct ObserverRouter` in `sglang-gateway` or observer/Mooncake/discovery semantics across any router.
+4. **Update router version ARGs** (`LLMD_ROUTER_VERSION`, `VLLM_ROUTER_VERSION`, `SGL_ROUTER_VERSION`) in `pack/llm-router/Dockerfile` and any patch references/comments if patches were retired. NEVER modify frozen `SGLANG_GATEWAY_VERSION`, `sglang-gateway-builder`, or `pack/llm-router/patches/sglang-gateway/**` (`validate_router.sh` fails closed on any change).
+5. Never drop `struct ObserverRouter` in `sgl-router` or `sglang-gateway`, or observer/Mooncake/discovery semantics across any router.
 6. **Verify `llm-d-router` observer system-default plugin coverage**: When rebasing `pack/llm-router/patches/llm-d/0001-observer-endpoints-and-dispatch.patch` onto a newer `llm-d-router` tag, inspect `pkg/epp/config/loader/defaults.go` and `cmd/epp/runner/runner.go` for newly added system-default plugins (for example, `strict-band-selection-policy` added by `ensureFlowControlLayer` in `v1.0.0`) and any signature changes to `parseConfigurationPhaseTwo`. Update `SupportedPlugins` in `pkg/epp/observer/endpoints.go` and `cmd/epp/runner/observer_test.go` in the same patch so `epp-builder`'s `go test ./cmd/epp/runner -run TestObserverSupportsRenderedOperatorProfiles` and `go test ./pkg/epp/observer/...` build gates pass.
 
-## 4. Proposal Artifact
+## 4. Proposal Artifact & `Base Image` Build Recommendations
 
-Keep `.auto-sync/proposals/router.json` valid JSON with `schema_version: 1`, `stage`, `summary`, `versions` (matching `upstream-records` IDs: `llm-d-router`, `vllm-router`, `sglang-gateway`), and `subscriptions`.
+Keep `.auto-sync/proposals/router.json` valid JSON with `schema_version: 1`, `stage`, `summary`, `versions` (matching `upstream-records` IDs: `llm-d-router`, `vllm-router`, `sglang-gateway`, `sgl-router`), `subscriptions`, and `base_image_builds` (JSON array):
+- Whenever Stage A modifies `pack/llm-router/Dockerfile` or `pack/llm-router/patches/**`, populate `base_image_builds` (matching `base_image_builds` in `router-preflight-report.json` / `router-preflight-summary.json`) with the required `gpustack/llm-router` entry containing `repository`, `target` (`""`), `recommended_tag`, `reason`, and the exact `gh workflow run "Base Image" -f repository=llm-router -f tag=<recommended_tag>` `command`, and mention the dispatch command in `summary`.
+- When no `pack/llm-router/**` files change (Stage B `tag_promotion` or `aligned`), set `"base_image_builds": []`.

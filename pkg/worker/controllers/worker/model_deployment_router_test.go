@@ -896,20 +896,30 @@ func TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged(t *tes
 			"no stage filter may demand a label no pass writes for this shape")
 	}
 
-	// The two argv profiles render no ConfigMap, so their whole configuration is the argument list
-	// a Pod is rolled by. Each discovers its halves by per-role selectors, and a MANAGED pair
-	// narrows those selectors from the first enable, one label per argument.
-	for _, routerName := range []string{
-		workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentRouterSGLang,
+	// The argv profiles render only the Envoy allowlist ConfigMap, never picker discovery files.
+	// SGLang pairs are GroupForward-activatable and narrow both role selectors from the first
+	// enable; vLLM pairs under vllm-router have no decode proxy (GroupForward Unsupported) and must
+	// NOT require endpoint-eligible=true, or the router selects zero workers.
+	for _, tc := range []struct {
+		routerName   string
+		engineName   string
+		wantNarrowed int
+	}{
+		{workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentEngineVLLM, 0},
+		{workercore.ModelDeploymentRouterSGLang, workercore.ModelDeploymentEngineSGLang, 2},
+		// sgl-router discovers EndpointSlices via role-kind on per-role Services (whose selectors
+		// carry endpoint-eligible=true), so its own router args omit endpoint-eligible.
+		{workercore.ModelDeploymentRouterSGL, workercore.ModelDeploymentEngineSGLang, 0},
 	} {
 		objects, err := renderModelDeploymentRouterObjects(context.Background(),
 			routedModelDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Router.Name = routerName
+				md.Spec.Engine.Name = tc.engineName
+				md.Spec.Router.Name = tc.routerName
 			}), nil, false)
 		require.NoError(t, err)
-		require.NotNil(t, objects.ConfigMap, "%s renders the Envoy allowlist ConfigMap for sentinel-capable roles", routerName)
+		require.NotNil(t, objects.ConfigMap, "%s renders the Envoy allowlist ConfigMap for sentinel-capable roles", tc.routerName)
 		assert.Equal(t, []string{modelDeploymentRouterEnvoyConfigKey}, slices.Collect(maps.Keys(objects.ConfigMap.Data)),
-			"%s publishes only the Envoy allowlist document, never picker discovery files", routerName)
+			"%s publishes only the Envoy allowlist document, never picker discovery files", tc.routerName)
 		narrowed := 0
 		for _, container := range objects.Deployment.Spec.Template.Spec.Containers {
 			for _, arg := range container.Args {
@@ -918,9 +928,9 @@ func TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged(t *tes
 				}
 			}
 		}
-		assert.Equal(t, 2, narrowed,
-			"%s discovers by per-role selectors, and both halves of a managed protected pair narrow them (%s)",
-			routerName, routerName)
+		assert.Equal(t, tc.wantNarrowed, narrowed,
+			"%s/%s endpoint-eligible narrowing must match GroupForward activatability",
+			tc.routerName, tc.engineName)
 	}
 }
 
@@ -996,7 +1006,7 @@ const (
 	mixedServerCandidateSelector = "app.kubernetes.io/name=model-deployment," +
 		"app.kubernetes.io/instance=qwen,modeldeployment.gpustack.ai/router-candidate=true," +
 		"!modeldeployment.gpustack.ai/router"
-	mixedServerCandidateHash = "bc2b19fd4e4b9bc9d7f0841ad6f1f19daf6c8045b0d007074594d4f57056c6e3"
+	mixedServerCandidateHash = "586078904f6f3f4e8ed236891744f588b30d7d854c248e8e1f263ff99584e037"
 )
 
 func TestRenderModelDeploymentRouterObjects_MixedServerRolesRenderTheCandidateUnion(t *testing.T) {
@@ -1662,9 +1672,9 @@ func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSpli
 		// once more when the default router image advanced to v0.4.0, again at v0.5.0, again
 		// when Envoy replaced its catch-all route with the explicit inference allowlist, and
 		// again when multimodal inference routes were added to that allowlist.
-		"a prefill and decode pair": "993d24783ee7eb8b2723128b83449e4c245764e421a42a2ffff1790dbd3b3d7b",
-		"a sole server role":        "6027867ad79c60c17a77245152808089706917fad34e828bef4f8ac8b4bfa04e",
-		"a router declaring its own image, policy, replicas and extra arguments": "780a89f271a8de5b00e0111b861ebb176b194eac54143664c0fd868acb9498eb",
+		"a prefill and decode pair": "7b039e9a106a71214fc742bcd197f450cca3d57f98a9bc212ba8ee04a7e9169f",
+		"a sole server role":        "1ec8490c73c2d0517b5812f4be64fa134ba4312bd3afead4cf1c21ef550f3511",
+		"a router declaring its own image, policy, replicas and extra arguments": "d16a66e779517dc9c7fb37c75b1b30f5514edc6fbb037dd55ecbb6dd987dccb5",
 		"a role whose command the user took over, so it publishes no events":     "4a8d95d2f122997bab1dd8e49f5d03fc2868d552835e496438e5c49a38a6c8ca",
 		"an sglang engine, whose metrics contract differs":                       "af51a8dd3dfad66334f2120f280cbd7578c2cfc0c0a5a652578b30199ae101cc",
 	}

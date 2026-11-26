@@ -1515,6 +1515,7 @@ for k in (
     "digest_refresh_only",
     "capture_date",
     "catalog_merge",
+    "base_image_builds",
 ):
     if k in report_doc:
         summary_highlights[k] = report_doc[k]

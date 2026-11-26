@@ -7,6 +7,7 @@ older engine release.
 ## Contents
 
 - [Minimum versions](#minimum-versions)
+- [Engine version resolution](#engine-version-resolution)
 - [Transport compatibility](#transport-compatibility)
 - [Remote weight loading](#remote-weight-loading)
 - [Limitations](#limitations)
@@ -29,7 +30,7 @@ configurations.
 | SGLang | with a Mooncake store | `0.5.18`, run as a pair | `0.3.12.post1` | the 0.3.12 line, such as `kvcacheai/mooncake:0.3.12.post1` |
 | vLLM | *encode/prefill/decode*, direct transfer over NIXL (`ECCPUConnector`) | `0.30.0`, behind `llm-d-router` or `vllm-router`: NVIDIA CUDA (verified on 4 × NVIDIA L40S) or AMD ROCm (unverified on hardware) | compiles its own, not run | — |
 | vLLM-Ascend | *encode/prefill/decode*, direct transfer (`ECExampleConnector`) | `0.30.0rc1`, behind `llm-d-router` (verified on Ascend 910B2) | `0.3.11.post1`, the NPU build | — |
-| SGLang | *encode/prefill/decode*, transfer by address (`encoder-urls`) | `0.5.10`, behind `llm-d-router` or `sglang-gateway` (NVIDIA verified on 2 × NVIDIA L40S) | `0.3.12.post1` | — |
+| SGLang | *encode/prefill/decode*, transfer by address (`encoder-urls`) | `0.5.10`, behind `sgl-router`, `llm-d-router`, or deprecated `sglang-gateway` (NVIDIA verified on 2 × NVIDIA L40S) | `0.3.12.post1` | — |
 
 A row counts as verified when the configuration served requests and reported KV block transfers or
 store writes. The vLLM-Ascend rows ran on `cann9.1-910b-vllm0.23.0` via *`roles[].image`*. NVIDIA
@@ -39,9 +40,6 @@ AMD *EPD* and SGLang Ascend rows are admitted but unverified on hardware
 
 ### Engine image requirements
 
-- **Image floor**: There is no *`engine.version`* field. Roles run *`roles[].image`* or
-  *`spec.engine.image`* ([Role images](configuration.md#role-images)), and admission never checks
-  the tag. An image below the floor fails at startup (`ImagePullBackOff` or unknown-flag exit).
 - **Render flag**: Non-*Encode* vLLM deployments behind `llm-d-router` need `--enable-scale-out`
   starting at vLLM `0.30.0` or vLLM-Ascend `0.30.0rc1`
   ([Router token counting](prefill-decode.md#router-token-counting)). Earlier `0.29.0`/`0.23.0`
@@ -59,6 +57,31 @@ AMD *EPD* and SGLang Ascend rows are admitted but unverified on hardware
   `0.5.18`/`0.5.21` (`meta_info.id` = rid). On other releases, the probe still runs: `Verified`
   admits a member, `Unknown` keeps prior eligibility, and only a failed health check withdraws it
   ([Endpoint status](routing.md#endpoint-status)).
+
+## Engine version resolution
+
+Managed roles (*`roles[].command`* empty) resolve an engine version from *`spec.roles[].engineVersion`*
+or fall back to *`spec.engine.version`*. Admission backfills empty version fields automatically from
+standard `gpustack/runner` image tags on both creation and update.
+
+- **Custom or digest-only images**: Set *`spec.engine.version`* or *`roles[].engineVersion`*
+  explicitly. Admission fails closed when a managed role uses an unparseable image without a version,
+  including when a role overrides *`roles[].image`* with a different unparseable image while leaving
+  *`roles[].engineVersion`* empty.
+- **Runner tag agreement**: If you update a `gpustack/runner` image while leaving a stale explicit
+  version, admission refuses the update. Update or clear the version field alongside the image.
+- **Milestone comparison**: Gates compare `(major, minor, patch)` tuples, so pre-release tags such
+  as `0.30.0rc1` or `0.34.0rc0` satisfy their release line (`0.30.0` or `0.34.0`).
+- **Empty stored version baseline**: In controller rendering, an empty stored version falls back to
+  the `< 0.30.0` baseline without re-parsing container image tags.
+
+### Version gates
+
+| Version gate | Engine | Before | At/after |
+|---|---|---|---|
+| `0.30.0` | `vLLM-Ascend` | *PD* renders `MooncakeConnectorV1` (`prefill tp_size >= decode tp_size`) | *PD* renders `MooncakeConnectorV2` Pull mode (`max(tp_p, tp_d) % min(tp_p, tp_d) == 0`); mixed V1/V2 pairs refused |
+| `0.31.0` | `vLLM`, `vLLM-Ascend` | `vllm-router` `kv_aware` policy refused at admission | `vllm-router` `kv_aware` admitted; emits KV events and `sha256_cbor` hash alignment |
+| `0.34.0` | `vLLM` | `ECCPUConnector` defaults `VLLM_USE_V2_MODEL_RUNNER=1` and `VLLM_EC_SIDE_CHANNEL_PORT=5601` | `VLLM_USE_V2_MODEL_RUNNER` omitted; `VLLM_EC_SIDE_CHANNEL_PORT=5601` remains defaulted (overridable, including `0`) |
 
 ## Transport compatibility
 

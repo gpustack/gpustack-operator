@@ -215,7 +215,7 @@ managed role:
 | Engine | Owned arguments | Owned environment |
 |---|---|---|
 | `vLLM` | `--kv-transfer-config`, `--kv-events-config` (including unique prefixes, underscores, and dotted members) | `MOONCAKE_CONFIG_PATH`, `VLLM_MOONCAKE_BOOTSTRAP_PORT`, `VLLM_NIXL_SIDE_CHANNEL_HOST` |
-| `SGLang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config`, `--disaggregation-mode`, `--disaggregation-transfer-backend`, `--disaggregation-bootstrap-port` (including unique prefixes) | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
+| `SGLang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config`, `--disaggregation-mode`, `--disaggregation-transfer-backend`, `--disaggregation-bootstrap-port`, `--kv-events-config` (including unique prefixes) | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
 
 - Encoder-stage keys (including vLLM `--ec-transfer-config` and SGLang encoder flags) are also owned
   per engine; see [Keys the operator owns](encode-prefill-decode.md#operator-owned-keys).
@@ -230,8 +230,10 @@ vLLM reads its client configuration from `/etc/gpustack/kvcache/mooncake.json`. 
 read-only downwardAPI projection, so do not mount an overlay over `/etc/gpustack/kvcache`. SGLang
 reads its whole cache configuration from environment variables.
 
-Routed cache-producing vLLM roles also render `--kv-events-config` on ZMQ ports `5557` and `5558`.
-Routed SGLang roles report `KVEventsPublishing=False/PublisherDisabled`.
+Routed cache-producing vLLM roles (`llm-d-router` single-`Pod` DP and `vllm-router` `kv_aware`) and
+SGLang roles behind `sgl-router` render `--kv-events-config` on ZMQ ports `5557` and `5558` (or
+`5557 + dpSpan` when `dpSpan > 1`) and report `KVEventsPublishing=True/Publishing`. SGLang behind
+`llm-d-router` or deprecated `sglang-gateway` reports `KVEventsPublishing=True/NotApplicable`.
 
 ## Rollout behavior
 

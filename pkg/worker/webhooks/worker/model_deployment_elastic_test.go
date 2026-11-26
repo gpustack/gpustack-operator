@@ -53,8 +53,9 @@ func elasticMD(roles ...workercore.ModelDeploymentRole) *workercore.ModelDeploym
 		Spec: workercore.ModelDeploymentSpec{
 			Model: workercore.ModelDeploymentModel{Name: "Qwen/Qwen3-30B-A3B"},
 			Engine: workercore.ModelDeploymentEngine{
-				Name:  workercore.ModelDeploymentEngineVLLM,
-				Image: "vllm/vllm-openai:v0.29.0",
+				Name:    workercore.ModelDeploymentEngineVLLM,
+				Image:   "vllm/vllm-openai:v0.29.0",
+				Version: "0.29.0",
 			},
 			Roles: roles,
 		},

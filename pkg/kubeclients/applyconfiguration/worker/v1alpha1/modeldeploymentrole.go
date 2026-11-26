@@ -129,6 +129,14 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// an image different from the engine's, or to name a repository the engine image does not.
 	//
 	Image *string `json:"image,omitempty"`
+	// EngineVersion overrides the deployment's engine version for this role, such as "0.32.0".
+	//
+	// - When omitted and Image is empty, the role inherits spec.engine.version.
+	// - When Image overrides the deployment image: when omitted on creation (or cleared when
+	// changing Image), admission derives it from standard gpustack/runner image tags.
+	// - Custom or digest-only role images require an explicit value.
+	//
+	EngineVersion *string `json:"engineVersion,omitempty"`
 	// ImagePullPolicy is the pull policy for Image.
 	//
 	ImagePullPolicy *v1.PullPolicy `json:"imagePullPolicy,omitempty"`
@@ -287,6 +295,14 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithResources(value *ModelDeploy
 // If called multiple times, the Image field is set to the value of the last call.
 func (b *ModelDeploymentRoleApplyConfiguration) WithImage(value string) *ModelDeploymentRoleApplyConfiguration {
 	b.Image = &value
+	return b
+}
+
+// WithEngineVersion sets the EngineVersion field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the EngineVersion field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithEngineVersion(value string) *ModelDeploymentRoleApplyConfiguration {
+	b.EngineVersion = &value
 	return b
 }
 

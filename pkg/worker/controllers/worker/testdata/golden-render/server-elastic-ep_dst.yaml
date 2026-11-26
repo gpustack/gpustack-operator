@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: main
     modeldeployment.gpustack.ai/pod-spec-hash: 92f968b546da07ea8c76502c489e08633bf4f9e7528adbb2ffe0d000026e0eb5
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -210,7 +210,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: main
     modeldeployment.gpustack.ai/pod-spec-hash: f897571ea9feea000545419d0f5b437b599d12d44b2f7159c106770fb6d0ea34
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -335,7 +335,7 @@ kind: Pod
 metadata:
   annotations:
     modeldeployment.gpustack.ai/pod-spec-hash: c82456074238f7c36155728507e4adda1653f05a876bd8739396efeb5de8f6c7
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: qwen-elastic-head
   generateName: qwen-qwen-elastic-head-
   labels:

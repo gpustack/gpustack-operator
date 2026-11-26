@@ -111,19 +111,20 @@ where the deployment attaches a pool, which renders the storage backend.
 
 The router table distinguishes ordinary serving from *prefill/decode (PD)* mode.
 
-| Field | `llm-d-router` | `vllm-router` | `vllm-router`, *PD* mode | `sglang-gateway` |
-|---|---|---|---|---|
-| `router-running` | `llm_d_epp_request_running`: requests the router is handling | `vllm_router_running_requests` | not exported | `smg_worker_requests_active`, summed over workers: requests in flight to a worker |
-| `router-backends` | `llm_d_epp_ready_endpoints`: endpoints it holds ready | — | — | `smg_worker_pool_size`: workers in its pool |
-| `router-reported-workers` | — | `vllm_router_active_workers` | not exported | — |
-| `requests` | `llm_d_epp_request_total` | — | — | `smg_router_requests_total` |
-| `successful-requests` | — | `vllm_router_requests_total`: completed successes | — | — |
-| `pd-requests` | — | — | `vllm_router_pd_requests_total` | — |
-| `request-errors`, `errors`, `pd-errors` | `llm_d_epp_request_error_total` | `vllm_router_request_errors_total` | `vllm_router_pd_errors_total` | `smg_router_request_errors_total` |
-| `retries-exhausted` | — | `vllm_router_retries_exhausted_total` | — | — |
-| `error-ratio` | — | — | — | `errors` over `requests` |
-| `http-5xx-responses` | — | — | — | `smg_http_responses_total` with a 5xx `status_code` |
-| `ttft`, `tpot` | `llm_d_epp_request_ttft_seconds`, `llm_d_epp_request_streaming_tpot_seconds` | — | — | — |
+| Field | `llm-d-router` | `vllm-router` | `vllm-router`, *PD* mode | `sgl-router` | `sglang-gateway` |
+|---|---|---|---|---|---|
+| `router-running` | `llm_d_epp_request_running`: requests the router is handling | `vllm_router_running_requests` | not exported | `sgl_router_worker_inflight_requests` (synthesized as `0` when `sgl_router_workers` sums to `0`) | `smg_worker_requests_active`, summed over workers: requests in flight to a worker |
+| `router-backends` | `llm_d_epp_ready_endpoints`: endpoints it holds ready | — | — | `sgl_router_workers`: workers in its registry | `smg_worker_pool_size`: workers in its pool |
+| `router-reported-workers` | — | `vllm_router_active_workers` | not exported | — | — |
+| `requests` | `llm_d_epp_request_total` | — | — | `sgl_router_requests_total` (excluding infra probe/metrics routes) | `smg_router_requests_total` |
+| `successful-requests` | — | `vllm_router_requests_total`: completed successes | — | — | — |
+| `pd-requests` | — | — | `vllm_router_pd_requests_total` | — | — |
+| `request-errors`, `errors`, `pd-errors` | `llm_d_epp_request_error_total` | `vllm_router_request_errors_total` | `vllm_router_pd_errors_total` | — | `smg_router_request_errors_total` |
+| `worker-errors` | — | — | — | `sgl_router_worker_requests_total` with `outcome="error"` (paired with `requests`) | — |
+| `retries-exhausted` | — | `vllm_router_retries_exhausted_total` | — | — | — |
+| `error-ratio` | — | — | — | — | `errors` over `requests` |
+| `http-5xx-responses` | — | — | — | `sgl_router_responses_total` with 5xx `status_code` (excluding infra probe/metrics routes, paired with `requests`) | `smg_http_responses_total` with a 5xx `status_code` |
+| `ttft`, `tpot` | `llm_d_epp_request_ttft_seconds`, `llm_d_epp_request_streaming_tpot_seconds` | — | — | — | — |
 
 `gpustack/llm-router:v0.3.1` does not export `llm_d_epp_request_streaming_tpot_seconds`. The table
 keeps the series because it remains part of the router contract.
@@ -169,8 +170,14 @@ the vLLM router does not supply those series in the pinned version. Router measu
 more of the request path than engine measurements; their scopes stay separate.
 
 *`traffic[]`* reports router requests per second, router-source errors per second, and their error
-fraction when the counters share a sampling window and a denominator. For the SGLang gateway it
-also reports `http-5xx-responses` per second from `smg_http_responses_total`.
+fraction when the counters share a sampling window and a denominator. For the SGLang gateway it also
+reports `http-5xx-responses` per second from `smg_http_responses_total`.
+
+For `sgl-router` it reports non-infrastructure `requests`, `worker-errors`
+(`sgl_router_worker_requests_total{outcome="error"}`), and `http-5xx-responses`
+(`sgl_router_responses_total` with `status_code >= 500`, filtering out probe, `/metrics`, and
+`/observer/endpoints` routes). `sgl-router` carries no `error-ratio` because `worker-errors` counts
+per-worker attempts (including prefill and decode hops in *PD* mode) rather than incoming requests.
 
 That counter covers gateway HTTP responses across paths, including a `503 no_available_workers`
 response that its router error counter does not record. Its labels do not identify the routed

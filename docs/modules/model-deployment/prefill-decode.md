@@ -94,17 +94,19 @@ Admission matches *`spec.router.name`* to *`spec.engine.name`* and rejects cross
 | Router | Engines | Rendered configuration | Routing policy |
 |---|---|---|---|
 | `llm-d-router` | `vLLM`, `SGLang` | Endpoint picker behind a proxy with a mounted config file | [Fixed scoring profile](routing.md#fixed-scoring-profile) |
-| `vllm-router` | `vLLM` | Single process configured by CLI flags | [`cache_aware`, or `--policy`](routing.md#policy-overrides) |
-| `sglang-gateway` | `SGLang` | Single process configured by CLI flags | [`cache_aware`, or `--policy`](routing.md#policy-overrides) |
+| `vllm-router` | `vLLM` | Single process configured by CLI flags | [`cache_aware`, or `--policy`](routing.md#policy-overrides) (supports `kv_aware` at `>= 0.31.0`) |
+| `sgl-router` | `SGLang` | Single process configured by CLI flags with `EndpointSlice` discovery | [SGLang native policies and KV events](routing.md#policy-overrides) |
+| `sglang-gateway` (deprecated, frozen at `gateway-v0.3.1`) | `SGLang` | Single process configured by CLI flags | [`cache_aware`, or `--policy`](routing.md#policy-overrides) |
 
 - **Router replicas**: *`spec.router.replicas`* defaults to `1`. Running `> 1` trades prefix-cache
   hit rate for availability (upstream reports unsynchronized radix trees and a 10%–20% hit-rate
   drop).
 - **Owned router flags**: Admission refuses operator-derived flags in *`spec.router.extraArgs`*. On
   `llm-d-router`: `--endpoint-selector`, `--endpoint-target-ports`, `--config-file`,
-  `--secure-serving`, `--grpc-health-port` and `--metrics-endpoint-auth`. On `vllm-router` and
-  `sglang-gateway`: bind addresses/ports, service-discovery flags, disaggregation flags and
-  `vllm-router`'s transfer connector flag.
+  `--secure-serving`, `--grpc-health-port`, and `--metrics-endpoint-auth`. On `vllm-router`,
+  `sgl-router`, and `sglang-gateway`: bind addresses/ports, service-discovery flags, disaggregation
+  flags, `vllm-router`'s `--kv-connector`, and `sgl-router`'s `--model-id`, `--chat-routing`,
+  `--no-tokenizer`, and `--dp-aware`.
 - **Fixed east-west flags**: `llm-d-router` fixes `--secure-serving=false` (loopback gRPC inside
   the `Pod`) and `--metrics-endpoint-auth=false` (in-cluster scrape). Enforce caller TLS and auth at
   the north-south cluster gateway.
@@ -112,8 +114,8 @@ Admission matches *`spec.router.name`* to *`spec.engine.name`* and rejects cross
 ### Router fields
 
 - *`spec.router.requestTimeoutSeconds`*: Sets router reply timeout (`> 0`; `0` is refused). If
-  omitted, upstream defaults diverge by 48×: 1 day on `llm-d-router` versus 30 minutes on
-  `vllm-router` and `sglang-gateway`.
+  omitted, upstream defaults diverge: 1 day on `llm-d-router` versus 30 minutes on `vllm-router`,
+  `sgl-router`, and `sglang-gateway`.
 - *`spec.router.disaggregationThresholdTokens`*: Supported on `llm-d-router` only (refused on other
   routers). Sets uncached prompt tokens needed to split a request; `0` disables splitting.
 - **Access logs**: The `llm-d-router` proxy writes one JSON access record per request to stdout
@@ -167,9 +169,11 @@ router paths:
 
 | Router path | `--enable-scale-out` status | Configuration path |
 |---|---|---|
-| `vllm-router` + vLLM | Not established | Uses router *PD* mode and selectors; *encode/prefill/decode (EPD)* renders [`--epd-config`](routing.md#encode-stage-routing) |
-| `sglang-gateway` + SGLang | Not applicable | Uses SGLang native disaggregation flags |
-| `llm-d-router` + SGLang | Not applicable; token path unmeasured | Uses SGLang native disaggregation flags |
+| `llm-d-router` + `vLLM` / `vLLM-Ascend` | Required on `>= 0.30.0` (non-*Encode*) | Publishes KV events (`kv@pod@<model>`) on *Server* and *Prefill* |
+| `vllm-router` + `vLLM` / `vLLM-Ascend` | Not established | Uses router *PD* mode and selectors; `kv_aware` (`>= 0.31.0`) enables KV events; *encode/prefill/decode (EPD)* renders [`--epd-config`](routing.md#encode-stage-routing) |
+| `sgl-router` + `SGLang` | Not applicable | Uses `EndpointSlice` selectors, SGLang native disaggregation flags, and native KV events (`kv-events`) on *Server* and *Prefill*; *EPD* uses `--encoder-urls` |
+| `sglang-gateway` + `SGLang` (deprecated) | Not applicable | Frozen at `gateway-v0.3.1`; uses `--pd-disaggregation` and SGLang native disaggregation flags |
+| `llm-d-router` + `SGLang` | Not applicable; token path unmeasured | Uses `approx-prefix-cache-producer` (no KV events) and SGLang native disaggregation flags |
 
 ## Direct KV transports
 
@@ -205,8 +209,13 @@ router paths:
 - **Combined pool + direct KV**: On vLLM pairs with *`spec.kvCache`*, *Prefill* wraps the direct
   connector first in `MultiConnector` beside the store connector; *Decode* runs the direct connector
   alone while keeping pool dtype and block-size alignment.
+- **Ascend connector generation**: On `vLLM-Ascend`, effective engine version `>= 0.30.0` renders
+  `MooncakeConnectorV2` (Pull mode) and relaxes *TP* validation to
+  `max(prefill_tp, decode_tp) % min(prefill_tp, decode_tp) == 0`. Versions `< 0.30.0` and legacy
+  versionless `ModelDeployment`s keep `MooncakeConnectorV1` (`prefill_tp >= decode_tp`). Admission
+  refuses mixed V1/V2 pairs where one role is `< 0.30.0` and the other is `>= 0.30.0`.
 - **Sidecar and handshakes**: Under `llm-d-router`, *Decode* runs a `routing-proxy` sidecar using
-  `--kv-connector=nixlv2` (vLLM NIXL or Ascend), `mooncake` (vLLM Mooncake) or `sglang` (SGLang).
+  `--kv-connector=nixlv2` (vLLM NIXL or Ascend), `mooncake` (vLLM Mooncake), or `sglang` (SGLang).
   Ascend vLLM pairs also render behind `vllm-router` with `--kv-connector=nixl`. SGLang uses its
   native disaggregation flags.
 
@@ -214,7 +223,8 @@ router paths:
 
 The operator reads each role's parallel degrees from *`roles[].extraArgs`* (managed role) or
 *`roles[].command`* (take-over role), plus literal `VLLM_DP_SIZE` in *`env`*. Undeclared degrees
-default to `1/1`.
+default to `1/1`. On SGLang, prefer `--attn-dp-size` over legacy `--enable-dp-attention`; both are
+parsed.
 
 *`resources.accelerator`* requests GPUs for scheduling; it never generates `--tensor-parallel-size`,
 `--pipeline-parallel-size` or `--data-parallel-size`. Pass engine parallelism flags explicitly in

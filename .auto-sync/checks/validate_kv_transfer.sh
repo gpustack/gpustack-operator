@@ -1292,6 +1292,10 @@ if runner_v not in ("aligned", "aligned+stage-b") and not re.fullmatch(r"[0-9a-f
     )
 PY
 
+# 6b. Validate Base Image build recommendations whenever mapped pack/** files changed.
+python3 -B "${SCRIPT_DIR}/base_image_builds.py" validate \
+  "${BASELINE_DIR}" "${AUTOSYNC_CANDIDATE_ROOT}" "${CAND_PROPOSAL}" --domain kv-transfer
+
 # 7. Chart / settings / docs regeneration and test gate when Stage B files changed.
 PROMOTED_FILES_CHANGED="false"
 for rel in \

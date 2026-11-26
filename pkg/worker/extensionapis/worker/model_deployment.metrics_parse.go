@@ -96,9 +96,104 @@ func parseModelDeploymentMetrics(body []byte, engine, router string) (modelDeplo
 			if count, ok := sglangGatewayHTTP5xx(families); ok {
 				out.windows["http-5xx-responses"] = modelDeploymentWindowPair{count: count}
 			}
+		case "sgl-router":
+			addGauge(out.gauges, families, "router-backends", "sgl_router_workers")
+			addGauge(out.gauges, families, "router-running", "sgl_router_worker_inflight_requests")
+			if backends, hasBackends := out.gauges["router-backends"]; hasBackends && backends == 0 {
+				if _, hasRunning := out.gauges["router-running"]; !hasRunning {
+					out.gauges["router-running"] = 0
+				}
+			}
+			if count, ok := sglRouterNonInfraRequests(families); ok {
+				out.windows["requests"] = modelDeploymentWindowPair{count: count}
+			}
+			if count, ok := metricSum(families, "sgl_router_worker_requests_total", map[string]string{"outcome": "error"}); ok {
+				out.windows["worker-errors"] = modelDeploymentWindowPair{count: count}
+			}
+			if count, ok := sglRouterNonInfraHTTP5xx(families); ok {
+				out.windows["http-5xx-responses"] = modelDeploymentWindowPair{count: count}
+			}
 		}
 	}
 	return out, nil
+}
+
+func isSGLRouterInfraRoute(route string) bool {
+	switch route {
+	case "/healthz", "/readyz", "/health", "/liveness", "/readiness",
+		"/health_generate", "/metrics", "/observer/endpoints":
+		return true
+	default:
+		return false
+	}
+}
+
+func sglRouterNonInfraRequests(families map[string]*dto.MetricFamily) (float64, bool) {
+	family := families["sgl_router_requests_total"]
+	if family == nil || family.GetType() != dto.MetricType_COUNTER {
+		return 0, false
+	}
+	var total float64
+	observed := false
+	for _, metric := range family.Metric {
+		if metric.Counter == nil || !finiteNonnegative(metric.Counter.GetValue()) {
+			continue
+		}
+		route, hasRoute := "", false
+		for _, label := range metric.Label {
+			if label.GetName() == "route" {
+				route = label.GetValue()
+				hasRoute = true
+				break
+			}
+		}
+		if !hasRoute {
+			continue
+		}
+		observed = true
+		if !isSGLRouterInfraRoute(route) {
+			total += metric.Counter.GetValue()
+		}
+	}
+	return total, observed
+}
+
+func sglRouterNonInfraHTTP5xx(families map[string]*dto.MetricFamily) (float64, bool) {
+	family := families["sgl_router_responses_total"]
+	if family == nil || family.GetType() != dto.MetricType_COUNTER {
+		return 0, false
+	}
+	var total float64
+	observed := false
+	for _, metric := range family.Metric {
+		if metric.Counter == nil || !finiteNonnegative(metric.Counter.GetValue()) {
+			continue
+		}
+		route, hasRoute := "", false
+		statusRaw, hasStatus := "", false
+		for _, label := range metric.Label {
+			switch label.GetName() {
+			case "route":
+				route = label.GetValue()
+				hasRoute = true
+			case "status_code":
+				statusRaw = label.GetValue()
+				hasStatus = true
+			}
+		}
+		if !hasRoute || !hasStatus {
+			continue
+		}
+		status, err := strconv.Atoi(statusRaw)
+		if err != nil || status < 100 || status >= 600 {
+			continue
+		}
+		observed = true
+		if !isSGLRouterInfraRoute(route) && status >= 500 {
+			total += metric.Counter.GetValue()
+		}
+	}
+	return total, observed
 }
 
 func sglangGatewayHTTP5xx(families map[string]*dto.MetricFamily) (float64, bool) {

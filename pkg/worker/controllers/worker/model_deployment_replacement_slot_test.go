@@ -593,13 +593,16 @@ func TestModelDeploymentReplacementSlot_DualHashRouterCurrency(t *testing.T) {
 	require.Len(t, want, 2)
 
 	legacyHashes := make([]string, len(want))
+	legacyHashSets := make([][]string, len(want))
 	preUpgradeMembers := make([]*core.Pod, len(want))
 	for i := range want {
 		seat := modelDeploymentPodMemberIndex(want[i])
-		legacyHash := modelDeploymentDesiredPodLegacyRouterHash(md, &md.Spec.Roles[0], 0, seat, want[i])
-		require.NotEmpty(t, legacyHash)
+		hashes := modelDeploymentDesiredPodLegacyHashes(md, &md.Spec.Roles[0], 0, seat, want[i])
+		require.NotEmpty(t, hashes)
+		legacyHash := hashes[0]
 		require.NotEqual(t, want[i].Annotations[modelDeploymentPodSpecHashAnnotation], legacyHash)
 		legacyHashes[seat] = legacyHash
+		legacyHashSets[seat] = hashes
 
 		pre := want[i].DeepCopy()
 		pre.Annotations[modelDeploymentPodSpecHashAnnotation] = legacyHash
@@ -662,9 +665,9 @@ func TestModelDeploymentReplacementSlot_DualHashRouterCurrency(t *testing.T) {
 		assert.True(t, replacementSuperseded(modelDeploymentReplacementSlot{
 			MemberHashes: slices.Clone(legacyHashes),
 		}, want), "without legacy hashes only projected fingerprints match")
-		assert.False(t, replacementSupersededWithLegacy(modelDeploymentReplacementSlot{
+		assert.False(t, replacementSupersededWithLegacySets(modelDeploymentReplacementSlot{
 			MemberHashes: slices.Clone(legacyHashes),
-		}, want, legacyHashes), "with legacy hashes pre-upgrade slot MemberHashes remain current")
+		}, want, legacyHashSets), "with legacy hashes pre-upgrade slot MemberHashes remain current")
 
 		m0 := preUpgradeMembers[0].DeepCopy()
 		m1 := preUpgradeMembers[1].DeepCopy()

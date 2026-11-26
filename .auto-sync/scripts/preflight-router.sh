@@ -2,10 +2,12 @@
 # .auto-sync/scripts/preflight-router.sh - Taskpack 2.0 preflight for router-sync.
 #
 # Discovers highest stable upstream tags for llm-d/llm-d-router (v*),
-# vllm-project/router (v*), and sgl-project/sglang (strictly gateway-v*),
-# stages clones into $AUTOSYNC_STAGE_DIR, checks commit 516f1cb ancestry for
-# automatic retirement of 0001-epd-routing.patch, probes multi-arch image
-# manifests via crane, and emits Taskpack 2.0 preflight outputs and staged resources.
+# vllm-project/router (v*), and sgl-project/sglang sgl-router (strictly router-v*),
+# keeps legacy sglang-gateway frozen at its pinned gateway-v0.3.1 tag,
+# stages clones into separate directories under $AUTOSYNC_STAGE_DIR, checks commit
+# 516f1cb ancestry for automatic retirement of 0001-epd-routing.patch, probes
+# multi-arch image manifests via crane, records Base Image build recommendations,
+# and emits Taskpack 2.0 preflight outputs and staged resources.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -167,12 +169,20 @@ def sync_full_history_repo(repo_url: str, dst: str, pinned_tag: str, target_tag:
     subprocess.run(["git", "-C", dst, "checkout", "-f", "-q", f"refs/tags/{target_tag}"], check=True)
 
 
-def sync_tagged_repo(repo_url: str, dst: str, pinned_tag: str, target_tag: str, sparse_subpath: str = "", is_local: bool = False) -> None:
+def sync_tagged_repo(
+    repo_url: str,
+    dst: str,
+    pinned_tag: str,
+    target_tag: str,
+    sparse_subpaths: list[str] | None = None,
+    is_local: bool = False,
+) -> None:
     if is_local:
         sync_full_history_repo(repo_url, dst, pinned_tag, target_tag)
         return
 
-    use_sparse = bool(sparse_subpath)
+    subpaths = [p for p in (sparse_subpaths or []) if p]
+    use_sparse = bool(subpaths)
     if not os.path.isdir(os.path.join(dst, ".git")):
         if os.path.exists(dst):
             shutil.rmtree(dst)
@@ -182,11 +192,11 @@ def sync_tagged_repo(repo_url: str, dst: str, pinned_tag: str, target_tag: str, 
         cmd.extend([repo_url, dst])
         subprocess.run(cmd, check=True)
         if use_sparse:
-            subprocess.run(["git", "-C", dst, "sparse-checkout", "set", sparse_subpath], check=True)
+            subprocess.run(["git", "-C", dst, "sparse-checkout", "set", *subpaths], check=True)
     else:
         subprocess.run(["git", "-C", dst, "remote", "set-url", "origin", repo_url], check=True)
         if use_sparse:
-            subprocess.run(["git", "-C", dst, "sparse-checkout", "set", sparse_subpath], check=True)
+            subprocess.run(["git", "-C", dst, "sparse-checkout", "set", *subpaths], check=True)
         ensure_tag_fetched(dst, repo_url, target_tag, filter_blobless=use_sparse)
 
     if pinned_tag and pinned_tag != target_tag:
@@ -203,7 +213,7 @@ def sync_tagged_repo(repo_url: str, dst: str, pinned_tag: str, target_tag: str, 
         # validate_router.sh forces the partial clone to fetch all needed blobs
         # (including root .gitattributes when present) while the stage dir is writable.
         subprocess.run(
-            ["git", "-C", dst, "archive", target_tag, "--", sparse_subpath],
+            ["git", "-C", dst, "archive", target_tag, "--", *subpaths],
             stdout=subprocess.DEVNULL,
             check=True,
         )
@@ -216,6 +226,7 @@ recipe = {
     "llm-d-router": read_dockerfile_arg(router_df, "LLMD_ROUTER_VERSION", "pack/llm-router/Dockerfile"),
     "vllm-router": read_dockerfile_arg(router_df, "VLLM_ROUTER_VERSION", "pack/llm-router/Dockerfile"),
     "sglang-gateway": read_dockerfile_arg(router_df, "SGLANG_GATEWAY_VERSION", "pack/llm-router/Dockerfile"),
+    "sgl-router": read_dockerfile_arg(router_df, "SGL_ROUTER_VERSION", "pack/llm-router/Dockerfile"),
 }
 defaults = {
     "router_image": extract_value_go_image(value_go, "ModelDeploymentRouterImage"),
@@ -249,19 +260,36 @@ vllm_url, vllm_local = resolve_repo_url(
     "vllm-router",
     "https://github.com/vllm-project/router.git",
 )
-sglang_url, sglang_local = resolve_repo_url(
+sglang_gw_url, sglang_gw_local = resolve_repo_url(
     "AUTOSYNC_ROUTER_SGLANG_REPO_URL",
     "sglang",
     "https://github.com/sgl-project/sglang.git",
 )
 
+
+def resolve_sgl_router_url() -> tuple[str, bool]:
+    override = os.environ.get("AUTOSYNC_ROUTER_SGL_ROUTER_REPO_URL", "").strip()
+    if override:
+        return override, os.path.isdir(override)
+    if fixture_dir:
+        local_sr = os.path.join(fixture_dir, "repos", "sgl-router")
+        if os.path.isdir(local_sr):
+            return local_sr, True
+    return sglang_gw_url, sglang_gw_local
+
+
+sgl_router_url, sgl_router_local = resolve_sgl_router_url()
+
 llmd_tag_re = re.compile(r"^v\d+(?:\.\d+)+$")
 vllm_tag_re = re.compile(r"^v\d+(?:\.\d+)+$")
-sglang_tag_re = re.compile(r"^gateway-v\d+(?:\.\d+)+$")
+sgl_router_tag_re = re.compile(r"^router-v\d+(?:\.\d+)+$")
 
 llmd_stage = os.path.join(stage_dir, "llm-d-router")
 vllm_stage = os.path.join(stage_dir, "vllm-router")
-sglang_stage = os.path.join(stage_dir, "sglang")
+# Stage sglang-gateway and sgl-router in separate directories so sparse-checkout trees
+# from the shared sgl-project/sglang repository never collide.
+sglang_gw_stage = os.path.join(stage_dir, "sglang-gateway")
+sgl_router_stage = os.path.join(stage_dir, "sgl-router")
 
 if "llm-d-router" in upstream_override:
     up_llmd = str(upstream_override["llm-d-router"]).strip()
@@ -279,28 +307,44 @@ elif vllm_url:
 else:
     up_vllm, up_vllm_recent = recipe["vllm-router"], [recipe["vllm-router"]]
 
+# sglang-gateway is permanently frozen at its pinned tag (upstream deleted sgl-model-gateway in PR #50732).
 if "sglang-gateway" in upstream_override:
-    up_sglang = str(upstream_override["sglang-gateway"]).strip()
-    up_sglang_recent = [up_sglang]
-elif sglang_url:
-    up_sglang, up_sglang_recent = ls_remote_stable_tags(
-        sglang_url, "refs/tags/gateway-v*", sglang_tag_re, "gateway-v"
+    print("FAIL: sglang-gateway is frozen; upstream override for it is not supported", file=sys.stderr)
+    raise SystemExit(1)
+up_sglang = recipe["sglang-gateway"]
+up_sglang_recent = [recipe["sglang-gateway"]]
+
+if "sgl-router" in upstream_override:
+    up_sgl_router = str(upstream_override["sgl-router"]).strip()
+    up_sgl_router_recent = [up_sgl_router]
+elif sgl_router_url:
+    up_sgl_router, up_sgl_router_recent = ls_remote_stable_tags(
+        sgl_router_url, "refs/tags/router-v*", sgl_router_tag_re, "router-v"
     )
 else:
-    up_sglang, up_sglang_recent = recipe["sglang-gateway"], [recipe["sglang-gateway"]]
+    up_sgl_router, up_sgl_router_recent = recipe["sgl-router"], [recipe["sgl-router"]]
 
 if llmd_url:
     sync_tagged_repo(llmd_url, llmd_stage, recipe["llm-d-router"], up_llmd, is_local=llmd_local)
 if vllm_url:
     sync_full_history_repo(vllm_url, vllm_stage, recipe["vllm-router"], up_vllm)
-if sglang_url:
+if sglang_gw_url:
     sync_tagged_repo(
-        sglang_url,
-        sglang_stage,
+        sglang_gw_url,
+        sglang_gw_stage,
         recipe["sglang-gateway"],
         up_sglang,
-        sparse_subpath="sgl-model-gateway",
-        is_local=sglang_local,
+        sparse_subpaths=["sgl-model-gateway"],
+        is_local=sglang_gw_local,
+    )
+if sgl_router_url:
+    sync_tagged_repo(
+        sgl_router_url,
+        sgl_router_stage,
+        recipe["sgl-router"],
+        up_sgl_router,
+        sparse_subpaths=["sgl-router", "rust"],
+        is_local=sgl_router_local,
     )
 
 # Check 516f1cb ancestry in vllm-router for automatic retirement of 0001-epd-routing.patch.
@@ -372,7 +416,8 @@ def parse_cargo_meta(cargo_txt: str) -> dict[str, str]:
 
 
 vllm_cargo_meta = parse_cargo_meta(read_git_tag_file(vllm_stage, up_vllm, "Cargo.toml"))
-sglang_cargo_meta = parse_cargo_meta(read_git_tag_file(sglang_stage, up_sglang, "sgl-model-gateway/Cargo.toml"))
+sglang_cargo_meta = parse_cargo_meta(read_git_tag_file(sglang_gw_stage, up_sglang, "sgl-model-gateway/Cargo.toml"))
+sgl_router_cargo_meta = parse_cargo_meta(read_git_tag_file(sgl_router_stage, up_sgl_router, "sgl-router/Cargo.toml"))
 
 def parse_generic_target_tags(raw_val: str) -> dict[str, str]:
     parsed = {}
@@ -539,11 +584,19 @@ discovery = {
         "llm-d-router": up_llmd,
         "vllm-router": up_vllm,
         "sglang-gateway": up_sglang,
+        "sgl-router": up_sgl_router,
     },
     "recent_tags": {
         "llm-d-router": up_llmd_recent,
         "vllm-router": up_vllm_recent,
         "sglang-gateway": up_sglang_recent,
+        "sgl-router": up_sgl_router_recent,
+    },
+    "frozen_upstreams": {
+        "sglang-gateway": {
+            "version": recipe["sglang-gateway"],
+            "reason": "upstream deleted sgl-model-gateway in sgl-project/sglang PR #50732",
+        },
     },
     "held_setting_images": router_holds,
     "targets": {
@@ -559,6 +612,7 @@ discovery = {
         "recommended_go_version_arg": recommended_go_version_arg,
         "vllm_router_cargo": vllm_cargo_meta,
         "sglang_gateway_cargo": sglang_cargo_meta,
+        "sgl_router_cargo": sgl_router_cargo_meta,
     },
 }
 
@@ -583,11 +637,15 @@ fi
 UPSTREAM_RECORDS_JSON="${STAGE_DIR}/upstream-records.json"
 PREFLIGHT_REPORT_JSON="${STAGE_DIR}/router-preflight-report.json"
 
-python3 - "${DISCOVERY_JSON}" "${MANIFESTS_JSON}" "${UPSTREAM_RECORDS_JSON}" "${PREFLIGHT_REPORT_JSON}" <<'PY'
+python3 -B - "${REPO_ROOT}" "${DISCOVERY_JSON}" "${MANIFESTS_JSON}" "${UPSTREAM_RECORDS_JSON}" "${PREFLIGHT_REPORT_JSON}" <<'PY'
 import json
+import os
 import sys
 
-disc_path, man_path, recs_path, rep_path = sys.argv[1:5]
+repo_root, disc_path, man_path, recs_path, rep_path = sys.argv[1:6]
+sys.path.insert(0, os.path.join(repo_root, ".auto-sync", "checks"))
+from base_image_builds import recommend_for_preflight
+
 with open(disc_path, "r", encoding="utf-8") as f:
     disc = json.load(f)
 with open(man_path, "r", encoding="utf-8") as f:
@@ -609,9 +667,10 @@ target_tags = disc["target_tags"]
 recent_tags = disc["recent_tags"]
 targets = disc["targets"]
 
+ROUTER_IDS = ("llm-d-router", "vllm-router", "sglang-gateway", "sgl-router")
 stage_a_drifts = {
-    uid: target_tags[uid] != recipe[uid]
-    for uid in ("llm-d-router", "vllm-router", "sglang-gateway")
+    uid: (False if uid == "sglang-gateway" else target_tags[uid] != recipe[uid])
+    for uid in ROUTER_IDS
 }
 has_stage_a = any(stage_a_drifts.values())
 
@@ -633,7 +692,7 @@ if has_stage_b:
     stage = "tag_promotion"
     image_published = True
     records = []
-    for uid in ("llm-d-router", "vllm-router", "sglang-gateway"):
+    for uid in ROUTER_IDS:
         promote = router_stage_b or (uid == "llm-d-router" and (sidecar_stage_b or proxy_stage_b))
         records.append({
             "id": uid,
@@ -653,7 +712,7 @@ elif has_stage_a:
             **({"currentVersion": recipe[uid]} if stage_a_drifts[uid] else {}),
             "recentVersions": recent_tags[uid],
         }
-        for uid in ("llm-d-router", "vllm-router", "sglang-gateway")
+        for uid in ROUTER_IDS
     ]
 else:
     stage = "no_change"
@@ -672,8 +731,12 @@ else:
             "version": recipe[uid],
             "recentVersions": recent_tags[uid],
         }
-        for uid in ("llm-d-router", "vllm-router", "sglang-gateway")
+        for uid in ROUTER_IDS
     ]
+
+base_image_builds = recommend_for_preflight(
+    repo_root, "router", stage, stage_a_drifts, target_tags
+)
 
 with open(recs_path, "w", encoding="utf-8") as f:
     json.dump(records, f, indent=2)
@@ -695,12 +758,14 @@ report = {
         "proxy": proxy_stage_b,
         "sidecar": sidecar_stage_b,
     },
+    "frozen_upstreams": disc.get("frozen_upstreams") or {},
     "held_setting_images": disc.get("held_setting_images") or {},
     "recipe": recipe,
     "target_tags": target_tags,
     "recent_tags": recent_tags,
     "defaults": defaults,
     "targets": targets,
+    "base_image_builds": base_image_builds,
     "rebase": {},
 }
 
@@ -762,13 +827,14 @@ retire_0001 = bool(rep.get("retire_0001_epd_routing"))
 retire_0004 = bool(rep.get("retire_0004_discovery_readiness"))
 
 ROUTER_SPECS = [
-    ("llm-d-router", os.path.join(stage_dir, "llm-d-router"), "llm-d", ""),
-    ("vllm-router", os.path.join(stage_dir, "vllm-router"), "vllm-router", ""),
-    ("sglang-gateway", os.path.join(stage_dir, "sglang"), "sglang-gateway", "sgl-model-gateway"),
+    ("llm-d-router", os.path.join(stage_dir, "llm-d-router"), "llm-d", []),
+    ("vllm-router", os.path.join(stage_dir, "vllm-router"), "vllm-router", []),
+    ("sglang-gateway", os.path.join(stage_dir, "sglang-gateway"), "sglang-gateway", ["sgl-model-gateway"]),
+    ("sgl-router", os.path.join(stage_dir, "sgl-router"), "sgl-router", ["sgl-router", "rust"]),
 ]
 
 
-def archive_tag(stage_repo: str, tag: str, dst_dir: str, sparse_subpath: str) -> None:
+def archive_tag(stage_repo: str, tag: str, dst_dir: str, sparse_subpaths: list[str]) -> None:
     if os.path.exists(dst_dir):
         shutil.rmtree(dst_dir)
     os.makedirs(dst_dir, exist_ok=True)
@@ -781,8 +847,8 @@ def archive_tag(stage_repo: str, tag: str, dst_dir: str, sparse_subpath: str) ->
         == "true"
     )
     cmd = ["git", "-C", stage_repo, "archive", f"refs/tags/{tag}"]
-    if promisor and sparse_subpath:
-        cmd.extend(["--", sparse_subpath])
+    if promisor and sparse_subpaths:
+        cmd.extend(["--", *sparse_subpaths])
     arc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if arc.returncode != 0:
         raise RuntimeError(f"git archive {tag} failed: {arc.stderr.decode('utf-8', 'replace')}")
@@ -889,6 +955,9 @@ def collect_target_extras(
     elif uid == "sglang-gateway":
         if "sgl-model-gateway/Cargo.toml" not in target_extras:
             target_extras.append("sgl-model-gateway/Cargo.toml")
+    elif uid == "sgl-router":
+        if "sgl-router/Cargo.toml" not in target_extras:
+            target_extras.append("sgl-router/Cargo.toml")
     return target_extras
 
 
@@ -904,7 +973,7 @@ git_env = {
 rebase_results = {}
 staged_patch_dirs = []
 
-for uid, stage_repo, subdir, sparse_subpath in ROUTER_SPECS:
+for uid, stage_repo, subdir, sparse_subpaths in ROUTER_SPECS:
     old_tag = recipe[uid]
     new_tag = target_tags[uid]
     if old_tag == new_tag:
@@ -935,8 +1004,8 @@ for uid, stage_repo, subdir, sparse_subpath in ROUTER_SPECS:
     os.makedirs(r_work, exist_ok=True)
 
     try:
-        archive_tag(stage_repo, old_tag, r_repo, sparse_subpath)
-        archive_tag(stage_repo, new_tag, r_target, sparse_subpath)
+        archive_tag(stage_repo, old_tag, r_repo, sparse_subpaths)
+        archive_tag(stage_repo, new_tag, r_target, sparse_subpaths)
     except RuntimeError as exc:
         rebase_results[uid] = {
             "auto_rebased": False,

@@ -123,9 +123,10 @@ func TestEveryRegisteredRendererFillsExactlyOneHalf(t *testing.T) {
 // itself.
 func TestEveryRegisteredRendererNamesItsOwnBinary(t *testing.T) {
 	want := map[string]string{
-		LLMD:   "epp",
-		VLLM:   "vllm-router",
-		SGLang: "sgl-model-gateway",
+		LLMD:          "epp",
+		VLLM:          "vllm-router",
+		SGL:           "sgl-router",
+		SGLangGateway: "sgl-model-gateway",
 	}
 	require.Len(t, want, len(renderers), "every registered router needs a binary named here")
 

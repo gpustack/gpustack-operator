@@ -221,6 +221,12 @@ type Input struct {
 	// Engine selects the renderer.
 	Engine Engine
 
+	// EngineVersion is the resolved inference engine version for this role (for example "0.30.0",
+	// "0.32.0", "0.34.0", or "0.30.0rc1"). Empty preserves the legacy baseline (< 0.30.0): Ascend
+	// P/D renders MooncakeConnectorV1 with tp_p >= tp_d, and ECCPUConnector defaults
+	// VLLM_USE_V2_MODEL_RUNNER=1. Non-empty values must pass ValidateEngineVersion.
+	EngineVersion string
+
 	// Role is the prefill/decode role, RoleNone when the caller declared none.
 	Role Role
 
@@ -318,6 +324,23 @@ type Input struct {
 	// wildcard address, which cannot be published to a consumer as an endpoint.
 	KVEventsHost string
 
+	// KVEventsTopic is the publisher topic written into --kv-events-config and Result.KVEvents.
+	// Empty falls back to VLLMKVEventsTopic ("kv@") for vLLM/vLLM-Ascend and SGLangKVEventsTopic
+	// ("kv-events") for SGLang.
+	KVEventsTopic string
+
+	// KVEventsUseCBORHash requests CBOR SHA-256 prefix-caching block hashes on vLLM/vLLM-Ascend
+	// when PublishKVEvents is true, emitting --prefix-caching-hash-algo sha256_cbor and
+	// VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0 so published block hashes match routers such as
+	// vllm-router kv_aware. Ignored when PublishKVEvents is false or on SGLang.
+	KVEventsUseCBORHash bool
+
+	// KVEventsLocalDP is the number of per-Pod data-parallel or attention-DP KV event publishers
+	// running inside the container network namespace. Zero or 1 uses VLLMKVEventsReplayPort
+	// (5558); values > 1 place replay_endpoint at VLLMKVEventsPort + KVEventsLocalDP so rank r's
+	// ZMQ PUB (5557 + r) and ZMQ ROUTER replay (5557 + localDP + r) sockets never collide.
+	KVEventsLocalDP int32
+
 	// EncoderURLs are the addresses of the deployment's encoder replicas, one per replica or per
 	// replica Service, in the engine's own spelling. It is what makes a deployment a three-role one,
 	// and only a prefill half reads it.
@@ -339,6 +362,12 @@ type Input struct {
 	// picked one itself would be free to disagree with the object that was accepted. EncoderURLs
 	// above is the other half of the same leg on the engine that carries the addresses instead.
 	EncoderCache EncoderCache
+
+	// ECSideChannelPort overrides the ContainerPort emitted for the vLLM ECCPUConnector
+	// ec-side-channel listener on RoleEncode. Nil uses the default VLLMECSideChannelPort (5601),
+	// 0 requests an ephemeral port and omits the ec-side-channel ContainerPort, and a positive
+	// value emits that port number.
+	ECSideChannelPort *int32
 }
 
 // The point-to-point KV transfer backends a caller may name in Input.KVTransferBackend.
@@ -461,6 +490,13 @@ const (
 	// keys with. Such a prefix would be joined into keys another prefix can also produce, so two
 	// weight identities could read each other's blocks while both look configured.
 	ReasonCachePrefixInvalid Reason = "CachePrefixInvalid"
+
+	// ReasonEngineVersionInvalid is a non-empty EngineVersion that fails ValidateEngineVersion.
+	ReasonEngineVersionInvalid Reason = "EngineVersionInvalid"
+
+	// ReasonKVEventsPortOverflow is a KVEventsLocalDP span whose ZMQ PUB and ROUTER replay port
+	// range [VLLMKVEventsPort .. VLLMKVEventsPort + 2*localDP - 1] exceeds TCP port 65535.
+	ReasonKVEventsPortOverflow Reason = "KVEventsPortOverflow"
 )
 
 // RefusalError is a rendering that was declined, carrying the reason a caller branches on and a

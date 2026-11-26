@@ -296,8 +296,9 @@ func modelDeploymentRouterObserverPort(profile string) int32 {
 }
 
 // modelDeploymentRouterObserverPortForPod returns the observer port for a concrete router Pod.
-// When vllm-router or sglang-gateway runs behind the Envoy allowlist sidecar, its HTTP server is
-// bound to loopback and Envoy exposes GET /observer/endpoints on the dedicated observer port.
+// When vllm-router, sgl-router, or sglang-gateway runs behind the Envoy allowlist sidecar, its
+// HTTP server is bound to loopback and Envoy exposes GET /observer/endpoints on the dedicated
+// observer port.
 func modelDeploymentRouterObserverPortForPod(profile string, routerPod *corev1.Pod) int32 {
 	if profile == workercore.ModelDeploymentRouterLLMD {
 		return modelDeploymentRouterMetricsPort

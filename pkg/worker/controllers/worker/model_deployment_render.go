@@ -109,17 +109,18 @@ const (
 
 	// modelDeploymentRenderVersion is the current operator Pod rendering baseline. Bump this
 	// constant whenever a change modifies the rendered Pod output of any ModelDeployment shape.
-	modelDeploymentRenderVersion = 6
+	modelDeploymentRenderVersion = 7
 	// modelDeploymentMinSupportedRenderVersion is the lowest render version that remains compatible
 	// with the current controller without replacing running Pods.
 	modelDeploymentMinSupportedRenderVersion = 1
 
-	// modelDeploymentDefaultPort is the port a replica serves on when the role names
+	// ModelDeploymentDefaultPort is the port a replica serves on when the role names
 	// none, and it is RENDERED INTO THE ENGINE'S OWN LISTEN ARGUMENT rather than left to the engine
 	// to pick, because the supported engines do not agree on a default. vLLM opens 8000 on every
 	// interface; SGLang opens 30000 on the loopback address alone, which neither a Service endpoint
 	// nor a kubelet probe can reach.
-	modelDeploymentDefaultPort int32 = 8000
+	ModelDeploymentDefaultPort int32 = 8000
+	modelDeploymentDefaultPort       = ModelDeploymentDefaultPort
 	// modelDeploymentDefaultPortName names that port on the container and on the Service fronting it.
 	modelDeploymentDefaultPortName = "http"
 	// A managed decoder's routing proxy owns the serving port, while vLLM listens behind it here.
@@ -1889,9 +1890,14 @@ func mergeModelDeploymentEnv(
 func mergeModelDeploymentUserEnv(
 	env []core.EnvVar, engine string, userEnv []workercore.ModelDeploymentEnvVar, artifact bool,
 ) []core.EnvVar {
+	ownsIntBlockHashes := engine == workercore.ModelDeploymentEngineVLLM &&
+		slices.ContainsFunc(env, func(e core.EnvVar) bool {
+			return e.Name == inject.VLLMKVEventsUseIntBlockHashesEnv
+		})
 	for i := range userEnv {
 		if ModelDeploymentOwnsEnv(engine, userEnv[i].Name) ||
-			(artifact && ModelDeploymentArtifactOwnsEnv(engine, userEnv[i].Name)) {
+			(artifact && ModelDeploymentArtifactOwnsEnv(engine, userEnv[i].Name)) ||
+			(ownsIntBlockHashes && userEnv[i].Name == inject.VLLMKVEventsUseIntBlockHashesEnv) {
 			continue
 		}
 		replaced := false
@@ -2299,30 +2305,66 @@ func modelDeploymentBindingHash(
 		}
 	}
 
-	subject := struct {
-		AcceleratorType   modelDeploymentAcceleratorTypeHashInput `json:"acceleratorType"`
-		RuntimeClassName  string                                  `json:"runtimeClassName,omitempty"`
-		InterfaceResource core.ResourceName                       `json:"interfaceResource,omitempty"`
-		Artifact          *ModelDeploymentArtifactRender          `json:"artifact,omitempty"`
-		Connector         *modelDeploymentConnectorBinding        `json:"connector,omitempty"`
-		RawConnector      *ModelDeploymentConnectorRender         `json:"rawConnector,omitempty"`
-		ECConnector       string                                  `json:"ecConnector,omitempty"`
-	}{
-		AcceleratorType:   accType,
-		RuntimeClassName:  in.RuntimeClassName,
-		InterfaceResource: in.InterfaceResource,
-		Artifact:          artifact,
-		Connector:         connector,
-		RawConnector:      rawConnector,
-		ECConnector:       ecConnector,
+	hashSubject := func(conn *modelDeploymentConnectorBinding) string {
+		subject := struct {
+			AcceleratorType   modelDeploymentAcceleratorTypeHashInput `json:"acceleratorType"`
+			RuntimeClassName  string                                  `json:"runtimeClassName,omitempty"`
+			InterfaceResource core.ResourceName                       `json:"interfaceResource,omitempty"`
+			Artifact          *ModelDeploymentArtifactRender          `json:"artifact,omitempty"`
+			Connector         *modelDeploymentConnectorBinding        `json:"connector,omitempty"`
+			RawConnector      *ModelDeploymentConnectorRender         `json:"rawConnector,omitempty"`
+			ECConnector       string                                  `json:"ecConnector,omitempty"`
+		}{
+			AcceleratorType:   accType,
+			RuntimeClassName:  in.RuntimeClassName,
+			InterfaceResource: in.InterfaceResource,
+			Artifact:          artifact,
+			Connector:         conn,
+			RawConnector:      rawConnector,
+			ECConnector:       ecConnector,
+		}
+
+		encoded, err := json.Marshal(subject)
+		if err != nil {
+			return "unhashable-binding-" + err.Error()
+		}
+
+		return stringx.SumBytesBySHA256(encoded)
 	}
 
-	encoded, err := json.Marshal(subject)
-	if err != nil {
-		return "unhashable-binding-" + err.Error()
+	bindingHash := hashSubject(connector)
+	if !takeOver &&
+		connector != nil &&
+		connector.PublishKVEvents &&
+		in.Deployment != nil &&
+		in.Deployment.Spec.Router != nil &&
+		in.Deployment.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
+		in.Deployment.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
+		var legacyBindingHashes []string
+		if strings.EqualFold(strings.TrimSpace(accType.Manufacturer), nodefeature.ManufacturerAscend) {
+			v6Conn := *connector
+			v6Conn.PublishKVEvents = false
+			v6Conn.KVEventsHost = ""
+			v6Conn.KVEventsTopic = ""
+			v6Conn.KVEventsUseCBORHash = false
+			v6Conn.KVEventsReplayPort = 0
+			legacyBindingHashes = append(legacyBindingHashes, hashSubject(&v6Conn))
+			if kubemeta.DeepEqual(v6Conn, modelDeploymentConnectorBinding{}) {
+				legacyBindingHashes = append(legacyBindingHashes, hashSubject(nil))
+			}
+		} else if connector.KVEventsTopic != "" {
+			v6Conn := *connector
+			v6Conn.KVEventsTopic = ""
+			v6Conn.KVEventsUseCBORHash = false
+			v6Conn.KVEventsReplayPort = 0
+			legacyBindingHashes = append(legacyBindingHashes, hashSubject(&v6Conn))
+		}
+		if len(legacyBindingHashes) > 0 {
+			recordModelDeploymentLegacyBindingHashes(bindingHash, legacyBindingHashes)
+		}
 	}
 
-	return stringx.SumBytesBySHA256(encoded)
+	return bindingHash
 }
 
 // modelDeploymentExplicitSpecHash fingerprints the explicit user-configured ModelDeployment and
@@ -2384,6 +2426,9 @@ func modelDeploymentSpecHashWithRouter(
 	canonicalRole.Kind = ModelDeploymentEffectiveRoleKind(&canonicalRole)
 	if canonicalRole.Image == "" {
 		canonicalRole.Image = md.Spec.Engine.Image
+	}
+	if canonicalRole.EngineVersion == "" {
+		canonicalRole.EngineVersion = ModelDeploymentEffectiveEngineVersion(md, &canonicalRole)
 	}
 	if len(canonicalRole.Command) == 0 {
 		canonicalRole.TerminationGracePeriodSeconds = ptr.To(
@@ -2461,8 +2506,9 @@ func modelDeploymentSpecHashWithRouter(
 const modelDeploymentBindingHashCacheMaxEntries = 8192
 
 var (
-	modelDeploymentBindingHashCacheMu sync.RWMutex
-	modelDeploymentBindingHashCache   = make(map[string]string)
+	modelDeploymentBindingHashCacheMu   sync.RWMutex
+	modelDeploymentBindingHashCache     = make(map[string]string)
+	modelDeploymentLegacyBindingHashMap = make(map[string][]string)
 )
 
 func recordModelDeploymentBindingHash(projectedSpecHash, bindingHash string) {
@@ -2486,31 +2532,72 @@ func lookupModelDeploymentBindingHash(projectedSpecHash string) (string, bool) {
 	return bindingHash, ok
 }
 
-// modelDeploymentDesiredPodLegacyRouterHash resolves the legacy full-router pod-spec-hash
-// corresponding to a stamped desired Pod without adding annotations to the Pod object.
-func modelDeploymentDesiredPodLegacyRouterHash(
+func recordModelDeploymentLegacyBindingHashes(bindingHash string, legacyBindingHashes []string) {
+	if bindingHash == "" || len(legacyBindingHashes) == 0 {
+		return
+	}
+	modelDeploymentBindingHashCacheMu.Lock()
+	defer modelDeploymentBindingHashCacheMu.Unlock()
+
+	if existing, ok := modelDeploymentLegacyBindingHashMap[bindingHash]; ok && slices.Equal(existing, legacyBindingHashes) {
+		return
+	}
+	if len(modelDeploymentLegacyBindingHashMap) >= modelDeploymentBindingHashCacheMaxEntries {
+		clear(modelDeploymentLegacyBindingHashMap)
+	}
+	modelDeploymentLegacyBindingHashMap[bindingHash] = slices.Clone(legacyBindingHashes)
+}
+
+func lookupModelDeploymentLegacyBindingHashes(bindingHash string) []string {
+	if bindingHash == "" {
+		return nil
+	}
+	modelDeploymentBindingHashCacheMu.RLock()
+	defer modelDeploymentBindingHashCacheMu.RUnlock()
+
+	return slices.Clone(modelDeploymentLegacyBindingHashMap[bindingHash])
+}
+
+// modelDeploymentDesiredPodLegacyHashes resolves every pre-upgrade pod-spec-hash (full-router
+// hashes and render-version <= 6 connector binding hashes) accepted for a stamped desired Pod.
+func modelDeploymentDesiredPodLegacyHashes(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 	ordinal, member int, desired *core.Pod,
-) string {
+) []string {
 	if md == nil || role == nil || desired == nil {
-		return ""
+		return nil
 	}
 	projectedHash := desired.Annotations[modelDeploymentPodSpecHashAnnotation]
 	if projectedHash == "" {
-		return ""
-	}
-	if !modelDeploymentRouterHasDecoupledFields(md.Spec.Router) {
-		return projectedHash
+		return nil
 	}
 	bindingHash, ok := lookupModelDeploymentBindingHash(projectedHash)
 	if !ok && modelDeploymentExplicitSpecHash(md, role, ordinal, member, "") == projectedHash {
 		ok = true
 	}
 	if !ok {
-		return ""
+		return nil
 	}
 
-	return modelDeploymentLegacyFullRouterSpecHash(md, role, ordinal, member, bindingHash)
+	hasDecoupledRouter := modelDeploymentRouterHasDecoupledFields(md.Spec.Router)
+	projectedRouter := modelDeploymentProjectRouterForSpecHash(md.Spec.Router)
+	var hashes []string
+	appendUnique := func(h string) {
+		if h != "" && h != projectedHash && !slices.Contains(hashes, h) {
+			hashes = append(hashes, h)
+		}
+	}
+	if hasDecoupledRouter {
+		appendUnique(modelDeploymentLegacyFullRouterSpecHash(md, role, ordinal, member, bindingHash))
+	}
+	for _, legacyBH := range lookupModelDeploymentLegacyBindingHashes(bindingHash) {
+		appendUnique(modelDeploymentSpecHashWithRouter(md, role, projectedRouter, ordinal, member, legacyBH))
+		if hasDecoupledRouter {
+			appendUnique(modelDeploymentLegacyFullRouterSpecHash(md, role, ordinal, member, legacyBH))
+		}
+	}
+
+	return hashes
 }
 
 // modelDeploymentEffectiveMinRenderVersion computes the minimum acceptable render version for a
@@ -2555,6 +2642,18 @@ func modelDeploymentPodMatchesCurrency(actual, desired *core.Pod, minRenderVersi
 func modelDeploymentPodMatchesCurrencyWithLegacy(
 	actual, desired *core.Pod, legacyFullRouterHash string, minRenderVersion int,
 ) bool {
+	if legacyFullRouterHash == "" {
+		return modelDeploymentPodMatchesCurrencyWithLegacyHashes(actual, desired, nil, minRenderVersion)
+	}
+	return modelDeploymentPodMatchesCurrencyWithLegacyHashes(actual, desired, []string{legacyFullRouterHash}, minRenderVersion)
+}
+
+// modelDeploymentPodMatchesCurrencyWithLegacyHashes reports whether a live Pod meets
+// minRenderVersion and matches either desired's pod-spec-hash or one of the pre-upgrade
+// legacyHashes when rendered at render-version <= modelDeploymentRenderVersion.
+func modelDeploymentPodMatchesCurrencyWithLegacyHashes(
+	actual, desired *core.Pod, legacyHashes []string, minRenderVersion int,
+) bool {
 	if actual == nil || desired == nil {
 		return false
 	}
@@ -2567,11 +2666,11 @@ func modelDeploymentPodMatchesCurrencyWithLegacy(
 		return true
 	}
 
-	return legacyFullRouterHash != "" &&
+	return len(legacyHashes) > 0 &&
 		actualHash != "" &&
 		rv > 0 &&
 		rv <= modelDeploymentRenderVersion &&
-		actualHash == legacyFullRouterHash
+		slices.Contains(legacyHashes, actualHash)
 }
 
 // modelDeploymentReplicaRenderVersionUniform reports whether all members of a replica carry the

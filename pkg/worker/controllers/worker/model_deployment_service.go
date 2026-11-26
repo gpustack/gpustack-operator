@@ -550,13 +550,13 @@ func modelDeploymentEligibilitySelectorActive(
 	if len(role.Command) > 0 {
 		return false
 	}
+	if !modelDeploymentGroupForwardActivatable(md, role) {
+		return false
+	}
 	if modelDeploymentProtectedRole(md, role) ||
 		modelDeploymentRoleDeclaresPauseOrRuntimeControl(role) ||
 		modelDeploymentRoleHasObservedRuntimeControl(md, role.Name) {
 		return true
-	}
-	if !modelDeploymentGroupForwardActivatable(md, role) {
-		return false
 	}
 	if passDecided || modelDeploymentEligibilityDecided(md) {
 		return true
@@ -617,6 +617,11 @@ func renderModelDeploymentRoleService(
 	manufacturers map[string]string, standingMembers []*core.Pod, mixedCommandMode bool,
 ) *core.Service {
 	svc := renderModelDeploymentServiceFor(md, role, md.Name+"-"+role.Name)
+	if md.Spec.Router != nil && md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL {
+		if upstreamKind, ok := ModelDeploymentRoleUpstreamKind(ModelDeploymentEffectiveRoleKind(role)); ok {
+			svc.Labels[modelDeploymentLabelKeyRoleKind] = upstreamKind
+		}
+	}
 	modelDeploymentFrontLeadersOnly(svc, role, len(standingMembers) > 0)
 	modelDeploymentSelectAnsweringMembers(svc, mixedCommandMode)
 	if modelDeploymentEligibilitySelectorActive(md,
@@ -624,8 +629,13 @@ func renderModelDeploymentRoleService(
 		modelDeploymentEligibilityDecided(md)) {
 		modelDeploymentSelectEligibleEndpoints(svc, md, role)
 	}
-	if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
-		for _, port := range inject.KVEventsPorts() {
+	// Omit kv-events/kv-replay ports on sgl-router per-role Services: Kubernetes's EndpointSlice
+	// controller sorts ports by MD5 hash of dump.ForHash(port), placing kv-replay:5558 or
+	// kv-events:5557 ahead of http:8000, while sgl-router@router-v0.1.0 reads EndpointSlice.ports[0]
+	// as the HTTP serving port and discovers ZMQ KV-event ports via HTTP GET /server_info directly.
+	if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) &&
+		(md.Spec.Router == nil || md.Spec.Router.Name != workercore.ModelDeploymentRouterSGL) {
+		for _, port := range inject.KVEventsPortsForLocalDP(ModelDeploymentKVEventsLocalDP(md, role)) {
 			svc.Spec.Ports = append(svc.Spec.Ports, core.ServicePort{
 				Name: port.Name, Protocol: port.Protocol, Port: port.ContainerPort,
 				TargetPort: intstr.FromInt32(port.ContainerPort),

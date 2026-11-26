@@ -12,7 +12,6 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
-	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
@@ -341,8 +340,8 @@ func (r *ModelDeploymentWebhook) modelDeploymentEPDPlatform(
 // than joining `modelDeploymentRouterReservedPorts`, which is vendor-blind by construction and would
 // have to over-claim the shared row.
 //
-// A ROLE NAMING NEITHER SERVES ON THE DEFAULT, which is not this number, so there is nothing to
-// refuse.
+// A ROLE NAMING NEITHER SERVES ON THE DEFAULT HTTP PORT (8000), which collides when
+// VLLM_EC_SIDE_CHANNEL_PORT overrides the side channel onto 8000.
 func validateModelDeploymentEPDSideChannelPort(
 	md *workercore.ModelDeployment, row workerctrl.ModelDeploymentEPDRow,
 ) field.ErrorList {
@@ -357,12 +356,25 @@ func validateModelDeploymentEPDSideChannelPort(
 
 	role := &md.Spec.Roles[encodeIdx]
 	rolesPath := field.NewPath("spec", "roles").Index(encodeIdx)
+
+	sideChannelPort, envIdx, err := workerctrl.ParseModelDeploymentVLLMECSideChannelPort(role.Env)
+	if err != nil {
+		return field.ErrorList{field.Invalid(
+			rolesPath.Child("env").Index(envIdx).Child("value"),
+			role.Env[envIdx].Value,
+			err.Error(),
+		)}
+	}
+	if envIdx >= 0 && sideChannelPort == 0 {
+		return nil
+	}
+
 	refusal := func(path *field.Path, value any) field.ErrorList {
 		return field.ErrorList{field.Invalid(path, value, fmt.Sprintf(
 			"role %q serves HTTP on port %d, which is the port %s binds its side channel on: the "+
 				"engine would serve on the socket every consumer dials for embeddings, and one of "+
 				"the two fails to bind",
-			role.Name, inject.VLLMECSideChannelPort, row.Connector,
+			role.Name, sideChannelPort, row.Connector,
 		))}
 	}
 
@@ -370,15 +382,21 @@ func validateModelDeploymentEPDSideChannelPort(
 	// declares a port, the flag is held to it rather than consulted.
 	var errs field.ErrorList
 	for _, port := range role.Ports {
-		if port.Port == inject.VLLMECSideChannelPort {
+		if port.Port == sideChannelPort {
 			errs = append(errs, refusal(rolesPath.Child("ports"), port.Port)...)
 		}
 	}
 
-	if listen, ok := workerctrl.ModelDeploymentRoleListenPort(md.Spec.Engine.Name, role); ok &&
-		listen == inject.VLLMECSideChannelPort {
+	listen, hasListen := workerctrl.ModelDeploymentRoleListenPort(md.Spec.Engine.Name, role)
+	if hasListen && listen == sideChannelPort {
 		errs = append(errs, refusal(rolesPath.Child("extraArgs"),
 			fmt.Sprintf("--port=%d", listen))...)
+	}
+	if len(role.Ports) == 0 && !hasListen && sideChannelPort == workerctrl.ModelDeploymentDefaultPort && envIdx >= 0 {
+		errs = append(errs, refusal(
+			rolesPath.Child("env").Index(envIdx).Child("value"),
+			role.Env[envIdx].Value,
+		)...)
 	}
 
 	return errs

@@ -37,6 +37,13 @@ const (
 	argvRouterPrefillSelectArg = "--prefill-selector"
 	argvRouterDecodeSelectArg  = "--decode-selector"
 	argvRouterRequestTimeout   = "--request-timeout-secs"
+	argvRouterModelIDArg       = "--model-id"
+	argvRouterChatRoutingArg   = "--chat-routing"
+	argvRouterNoTokenizerArg   = "--no-tokenizer"
+	argvRouterTokenizerPathArg = "--tokenizer-path"
+	argvRouterBucketConfigArg  = "--bucket-config"
+	argvRouterPolicyArg        = "--policy"
+	argvRouterPrefillPolicyArg = "--prefill-policy"
 
 	// argvRouterBindAddress is what replaces a loopback default. Only the vLLM router has one -- it
 	// binds its API (`vllm-project/router@v0.1.15:src/main.rs:98-99`, `CliArgs::host`) and its
@@ -62,15 +69,37 @@ const (
 
 // argvRouter is what one of these routers differs by. Everything not named here is shared.
 type argvRouter struct {
-	// Binary is the program this router is, inside the image that carries all three.
+	// Binary is the program this router is, inside the image that carries all managed routers.
 	//
 	// A BARE NAME RATHER THAN A PATH, so that a deployment naming its own image only has to put the
 	// program on PATH instead of at the path this project's image happens to use.
 	Binary string
 
-	// DisaggregationArg turns on prefill/decode mode. The two projects spell the same switch
-	// differently, which is the whole of the difference in that mode.
+	// DisaggregationArg turns on prefill/decode mode when the router requires an explicit switch.
 	DisaggregationArg string
+
+	// HasMetricsServer reports whether the router exposes Prometheus metrics on dedicated
+	// --prometheus-host/--prometheus-port flags instead of serving /metrics on its main port.
+	HasMetricsServer bool
+
+	// HasDiscoveryPort reports whether the router accepts --service-discovery-port.
+	HasDiscoveryPort bool
+
+	// SupportsModelID reports whether the router accepts --model-id.
+	SupportsModelID bool
+
+	// ChatRoutingReorg reports whether the router renders --chat-routing=reorg.
+	ChatRoutingReorg bool
+
+	// OptionalNoTokenizer reports whether the router defaults to --no-tokenizer unless extraArgs
+	// configures a tokenizer path or a tokenizer-dependent policy/filter.
+	OptionalNoTokenizer bool
+
+	// SupportsDPAware reports whether the router supports --dp-aware for SGLang External DP.
+	SupportsDPAware bool
+
+	// DPAwarePDAllowed reports whether --dp-aware is valid alongside PD disaggregation.
+	DPAwarePDAllowed bool
 
 	// Extra are flags only this router has, and they are rendered whether or not the deployment is
 	// split, because each states a default that would otherwise be inherited.
@@ -82,22 +111,55 @@ var argvRouters = map[string]argvRouter{
 		Binary: "vllm-router",
 		// `vllm-project/router@v0.1.15:src/main.rs:114-115`, `CliArgs::vllm_pd_disaggregation`.
 		DisaggregationArg: "--vllm-pd-disaggregation",
+		HasMetricsServer:  true,
+		HasDiscoveryPort:  true,
 		// Extra is FILLED PER RENDER in renderArgvRouter: this project's transfer connector is
 		// a pair property that follows Input.KVConnector ("mooncake" default, "nixl" override)
 		// rather than one fixed value. The gateway has no such flag at all: its transfer
 		// backend is the engine's, named on the engine's own command line.
 	},
-	SGLang: {
+	SGLangGateway: {
 		Binary: "sgl-model-gateway",
 		// `sgl-project/sglang@gateway-v0.3.1:sgl-model-gateway/src/main.rs:191-192`,
 		// `CliArgs::pd_disaggregation`.
 		DisaggregationArg: "--pd-disaggregation",
+		HasMetricsServer:  true,
+		HasDiscoveryPort:  true,
+		SupportsDPAware:   true,
 		// NOTHING EXTRA, and no model name either. Turning on service discovery turns on this
 		// gateway's inference-gateway mode by itself (`:1056-1060`), and that mode routes by the id
 		// each worker reports for itself rather than by one the gateway was told. Its --model-path
 		// loads a TOKENIZER (`:937`, `maybe_model_path`), which would make the router Pod depend on
 		// reaching a model repository at startup for a name it does not route by.
 	},
+	SGL: {
+		Binary: "sgl-router",
+		// `sgl-project/sglang@router-v0.1.0:sgl-router/src/config/cli.rs` enables PD mode via
+		// --prefill-selector and --decode-selector without a separate disaggregation flag, reads
+		// worker ports from EndpointSlice directly, and serves /metrics on its main HTTP port.
+		SupportsModelID:     true,
+		ChatRoutingReorg:    true,
+		OptionalNoTokenizer: true,
+		SupportsDPAware:     true,
+		DPAwarePDAllowed:    true,
+	},
+}
+
+// SGLOwnedFlags returns the CLI flags managed by the operator for sgl-router.
+func SGLOwnedFlags() []string {
+	return []string{
+		argvRouterHostArg,
+		argvRouterPortArg,
+		argvRouterModelIDArg,
+		argvRouterChatRoutingArg,
+		argvRouterNoTokenizerArg,
+		argvRouterDiscoveryArg,
+		argvRouterDiscoveryNSArg,
+		argvRouterSelectorArg,
+		argvRouterPrefillSelectArg,
+		argvRouterDecodeSelectArg,
+		argvRouterDPAwareArg,
+	}
 }
 
 func argvRenderer(name string) func(Input) (Output, error) {
@@ -122,7 +184,7 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 	if input.Namespace == "" {
 		return Output{}, fmt.Errorf("render %s: no discovery namespace", name)
 	}
-	if input.DiscoveryPort <= 0 {
+	if delta.HasDiscoveryPort && input.DiscoveryPort <= 0 {
 		return Output{}, fmt.Errorf("render %s: no discovery port", name)
 	}
 	// The transfer connector is stated on EVERY render, both shapes, and never left to its
@@ -150,8 +212,21 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 	args := []string{
 		argvRouterHostArg + "=" + listenHost,
 		argvRouterPortArg + "=" + strconv.Itoa(int(input.ListenPort)),
-		argvRouterMetricsHostArg + "=" + argvRouterBindAddress,
-		argvRouterMetricsPortArg + "=" + strconv.Itoa(int(input.MetricsPort)),
+	}
+	if delta.HasMetricsServer {
+		args = append(args,
+			argvRouterMetricsHostArg+"="+argvRouterBindAddress,
+			argvRouterMetricsPortArg+"="+strconv.Itoa(int(input.MetricsPort)),
+		)
+	}
+	if delta.SupportsModelID && input.ModelName != "" {
+		args = append(args, argvRouterModelIDArg+"="+input.ModelName)
+	}
+	if delta.ChatRoutingReorg {
+		args = append(args, argvRouterChatRoutingArg+"=reorg")
+	}
+	if delta.OptionalNoTokenizer && !sglRouterNeedsTokenizer(input.ExtraArgs) {
+		args = append(args, argvRouterNoTokenizerArg)
 	}
 	// Absent leaves this router on its own default, which is HALF AN HOUR on both of them against a
 	// day under the proxy. Rendering nothing is what that absence means; rendering a value here is
@@ -164,8 +239,10 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 	args = append(args,
 		argvRouterDiscoveryArg,
 		argvRouterDiscoveryNSArg+"="+input.Namespace,
-		argvRouterDiscoveryPortArg+"="+strconv.Itoa(int(input.DiscoveryPort)),
 	)
+	if delta.HasDiscoveryPort {
+		args = append(args, argvRouterDiscoveryPortArg+"="+strconv.Itoa(int(input.DiscoveryPort)))
+	}
 
 	prefill, decode := roleSelector(input, rolePrefill), roleSelector(input, roleKindDecode)
 	if prefill != nil && decode != nil {
@@ -174,7 +251,12 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 		// one that survives a scale (`vllm-project/router@v0.1.15:src/main.rs:403-415`). The two
 		// selectors are a UNION rather than a conjunction: a Pod is taken when it matches either
 		// (`src/service_discovery.rs:88-95`).
-		args = append(args, delta.DisaggregationArg)
+		if delta.DisaggregationArg != "" {
+			args = append(args, delta.DisaggregationArg)
+		}
+		if delta.SupportsDPAware && delta.DPAwarePDAllowed && input.AttentionDataParallelSize >= 2 {
+			args = append(args, argvRouterDPAwareArg)
+		}
 		// AN ENCODER IS CARRIED AS ONE STATIC LIST, and the vLLM router is the one that takes it.
 		// Its --epd-config is the whole of the encoder stage upstream knows (pull request 266): a
 		// JSON document read once at startup, whose encoder_urls are never refreshed and whose
@@ -223,12 +305,9 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 	// register -- the failure this program measured as one healthy worker where the contract is
 	// one endpoint per member -- and only the gateway carries the flag. The width is the one the
 	// External DP classifier reads, so a shape the classifier admits is a shape the flag covers.
-	// Every other shape renders without it. The flag belongs to this undivided shape alone: the
-	// split shape above renders the gateway's disaggregation mode, and the gateway rejects
-	// dp-aware beside it -- combining the two produced an invalid decode destination in the
-	// recorded container run -- so a split deployment carries no flag whatever widths its roles
-	// declare.
-	if name == SGLang && input.AttentionDataParallelSize >= 2 {
+	// Every other shape renders without it. The flag belongs to this undivided shape alone for
+	// sglang-gateway, which rejects --dp-aware beside --pd-disaggregation.
+	if delta.SupportsDPAware && input.AttentionDataParallelSize >= 2 {
 		args = append(args, argvRouterDPAwareArg)
 	}
 	deployment := selectorArgs(argvRouterSelectorArg, input.EndpointLabels)
@@ -331,4 +410,111 @@ func epdConfigArg(name string, input Input) (string, error) {
 	}
 
 	return argvRouterEPDConfigArg + "=" + string(encoded), nil
+}
+
+// VLLMRouterKVAware describes which roles activate vllm-router's kv_aware routing policy.
+type VLLMRouterKVAware struct {
+	Server  bool
+	Prefill bool
+	Decode  bool
+	Any     bool
+}
+
+// ForRoleKind reports whether kv_aware routing is active for the given upstream role kind.
+func (k VLLMRouterKVAware) ForRoleKind(kind string) bool {
+	switch kind {
+	case "server":
+		return k.Server
+	case rolePrefill:
+		return k.Prefill
+	case roleKindDecode:
+		return k.Decode
+	default:
+		return false
+	}
+}
+
+// ParseVLLMRouterKVAware resolves effective kv_aware KV-event subscriber activation from
+// vllm-router extraArgs across --policy and --prefill-policy using last-wins precedence.
+// In disaggregated P/D mode, vllm-router@v0.1.17 starts PdKvState only for prefill workers and
+// never queries KV placement or /kv_event_sources on Decode, so Decode is always false.
+func ParseVLLMRouterKVAware(extraArgs []string, disaggregated bool) VLLMRouterKVAware {
+	var (
+		policy        string
+		prefillPolicy string
+		prefillSet    bool
+	)
+	visitArgvFlags(extraArgs, func(name, value string, hasValue bool) {
+		if !hasValue {
+			return
+		}
+		switch name {
+		case argvRouterPolicyArg:
+			policy = value
+		case argvRouterPrefillPolicyArg:
+			prefillPolicy = value
+			prefillSet = true
+		}
+	})
+
+	if !disaggregated {
+		server := policy == "kv_aware"
+		return VLLMRouterKVAware{Server: server, Any: server}
+	}
+
+	prefill := (prefillSet && prefillPolicy == "kv_aware") || (!prefillSet && policy == "kv_aware")
+	return VLLMRouterKVAware{
+		Prefill: prefill,
+		Decode:  false,
+		Any:     prefill,
+	}
+}
+
+// sglRouterNeedsTokenizer reports whether sgl-router extraArgs require loading a tokenizer under
+// --chat-routing=reorg: an explicit --tokenizer-path (which conflicts with --no-tokenizer),
+// --bucket-config (whose buckets may define token length limits or group cache_aware policies),
+// or --policy=cache_aware (the only top-level reorg policy whose needs_request_tokens() returns true).
+func sglRouterNeedsTokenizer(extraArgs []string) bool {
+	var (
+		hasTokenizerPath bool
+		hasBucketConfig  bool
+		policy           string
+	)
+	visitArgvFlags(extraArgs, func(name, value string, hasValue bool) {
+		switch name {
+		case argvRouterTokenizerPathArg:
+			hasTokenizerPath = true
+		case argvRouterBucketConfigArg:
+			hasBucketConfig = true
+		case argvRouterPolicyArg:
+			if hasValue {
+				policy = value
+			}
+		}
+	})
+	return hasTokenizerPath || hasBucketConfig || policy == "cache_aware"
+}
+
+// visitArgvFlags iterates long CLI options before any "--" stop token, resolving both
+// "--flag=value" and "--flag value" forms.
+func visitArgvFlags(args []string, fn func(name, value string, hasValue bool)) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			return
+		}
+		if !strings.HasPrefix(arg, "--") {
+			continue
+		}
+		if eq := strings.IndexByte(arg, '='); eq >= 0 {
+			fn(arg[:eq], arg[eq+1:], true)
+			continue
+		}
+		if i+1 < len(args) && args[i+1] != "--" && !strings.HasPrefix(args[i+1], "-") {
+			fn(arg, args[i+1], true)
+			i++
+			continue
+		}
+		fn(arg, "", false)
+	}
 }

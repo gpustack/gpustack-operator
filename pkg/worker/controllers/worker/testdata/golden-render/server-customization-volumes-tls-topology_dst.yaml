@@ -7,7 +7,7 @@ metadata:
     kueue.x-k8s.io/podset-required-topology: topology.kubernetes.io/zone
     kueue.x-k8s.io/role-hash: main
     modeldeployment.gpustack.ai/pod-spec-hash: 8cc4d9fe369345ff58fe73536982d0664de3d8f7443a153e2a0beb676d37e20a
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
     prometheus.io/port: "9000"

@@ -88,21 +88,114 @@ type KVEvents struct {
 	Topic          string
 }
 
-// VLLMKVEvents returns the dialable event contract paired with vLLM's fixed bind configuration.
+// VLLMKVEvents returns the dialable event contract paired with vLLM's fixed bind configuration
+// and the legacy bare topic prefix.
 func VLLMKVEvents(host string) *KVEvents {
+	return KVEventsForTopic(host, VLLMKVEventsTopic)
+}
+
+// KVEventsMaxLocalDP is the maximum per-Pod DP publisher span whose ZMQ PUB ports
+// [5557 .. 5557+localDP-1] and ROUTER replay ports [5557+localDP .. 5557+2*localDP-1] fit inside
+// the TCP port range [1, 65535] without overlap or overflow.
+const KVEventsMaxLocalDP int32 = (65535 - VLLMKVEventsPort + 1) / 2
+
+// ValidateKVEventsLocalDP refuses a KV event DP publisher span whose ZMQ PUB and ROUTER replay
+// port range overflows TCP port 65535.
+func ValidateKVEventsLocalDP(localDP int32) error {
+	if localDP > KVEventsMaxLocalDP {
+		return newRefusal(ReasonKVEventsPortOverflow,
+			"KV events data-parallel span %d overflows TCP port 65535 (max supported span is %d from base port %d)",
+			localDP, KVEventsMaxLocalDP, VLLMKVEventsPort)
+	}
+	return nil
+}
+
+// KVEventsReplayPortForLocalDP returns the ZMQ ROUTER replay base port for localDP per-Pod
+// publishers. Single-DP workloads (localDP <= 1) keep VLLMKVEventsReplayPort (5558); multi-DP
+// workloads place replay at VLLMKVEventsPort + localDP so rank r's PUB (5557 + r) and replay
+// (5557 + localDP + r) sockets never overlap. Returns 0 when localDP exceeds KVEventsMaxLocalDP;
+// callers should validate with ValidateKVEventsLocalDP first.
+func KVEventsReplayPortForLocalDP(localDP int32) int32 {
+	if localDP <= 1 {
+		return VLLMKVEventsReplayPort
+	}
+	if localDP > KVEventsMaxLocalDP {
+		return 0
+	}
+	return VLLMKVEventsPort + localDP
+}
+
+// KVEventsForTopic returns the dialable event contract paired with the ZMQ publisher's default
+// single-DP ports and the given topic.
+func KVEventsForTopic(host, topic string) *KVEvents {
+	return KVEventsForTopicAndLocalDP(host, topic, 1)
+}
+
+// KVEventsForTopicAndLocalDP returns the dialable event contract paired with VLLMKVEventsPort,
+// KVEventsReplayPortForLocalDP(localDP), and the given topic.
+func KVEventsForTopicAndLocalDP(host, topic string, localDP int32) *KVEvents {
 	return &KVEvents{
 		Endpoint:       fmt.Sprintf("tcp://%s:%d", host, VLLMKVEventsPort),
-		ReplayEndpoint: fmt.Sprintf("tcp://%s:%d", host, VLLMKVEventsReplayPort),
-		Topic:          VLLMKVEventsTopic,
+		ReplayEndpoint: fmt.Sprintf("tcp://%s:%d", host, KVEventsReplayPortForLocalDP(localDP)),
+		Topic:          topic,
 	}
 }
 
-// KVEventsPorts returns the ports used by the vLLM ZMQ publisher and its replay endpoint.
+// VLLMKVEventsTopicForModel returns the 3-segment vLLM / vLLM-Ascend KV event publisher topic
+// ("kv@pod@<model>") expected by llm-d-router parseTopic and vllm-router /kv_event_sources.
+// An empty model falls back to VLLMKVEventsTopic ("kv@").
+func VLLMKVEventsTopicForModel(model string) string {
+	if model == "" {
+		return VLLMKVEventsTopic
+	}
+	return VLLMKVEventsTopic + "pod@" + model
+}
+
+// engineVersionAtLeast reports whether version satisfies minimum under CompareEngineVersion.
+// An empty version represents the legacy baseline (< minimum). Non-empty invalid versions return
+// a typed refusal.
+func engineVersionAtLeast(version, minimum string) (bool, error) {
+	if version == "" {
+		return false, nil
+	}
+	ok, err := EngineVersionAtLeast(version, minimum)
+	if err != nil {
+		return false, newRefusal(ReasonEngineVersionInvalid, "%v", err)
+	}
+	return ok, nil
+}
+
+// KVEventsPorts returns the container ports used by a single-DP ZMQ publisher and replay endpoint.
 func KVEventsPorts() []core.ContainerPort {
+	return KVEventsPortsForLocalDP(1)
+}
+
+// KVEventsPortsForLocalDP returns the base ZMQ publisher and replay container ports for localDP
+// per-Pod publishers.
+func KVEventsPortsForLocalDP(localDP int32) []core.ContainerPort {
 	return []core.ContainerPort{
 		{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: VLLMKVEventsPort},
-		{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: VLLMKVEventsReplayPort},
+		{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: KVEventsReplayPortForLocalDP(localDP)},
 	}
+}
+
+// KVEventsReservedPortsForLocalDP returns every TCP port bound inside the Pod by localDP ZMQ PUB
+// and ROUTER replay publishers: [5557 .. 5557 + 2*max(localDP, 1) - 1]. Returns nil when localDP
+// exceeds KVEventsMaxLocalDP; callers must validate with ValidateKVEventsLocalDP so overflowing
+// spans are refused rather than understated.
+func KVEventsReservedPortsForLocalDP(localDP int32) []int32 {
+	if localDP < 1 {
+		localDP = 1
+	}
+	if localDP > KVEventsMaxLocalDP {
+		return nil
+	}
+	end := VLLMKVEventsPort + 2*localDP - 1
+	ports := make([]int32, 0, int(end-VLLMKVEventsPort+1))
+	for p := VLLMKVEventsPort; p <= end; p++ {
+		ports = append(ports, p)
+	}
+	return ports
 }
 
 // cachePrefixSeparators are the characters vLLM and SGLang join a store key's parts with.
@@ -123,6 +216,16 @@ func Render(in Input) (*Result, error) {
 	if !slices.Contains(Engines(), in.Engine) {
 		return nil, newRefusal(ReasonEngineUnknown,
 			"engine %q is not one this operator can configure; set one of %v", in.Engine, Engines())
+	}
+	if in.EngineVersion != "" {
+		if err := ValidateEngineVersion(in.EngineVersion); err != nil {
+			return nil, newRefusal(ReasonEngineVersionInvalid, "%v", err)
+		}
+	}
+	if in.PublishKVEvents {
+		if err := ValidateKVEventsLocalDP(in.KVEventsLocalDP); err != nil {
+			return nil, err
+		}
 	}
 
 	hasStore := in.Connection.MasterAddress != "" || in.Connection.Protocol != ""
@@ -157,30 +260,19 @@ func Render(in Input) (*Result, error) {
 	}
 	if !hasStore && in.Role != RoleEncode &&
 		in.Engine != EngineVLLM && in.Engine != EngineVLLMAscend &&
-		(in.Engine != EngineSGLang || !in.KVTransfer) {
+		(in.Engine != EngineSGLang || (!in.KVTransfer && !in.PublishKVEvents)) {
 		return nil, newRefusal(ReasonConnectionIncomplete,
 			"engine %q requires a shared store connection", in.Engine)
 	}
-	// Point-to-point transfer is rendered by the whole vLLM family and by SGLang, each in its
-	// own vocabulary; KV event publishing is vLLM proper's alone. A capability an engine does not
-	// render is refused HERE rather than ignored by that engine's renderer.
-	//
-	// It is refused rather than dropped because dropping it is the failure this package exists to
-	// prevent: an engine asked for a capability it renders no term for would start normally, serve
-	// normally, and move no blocks - with nothing in the Pod to read that says so. The combination
-	// is reachable, not theoretical: the router's metrics contract covers SGLang, so a managed
-	// router over an SGLang pool is a configuration a user can write today.
-	//
-	// The vLLM renderer refuses point-to-point transfer again, on a condition that also covers the
-	// role. That is not a duplicate of this one: this check is about the ENGINE and runs for every
-	// caller, while that one is about a role that is neither prefill nor decode and can only be
-	// reached once the engine is already vLLM.
+	// Point-to-point transfer and KV event publishing are rendered by the vLLM family and SGLang,
+	// each in its own vocabulary. Any future engine outside that set is refused here rather than
+	// silently dropping the capability.
 	if in.KVTransfer && in.Engine != EngineVLLM && in.Engine != EngineVLLMAscend && in.Engine != EngineSGLang {
 		return nil, newRefusal(ReasonRoleUnsupported,
 			"engine %q renders no point-to-point transfer; asking for one would leave a container "+
 				"that starts and moves nothing", in.Engine)
 	}
-	if in.PublishKVEvents && in.Engine != EngineVLLM {
+	if in.PublishKVEvents && in.Engine != EngineVLLM && in.Engine != EngineVLLMAscend && in.Engine != EngineSGLang {
 		return nil, newRefusal(ReasonRoleUnsupported,
 			"engine %q renders no KV event publishing; asking for it would leave a container that "+
 				"starts and moves nothing", in.Engine)

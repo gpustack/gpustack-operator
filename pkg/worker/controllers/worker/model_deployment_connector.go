@@ -14,6 +14,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -31,6 +32,10 @@ type ModelDeploymentConnectorInput struct {
 	// Engine selects which engine's argument keys and carrier to render, and it is the left half of
 	// every owned-key decision.
 	Engine string
+
+	// EngineVersion is the role's effective stored engine version (role.EngineVersion falling back to
+	// spec.engine.version). Empty preserves the pre-0.30.0 legacy baseline.
+	EngineVersion string
 
 	// Kind is what the engine is told this role is, and it is the ONE term that makes a prefill role
 	// and a decode role different configurations rather than two copies of one.
@@ -97,6 +102,17 @@ type ModelDeploymentConnectorInput struct {
 	// bind address.
 	KVEventsHost string
 
+	// KVEventsTopic is the ZMQ PUB topic prefix advertised by a KV-events publisher.
+	KVEventsTopic string
+
+	// KVEventsUseCBORHash selects sha256_cbor prefix-cache block hashing and
+	// VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0 for vllm-router kv_aware roles.
+	KVEventsUseCBORHash bool
+
+	// KVEventsLocalDP is the role's effective per-Pod DP publisher width used to offset the ZMQ
+	// replay port above all local PUB sockets when > 1.
+	KVEventsLocalDP int32
+
 	// KVTransfer composes point-to-point P/D transfer with the shared store. The two are
 	// orthogonal inputs and both may be on at once; neither is a branch that excludes the other.
 	KVTransfer bool
@@ -140,6 +156,11 @@ type ModelDeploymentConnectorInput struct {
 	// Its zero value asks for no leg, which is the shape every deployment without an Encode role
 	// renders, and the render is unchanged for it.
 	EncoderCache inject.EncoderCache
+
+	// ECSideChannelPort overrides the vLLM ECCPUConnector ec-side-channel ContainerPort on Encode
+	// roles when the user declares VLLM_EC_SIDE_CHANNEL_PORT in role.Env (nil = default 5601,
+	// 0 = ephemeral/omitted, > 0 = custom port).
+	ECSideChannelPort *int32
 
 	// EncoderURLs are the addresses of the encoder stage, which is the other engine's half of the
 	// same leg: SGLang takes the URLs on the language side and passes them down to the encoder
@@ -238,6 +259,9 @@ type modelDeploymentConnectorBinding struct {
 	AscendTransferProtocol string                 `json:"ascendTransferProtocol,omitempty"`
 	PublishKVEvents        bool                   `json:"publishKVEvents,omitempty"`
 	KVEventsHost           string                 `json:"kvEventsHost,omitempty"`
+	KVEventsTopic          string                 `json:"kvEventsTopic,omitempty"`
+	KVEventsUseCBORHash    bool                   `json:"kvEventsUseCBORHash,omitempty"`
+	KVEventsReplayPort     int32                  `json:"kvEventsReplayPort,omitempty"`
 	RoutingSidecar         bool                   `json:"routingSidecar,omitempty"`
 	Disaggregated          bool                   `json:"disaggregated,omitempty"`
 	Parallelism            inject.ParallelismPair `json:"parallelism,omitempty"`
@@ -245,18 +269,20 @@ type modelDeploymentConnectorBinding struct {
 	EncoderURLs            []string               `json:"encoderURLs,omitempty"`
 }
 
-// modelDeploymentRoutesManaged is now the KV EVENTS gate alone: a managed router is in front of
-// this deployment, off Ascend.
-//
-// THE THREE DECISIONS BELOW ANSWER SEPARATELY, and stating what they do not share is the point of
-// keeping them apart. The KV event publisher exists to feed one router's data layer, so it follows
-// that router and that engine -- and it stays off Ascend, because the vLLM-Ascend render knows no
-// publisher, and a refused render is an error loop, not a deployment without events. The
-// engine-side transfer leg follows every admitted pair, because a prefiller that cannot hand a
-// decoder its blocks is not disaggregated under any router. The decode proxy follows one router
-// alone, because it reads an endpoint out of a header only that router writes.
-func modelDeploymentRoutesManaged(md *workercore.ModelDeployment, manufacturer string) bool {
-	return md.Spec.Router != nil && manufacturer != nodefeature.ManufacturerAscend
+// ModelDeploymentEffectiveEngineVersion resolves the effective stored engine version for a role,
+// preferring role.EngineVersion over spec.engine.version. Empty stays empty without re-parsing the
+// container image so pre-upgrade deployments keep stable connector outputs and spec hashes.
+func ModelDeploymentEffectiveEngineVersion(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) string {
+	if role != nil && role.EngineVersion != "" {
+		return role.EngineVersion
+	}
+	if md != nil {
+		return md.Spec.Engine.Version
+	}
+
+	return ""
 }
 
 // ModelDeploymentMaySynthesizeConnector reports whether the render can synthesize a connector onto
@@ -437,7 +463,7 @@ var modelDeploymentOwnedKeys = map[string]struct {
 		Args: append([]string{
 			"--hicache-storage-backend", "--hicache-storage-backend-extra-config",
 			"--disaggregation-mode", "--disaggregation-transfer-backend",
-			"--disaggregation-bootstrap-port",
+			"--disaggregation-bootstrap-port", "--kv-events-config",
 		}, inject.SGLangEncoderOwnedArgs()...),
 		Env: []string{
 			"SGLANG_HICACHE_MOONCAKE_CONFIG_PATH",
@@ -665,6 +691,8 @@ var modelDeploymentDefaultedEnvNames = slices.Concat([]string{
 	inject.MooncakeTCPLanesPerPeerEnv,
 	inject.MooncakeTCPAdmissionTimeoutMsEnv,
 	inject.VLLMNIXLSideChannelPortEnv,
+	inject.VLLMECSideChannelPortEnv,
+	inject.VLLMUseV2ModelRunnerEnv,
 	inject.SGLangDisaggregationNIXLBackendEnv,
 	inject.AscendAutoConnectEnv,
 	inject.AscendLocalCommResEnv,
@@ -856,8 +884,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 	}
 
 	res, err := inject.Render(inject.Input{
-		Engine: engine,
-		Role:   role,
+		Engine:        engine,
+		EngineVersion: in.EngineVersion,
+		Role:          role,
 		// The pair term travels beside the role rather than being derived from it: the renderer's
 		// split mode is a property of the deployment's whole role set, and a role alone cannot
 		// know whether its other half is declared.
@@ -868,15 +897,19 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		// The encoder leg arrives whole rather than being assembled here: which connector carries it
 		// is admission's answer, read from the row it admitted this combination under. A zero value
 		// asks for no leg and renders exactly what this render produced before the leg existed.
-		EncoderCache: in.EncoderCache,
-		EncoderURLs:  in.EncoderURLs,
+		EncoderCache:      in.EncoderCache,
+		ECSideChannelPort: in.ECSideChannelPort,
+		EncoderURLs:       in.EncoderURLs,
 		Connection: inject.Connection{
 			MasterAddress: in.MasterServerAddress,
 			Protocol:      protocol,
 		},
-		PublishKVEvents: in.PublishKVEvents,
-		KVEventsHost:    in.KVEventsHost,
-		KVTransfer:      in.KVTransfer,
+		PublishKVEvents:     in.PublishKVEvents,
+		KVEventsHost:        in.KVEventsHost,
+		KVEventsTopic:       in.KVEventsTopic,
+		KVEventsUseCBORHash: in.KVEventsUseCBORHash,
+		KVEventsLocalDP:     in.KVEventsLocalDP,
+		KVTransfer:          in.KVTransfer,
 		// The renderer owns the unset default; only a declared API value is mapped here.
 		KVTransferProtocol: kvTransferProtocol,
 		KVTransferBackend:  in.KVTransferBackend,
@@ -931,6 +964,14 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 	if (engine == inject.EngineVLLM || engine == inject.EngineVLLMAscend) && res.KVTransfer && role == inject.RoleDecode {
 		domainFingerprint, cachePrefixFingerprint = "", ""
 	}
+	kvEventsTopicFingerprint := ""
+	var kvEventsReplayPortFingerprint int32
+	if res.KVEvents != nil {
+		kvEventsTopicFingerprint = res.KVEvents.Topic
+		if replayPort := inject.KVEventsReplayPortForLocalDP(in.KVEventsLocalDP); replayPort != inject.VLLMKVEventsReplayPort {
+			kvEventsReplayPortFingerprint = replayPort
+		}
+	}
 
 	return ModelDeploymentConnectorRender{
 		Args: res.Args,
@@ -964,6 +1005,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 			AscendTransferProtocol: ascendTransferProtocol,
 			PublishKVEvents:        in.PublishKVEvents,
 			KVEventsHost:           in.KVEventsHost,
+			KVEventsTopic:          kvEventsTopicFingerprint,
+			KVEventsUseCBORHash:    in.PublishKVEvents && in.KVEventsUseCBORHash,
+			KVEventsReplayPort:     kvEventsReplayPortFingerprint,
 			RoutingSidecar:         in.RoutingSidecar,
 			Disaggregated:          in.Disaggregated && (role == inject.RolePrefill || role == inject.RoleDecode),
 			Parallelism:            parallelism,
@@ -1071,28 +1115,96 @@ func ModelDeploymentEffectiveRoleKind(
 	return role.Kind
 }
 
-// modelDeploymentPublishesKVEvents reports whether this role runs the event publisher.
-//
-// IT STAYS WITH ONE ROUTER AND ONE ENGINE. The publisher exists to feed that router's prefix-cache
-// data layer, which subscribes per Pod; the other two score on their own observations and subscribe
-// to nothing, so publishing under them would open two sockets on every replica that nothing reads.
-//
-// ENCODE IS NOT A KV PRODUCER: an encoder produces multimodal embeddings, not KV cache blocks, and
-// the publisher it would open has no subscriber on the data-plane side. Refusing it is what keeps a
-// deployment that pairs Encode with Prefill from rendering two sockets on the encoder when only
-// one has a consumer.
-func modelDeploymentPublishesKVEvents(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
-) bool {
+// modelDeploymentKVEventsConfig resolves whether a managed role publishes ZMQ KV cache events, the
+// publisher topic, and whether CBOR block hashing is required for vllm-router kv_aware scoring.
+func modelDeploymentKVEventsConfig(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) (publish bool, topic string, useCBORHash bool) {
+	if md == nil || role == nil || md.Spec.Router == nil || len(role.Command) > 0 {
+		return false, "", false
+	}
 	kind := ModelDeploymentEffectiveRoleKind(role)
-	if kind == workercore.ModelDeploymentRoleKindDecode || kind == workercore.ModelDeploymentRoleKindEncode {
-		return false
+	if kind == workercore.ModelDeploymentRoleKindEncode {
+		return false, "", false
+	}
+	upstreamKind, ok := ModelDeploymentRoleUpstreamKind(kind)
+	if !ok {
+		return false, "", false
 	}
 
-	return modelDeploymentRoutesManaged(md, manufacturer) &&
-		md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
-		md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
-		len(role.Command) == 0
+	switch md.Spec.Router.Name {
+	case workercore.ModelDeploymentRouterLLMD:
+		if md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM ||
+			kind == workercore.ModelDeploymentRoleKindDecode ||
+			modelDeploymentLLMDRouterDisablesKVEvents(md) {
+			return false, "", false
+		}
+		return true, inject.VLLMKVEventsTopicForModel(md.Spec.Model.Name), false
+	case workercore.ModelDeploymentRouterSGL:
+		if md.Spec.Engine.Name != workercore.ModelDeploymentEngineSGLang ||
+			kind == workercore.ModelDeploymentRoleKindDecode {
+			return false, "", false
+		}
+		return true, inject.SGLangKVEventsTopic, false
+	case workercore.ModelDeploymentRouterVLLM:
+		if md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM {
+			return false, "", false
+		}
+		kvAware := router.ParseVLLMRouterKVAware(
+			md.Spec.Router.ExtraArgs, ModelDeploymentDeclaresBothHalves(md),
+		)
+		if !kvAware.ForRoleKind(upstreamKind) {
+			return false, "", false
+		}
+		return true, inject.VLLMKVEventsTopicForModel(md.Spec.Model.Name), true
+	default:
+		return false, "", false
+	}
+}
+
+// ModelDeploymentRolePublishesKVEvents reports whether the operator synthesizes ZMQ KV-event
+// publisher and replay listeners (ports 5557/5558) onto this managed role.
+func ModelDeploymentRolePublishesKVEvents(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	publish, _, _ := modelDeploymentKVEventsConfig(md, role)
+	return publish
+}
+
+// modelDeploymentPublishesKVEvents reports whether this role runs the event publisher.
+func modelDeploymentPublishesKVEvents(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, _ string,
+) bool {
+	return ModelDeploymentRolePublishesKVEvents(md, role)
+}
+
+// ParseModelDeploymentVLLMECSideChannelPort parses VLLM_EC_SIDE_CHANNEL_PORT from a role's
+// declared env list using last-wins semantics. When unset, it returns the default port (5601)
+// with envIdx=-1. When present, empty, non-numeric, negative, or >65535 values return an error
+// alongside the winning env entry index so admission can report the exact field path.
+func ParseModelDeploymentVLLMECSideChannelPort(
+	env []workercore.ModelDeploymentEnvVar,
+) (port int32, envIdx int, err error) {
+	envIdx = -1
+	for i := range env {
+		if env[i].Name == inject.VLLMECSideChannelPortEnv {
+			envIdx = i
+		}
+	}
+	if envIdx < 0 {
+		return inject.VLLMECSideChannelPort, -1, nil
+	}
+
+	val := env[envIdx].Value
+	parsed, parseErr := strconv.ParseInt(val, 10, 32)
+	if val == "" || parseErr != nil || parsed < 0 || parsed > 65535 {
+		return 0, envIdx, fmt.Errorf(
+			"%s must be 0 (ephemeral) or a valid TCP port (1-65535), got %q",
+			inject.VLLMECSideChannelPortEnv, val,
+		)
+	}
+
+	return int32(parsed), envIdx, nil
 }
 
 // modelDeploymentInjectRole maps this API's role kind onto the renderer's role.

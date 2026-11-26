@@ -117,6 +117,7 @@ spec:
       - summary
       - versions
       - subscriptions
+      - base_image_builds
     schemaVersion: 1
   verification:
     localChecks:

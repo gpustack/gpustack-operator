@@ -25,19 +25,22 @@ those candidates.
 | *Elastic EP* collective | Master endpoint only |
 | *Encode* group | Excluded from answering candidates and deployment `Service` |
 
-`vllm-router` pairs only with vLLM and `sglang-gateway` only with SGLang:
+Admission enforces strict engine-router pairing: `vllm-router` accepts `vLLM` (including Ascend)
+only, `sgl-router` and deprecated `sglang-gateway` accept `SGLang` only, and `llm-d-router` accepts
+both:
 
-| Mode | `llm-d-router` | `vllm-router` | `sglang-gateway` |
-|---|---|---|---|
-| Multi-replica *Server* | Fixed scoring profile (prefix, queue, KV); measured 187/170 on vLLM and 375/0 on SGLang | `cache_aware` default; `--policy round_robin` measured 60/60 | Same policies; `round_robin` measured 60/60 |
-| *PD* pair | Token-counted *PD* split, connector docs and decode sidecar | Native *PD* mode | Native `--pd-disaggregation` (never combined with `--dp-aware`) |
-| *EPD* | `encode` profile + decode sidecar transfer | Operator-owned `--epd-config`, no sidecar | Native pair; *Prefill* dials `--encoder-urls` |
-| *Elastic EP* | Engine internal load balancing; single endpoint | Same | Same |
-| *External DP* | Admitted, but no `--policy` flag; prefer engine router | Per-rank endpoints with `--policy round_robin` | Per-member endpoints (`--dp-aware` fan-out below) |
+| Mode | `llm-d-router` | `vllm-router` | `sgl-router` | `sglang-gateway` (deprecated) |
+|---|---|---|---|---|
+| Multi-replica *Server* | Fixed scoring profile (`precise-prefix-cache-producer` on vLLM/Ascend; `approx-prefix-cache-producer` on SGLang) | `cache_aware` default; `--policy kv_aware` (`>= 0.31.0`) or `round_robin` | `EndpointSlice` discovery + native SGLang KV events (`kv-events`) | Frozen at `gateway-v0.3.1`; `cache_aware` default or `--policy` |
+| *PD* pair | Token-counted *PD* split, connector docs, and decode sidecar | Native *PD* mode; optional `kv_aware` (`>= 0.31.0`) | Inferred from `--prefill-selector` + `--decode-selector` + KV events | Native `--pd-disaggregation` (never combined with `--dp-aware`) |
+| *EPD* | `encode` profile + decode sidecar transfer | Operator-owned `--epd-config`, no sidecar | Native pair; *Prefill* dials `--encoder-urls` | Native pair; *Prefill* dials `--encoder-urls` |
+| *Elastic EP* | Engine internal load balancing; single endpoint | Same | Same | Same |
+| *External DP* | Admitted, no `--policy` flag; prefer engine router | Per-rank endpoints with `--policy round_robin` | Per-member endpoints with `--dp-aware` (including *PD*) | Per-member endpoints with `--dp-aware` (undivided only) |
 
 Where even spread matters (multi-replica *Server* or *External DP*), choose `vllm-router` for vLLM
-or `sglang-gateway` for SGLang because `llm-d-router` has no policy switch
-([Fixed scoring profile](#fixed-scoring-profile)).
+or `sgl-router` for SGLang because `llm-d-router` has no policy switch
+([Fixed scoring profile](#fixed-scoring-profile)). Prefer `sgl-router` over deprecated
+`sglang-gateway` (frozen at `gateway-v0.3.1`) for new SGLang deployments.
 
 - **External selectors**: Qualified *External* *Server* roles omit `member-index=0` while keeping
   the `endpoint-eligible` selector; the headless `Service` always publishes all members for peer
@@ -45,12 +48,22 @@ or `sglang-gateway` for SGLang because `llm-d-router` has no policy switch
 - **Shared serving port**: Managed roles expose one HTTP port (`8000` default; all routed roles must
   match). Admission rejects vLLM `MultiPort`. See
   [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md).
-- **SGLang `--dp-aware` registration**: For SGLang *External DP*, the operator renders `--dp-aware`
-  on `sglang-gateway` so `gpustack/llm-router:v0.4.0`+ registers one logical worker per attention-DP
-  rank (`http://host:port@0`, `http://host:port@1`) pointing at each member's single listener. This
-  render gate and fan-out are unit-tested (no live runtime capture yet). Without `--dp-aware` (for
-  example on `v0.3.1`), subordinate members time out in the gateway's 10 s discovery step, leaving
-  at most one registered worker per group.
+- **`sgl-router` discovery and RBAC**: `sgl-router` watches Kubernetes `EndpointSlice` objects
+  rather than `Pod`s. The operator stamps `modeldeployment.gpustack.ai/role-kind=<kind>` on
+  per-role `Service`s (`<deployment>-<role>`) and grants `discovery.k8s.io/endpointslices`
+  (`get`, `list`, `watch`) in the router `Role`. Custom least-privilege operator worker bindings
+  must include `discovery.k8s.io/endpointslices` (`get`, `list`, `watch`).
+- **`sgl-router` tokenizer default**: The operator emits `--no-tokenizer` by default so `sgl-router`
+  starts offline in air-gapped clusters without calling Hugging Face Hub. It omits `--no-tokenizer`
+  automatically when *`spec.router.extraArgs`* supplies `--tokenizer-path`, `--bucket-config`, or
+  sets `--policy` to `cache_aware` (`power_of_two` and `session_aware` keep `--no-tokenizer`).
+- **`llm-d-router` SGLang limitation**: On `llm-d-router@v1.0.0`, `SGLang` stays on
+  `approx-prefix-cache-producer` with no KV events because upstream `precise-prefix-cache-producer`
+  requires vLLM's `/v1/chat/completions/render` endpoint. Use `sgl-router` for SGLang KV events.
+- **SGLang `--dp-aware` routing**: The operator renders `--dp-aware` on `sgl-router` for SGLang
+  *External DP* and multi-DP *PD* (`--attn-dp-size >= 2` or `--dp-size >= 2` on *Prefill* or
+  *Decode*) to select DP ranks per worker, and on `sglang-gateway` (undivided *External DP* only) to
+  register one worker per attention-DP rank.
 
 ### Excluded replica groups
 
@@ -79,7 +92,8 @@ Send all client requests to *`status.endpoint`*. *Encode* `Pod`s stay excluded f
 | `llm-d-router` | `vLLM` | `encode` profile picks an encoder for media requests; decode sidecar (`--ec-connector=ec-nixl` or `ec-example`) coordinates transfer |
 | `vllm-router` | `vLLM` | Operator renders `--epd-config` (owned, refused in *`extraArgs`*); router drives *Encode* → *Prefill* (NIXL) → *Decode* without a sidecar |
 | `llm-d-router` | `SGLang` | Router splits every request to *Prefill*/*Decode* (no `--ec-connector`); *Prefill* dials *Encode* via `--encoder-urls` |
-| `sglang-gateway` | `SGLang` | Gateway routes *Prefill*/*Decode* natively; *Prefill* dials *Encode* via `--encoder-urls` |
+| `sgl-router` | `SGLang` | Router routes *Prefill*/*Decode* via `EndpointSlice` selectors; *Prefill* dials *Encode* via `--encoder-urls` |
+| `sglang-gateway` | `SGLang` | Deprecated frozen gateway routes *Prefill*/*Decode* natively; *Prefill* dials *Encode* via `--encoder-urls` |
 
 Under `llm-d-router` + vLLM, the `encode` profile omits queue, KV-cache and prefix scorers, sends
 media requests through *Encode* first, and routes text-only requests straight to *Prefill* and
@@ -88,11 +102,13 @@ media requests through *Encode* first, and routes text-only requests straight to
 ## Default routing policies
 
 `vllm-router` and `sglang-gateway` default to `cache_aware` (logging
-`policy: CacheAware { cache_threshold: 0.3, ... }`); `llm-d-router` uses its fixed scoring profile:
+`policy: CacheAware { cache_threshold: 0.3, ... }`), `sgl-router` defaults to `power_of_two` under
+`--chat-routing=reorg`, and `llm-d-router` uses its fixed scoring profile:
 
 | Router | Default | Replica selection |
 |---|---|---|
 | `vllm-router` | `cache_aware` | Longest matching prefix above `--cache-threshold` (`0.3`), else smallest tree; switches to least-loaded when load gap exceeds `--balance-abs-threshold` (`64`) and `--balance-rel-threshold` (`1.5×`) |
+| `sgl-router` | `power_of_two` | Picks the less-loaded of two sampled workers under `--chat-routing=reorg` (override with `--policy cache_aware` or `--policy session_aware`) |
 | `sglang-gateway` | `cache_aware` | Same algorithm and three defaults |
 | `llm-d-router` | Fixed profile | Highest sum of prefix match (weight `3`, omitted on *Decode*), queue depth (`2`) and KV utilization (`2`) |
 
@@ -136,19 +152,26 @@ the router logs `Starting router ... | policy: RoundRobin`. On the same two-repl
 creation, 120 requests split `60 / 60` on both routers with zero errors.
 
 Editing *`router.extraArgs`* replaces only the router `Deployment` without rolling worker `Pod`s
-([Router rollout effects](runtime-control.md#router-rollout-effects)); the new router starts with
-an empty prefix table. Both routers also run behind the shared Envoy inference allowlist sidecar
-with a `:9091` observer when managed accelerated non-*Encode* roles exist.
+([Router rollout effects](runtime-control.md#router-rollout-effects)), except when toggling
+`kv_aware` on `vllm-router`, which rolls only the affected worker roles. The new router starts with
+an empty prefix table. `vllm-router`, `sgl-router`, and `sglang-gateway` run behind the Envoy
+inference allowlist sidecar with a `:9091` observer (`sgl-router` also proxies `/metrics` on `:9090`).
 
-Admission does not validate `--policy` values; an unknown value stops the router at startup:
+Admission validates `kv_aware` version requirements on `vllm-router` but does not validate other
+`--policy` values; an unknown value stops the router at startup:
 
 | Router | Accepted `--policy` values |
 |---|---|
-| `vllm-router` | `random`, `round_robin`, `cache_aware`, `power_of_two`, `consistent_hash`, `rendezvous_hash` |
-| `sglang-gateway` | `random`, `round_robin`, `cache_aware`, `power_of_two`, `prefix_hash`, `manual` |
+| `vllm-router` | `random`, `round_robin`, `cache_aware`, `kv_aware` (`vLLM >= 0.31.0`), `power_of_two`, `consistent_hash`, `rendezvous_hash` |
+| `sgl-router` | `power_of_two` (default), `cache_aware` (omits `--no-tokenizer`), `session_aware` (under `--chat-routing=reorg`, `--decode-policy` accepts `power_of_two` only and `--filter` accepts `overloaded` only) |
+| `sglang-gateway` (deprecated) | `random`, `round_robin`, `cache_aware`, `power_of_two`, `prefix_hash`, `manual` |
 
-Only `round_robin` was live-tested; `cache_aware` thresholds, `--prefill-policy` and
-`--decode-policy` pass through *`extraArgs`* untested.
+- **`vllm-router` `kv_aware` (`>= 0.31.0`)**: `--policy` on *Server*, or `--policy` /
+  `--prefill-policy` on *PD* *Prefill*, set to `kv_aware` enables `--kv-events-config`
+  (`topic: "kv@pod@<model>"`), `--prefix-caching-hash-algo sha256_cbor`,
+  `VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES=0`, and ZMQ event/replay ports on *Server*/*Prefill* (*Decode*
+  never subscribes to KV events). Shared `KVCachePool` domains must use matching hash algorithms for
+  cross-deployment prefix hits.
 
 ### Fixed scoring profile
 
@@ -196,6 +219,8 @@ URL/`Pod` address):
 | `vllm-router` | `vllm_router_processed_requests_total{worker}` | Requests sent to each worker |
 | `vllm-router` | `vllm_router_policy_decisions_total{policy,worker}` | Policy picks per worker |
 | `vllm-router` | `vllm_router_pd_prefill_requests_total{worker}`, `vllm_router_pd_decode_requests_total{worker}` | *PD* requests per *Prefill* and *Decode* worker |
+| `sgl-router` | `sgl_router_workers`, `sgl_router_worker_inflight_requests` | Active worker count and in-flight requests per worker |
+| `sgl-router` | `sgl_router_requests_total`, `sgl_router_responses_total`, `sgl_router_worker_requests_total{outcome}` | Total requests, responses, and per-worker outcomes |
 | `sglang-gateway` | `smg_worker_requests_active{worker}` | Active in-flight requests per worker |
 | `sglang-gateway` | `smg_worker_selection_total{worker_type,policy}` | Picks by policy and `regular`/`prefill`/`decode` type |
 | `llm-d-router` | `llm_d_epp_per_endpoint_queue_size{model_server_endpoint}` | Queued requests per endpoint |

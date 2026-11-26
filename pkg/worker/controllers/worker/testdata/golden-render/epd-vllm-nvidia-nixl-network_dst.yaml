@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
     modeldeployment.gpustack.ai/pod-spec-hash: 16f6b22a05f9cca1e4c3de72b085558b4c69d5df9659079aae8b87d994208a80
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
     prometheus.io/port: "8200"
@@ -198,7 +198,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: encode
     modeldeployment.gpustack.ai/pod-spec-hash: 20230d5ab683c91163aa55ff334c78e55f9a2c4398d036242cf01da509bcfc90
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: encode
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -255,16 +255,16 @@ spec:
     - --port
     - "8000"
     env:
-    - name: VLLM_USE_V2_MODEL_RUNNER
-      value: "1"
     - name: VLLM_EC_SIDE_CHANNEL_HOST
       valueFrom:
         fieldRef:
           fieldPath: status.podIP
-    - name: VLLM_EC_SIDE_CHANNEL_PORT
-      value: "5601"
     - name: MC_TE_METRIC
       value: "1"
+    - name: VLLM_USE_V2_MODEL_RUNNER
+      value: "1"
+    - name: VLLM_EC_SIDE_CHANNEL_PORT
+      value: "5601"
     - name: VLLM_CACHE_ROOT
       value: /var/lib/gpustack/cache
     - name: HF_HUB_CACHE
@@ -383,8 +383,8 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
-    modeldeployment.gpustack.ai/pod-spec-hash: 65fd1c8eda8d9991aa07384e33d1c3c8259e5931e3003b5d603bde4963ddecdc
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/pod-spec-hash: b4e4da5fa4dfe90ee0b99d27d35c0625d044bac5d9afe6e1fae6c7e0baba43e0
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -441,20 +441,18 @@ spec:
     - '{"kv_connector":"NixlConnector","kv_role":"kv_producer","kv_connector_extra_config":{"backends":["UCX"]}}'
     - --ec-transfer-config
     - '{"ec_connector":"ECCPUConnector","ec_role":"ec_consumer","ec_connector_extra_config":{"ec_enable_nixl":true,"ec_cpu_bytes":1073741824}}'
-    - --kv-events-config
-    - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@"}'
     - --host
     - 0.0.0.0
     - --port
     - "8000"
     env:
-    - name: VLLM_USE_V2_MODEL_RUNNER
-      value: "1"
     - name: VLLM_NIXL_SIDE_CHANNEL_HOST
       valueFrom:
         fieldRef:
           fieldPath: status.podIP
     - name: MC_TE_METRIC
+      value: "1"
+    - name: VLLM_USE_V2_MODEL_RUNNER
       value: "1"
     - name: VLLM_NIXL_SIDE_CHANNEL_PORT
       value: "8998"
@@ -509,12 +507,6 @@ spec:
       protocol: TCP
     - containerPort: 8998
       name: nixl-side
-      protocol: TCP
-    - containerPort: 5557
-      name: kv-events
-      protocol: TCP
-    - containerPort: 5558
-      name: kv-replay
       protocol: TCP
     readinessProbe:
       failureThreshold: 3
@@ -690,14 +682,6 @@ spec:
     port: 8000
     protocol: TCP
     targetPort: 8000
-  - name: kv-events
-    port: 5557
-    protocol: TCP
-    targetPort: 5557
-  - name: kv-replay
-    port: 5558
-    protocol: TCP
-    targetPort: 5558
   selector:
     app.kubernetes.io/component: prefill
     app.kubernetes.io/instance: qwen-vl

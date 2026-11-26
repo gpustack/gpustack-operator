@@ -104,7 +104,7 @@ runs one distributed launch across `size` member `Pod`s
 
 SGLang runs one distributed launch spanning `size` member `Pod`s with one attention-DP group per
 member. With `SGLANG_RUST_SERVER=1`, each member serves HTTP on its base port behind
-`sglang-gateway`, while the *FFN* tensor-parallel group spans all members:
+`sgl-router`, while the *FFN* tensor-parallel group spans all members:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -119,7 +119,7 @@ spec:
     name: SGLang
     image: gpustack/runner:cuda13.0-sglang0.5.22
   router:
-    name: sglang-gateway  # required; balances across member endpoints
+    name: sgl-router  # required; balances across member endpoints
   roles:
     - name: server
       kind: Server

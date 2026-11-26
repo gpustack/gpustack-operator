@@ -75,10 +75,28 @@ PY
 CAND_LLMD_VER="$(extract_df_arg "${CAND_DOCKERFILE}" "LLMD_ROUTER_VERSION")"
 CAND_VLLM_VER="$(extract_df_arg "${CAND_DOCKERFILE}" "VLLM_ROUTER_VERSION")"
 CAND_SGLANG_VER="$(extract_df_arg "${CAND_DOCKERFILE}" "SGLANG_GATEWAY_VERSION")"
+CAND_SGL_ROUTER_VER="$(extract_df_arg "${CAND_DOCKERFILE}" "SGL_ROUTER_VERSION")"
 
 BASE_LLMD_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "LLMD_ROUTER_VERSION")"
 BASE_VLLM_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "VLLM_ROUTER_VERSION")"
 BASE_SGLANG_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "SGLANG_GATEWAY_VERSION")"
+BASE_SGL_ROUTER_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "SGL_ROUTER_VERSION")"
+
+# 2b. Enforce permanent freeze on legacy sglang-gateway (deleted upstream in PR #50732).
+FROZEN_SGLANG_GATEWAY_VERSION="gateway-v0.3.1"
+if [[ "${CAND_SGLANG_VER}" != "${BASE_SGLANG_VER}" ]] || [[ "${CAND_SGLANG_VER}" != "${FROZEN_SGLANG_GATEWAY_VERSION}" ]]; then
+  printf 'FAIL: SGLANG_GATEWAY_VERSION is frozen at %s (upstream deleted sgl-model-gateway in PR #50732); candidate has %s (baseline %s)\n' \
+    "${FROZEN_SGLANG_GATEWAY_VERSION}" "${CAND_SGLANG_VER}" "${BASE_SGLANG_VER}" >&2
+  exit 1
+fi
+
+BASE_SGLANG_PATCHES="${BASELINE_DIR}/pack/llm-router/patches/sglang-gateway"
+CAND_SGLANG_PATCHES="${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/sglang-gateway"
+if [[ ! -d "${BASE_SGLANG_PATCHES}" || ! -d "${CAND_SGLANG_PATCHES}" ]] || \
+   ! diff -rq -- "${BASE_SGLANG_PATCHES}" "${CAND_SGLANG_PATCHES}" >/dev/null 2>&1; then
+  printf 'FAIL: pack/llm-router/patches/sglang-gateway/ is frozen and must not be modified\n' >&2
+  exit 1
+fi
 
 # 3. Validate 0001-epd-routing.patch and 0004-discovery-readiness-and-deselect-removal.patch retirement invariants when router-preflight-report.json exists.
 EPD_PATCH="${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/vllm-router/0001-epd-routing.patch"
@@ -137,7 +155,8 @@ apply_staged_patches() {
   local stage_repo="$2"
   local target_ver="$3"
   local patch_dir="$4"
-  local sparse_subpath="${5:-}"
+  shift 4
+  local sparse_subpaths=("$@")
 
   local patches=()
   local pf
@@ -154,9 +173,15 @@ apply_staged_patches() {
 
   if [[ ! -d "${stage_repo}" ]]; then
     if [[ "${AUTOSYNC_ALLOW_MISSING_STAGED_REPO:-false}" == "true" ]]; then
-      if [[ "${name}" == "sglang" ]]; then
+      if [[ "${name}" == "sglang-gateway" || "${name}" == "sgl-router" ]]; then
         if ! grep -q "struct ObserverRouter" "${patches[@]}"; then
-          printf 'FAIL: struct ObserverRouter missing from sglang-gateway patches\n' >&2
+          printf 'FAIL: struct ObserverRouter missing from %s patches\n' "${name}" >&2
+          return 1
+        fi
+      fi
+      if [[ "${name}" == "sgl-router" ]]; then
+        if ! grep -q "pub mod observer;" "${patches[@]}" || ! grep -q "/observer/endpoints" "${patches[@]}"; then
+          printf 'FAIL: sgl-router patches missing observer module/endpoint hooks\n' >&2
           return 1
         fi
       fi
@@ -180,8 +205,8 @@ apply_staged_patches() {
     is_promisor="true"
   fi
 
-  if [[ "${is_promisor}" == "true" && -n "${sparse_subpath}" ]]; then
-    git -C "${stage_repo}" archive "${target_ver}" -- "${sparse_subpath}" | tar -x -C "${tmp_tree}"
+  if [[ "${is_promisor}" == "true" ]] && (( ${#sparse_subpaths[@]} > 0 )); then
+    git -C "${stage_repo}" archive "${target_ver}" -- "${sparse_subpaths[@]}" | tar -x -C "${tmp_tree}"
   else
     git -C "${stage_repo}" archive "${target_ver}" | tar -x -C "${tmp_tree}"
   fi
@@ -200,11 +225,30 @@ apply_staged_patches() {
     fi
   done
 
-  if [[ "${name}" == "sglang" ]]; then
+  if [[ "${name}" == "sglang-gateway" ]]; then
     local observer_rs="${tmp_tree}/sgl-model-gateway/src/observer.rs"
     if [[ ! -f "${observer_rs}" ]] || ! grep -q "struct ObserverRouter" "${observer_rs}"; then
       printf 'FAIL: struct ObserverRouter missing in %s after applying sglang-gateway patches\n' \
         "sgl-model-gateway/src/observer.rs" >&2
+      return 1
+    fi
+  elif [[ "${name}" == "sgl-router" ]]; then
+    local observer_rs="${tmp_tree}/sgl-router/src/observer.rs"
+    local lib_rs="${tmp_tree}/sgl-router/src/lib.rs"
+    local app_rs="${tmp_tree}/sgl-router/src/server/app.rs"
+    if [[ ! -f "${observer_rs}" ]] || ! grep -q "struct ObserverRouter" "${observer_rs}"; then
+      printf 'FAIL: struct ObserverRouter missing in %s after applying sgl-router patches\n' \
+        "sgl-router/src/observer.rs" >&2
+      return 1
+    fi
+    if [[ ! -f "${lib_rs}" ]] || ! grep -q "pub mod observer;" "${lib_rs}"; then
+      printf 'FAIL: pub mod observer; missing in %s after applying sgl-router patches\n' \
+        "sgl-router/src/lib.rs" >&2
+      return 1
+    fi
+    if [[ ! -f "${app_rs}" ]] || ! grep -q "/observer/endpoints" "${app_rs}"; then
+      printf 'FAIL: /observer/endpoints missing in %s after applying sgl-router patches\n' \
+        "sgl-router/src/server/app.rs" >&2
       return 1
     fi
   fi
@@ -216,8 +260,15 @@ apply_staged_patches "llm-d-router" "${STAGE_DIR}/llm-d-router" "${CAND_LLMD_VER
 apply_staged_patches "vllm-router" "${STAGE_DIR}/vllm-router" "${CAND_VLLM_VER}" \
   "${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/vllm-router"
 
-apply_staged_patches "sglang" "${STAGE_DIR}/sglang" "${CAND_SGLANG_VER}" \
+SGLANG_GW_STAGE="${STAGE_DIR}/sglang-gateway"
+if [[ ! -d "${SGLANG_GW_STAGE}" && -d "${STAGE_DIR}/sglang" ]]; then
+  SGLANG_GW_STAGE="${STAGE_DIR}/sglang"
+fi
+apply_staged_patches "sglang-gateway" "${SGLANG_GW_STAGE}" "${CAND_SGLANG_VER}" \
   "${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/sglang-gateway" "sgl-model-gateway"
+
+apply_staged_patches "sgl-router" "${STAGE_DIR}/sgl-router" "${CAND_SGL_ROUTER_VER}" \
+  "${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/sgl-router" "sgl-router" "rust"
 
 # 5. Detect modified router stages and run targeted docker buildx verification.
 CHANGED_STAGES="$(python3 - \
@@ -225,7 +276,8 @@ CHANGED_STAGES="$(python3 - \
   "${BASELINE_DIR}/pack/llm-router/patches" "${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches" \
   "${BASE_LLMD_VER}" "${CAND_LLMD_VER}" \
   "${BASE_VLLM_VER}" "${CAND_VLLM_VER}" \
-  "${BASE_SGLANG_VER}" "${CAND_SGLANG_VER}" <<'PY'
+  "${BASE_SGLANG_VER}" "${CAND_SGLANG_VER}" \
+  "${BASE_SGL_ROUTER_VER}" "${CAND_SGL_ROUTER_VER}" <<'PY'
 import os
 import re
 import subprocess
@@ -242,9 +294,16 @@ import sys
     cand_vllm,
     base_sglang,
     cand_sglang,
-) = sys.argv[1:11]
+    base_sgl_router,
+    cand_sgl_router,
+) = sys.argv[1:13]
 
-ALL_BUILDERS = ("epp-builder", "vllm-router-builder", "sglang-gateway-builder")
+ALL_BUILDERS = (
+    "epp-builder",
+    "vllm-router-builder",
+    "sglang-gateway-builder",
+    "sgl-router-builder",
+)
 stages = set()
 
 if cand_llmd != base_llmd:
@@ -253,11 +312,14 @@ if cand_vllm != base_vllm:
     stages.add("vllm-router-builder")
 if cand_sglang != base_sglang:
     stages.add("sglang-gateway-builder")
+if cand_sgl_router != base_sgl_router:
+    stages.add("sgl-router-builder")
 
 patch_map = (
     ("llm-d", "epp-builder"),
     ("vllm-router", "vllm-router-builder"),
     ("sglang-gateway", "sglang-gateway-builder"),
+    ("sgl-router", "sgl-router-builder"),
 )
 for subdir, builder in patch_map:
     bdir = os.path.join(base_patches_root, subdir)
@@ -274,7 +336,9 @@ def split_dockerfile(path: str) -> tuple[list[str], dict[str, list[str]]]:
     preamble = []
     sections: dict[str, list[str]] = {}
     cur_name = None
-    router_arg_re = re.compile(r"^ARG (?:LLMD_ROUTER_VERSION|VLLM_ROUTER_VERSION|SGLANG_GATEWAY_VERSION)=")
+    router_arg_re = re.compile(
+        r"^ARG (?:LLMD_ROUTER_VERSION|VLLM_ROUTER_VERSION|SGLANG_GATEWAY_VERSION|SGL_ROUTER_VERSION)="
+    )
     from_re = re.compile(r"^\s*FROM\s+\S+(?:\s+AS\s+([A-Za-z0-9._-]+))?", re.IGNORECASE)
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -298,6 +362,13 @@ def split_dockerfile(path: str) -> tuple[list[str], dict[str, list[str]]]:
 base_pre, base_sec = split_dockerfile(base_df)
 cand_pre, cand_sec = split_dockerfile(cand_df)
 
+if base_sec.get("sglang-gateway-builder") != cand_sec.get("sglang-gateway-builder"):
+    print(
+        "FAIL: sglang-gateway-builder stage in pack/llm-router/Dockerfile is frozen and must not be modified",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 if base_pre != cand_pre:
     # Check specific shared preamble ARGs before falling back to all builders.
     base_non_arg = [ln for ln in base_pre if not ln.startswith("ARG GO_VERSION=") and not ln.startswith("ARG RUST_VERSION=")]
@@ -310,6 +381,7 @@ if base_pre != cand_pre:
         if [ln for ln in base_pre if ln.startswith("ARG RUST_VERSION=")] != [ln for ln in cand_pre if ln.startswith("ARG RUST_VERSION=")]:
             stages.add("vllm-router-builder")
             stages.add("sglang-gateway-builder")
+            stages.add("sgl-router-builder")
 
 all_sec_names = set(base_sec.keys()) | set(cand_sec.keys())
 for sec_name in all_sec_names:
@@ -320,9 +392,12 @@ for sec_name in all_sec_names:
             stages.add("vllm-router-builder")
         elif sec_name == "sglang-gateway-builder":
             stages.add("sglang-gateway-builder")
+        elif sec_name == "sgl-router-builder":
+            stages.add("sgl-router-builder")
         elif sec_name == "rust-builder":
             stages.add("vllm-router-builder")
             stages.add("sglang-gateway-builder")
+            stages.add("sgl-router-builder")
         else:
             stages.update(ALL_BUILDERS)
 
@@ -493,12 +568,12 @@ fi
 
 # 6b. Proposal schema and version parity (.auto-sync/proposals/router.json).
 CAND_PROPOSAL="${AUTOSYNC_CANDIDATE_ROOT}/.auto-sync/proposals/router.json"
-python3 - "${CAND_PROPOSAL}" "${CAND_LLMD_VER}" "${CAND_VLLM_VER}" "${CAND_SGLANG_VER}" "${IMAGES_CHANGED}" "${HELD_ROUTER_KEYS}" <<'PY'
+python3 - "${CAND_PROPOSAL}" "${CAND_LLMD_VER}" "${CAND_VLLM_VER}" "${CAND_SGLANG_VER}" "${CAND_SGL_ROUTER_VER}" "${IMAGES_CHANGED}" "${HELD_ROUTER_KEYS}" <<'PY'
 import json
 import os
 import sys
 
-prop_p, llmd_v, vllm_v, sglang_v, images_changed_str, held_keys_csv = sys.argv[1:7]
+prop_p, llmd_v, vllm_v, sglang_v, sgl_router_v, images_changed_str, held_keys_csv = sys.argv[1:8]
 held_keys = {k for k in held_keys_csv.split(",") if k}
 if not os.path.isfile(prop_p):
     raise SystemExit(f"FAIL: missing proposal artifact: {prop_p}")
@@ -523,6 +598,7 @@ expected = {
     "llm-d-router": (llmd_v, not ({"router", "proxy", "sidecar"} <= held_keys)),
     "vllm-router": (vllm_v, "router" not in held_keys),
     "sglang-gateway": (sglang_v, "router" not in held_keys),
+    "sgl-router": (sgl_router_v, "router" not in held_keys),
 }
 for uid, (exp_v, uid_allow_sb) in expected.items():
     got = versions.get(uid)
@@ -534,6 +610,10 @@ for uid, (exp_v, uid_allow_sb) in expected.items():
         continue
     raise SystemExit(f"FAIL: proposals/router.json versions.{uid} ({got!r}) != pinned ({exp_v!r})")
 PY
+
+# 6c. Validate Base Image build recommendations whenever pack/llm-router/** changed.
+python3 -B "${SCRIPT_DIR}/base_image_builds.py" validate \
+  "${BASELINE_DIR}" "${AUTOSYNC_CANDIDATE_ROOT}" "${CAND_PROPOSAL}" --domain router
 
 # 7. Go settings/controller render tests and docs lint when Stage B files changed.
 PROMOTED_FILES_CHANGED="false"

@@ -3,6 +3,7 @@ package router
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 
 	"sigs.k8s.io/yaml"
@@ -12,9 +13,10 @@ import (
 // here rather than imported because the refusal messages interpolate them, and a package that took
 // them from the API would make this renderer depend on the type it exists to stay independent of.
 const (
-	LLMD   = "llm-d-router"
-	VLLM   = "vllm-router"
-	SGLang = "sglang-gateway"
+	LLMD          = "llm-d-router"
+	VLLM          = "vllm-router"
+	SGL           = "sgl-router"
+	SGLangGateway = "sglang-gateway"
 )
 
 // Role is one stable class of model-server endpoints visible to a router.
@@ -143,6 +145,10 @@ type Input struct {
 	// Absent leaves the renderer's own value; an explicit zero disables splitting, which is what
 	// the upstream decider does with it.
 	DisaggregationThreshold *int32
+
+	// ExtraArgs holds user-supplied router CLI arguments inspected by argv renderers that
+	// adapt default flags such as sgl-router --no-tokenizer.
+	ExtraArgs []string
 }
 
 // roleKindDecode is the decoder's kind as this package receives it.
@@ -284,9 +290,10 @@ func Render(name string, input Input) (Output, error) {
 }
 
 var renderers = map[string]func(Input) (Output, error){
-	LLMD:   renderLLMD,
-	VLLM:   argvRenderer(VLLM),
-	SGLang: argvRenderer(SGLang),
+	LLMD:          renderLLMD,
+	VLLM:          argvRenderer(VLLM),
+	SGL:           argvRenderer(SGL),
+	SGLangGateway: argvRenderer(SGLangGateway),
 }
 
 func renderLLMD(input Input) (Output, error) {
@@ -296,6 +303,9 @@ func renderLLMD(input Input) (Output, error) {
 		kinds[role.Kind] = role.RoleLabelKey
 		selectors[role.Kind] = role.Selector
 	}
+	// Preserve raw role label keys before dropping the SGLang encoder stage so KV event
+	// publisher exclusions still exclude encode Pods if precise KV events are ever enabled.
+	publisherKinds := maps.Clone(kinds)
 
 	// SGLang's prefiller dials the encoder itself through its encoder URLs, so the router sees the
 	// encoder and the prefiller as one stage: encode plus prefill, then decode. The encoder is
@@ -387,7 +397,7 @@ func renderLLMD(input Input) (Output, error) {
 		metricsSource["parameters"] = map[string]any{"port": input.Metrics.Port}
 	}
 	prefixProducer := "approx-prefix-cache-producer"
-	if input.KVEvents.Port > 0 {
+	if input.KVEvents.Port > 0 && !encode {
 		prefixProducer = "precise-prefix-cache-producer"
 		// Excludes every role that keeps no KV cache from the set of Pods the producer
 		// subscribes to. The exclusion is keyed on each kind's own label, so a term exists only
@@ -407,7 +417,7 @@ func renderLLMD(input Input) (Output, error) {
 		// in the set is a subscriber dialing a socket the engine never opens.
 		publisherSelector := input.EndpointSelector
 		for _, kind := range []string{roleKindDecode, roleKindEncode} {
-			key, ok := kinds[kind]
+			key, ok := publisherKinds[kind]
 			if !ok {
 				continue
 			}
@@ -418,23 +428,12 @@ func renderLLMD(input Input) (Output, error) {
 				publisherSelector += "," + exclusion
 			}
 		}
-		// AN ENCODER STAGE GETS THE BUILT-IN ESTIMATOR, AND EVERY OTHER DEPLOYMENT GETS THE HTTP
-		// RENDERER. Naming the vLLM URL here selects llm-d-router's vllmHTTPRenderer, which POSTs to
-		// <url>/v1/chat/completions/render -- an endpoint vLLM 0.30.0 serves only under
-		// --enable-scale-out, so on a default server the call answers 404 and no request is routed
-		// at all. A bare token-producer instead selects the built-in estimator, which reads PNG and
-		// JPEG dimensions out of a data: URL with no HTTP call.
-		//
-		// The two are also not interchangeable on an encoder: the request is forwarded to the
-		// encoder with its media still attached, and the multimodal decider reads the estimator's
-		// MultiModalFeatures to decide the stage exists at all. The HTTP renderer would have to ask
-		// the prefiller to render, which is the wrong server for the question.
-		tokenProducer := map[string]any{"type": "token-producer"}
-		if !encode {
-			tokenProducer["parameters"] = map[string]any{
+		tokenProducer := map[string]any{
+			"type": "token-producer",
+			"parameters": map[string]any{
 				"modelName": input.ModelName,
 				"vllm":      map[string]any{"url": input.TokenizerEndpoint},
-			}
+			},
 		}
 		plugins = append(plugins,
 			tokenProducer,
@@ -457,6 +456,15 @@ func renderLLMD(input Input) (Output, error) {
 				},
 			})
 	} else {
+		// AN ENCODER STAGE GETS THE BUILT-IN ESTIMATOR + APPROXIMATE PREFIX PRODUCER.
+		// Naming the vLLM URL on token-producer calls /v1/chat/completions/render (which requires
+		// --enable-scale-out and cannot populate MultiModalFeatures for the multimodal decider),
+		// while llm-d-router@v1.0.0 rejects pairing a bare token-producer with
+		// precise-prefix-cache-producer. Emit bare token-producer alongside
+		// approx-prefix-cache-producer for EPD instead.
+		if encode {
+			plugins = append(plugins, map[string]any{"type": "token-producer"})
+		}
 		plugins = append(plugins, map[string]any{"type": prefixProducer})
 	}
 	prefixScorer := map[string]any{"type": "prefix-cache-scorer"}

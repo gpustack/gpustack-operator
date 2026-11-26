@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
     modeldeployment.gpustack.ai/pod-spec-hash: 80de5c5e6f2e0591298ce6c81b103c7a5239f8b35bfff78f2ba7e22844e4bc70
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -154,7 +154,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
     modeldeployment.gpustack.ai/pod-spec-hash: c5d7620324dbb5293528ca01af48b20b03cfb9bb0965265d29b0a1e9d071ab31
-    modeldeployment.gpustack.ai/render-version: "6"
+    modeldeployment.gpustack.ai/render-version: "7"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -323,7 +323,6 @@ spec:
     app.kubernetes.io/component: prefill
     app.kubernetes.io/instance: qwen
     app.kubernetes.io/name: model-deployment
-    modeldeployment.gpustack.ai/endpoint-eligible: "true"
   type: ClusterIP
 status:
   loadBalancer: {}
@@ -357,7 +356,6 @@ spec:
     app.kubernetes.io/component: decode
     app.kubernetes.io/instance: qwen
     app.kubernetes.io/name: model-deployment
-    modeldeployment.gpustack.ai/endpoint-eligible: "true"
   type: ClusterIP
 status:
   loadBalancer: {}
@@ -391,7 +389,6 @@ spec:
     app.kubernetes.io/component: prefill
     app.kubernetes.io/instance: qwen
     app.kubernetes.io/name: model-deployment
-    modeldeployment.gpustack.ai/endpoint-eligible: "true"
   type: ClusterIP
 status:
   loadBalancer: {}

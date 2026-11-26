@@ -54,20 +54,19 @@ const (
 	// event publisher each sit on their own, and the KV transfer handshake sits on a fourth.
 	VLLMECSideChannelPort int32 = 5601
 
-	// vllmECSideChannelHostEnv is the bind address of that socket. Upstream reads the pair only on
-	// a producer with NIXL transfer enabled (v0.30.0 `docs/features/ec_cpu_connector.md:108`), and
-	// its default of "localhost" works only when a producer and its consumer share a host
-	// (`:105`) - which two Pods never do, so the renderer names the Pod's own address.
-	vllmECSideChannelHostEnv = "VLLM_EC_SIDE_CHANNEL_HOST"
+	// VLLMECSideChannelHostEnv is the owned bind address of the NIXL EC side channel, resolved from
+	// status.podIP by the kubelet on the producer role.
+	VLLMECSideChannelHostEnv = "VLLM_EC_SIDE_CHANNEL_HOST"
 
-	// vllmECSideChannelPortEnv is the port half of the same pair.
-	vllmECSideChannelPortEnv = "VLLM_EC_SIDE_CHANNEL_PORT"
+	// VLLMECSideChannelPortEnv is the defaulted port half of the NIXL EC side channel.
+	VLLMECSideChannelPortEnv = "VLLM_EC_SIDE_CHANNEL_PORT"
 
-	// vllmModelRunnerEnv selects the engine's model runner. ECCPUConnector requires the second one
-	// and raises ValueError at construction without it (v0.30.0
-	// `docs/features/ec_cpu_connector.md:10`), so on this leg the variable is the connector's
-	// precondition rather than a preference, and it is owned rather than defaulted.
-	vllmModelRunnerEnv = "VLLM_USE_V2_MODEL_RUNNER"
+	// VLLMUseV2ModelRunnerEnv selects the V2 model runner required by ECCPUConnector on vLLM < 0.34.0.
+	// Removed upstream in v0.34.0; emitted in DefaultedEnv only for legacy or < 0.34.0 versions.
+	VLLMUseV2ModelRunnerEnv = "VLLM_USE_V2_MODEL_RUNNER"
+
+	// VLLMModelRunnerV2RemovedVersion is the vLLM release line where VLLM_USE_V2_MODEL_RUNNER was removed.
+	VLLMModelRunnerV2RemovedVersion = "0.34.0"
 
 	// vllmECPodIPFieldPath is the field the kubelet resolves at container start, which is what
 	// makes the side channel bind address routable without the renderer knowing the Pod's address.
@@ -247,39 +246,48 @@ func renderVLLMEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 	}
 	result := &Result{Args: []string{vllmECTransferConfigArg, string(encoded)}}
 
-	// The model runner is the connector's precondition on EVERY role, not the producer's.
-	// ECCPUConnector.__init__ raises ValueError when use_v2_model_runner is false BEFORE it looks
-	// at the role it was handed (read at vLLM v0.30.0
-	// `vllm/distributed/ec_transfer/ec_connector/cpu/connector.py:40-44`), and the factory
-	// constructs that class for a consumer instance exactly as it does for a producer's
-	// (`ec_connector/factory.py:36-56`: the role it passes is worker-or-scheduler, not
-	// produce-or-consume). So a prefiller on this leg crash-loops at construction without the
-	// variable. It is left unset on the shared-directory leg because ECExampleConnector.__init__
-	// reads no such flag (`example_connector.py:54-67`).
+	// ECCPUConnector required VLLM_USE_V2_MODEL_RUNNER=1 on vLLM < 0.34.0 (removed in v0.34.0).
+	// Emitted as DefaultedEnv on legacy/older versions and omitted at >= 0.34.0.
 	if doc.ECConnector == vllmECCPUConnector {
-		result.Env = []core.EnvVar{{Name: vllmModelRunnerEnv, Value: "1"}}
+		v2Removed, err := engineVersionAtLeast(in.EngineVersion, VLLMModelRunnerV2RemovedVersion)
+		if err != nil {
+			return nil, err
+		}
+		if !v2Removed {
+			result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{
+				Name:  VLLMUseV2ModelRunnerEnv,
+				Value: "1",
+			})
+		}
 	}
 
 	if role == vllmECConsumerRole {
 		return result, nil
 	}
 
-	// Producer-only from here. The side channel is read by a producer with NIXL transfer enabled
-	// and by nothing else, so a consumer that rendered the pair would advertise an address it
-	// never binds.
+	// Producer-only from here. VLLM_EC_SIDE_CHANNEL_HOST stays owned (status.podIP);
+	// VLLM_EC_SIDE_CHANNEL_PORT is defaulted to 5601 so a role can override it.
 	if doc.ECConnector == vllmECCPUConnector {
 		result.Env = append(result.Env,
 			core.EnvVar{
-				Name: vllmECSideChannelHostEnv,
+				Name: VLLMECSideChannelHostEnv,
 				ValueFrom: &core.EnvVarSource{
 					FieldRef: &core.ObjectFieldSelector{FieldPath: vllmECPodIPFieldPath},
 				},
 			},
-			core.EnvVar{Name: vllmECSideChannelPortEnv, Value: strconv.Itoa(int(VLLMECSideChannelPort))},
 		)
-		result.Ports = []core.ContainerPort{{
-			Name: "ec-side-channel", Protocol: core.ProtocolTCP, ContainerPort: VLLMECSideChannelPort,
-		}}
+		result.DefaultedEnv = append(result.DefaultedEnv,
+			core.EnvVar{Name: VLLMECSideChannelPortEnv, Value: strconv.Itoa(int(VLLMECSideChannelPort))},
+		)
+		sideChannelPort := VLLMECSideChannelPort
+		if in.ECSideChannelPort != nil {
+			sideChannelPort = *in.ECSideChannelPort
+		}
+		if sideChannelPort > 0 {
+			result.Ports = []core.ContainerPort{{
+				Name: "ec-side-channel", Protocol: core.ProtocolTCP, ContainerPort: sideChannelPort,
+			}}
+		}
 	}
 
 	result.DefaultedArgs = [][]string{
@@ -291,28 +299,9 @@ func renderVLLMEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 	return result, nil
 }
 
-// EncoderCacheOwnedKeys returns the flags and the variables the encoder-cache leg writes for the
-// given request, and therefore resolves itself.
-//
-// A caller uses this to refuse a workload that also declares one of them. Both would otherwise be
-// honored and the engine would read whichever it parsed last, so a workload could turn NIXL
-// transfer off, point the side channel at a host no consumer dials, or swap the connector under a
-// deployment that is already running - none of which any engine log distinguishes from the leg
-// simply not working.
-//
-// The two lists are exact rather than a fixed set, because what the leg writes depends on both the
-// connector and the role: the model runner belongs to the NIXL leg on either role, while the side
-// channel belongs to its producer alone. They are returned separately because a flag and a variable
-// are refused through different mechanisms, and each is always a list - empty where the leg owns
-// nothing of that kind - so a caller can compare them against what a render produced without
-// normalizing either side.
-//
-// A request naming no connector owns nothing because it renders nothing, and the caller in
-// model_deployment_connector.go that builds the operator's owned-key set always names a connector,
-// so the keys are owned on every deployment.
-//
-// The role is taken alongside the request because a request alone cannot answer the question: the
-// same NIXL leg owns one variable as a consumer and three as a producer.
+// EncoderCacheOwnedKeys returns the owned flags and environment variables written by the
+// encoder-cache leg for the given role and connector. Defaulted variables
+// (VLLM_USE_V2_MODEL_RUNNER and VLLM_EC_SIDE_CHANNEL_PORT) are excluded.
 func EncoderCacheOwnedKeys(role Role, ec EncoderCache) (args, env []string) {
 	if ec.Connector == "" {
 		return []string{}, []string{}
@@ -321,9 +310,8 @@ func EncoderCacheOwnedKeys(role Role, ec EncoderCache) (args, env []string) {
 	if ec.Connector != vllmECCPUConnector {
 		return args, []string{}
 	}
-	env = []string{vllmModelRunnerEnv}
 	if role == RoleEncode {
-		env = append(env, vllmECSideChannelHostEnv, vllmECSideChannelPortEnv)
+		return args, []string{VLLMECSideChannelHostEnv}
 	}
-	return args, env
+	return args, []string{}
 }

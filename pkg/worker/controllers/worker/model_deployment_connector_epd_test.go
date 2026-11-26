@@ -35,6 +35,7 @@ func TestModelDeploymentEPDEncoderLeg_AnAddressLegConfiguresNoCache(t *testing.T
 	for _, router := range []string{
 		workercore.ModelDeploymentRouterLLMD,
 		workercore.ModelDeploymentRouterSGLang,
+		workercore.ModelDeploymentRouterSGL,
 	} {
 		for _, platform := range []string{
 			nodefeature.ManufacturerNVIDIA,
@@ -82,6 +83,7 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 			workercore.ModelDeploymentRouterLLMD:   true,
 			workercore.ModelDeploymentRouterVLLM:   true,
 			workercore.ModelDeploymentRouterSGLang: true,
+			workercore.ModelDeploymentRouterSGL:    true,
 		}
 		engines := map[string]bool{
 			workercore.ModelDeploymentEngineVLLM:   true,
@@ -116,6 +118,7 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 		}{
 			{workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentEngineSGLang},
 			{workercore.ModelDeploymentRouterSGLang, workercore.ModelDeploymentEngineVLLM},
+			{workercore.ModelDeploymentRouterSGL, workercore.ModelDeploymentEngineVLLM},
 		} {
 			for _, platform := range []string{
 				nodefeature.ManufacturerNVIDIA,
@@ -189,6 +192,7 @@ func TestModelDeploymentEPDMatrix(t *testing.T) {
 		for _, router := range []string{
 			workercore.ModelDeploymentRouterLLMD,
 			workercore.ModelDeploymentRouterSGLang,
+			workercore.ModelDeploymentRouterSGL,
 		} {
 			for _, platform := range []string{
 				nodefeature.ManufacturerNVIDIA,

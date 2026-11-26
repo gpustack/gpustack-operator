@@ -82,7 +82,8 @@ type ModelDeploymentSpec struct {
 	// one prefiller and one decoder would describe a pairer rather than this field.
 	//
 	// Both llm-d-router and vllm-router support vLLM prefill/decode transfer across Ascend and
-	// non-Ascend pools. sglang-gateway is only valid when engine.name is SGLang.
+	// non-Ascend pools. sgl-router and deprecated sglang-gateway are only valid when engine.name
+	// is SGLang.
 	//
 	// Absent means no router, and that stays a supported shape rather than a broken one: the roles are
 	// individually addressable through their own Services either way, so a deployment written before
@@ -189,6 +190,19 @@ type ModelDeploymentEngine struct {
 	// +k8s:validation:minLength=1
 	// +k8s:validation:maxLength=512
 	Image string `json:"image" protobuf:"bytes,2,opt,name=image"`
+
+	// Version is the inference engine release version the deployment runs by default, such as
+	// "0.34.0" or "0.5.23".
+	//
+	//   - When omitted on creation (or cleared when changing Image), admission derives it from
+	//     standard gpustack/runner image tags. Custom or digest-only images require an explicit
+	//     value.
+	//   - It is editable alongside Image. A role that overrides Image may also declare its own
+	//     EngineVersion; otherwise roles inherit this value.
+	//
+	// +optional
+	// +k8s:validation:maxLength=64
+	Version string `json:"version,omitempty" protobuf:"bytes,3,opt,name=version"`
 }
 
 // ModelDeploymentKVCache attaches the deployment to a KV cache pool.
@@ -411,6 +425,17 @@ type ModelDeploymentRole struct {
 	// +optional
 	// +k8s:validation:maxLength=512
 	Image string `json:"image,omitempty" protobuf:"bytes,7,opt,name=image"`
+
+	// EngineVersion overrides the deployment's engine version for this role, such as "0.32.0".
+	//
+	//   - When omitted and Image is empty, the role inherits spec.engine.version.
+	//   - When Image overrides the deployment image: when omitted on creation (or cleared when
+	//     changing Image), admission derives it from standard gpustack/runner image tags.
+	//   - Custom or digest-only role images require an explicit value.
+	//
+	// +optional
+	// +k8s:validation:maxLength=64
+	EngineVersion string `json:"engineVersion,omitempty" protobuf:"bytes,24,opt,name=engineVersion"`
 
 	// ImagePullPolicy is the pull policy for Image.
 	//
@@ -804,13 +829,15 @@ type ModelDeploymentRouter struct {
 	// of work rather than a constant.
 	//
 	// A VALUE IS ALSO ENGINE-MATCHED, and the match is a separate rule rather than something this
-	// enum can express: "vllm-router" and "sglang-gateway" are each one project's own router for
-	// its own engine, so each is refused in front of the other's. "llm-d-router" takes either
-	// engine, because upstream carries a handshake connector and a metrics configuration for each
-	// of them.
+	// enum can express: "vllm-router" accepts vLLM only, "sgl-router" and deprecated
+	// "sglang-gateway" accept SGLang only, and "llm-d-router" accepts both engines.
+	//
+	// "sglang-gateway" is deprecated and frozen at gateway-v0.3.1 because upstream removed
+	// sgl-model-gateway; new SGLang deployments should use "sgl-router" and existing deployments
+	// should migrate to "sgl-router".
 	//
 	// +required
-	// +k8s:validation:enum=["llm-d-router","vllm-router","sglang-gateway"]
+	// +k8s:validation:enum=["llm-d-router","vllm-router","sglang-gateway","sgl-router"]
 	Name string `json:"name" protobuf:"bytes,1,name=name"`
 
 	// Replicas is how many router Pods to run. Absent means one.
@@ -902,9 +929,15 @@ type ModelDeploymentRouter struct {
 //
 // Declared beside the field whose schema closes the set, so that a reader of either finds the other.
 const (
-	ModelDeploymentRouterLLMD   = "llm-d-router"
-	ModelDeploymentRouterVLLM   = "vllm-router"
-	ModelDeploymentRouterSGLang = "sglang-gateway"
+	ModelDeploymentRouterLLMD = "llm-d-router"
+	ModelDeploymentRouterVLLM = "vllm-router"
+	ModelDeploymentRouterSGL  = "sgl-router"
+	// ModelDeploymentRouterSGLangGateway is deprecated and frozen at gateway-v0.3.1; use
+	// ModelDeploymentRouterSGL ("sgl-router") instead.
+	ModelDeploymentRouterSGLangGateway = "sglang-gateway"
+	// Deprecated: kept as an alias for compatibility; use ModelDeploymentRouterSGLangGateway
+	// or migrate to ModelDeploymentRouterSGL ("sgl-router").
+	ModelDeploymentRouterSGLang = ModelDeploymentRouterSGLangGateway
 )
 
 // ModelDeploymentStatus defines the observed state of ModelDeployment.

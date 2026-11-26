@@ -6461,6 +6461,11 @@ func (m *ModelDeploymentEngine) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.Version)
+	copy(dAtA[i:], m.Version)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Version)))
+	i--
+	dAtA[i] = 0x1a
 	i -= len(m.Image)
 	copy(dAtA[i:], m.Image)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Image)))
@@ -7375,6 +7380,13 @@ func (m *ModelDeploymentRole) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.EngineVersion)
+	copy(dAtA[i:], m.EngineVersion)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.EngineVersion)))
+	i--
+	dAtA[i] = 0x1
+	i--
+	dAtA[i] = 0xc2
 	if m.RuntimeControl != nil {
 		{
 			size, err := m.RuntimeControl.MarshalToSizedBuffer(dAtA[:i])
@@ -15296,6 +15308,8 @@ func (m *ModelDeploymentEngine) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.Image)
 	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Version)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -15717,6 +15731,8 @@ func (m *ModelDeploymentRole) Size() (n int) {
 		l = m.RuntimeControl.Size()
 		n += 2 + l + sovGenerated(uint64(l))
 	}
+	l = len(m.EngineVersion)
+	n += 2 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -19393,6 +19409,7 @@ func (this *ModelDeploymentEngine) String() string {
 	s := strings.Join([]string{`&ModelDeploymentEngine{`,
 		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
 		`Image:` + fmt.Sprintf("%v", this.Image) + `,`,
+		`Version:` + fmt.Sprintf("%v", this.Version) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -19703,6 +19720,7 @@ func (this *ModelDeploymentRole) String() string {
 		`AcceleratorType:` + fmt.Sprintf("%v", this.AcceleratorType) + `,`,
 		`Pause:` + fmt.Sprintf("%v", this.Pause) + `,`,
 		`RuntimeControl:` + strings.Replace(this.RuntimeControl.String(), "ModelDeploymentRoleRuntimeControl", "ModelDeploymentRoleRuntimeControl", 1) + `,`,
+		`EngineVersion:` + fmt.Sprintf("%v", this.EngineVersion) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -40267,6 +40285,38 @@ func (m *ModelDeploymentEngine) Unmarshal(dAtA []byte) error {
 			}
 			m.Image = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Version = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -43957,6 +44007,38 @@ func (m *ModelDeploymentRole) Unmarshal(dAtA []byte) error {
 			if err := m.RuntimeControl.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
+			iNdEx = postIndex
+		case 24:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EngineVersion", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EngineVersion = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

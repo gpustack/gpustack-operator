@@ -1,35 +1,36 @@
-# Build target: the default final stage bundles epp, vllm-router and sgl-model-gateway.
+# Build target: the default final stage bundles epp, vllm-router, sgl-model-gateway (frozen) and sgl-router.
 # Platforms: linux/amd64 and linux/arm64.
 # Run from the repository root:
 #   PACKAGE_ARCH=amd64 PACKAGE_TAG=dev make package llm-router
-# Router source versions are the LLMD_ROUTER_VERSION, VLLM_ROUTER_VERSION and
-# SGLANG_GATEWAY_VERSION build arguments below. Pass overrides with Docker Buildx:
+# Router source versions are the LLMD_ROUTER_VERSION, VLLM_ROUTER_VERSION,
+# SGLANG_GATEWAY_VERSION (frozen) and SGL_ROUTER_VERSION build arguments below. Pass overrides with Docker Buildx:
 #   docker buildx build --platform linux/amd64 --load -t gpustack/llm-router:dev \
 #     --build-arg VLLM_ROUTER_VERSION=v0.1.17 -f pack/llm-router/Dockerfile .
 
 # One image carrying every router a ModelDeployment can name.
 #
-# WHAT: three independent router binaries built from three upstream sources into one runtime layer.
-# `epp` is the llm-d endpoint picker, `vllm-router` is the vLLM project's router, and
-# `sgl-model-gateway` is the SGLang model gateway. Nothing here couples them: a router Pod runs
-# exactly one of the three, named by the workload's command.
+# WHAT: four independent router binaries built from upstream sources into one runtime layer.
+# `epp` is the llm-d endpoint picker, `vllm-router` is the vLLM project's router,
+# `sgl-model-gateway` is the frozen legacy SGLang model gateway, and `sgl-router` is the
+# SGLang router. Nothing here couples them: a router Pod runs exactly one of them, named
+# by the workload's command.
 #
-# WHY ONE IMAGE RATHER THAN THREE: the router a deployment names is a field on the object, so the
+# WHY ONE IMAGE RATHER THAN SEPARATE IMAGES: the router a deployment names is a field on the object, so the
 # operator would otherwise resolve one image setting per router value and a cluster would have to
-# mirror, pin and redirect three of them to make the field usable at all. One image makes the
+# mirror, pin and redirect all of them to make the field usable at all. One image makes the
 # enum's cost flat -- widening it later adds a binary to this file, not an image to every cluster's
 # mirroring plan.
 #
 # WHY NOT BUILD ON THE PUBLISHED llm-d IMAGE: its runtime stage is `gcr.io/distroless/static`,
 # which carries no shell, no package manager and no dynamic loader for anything but a static
-# binary. The other two routers are ordinary dynamically linked Rust binaries, so they cannot be
+# binary. The other routers are ordinary dynamically linked Rust binaries, so they cannot be
 # added to it. The only shape that would work is copying the picker OUT of a published image, and
 # that pins this project to upstream's release cadence: a patch, or a build of an unreleased
-# reference, would have nowhere to go. Building all three from source is what keeps each version
+# reference, would have nowhere to go. Building all of them from source is what keeps each version
 # an argument.
 #
 # VERSIONS: one ARG per router, each naming an upstream git reference. They move independently
-# because the three projects release independently; nothing here requires them to agree.
+# because the upstream projects release independently; nothing here requires them to agree.
 #
 # NOT IN THIS IMAGE: the llm-d disaggregation sidecar. It runs in a DECODE role's Pod, not in a
 # router Pod, so putting it here would pull a router image into every decoder.
@@ -40,7 +41,10 @@ ARG RUST_VERSION=1.95-bookworm
 
 ARG LLMD_ROUTER_VERSION=v1.0.0
 ARG VLLM_ROUTER_VERSION=v0.1.17
+# FROZEN: upstream deleted sgl-model-gateway in sgl-project/sglang PR #50732 (commit 2588d80d062).
+# Keep gateway-v0.3.1 pinned until sglang-gateway is removed after its deprecation window.
 ARG SGLANG_GATEWAY_VERSION=gateway-v0.3.1
+ARG SGL_ROUTER_VERSION=router-v0.1.0
 
 ######################## llm-d endpoint picker ########################
 
@@ -275,6 +279,59 @@ RUN <<EOF
     cp target/release/sgl-model-gateway /out/sgl-model-gateway
 EOF
 
+######################## SGLang router ########################
+
+FROM rust-builder AS sgl-router-builder
+
+SHELL ["/bin/bash", "-c"]
+
+ARG SGL_ROUTER_VERSION
+
+WORKDIR /src
+
+# sgl-router lives inside sgl-project/sglang and declares path dependencies on sibling crates under
+# ../rust/ (sglang-processor, sglang-api-types, sglang-runtime-v1-types), so sparse-checkout pulls
+# both sgl-router and rust without downloading the Python engine tree.
+RUN <<EOF
+    set -exo pipefail
+
+    git clone --depth 1 --branch "${SGL_ROUTER_VERSION}" \
+        --filter=blob:none --sparse \
+        https://github.com/sgl-project/sglang.git .
+    git sparse-checkout set sgl-router rust
+    git submodule update --init --recursive --depth 1
+EOF
+
+# Patches use repository-root-relative paths (sgl-router/src/...) and apply from /src.
+COPY pack/llm-router/patches/sgl-router/ /tmp/patches/
+RUN <<EOF
+    set -exo pipefail
+
+    cd /src
+    git apply /tmp/patches/*.patch
+
+    # Fail the build if the observer patch did not land.
+    grep -q "struct ObserverRouter" sgl-router/src/observer.rs
+    grep -q "pub mod observer;" sgl-router/src/lib.rs
+    grep -q "/observer/endpoints" sgl-router/src/server/app.rs
+
+    rm -rf /tmp/patches
+EOF
+
+WORKDIR /src/sgl-router
+
+# sgl-router uses pure-Rust zeromq (no libzmq-dev needed) and ships Cargo.lock so --locked keeps
+# dependency resolution deterministic. PCRE2_SYS_STATIC=1 statically links vendored pcre2 so the
+# minimal runtime stage needs no system libpcre2-8 package.
+RUN <<EOF
+    set -exo pipefail
+
+    export PCRE2_SYS_STATIC=1
+    cargo build --release --locked --bin sgl-router
+    mkdir -p /out
+    cp target/release/sgl-router /out/sgl-router
+EOF
+
 ######################## runtime ########################
 
 FROM ubuntu:${UBUNTU_VERSION}
@@ -282,7 +339,7 @@ FROM ubuntu:${UBUNTU_VERSION}
 SHELL ["/bin/bash", "-c"]
 
 # libssl3t64 is the runtime half of the openssl crate the gateway links; ca-certificates is what
-# lets any of the three reach an HTTPS endpoint at all.
+# lets any of the routers reach an HTTPS endpoint at all.
 RUN <<EOF
     set -exo pipefail
 
@@ -299,14 +356,20 @@ EOF
 COPY --from=epp-builder /out/epp /usr/local/bin/epp
 COPY --from=vllm-router-builder /out/vllm-router /usr/local/bin/vllm-router
 COPY --from=sglang-gateway-builder /out/sgl-model-gateway /usr/local/bin/sgl-model-gateway
+COPY --from=sgl-router-builder /out/sgl-router /usr/local/bin/sgl-router
+
+# nonroot is created with --no-create-home; point HOME and HF_HOME at writable /tmp so
+# tokenizers downloaded at startup (such as sgl-router --policy=cache_aware) can write cache files.
+ENV HOME=/tmp \
+    HF_HOME=/tmp/huggingface
 
 USER 65532:65532
 
 # llm-d endpoint picker: ext_proc gRPC, gRPC health, Prometheus, KV-events ZMQ SUB.
 EXPOSE 9002 9003 9090 5557
-# vLLM router and SGLang model gateway: HTTP serving and Prometheus.
+# vLLM router, SGLang model gateway, and SGLang router: HTTP serving and Prometheus.
 EXPOSE 30000 29000
 
-# NO ENTRYPOINT ON PURPOSE. One image holds three programs, so an entrypoint here would name one of
-# them as the default and make the other two reachable only by overriding it. The workload names
+# NO ENTRYPOINT ON PURPOSE. One image holds four programs, so an entrypoint here would name one of
+# them as the default and make the others reachable only by overriding it. The workload names
 # the binary it wants, which is the same place its arguments already come from.

@@ -2525,7 +2525,8 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 		// block has therefore become a term below that excludes the KV terms alone, so a leg the
 		// operator owns is configured while the store the operator does not own is left alone.
 		kvTransfer := modelDeploymentUsesKVTransfer(md, role)
-		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, manufacturer)
+		publishKVEvents, kvEventsTopic, kvEventsUseCBORHash := modelDeploymentKVEventsConfig(md, role)
+		engineVersion := ModelDeploymentEffectiveEngineVersion(md, role)
 		routingSidecar := modelDeploymentFrontsDecodeWithSidecar(md, role)
 		roleKind := ModelDeploymentEffectiveRoleKind(role)
 		// The encoder stage is the row's answer for this combination, taken once per role because
@@ -2626,6 +2627,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 				roleConnection = *connection
 			}
 			roleConnection.Engine = md.Spec.Engine.Name
+			roleConnection.EngineVersion = engineVersion
 			roleConnection.Manufacturer = manufacturer
 			roleConnection.AcceleratorFamily = family
 			roleConnection.AscendHostRoCE = ascendHostRoCE
@@ -2652,8 +2654,11 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 				roleConnection.CachePrefix = weights.KVIdentity
 			}
 			roleConnection.PublishKVEvents = publishKVEvents
+			roleConnection.KVEventsTopic = kvEventsTopic
+			roleConnection.KVEventsUseCBORHash = kvEventsUseCBORHash
 			if roleConnection.PublishKVEvents {
 				roleConnection.KVEventsHost = md.Name + "-" + role.Name + "." + md.Namespace + ".svc"
+				roleConnection.KVEventsLocalDP = ModelDeploymentKVEventsLocalDP(md, role)
 			}
 
 			connector, err := SynthesizeModelDeploymentConnector(roleConnection)
@@ -2673,12 +2678,24 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 			// its encoder by address; a combination with neither renders this role undivided, which is
 			// what it rendered before any of this existed and what a reconcile of an object admission
 			// refuses should keep doing rather than fail over a field nothing consumes.
+			var ecSideChannelPort *int32
+			if encoderLeg.Connector == ModelDeploymentECConnectorCPU {
+				port, envIdx, err := ParseModelDeploymentVLLMECSideChannelPort(role.Env)
+				if err != nil {
+					return nil, fmt.Errorf("role %q has invalid %s: %w", role.Name, inject.VLLMECSideChannelPortEnv, err)
+				}
+				if envIdx >= 0 {
+					ecSideChannelPort = &port
+				}
+			}
 			connector, err := SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
 				Engine:            md.Spec.Engine.Name,
+				EngineVersion:     engineVersion,
 				Manufacturer:      manufacturer,
 				AcceleratorFamily: family,
 				Kind:              role.Kind,
 				EncoderCache:      encoderLeg,
+				ECSideChannelPort: ecSideChannelPort,
 				EncoderURLs:       encoderURLs,
 			})
 			if err != nil {

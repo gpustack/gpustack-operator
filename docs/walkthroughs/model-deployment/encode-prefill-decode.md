@@ -211,7 +211,8 @@ Confirm three rendered invariants:
 
 - ***Encode*** runs `--mm-encoder-only` (keeping LLM weights unloaded), defaults `--enforce-eager` and
   `--no-enable-prefix-caching` ([Operator-owned keys](../../modules/model-deployment/encode-prefill-decode.md#operator-owned-keys)),
-  and opens NIXL side-channel port `5601` (`VLLM_EC_SIDE_CHANNEL_PORT=5601`, `VLLM_USE_V2_MODEL_RUNNER=1`).
+  defaults NIXL side-channel port `5601` (`VLLM_EC_SIDE_CHANNEL_PORT=5601`, overridable including `0`),
+  and defaults `VLLM_USE_V2_MODEL_RUNNER=1` on `vLLM < 0.34.0` (omitted at `>= 0.34.0`).
 - ***Prefill*** pairs `ECCPUConnector` (`ec_consumer`) with `MooncakeConnector` (`kv_producer`) while
   keeping CUDA graphs enabled.
 - ***Decode*** serves behind `routing-proxy` on `:8000` (`--ec-connector=ec-nixl` → engine `:8200`).
@@ -324,7 +325,7 @@ kubectl get pods,services -n gpustack-bench -l app.kubernetes.io/instance=epd-ar
 | Encoder container exits on unknown flag | Container startup failure | Upgrade the runner image to meet the floor (`vLLM >= 0.30.0`, `vllm-ascend >= 0.30.0rc1`, `SGLang >= 0.5.10`; see [Engine Compatibility](../../modules/model-deployment/engine-versions.md)). |
 | Requests bypass *Prefill* | Router routes directly to *Decode* | Check vLLM token-counting support and `--enable-scale-out` rules ([Router token counting](../../modules/model-deployment/prefill-decode.md#router-token-counting)). |
 | Ascend encoder fails storage setup | `ECExampleConnector` missing shared path | Mount a shared `ReadWriteMany` PVC on both *Encode* (read-write) and *Prefill* with identical *`claimName`*, *`mountPath`*, and *`subPath`*. |
-| Apply rejected on port `5601` or `8997` | Owned-port collision | `ECCPUConnector` owns `5601`, and SGLang *Prefill* in *EPD* owns `8997`; move custom HTTP ports off both numbers. |
+| Apply rejected on port `5601` or `8997` | Side-channel or bootstrap port collision | `ECCPUConnector` defaults `VLLM_EC_SIDE_CHANNEL_PORT=5601` (override in *`roles[].env`*, including `0`, or move HTTP off `5601`), and SGLang *Prefill* in *EPD* owns `8997`. |
 | *Encode* replica stays in `Draining` ~300 s | Bounded encoder drain timer | Expected behavior; wait for the ~300 s drain window to finish. |
 | `RoleKindsReady=False` | Zero Ready replicas in one role kind | Read the failing kind from `ModelDeployment` status and inspect its `Pod` events and container logs. |
 

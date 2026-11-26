@@ -10139,6 +10139,14 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentEngine(ref common.Refere
 							Format:      "",
 						},
 					},
+					"version": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Version is the inference engine release version the deployment runs by default, such as \"0.34.0\" or \"0.5.23\".\n\n  - When omitted on creation (or cleared when changing Image), admission derives it from\n    standard gpustack/runner image tags. Custom or digest-only images require an explicit\n    value.\n  - It is editable alongside Image. A role that overrides Image may also declare its own\n    EngineVersion; otherwise roles inherit this value.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"name", "image"},
 			},
@@ -11104,6 +11112,14 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							Format:      "",
 						},
 					},
+					"engineVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "EngineVersion overrides the deployment's engine version for this role, such as \"0.32.0\".\n\n  - When omitted and Image is empty, the role inherits spec.engine.version.\n  - When Image overrides the deployment image: when omitted on creation (or cleared when\n    changing Image), admission derives it from standard gpustack/runner image tags.\n  - Custom or digest-only role images require an explicit value.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"imagePullPolicy": {
 						SchemaProps: spec.SchemaProps{
 							Description: "ImagePullPolicy is the pull policy for Image.\n\n\nPossible enum values:\n - `\"Always\"` means that kubelet always attempts to pull the latest image. Container will fail If the pull fails.\n - `\"IfNotPresent\"` means that kubelet pulls if the image isn't present on disk. Container will fail if the image isn't present and the pull fails.\n - `\"Never\"` means that kubelet never pulls an image, but only uses a local image. Container will fail if the image isn't present",
@@ -11722,7 +11738,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref common.Refere
 				Properties: map[string]spec.Schema{
 					"name": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Name selects which router implementation fronts this deployment.\n\nTHE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is visible in the same word twice: the transport protocol on the cache backend types spells it \"Auto\" while the connector here spells it \"auto\". The casing convention is per API type, and the reason is the one ModelDeploymentRoleKind states about itself -- these values are terms the outside tool understands, not terms this operator invents. \"llm-d-router\" is how the llm-d project spells this router in its module path, so it is spelled that way here.\n\nTHE RENAME FROM \"llm-d\" CARRIES NO CONVERSION, because that spelling never shipped in a release: it lived on main between this field's introduction and this rename, with no release cut in between, so no released CRD ever accepted it and every object a release could have written spells the value this enum requires. A cluster running an unreleased build of the interval is outside that guarantee and edits such an object by hand.\n\nWIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set that router needs, AND the wiring that threads this value to a dispatch point. The schema reservation covers the first of those and nothing else, which is why a second router is a piece of work rather than a constant.\n\nA VALUE IS ALSO ENGINE-MATCHED, and the match is a separate rule rather than something this enum can express: \"vllm-router\" and \"sglang-gateway\" are each one project's own router for its own engine, so each is refused in front of the other's. \"llm-d-router\" takes either engine, because upstream carries a handshake connector and a metrics configuration for each of them.",
+							Description: "Name selects which router implementation fronts this deployment.\n\nTHE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is visible in the same word twice: the transport protocol on the cache backend types spells it \"Auto\" while the connector here spells it \"auto\". The casing convention is per API type, and the reason is the one ModelDeploymentRoleKind states about itself -- these values are terms the outside tool understands, not terms this operator invents. \"llm-d-router\" is how the llm-d project spells this router in its module path, so it is spelled that way here.\n\nTHE RENAME FROM \"llm-d\" CARRIES NO CONVERSION, because that spelling never shipped in a release: it lived on main between this field's introduction and this rename, with no release cut in between, so no released CRD ever accepted it and every object a release could have written spells the value this enum requires. A cluster running an unreleased build of the interval is outside that guarantee and edits such an object by hand.\n\nWIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set that router needs, AND the wiring that threads this value to a dispatch point. The schema reservation covers the first of those and nothing else, which is why a second router is a piece of work rather than a constant.\n\nA VALUE IS ALSO ENGINE-MATCHED, and the match is a separate rule rather than something this enum can express: \"vllm-router\" accepts vLLM only, \"sgl-router\" and deprecated \"sglang-gateway\" accept SGLang only, and \"llm-d-router\" accepts both engines.\n\n\"sglang-gateway\" is deprecated and frozen at gateway-v0.3.1 because upstream removed sgl-model-gateway; new SGLang deployments should use \"sgl-router\" and existing deployments should migrate to \"sgl-router\".",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -14425,7 +14441,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.Referenc
 					},
 					"router": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Router optionally puts a request router in front of the roles.\n\nIT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides which shapes are legal behind it. Several plain servers is one of them: a router that scores on a cache view picks between equals in a way a Service cannot, so \"there is no pair here\" is not a reason to refuse one. Several prefillers with several decoders is another. A rule admitting only one prefiller and one decoder would describe a pairer rather than this field.\n\nBoth llm-d-router and vllm-router support vLLM prefill/decode transfer across Ascend and non-Ascend pools. sglang-gateway is only valid when engine.name is SGLang.\n\nAbsent means no router, and that stays a supported shape rather than a broken one: the roles are individually addressable through their own Services either way, so a deployment written before this field existed serves exactly as it did.",
+							Description: "Router optionally puts a request router in front of the roles.\n\nIT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides which shapes are legal behind it. Several plain servers is one of them: a router that scores on a cache view picks between equals in a way a Service cannot, so \"there is no pair here\" is not a reason to refuse one. Several prefillers with several decoders is another. A rule admitting only one prefiller and one decoder would describe a pairer rather than this field.\n\nBoth llm-d-router and vllm-router support vLLM prefill/decode transfer across Ascend and non-Ascend pools. sgl-router and deprecated sglang-gateway are only valid when engine.name is SGLang.\n\nAbsent means no router, and that stays a supported shape rather than a broken one: the roles are individually addressable through their own Services either way, so a deployment written before this field existed serves exactly as it did.",
 							Ref:         ref(v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName()),
 						},
 					},

@@ -68,6 +68,8 @@ Only bump `ARG NIXL_VERSION="..."` (together with `ARG NIXL_ROCM_VERSION="..."` 
 - When `modelexpress/Cargo.toml` is staged in `kv-transfer-stage-bundle.tgz` (or `modelexpress.workspace_version` is recorded in `kv-transfer-preflight-report.json`), verify `MODELEXPRESS_VERSION` (without the leading `v`) matches `[workspace.package].version` in `Cargo.toml`.
 - When bumping `ARG MODELEXPRESS_VERSION=vX.Y.Z` in `pack/mirrored-modelexpress-server/Dockerfile`, full `docker buildx` `--target builder` (`--locked` Cargo) verification runs on the host in `validate_kv_transfer.sh` after you submit.
 
-## 6. Proposal Artifact
+## 6. Proposal Artifact & `Base Image` Build Recommendations
 
-Keep `.auto-sync/proposals/kv-transfer.json` valid JSON with `schema_version: 1`, `stage`, `summary`, `versions` (matching `upstream-records` IDs: `mooncake`, `nixl-pypi`, `nixl-rocm`, `ucx-rocm`, `hixl`, `modelexpress`, `gpustack-runner`), and `subscriptions`.
+Keep `.auto-sync/proposals/kv-transfer.json` valid JSON with `schema_version: 1`, `stage`, `summary`, `versions` (matching `upstream-records` IDs: `mooncake`, `nixl-pypi`, `nixl-rocm`, `ucx-rocm`, `hixl`, `modelexpress`, `gpustack-runner`), `subscriptions`, and `base_image_builds` (JSON array):
+- Whenever Stage A modifies `pack/mirrored-mooncake/**`, `pack/model-transfer/**`, or `pack/mirrored-modelexpress-server/**`, populate `base_image_builds` (matching `base_image_builds` in `kv-transfer-preflight-report.json` / `kv-transfer-preflight-summary.json`) with one entry per affected `.github/workflows/base-image.yml` dispatch (`repository`, `target`, `recommended_tag`, `reason`, and exact `gh workflow run "Base Image" -f repository=<repo> -f tag=<recommended_tag> [-f target=<target>]` `command`), and mention the dispatch commands in `summary`.
+- When no mapped `pack/**` files change (Stage B `tag_promotion` or `aligned`), set `"base_image_builds": []`.
