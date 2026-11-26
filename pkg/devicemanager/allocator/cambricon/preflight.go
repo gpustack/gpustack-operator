@@ -158,11 +158,11 @@ func (d *recordingSMLUDriver) DestroyProfile(string, int32) error {
 
 func (d *recordingSMLUDriver) CreateInstance(card string, profileID int32, name string) (smluInstance, error) {
 	d.instanceCreates = append(d.instanceCreates, instanceRequest{card: card, profileID: profileID, name: name})
-	// No device node: the real one is assigned by the driver at create time, which this call
-	// deliberately never reaches. A responder that needs it (VIRTUAL_DEVICES, the instance's own
-	// node) simply omits what it cannot know, the same way it omits them today when the driver
-	// reports none.
-	return smluInstance{card: card, profileID: profileID, name: name}, nil
+	// The device node is synthesized, not read: the real one is assigned by the driver at create
+	// time, which this call deliberately never reaches, and the responder refuses an instance that
+	// has none. The name is deliberately not a /dev/cambricon_smlu<N> shape, so a reader of the
+	// recorded response can tell it from a driver-assigned node.
+	return smluInstance{card: card, profileID: profileID, name: name, devNode: "/dev/cambricon_smlu-simulated-" + name}, nil
 }
 
 func (d *recordingSMLUDriver) DestroyInstance(string, string) error {

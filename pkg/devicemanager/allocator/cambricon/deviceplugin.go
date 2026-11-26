@@ -3,6 +3,7 @@ package cambricon
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -169,12 +170,12 @@ func (s *server) GetContainerAllocateResponse(
 // Device-node paths read from the Cambricon device plugin v2.2.0, commit cc0f7735f208, function
 // PrepareResponse in device-plugin/pkg/mlu/server.go with the path constants in
 // device-plugin/pkg/mlu/const.go. An older or newer Neuware may name them differently.
-const (
-	cardDevicePathFormat     = "/dev/cambricon_dev%d"
-	cardIPCMDevicePathFormat = "/dev/cambricon_ipcm%d"
-)
+const cardIPCMDevicePathFormat = "/dev/cambricon_ipcm%d"
 
 var (
+	// cardDevicePathFormat names the node that is the accelerator itself, by driver index. A var
+	// rather than a const, like OperatorPodsDir, so a test can point it at a node it creates.
+	cardDevicePathFormat = "/dev/cambricon_dev%d"
 	// optionalCardDevicePathFormats are the per-card nodes only some driver builds expose. Each is
 	// a format taking the card's driver index, so every one of them carries a %d. The sliced path
 	// injects the IPC node too, from the same format, so a name cannot be corrected in one place
@@ -294,6 +295,10 @@ func appendNodeDevices(resp *deviceplugin.ContainerAllocateResponse) {
 // A VIRTUAL_DEVICES env is set as the fallback for --use-runtime deployments (sMLU/mim do
 // not support CDI).
 //
+// The instance's own node and the card's node are both required: a response missing either
+// refuses the allocation and releases the instance, rather than granting a container no
+// accelerator or, with the card node alone, the whole card.
+//
 // An sMLU request is 1 pod / 1 container / 1 accelerator, so a multi-accelerator sliced
 // allocation is rejected (the Ascend single-accelerator pattern) rather than silently slicing
 // only one.
@@ -351,28 +356,56 @@ func (s *server) getSlicedContainerAllocateResponse(
 		return nil, fmt.Errorf("reserve cambricon smlu instance: %w", err)
 	}
 
-	ctrResp := &deviceplugin.ContainerAllocateResponse{}
-	if pDev := deviceplugin.NewRWDevice(cardDevicePath(slot)); pDev != nil {
-		ctrResp.Devices = append(ctrResp.Devices, pDev)
+	marker := markerPath(string(pod.UID), ctr.Name)
+
+	// The instance's node is checked before the card's: a card node on its own is the whole card,
+	// so it must never be what a response falls back to.
+	if inst.devNode == "" {
+		return nil, releaseReservedInstance(s.smlu, inst, marker, fmt.Errorf(
+			"accelerator %q of card %q (device index %d) has no smlu device node: "+
+				"the driver readback for instance %q left it empty",
+			accel.ID, card, slot, inst.name,
+		), s.Logger)
 	}
+	ownPath := cardDevicePath(slot)
+	cardDev := deviceplugin.NewRWDevice(ownPath)
+	if cardDev == nil {
+		return nil, releaseReservedInstance(s.smlu, inst, marker, fmt.Errorf("accelerator %q of card %q has no device node %q",
+			accel.ID, card, ownPath), s.Logger)
+	}
+
+	ctrResp := &deviceplugin.ContainerAllocateResponse{Devices: []*deviceplugin.DeviceSpec{cardDev}}
+	// The IPC node is a control device: injected where the host has it, never required.
 	if pDev := deviceplugin.NewRWDevice(cardIPCMDevicePath(slot)); pDev != nil {
 		ctrResp.Devices = append(ctrResp.Devices, pDev)
 	}
-	if inst.devNode != "" {
-		if pDev := deviceplugin.NewRWDevice(inst.devNode); pDev != nil {
-			ctrResp.Devices = append(ctrResp.Devices, pDev)
-		}
+	if pDev := deviceplugin.NewRWDevice(inst.devNode); pDev != nil {
+		ctrResp.Devices = append(ctrResp.Devices, pDev)
 	}
 	// A slice needs the node-level control devices for the same reasons a whole card does, and the
 	// vendor's own sMLU branch grants them too. The same helper serves both paths, so the two cannot
 	// come to disagree about what is node-level.
 	appendNodeDevices(ctrResp)
 	// The VIRTUAL_DEVICES env is the --use-runtime fallback: it names the sMLU instance's
-	// device node for a runtime that maps devices by env rather than by injected node. Set
-	// it only when the readback populated a device node — an empty value would misconfigure
-	// a runtime that keys on it (the node mount above is guarded the same way).
-	if inst.devNode != "" {
-		ctrResp.Envs = map[string]string{"VIRTUAL_DEVICES": inst.devNode}
-	}
+	// device node for a runtime that maps devices by env rather than by injected node.
+	ctrResp.Envs = map[string]string{"VIRTUAL_DEVICES": inst.devNode}
 	return ctrResp, nil
+}
+
+// releaseReservedInstance unwinds a reservation reserveInstance already persisted and returns cause
+// as the allocation's refusal, so a refused container never leaves the slice behind for the reclaim
+// loop. The instance is destroyed first and the marker removed only once that succeeded: the two
+// always leave together, the way reserveInstance's own rollback pairs them, so a failed release
+// hands the reclaim loop a marker that still names a live instance. A failed release or removal is
+// logged and not returned: the container is refused either way, and the refusal's own reason is the
+// one the operator needs.
+func releaseReservedInstance(driver smluDriver, inst smluInstance, marker string, cause error, logger klog.Logger) error {
+	if err := driver.DestroyInstance(inst.card, inst.name); err != nil {
+		logger.Error(err, "release reserved smlu instance", "card", inst.card, "instance", inst.name)
+		return cause
+	}
+	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+		logger.Error(err, "remove released smlu instance marker", "card", inst.card, "instance", inst.name, "marker", marker)
+	}
+	return cause
 }

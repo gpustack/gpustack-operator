@@ -301,6 +301,9 @@ func TestPreflightAccelerator_NotDeclaredOutranksMissingPciBusID(t *testing.T) {
 // than inferred from the response it produced.
 func TestPreflightResponder_WritesNothing(t *testing.T) {
 	defer deviceplugin.RedirectHostWrites(t.TempDir())()
+	// The card node is required of a sliced response, and this host has none to offer.
+	redirectCardDevicePath(t)
+	stageCardNode(t, testMLU0Index)
 
 	// The mode is off, which is the case an allocation would write on: a pass over an
 	// already-enabled card would leave it untouched for the wrong reason.
@@ -329,6 +332,8 @@ func TestPreflightResponder_WritesNothing(t *testing.T) {
 // because nothing ever reached the driver.
 func TestPreflightResponder_RecordsWhatItWithheld(t *testing.T) {
 	defer deviceplugin.RedirectHostWrites(t.TempDir())()
+	redirectCardDevicePath(t)
+	stageCardNode(t, testMLU0Index)
 
 	rec := &recordingSMLUDriver{read: newFakeDriver()}
 	srv := newSlicedServer(rec)
@@ -363,6 +368,8 @@ func TestPreflightResponder_RecordsWhatItWithheld(t *testing.T) {
 func TestPreflightResponder_RequestsTheSameInstanceProductionWould(t *testing.T) {
 	devs := cambriconDevicesFixture()
 	allocated := allocateMLU0()
+	redirectCardDevicePath(t)
+	stageCardNode(t, testMLU0Index)
 
 	// Production: the server an allocation is served by, over a driver that answers and really
 	// creates. A distinct pod UID from the preflight side below, so the two runs never share a
@@ -563,6 +570,8 @@ func TestPreflightResponder_IsolatedFromNodeListError(t *testing.T) {
 			smlu := newFakeDriver()
 			smlu.failList = true
 			smlu.failCardList[testCard1] = errors.New("IN_PROBLEM")
+			redirectCardDevicePath(t)
+			stageCardNode(t, testMLU0Index)
 
 			p := &preflighter{logger: klog.Background(), smlu: smlu}
 			responder, restore, err := p.PreflightResponder(workercore.DeviceAllocationModeSliced)

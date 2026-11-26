@@ -3,6 +3,8 @@ package cambricon
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -20,6 +22,10 @@ import (
 
 const testGroupID = "mlu590"
 
+// testMLU0Index is the cnDev device index the fixture records for MLU-0, which is what names its
+// card node.
+const testMLU0Index = 3
+
 func cambriconDevicesFixture() *workercore.Devices {
 	return &workercore.Devices{
 		Spec: workercore.DevicesSpec{
@@ -32,7 +38,7 @@ func cambriconDevicesFixture() *workercore.Devices {
 				// PhysicalIndexes carries the raw cnDev loop position), so a fixture where they
 				// agree would let the responder read the wrong one and still pass.
 				Accelerators: []workercore.Accelerator{
-					{ID: "MLU-0", Index: 0, PhysicalIndexes: []uint32{3}, Topology: workercore.DeviceTopology{PciBusID: testCard0}},
+					{ID: "MLU-0", Index: 0, PhysicalIndexes: []uint32{testMLU0Index}, Topology: workercore.DeviceTopology{PciBusID: testCard0}},
 					{ID: "MLU-1", Index: 1, PhysicalIndexes: []uint32{7}, Topology: workercore.DeviceTopology{PciBusID: testCard1}},
 				},
 			}},
@@ -92,6 +98,33 @@ func requireNoCardNode(t *testing.T) {
 	t.Helper()
 	require.NoFileExists(t, cardDevicePath(missingCardIndex),
 		"this case needs a host without that node; pick another index for missingCardIndex")
+}
+
+// redirectCardDevicePath points the card node's path format at a temp dir for the test, so a case
+// can serve a card node the host lacks or withhold one it may have; the responder only stats the
+// path, so a plain file stands in for the character device. The IPC node is left where it is: it is
+// optional, and every host this suite runs on lacks it.
+func redirectCardDevicePath(t *testing.T) {
+	t.Helper()
+	orig := cardDevicePathFormat
+	cardDevicePathFormat = filepath.Join(t.TempDir(), "cambricon_dev%d")
+	t.Cleanup(func() { cardDevicePathFormat = orig })
+}
+
+// stageCardNode serves the card node for the driver index under redirectCardDevicePath, so a sliced
+// grant is exercised the same way on a host without Cambricon cards as on one with them.
+func stageCardNode(t *testing.T, index uint32) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(cardDevicePath(index), nil, 0o600))
+}
+
+// hostPaths renders the device nodes a response carries, for a containment assertion.
+func hostPaths(devs []*deviceplugin.DeviceSpec) []string {
+	paths := make([]string, 0, len(devs))
+	for i := range devs {
+		paths = append(paths, devs[i].HostPath)
+	}
+	return paths
 }
 
 // newWholeCardServer builds a responder for one of the modes that hand out whole cards.
@@ -225,6 +258,8 @@ func TestWholeCard_MissingOwnDeviceNodeRejected(t *testing.T) {
 // and injects VIRTUAL_DEVICES naming the instance's device node.
 func TestSliced_PartialSlice(t *testing.T) {
 	redirectLogicalSliceDirs(t)
+	redirectCardDevicePath(t)
+	stageCardNode(t, testMLU0Index)
 	d := newFakeDriver()
 	s := newSlicedServer(d)
 	devs := cambriconDevicesFixture()
@@ -248,6 +283,8 @@ func TestSliced_PartialSlice(t *testing.T) {
 // An absent cores-percentage defaults to 100 (a whole-accelerator-exclusive sMLU instance).
 func TestSliced_DefaultCores(t *testing.T) {
 	redirectLogicalSliceDirs(t)
+	redirectCardDevicePath(t)
+	stageCardNode(t, testMLU0Index)
 	d := newFakeDriver()
 	s := newSlicedServer(d)
 	devs := cambriconDevicesFixture()
@@ -358,6 +395,117 @@ func TestSliced_MissingDeviceIndexOutranksMissingMemory(t *testing.T) {
 	_, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocateMLU0())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "carries no cnDev device index")
+}
+
+// A sliced response refuses rather than granting a container no accelerator, and every refusal
+// releases the instance reserveInstance already persisted. The instance's own node is required
+// whatever the card node says -- with the card node alone the container gets the whole card while the
+// ledger records a slice -- and the card node is required the way the whole-card path requires it.
+// The four cases cross the two, so neither refusal hides behind the other; a fifth proves that a
+// refused release is logged without replacing the refusal.
+func TestSliced_RefusesWithoutInstanceOrCardNode(t *testing.T) {
+	testCases := []struct {
+		name         string
+		cardNode     bool // the host exposes the card node
+		instanceNode bool // the driver readback populated the instance's device node
+		// wantRefusal is what the refusal must say beyond the accelerator and its card; empty for
+		// the one case that succeeds.
+		wantRefusal string
+		// wantCardPath is set when the refusal names the card node it looked for.
+		wantCardPath bool
+		// releaseFails makes the driver refuse DestroyInstance, so the case can prove the release
+		// failure is logged without replacing the refusal.
+		releaseFails bool
+		// wantMarker is whether the reservation's marker is still on disk afterwards: a grant keeps
+		// it, a refusal removes it only once the instance is released.
+		wantMarker bool
+	}{
+		{
+			name:         "card node and instance node",
+			cardNode:     true,
+			instanceNode: true,
+			wantMarker:   true,
+		},
+		{
+			// The whole-card refusal, mirrored: a card the host exposes no node for cannot be handed
+			// to a container at all.
+			name:         "no card node",
+			instanceNode: true,
+			wantRefusal:  "has no device node",
+			wantCardPath: true,
+		},
+		{
+			// The isolation break: with the card node alone the container gets the whole card.
+			name:         "no instance node",
+			cardNode:     true,
+			instanceNode: false,
+			wantRefusal:  "driver readback",
+		},
+		{
+			// The silent grant: zero devices and no VIRTUAL_DEVICES, with the pod Running.
+			name:         "neither node",
+			instanceNode: false,
+			wantRefusal:  "driver readback",
+		},
+		{
+			// The release is best effort: a driver that refuses it leaves the instance for the reclaim
+			// loop, and the refusal still says why the container was refused.
+			name:         "no card node, release refused",
+			instanceNode: true,
+			wantRefusal:  "has no device node",
+			wantCardPath: true,
+			releaseFails: true,
+			wantMarker:   true,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			redirectCardDevicePath(t)
+			if tc.cardNode {
+				stageCardNode(t, testMLU0Index)
+			}
+			d := newFakeDriver()
+			d.emptyDevNode = !tc.instanceNode
+			if tc.releaseFails {
+				d.failDestroy[testCard0] = errors.New("IN_PROBLEM")
+			}
+			s := newSlicedServer(d)
+
+			pod, ctr := slicedPod("pod-refuse", "train", 25, 50)
+			resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr,
+				cambriconDevicesFixture(), allocateMLU0())
+
+			name := encodeInstanceName("pod-refuse", "train")
+			if tc.wantRefusal == "" {
+				require.NoError(t, err)
+				assert.True(t, markerExists("pod-refuse", "train"), "a grant keeps its marker")
+				assert.Empty(t, d.destroyedInsts, "a grant never releases its instance")
+				assert.Equal(t, "/dev/cambricon_dev-"+name, resp.Envs["VIRTUAL_DEVICES"])
+				assert.Contains(t, hostPaths(resp.Devices), cardDevicePath(testMLU0Index), "the response carries the card node")
+				return
+			}
+
+			require.Error(t, err)
+			assert.Nil(t, resp)
+			for _, want := range []string{"MLU-0", testCard0, tc.wantRefusal} {
+				assert.Containsf(t, err.Error(), want, "the refusal must name %q", want)
+			}
+			if tc.wantCardPath {
+				assert.Containsf(t, err.Error(), cardDevicePath(testMLU0Index), "the refusal must name the card node")
+			}
+			assert.Equal(t, []smluRef{{card: testCard0, name: name}}, d.destroyedInsts,
+				"the reserved instance is released exactly once, by card and name")
+			assert.Equal(t, tc.wantMarker, markerExists("pod-refuse", "train"),
+				"the marker leaves only with a released instance")
+			if tc.releaseFails {
+				assert.NotContains(t, err.Error(), "IN_PROBLEM", "a failed release is logged, never returned as the refusal")
+				assert.True(t, d.hasInstance(name), "and the instance it failed on is left for the reclaim loop")
+				return
+			}
+			assert.False(t, d.hasInstance(name), "and the release reached the driver")
+		})
+	}
 }
 
 // A non-sliced (exclusive) responder never creates an instance or writes a marker: the
