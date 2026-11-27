@@ -274,7 +274,7 @@ if kind != roleKindDecode {
       Acceptance: `router.Role` gains `ExternalDP bool` and `router.Input` gains `HasUnmanagedRoles bool`; `renderLLMD` combines `ExternalDP` per role kind via logical OR (order-invariant across mixed `Server` roles), omits `prefix-cache-scorer` on External DP `server` profiles (retaining `queue-scorer(2)`, `kv-cache-utilization-scorer(2)`, and `max-score-picker`), renders `endpoint-health-filter` (`pollFailureThreshold: 3`, or `0` when `HasUnmanagedRoles` is true, `responseFailureThreshold: 5`, `responseFailureCodes: [502, 503]`, `maxEjectionPercent: 50`) placed immediately after `<kind>-pods` on `server`, `prefill`, and `decode` profiles only (strictly absent from `encode`), and keeps non-External-DP `server`/`prefill` scoring weights unchanged. All rendered shapes pass `epp --validate-config`.
       Verify: `go test -v -cover ./pkg/worker/kvcache/router/...`
 
-- [ ] **T5 · Default router and sidecar image promotions (PR 2)**
+- [x] **T5 · Default router and sidecar image promotions (PR 2)**
       Blocked by: T3
       Owns: `pkg/worker/settings/**`
       Acceptance: `ModelDeploymentRouterImage` defaults to `gpustack/llm-router:v0.6.1` and `ModelDeploymentRoutingSidecarImage` defaults to `gpustack/mirrored-llm-d-router-disagg-sidecar:v1.0.0` in `pkg/worker/settings/value.go`, with `pkg/worker/settings/value_test.go` updated and passing.
