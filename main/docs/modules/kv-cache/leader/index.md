@@ -88,7 +88,7 @@ operator namespace. Scale an elected leader with a `replicas` patch:
 **Image requirement:** Upstream `kvcacheai/mooncake` images compile leadership backends **off**
 (leaders stay in `UNAVAILABLE_IN_CURRENT_MODE` and members crash with `Invalid HA backend entry`).
 Use `gpustack/mirrored-mooncake` (`>= 0.3.12`, built from
-[`pack/mirrored-mooncake`](https://github.com/gpustack/gpustack-operator/blob/15ed6034ae767ecf5689099b71fc27f4ca9b443e/pack/mirrored-mooncake/Dockerfile)) for *`spec.image`* and every
+[`pack/mirrored-mooncake`](https://github.com/gpustack/gpustack-operator/blob/b03dcb764b0829ff82be1baf5329e58b61e883f3/pack/mirrored-mooncake/Dockerfile)) for *`spec.image`* and every
 *`members[].image`* (`0.3.11` exits on rendered `-pod_name` and `-pod_namespace` flags).
 
 All official `mirrored-mooncake` variants (`-cpu`, `cuda`, `cann`, `rocm`, including built-in `EFA`
