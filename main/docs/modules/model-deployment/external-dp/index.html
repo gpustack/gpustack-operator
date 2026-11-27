@@ -1526,6 +1526,14 @@ and <em><code>endpoints.serving</code></em> (Router-confirmed HTTP endpoints, <c
 per-worker balance in the Router registry and metrics
 (<a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#endpoint-status">Endpoint status</a>
 ).</p>
+<ul>
+<li><strong><code>llm-d-router</code></strong>: Managed <em>External DP</em> <em>Server</em> profiles omit <code>prefix-cache-scorer</code> while
+keeping <code>queue-scorer</code>, <code>kv-cache-utilization-scorer</code>, and <code>max-score-picker</code> round-robin
+tie-breaking, spreading requests across ranks without prefix stickiness.</li>
+<li><strong><code>vllm-router</code> and <code>sgl-router</code></strong>: <code>vllm-router</code> balances ranks with <code>--policy round_robin</code>;
+<code>sgl-router</code> renders <code>--dp-aware</code> and supports <code>--dp-rank-policy least_tokens</code>. Deprecated
+<code>sglang-gateway</code> renders <code>--dp-aware</code> on undivided <em>Server</em> roles only.</li>
+</ul>
 <h3 id="rank-health-checks">Rank health checks</h3>
 <p>A member&rsquo;s <code>/health</code> checks only that member, not the collective. Qualification therefore runs a
 <strong>group-forward probe</strong> (a real generation request) against every member across the collective. A

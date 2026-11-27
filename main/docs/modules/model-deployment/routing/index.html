@@ -1201,6 +1201,8 @@ Endpoint selection, per-router defaults, SGLang <em>DP</em> registration and qua
 which replicas receive traffic.</p>
 <h2 id="contents">Contents</h2>
 <ul>
+<li><a href="#router-capabilities-matrix">Router capabilities matrix</a>
+</li>
 <li><a href="#traffic-targets">Traffic targets</a>
 </li>
 <li><a href="#default-routing-policies">Default routing policies</a>
@@ -1211,6 +1213,108 @@ which replicas receive traffic.</p>
 </li>
 <li><a href="#troubleshooting">Troubleshooting</a>
 </li>
+</ul>
+<h2 id="router-capabilities-matrix">Router capabilities matrix</h2>
+<p>Each managed router pairs with specific serving engines, discovery mechanisms, routing policies,
+resilience controls, and disaggregation features:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Capability</th>
+					<th><code>llm-d-router</code></th>
+					<th><code>vllm-router</code></th>
+					<th><code>sgl-router</code></th>
+					<th><code>sglang-gateway</code> (deprecated)</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Engine pairing</td>
+					<td><code>vLLM</code>, <code>vLLM-Ascend</code>, <code>SGLang</code></td>
+					<td><code>vLLM</code>, <code>vLLM-Ascend</code></td>
+					<td><code>SGLang</code></td>
+					<td><code>SGLang</code> (frozen <code>gateway-v0.3.1</code>)</td>
+			</tr>
+			<tr>
+					<td>Discovery</td>
+					<td><code>Pod</code> watcher</td>
+					<td><code>Pod</code> watcher</td>
+					<td><code>EndpointSlice</code> watcher</td>
+					<td><code>Pod</code> watcher</td>
+			</tr>
+			<tr>
+					<td>Default policy</td>
+					<td>Fixed scorer profile (<code>queue</code> <code>2</code>, <code>kv</code> <code>2</code>, <code>prefix</code> <code>3</code>, <code>max-score-picker</code>)</td>
+					<td><code>cache_aware</code></td>
+					<td><code>power_of_two</code> (<code>--chat-routing=reorg</code>)</td>
+					<td><code>cache_aware</code></td>
+			</tr>
+			<tr>
+					<td>Policy overrides</td>
+					<td>None (<code>--config-file</code> owned)</td>
+					<td><code>--policy</code>, <code>--prefill-policy</code></td>
+					<td><code>--policy</code>, <code>--decode-policy</code>, <code>--dp-rank-policy</code>, <code>--decode-dp-rank-policy</code></td>
+					<td><code>--policy</code>, <code>--prefill-policy</code></td>
+			</tr>
+			<tr>
+					<td>Real-time KV events</td>
+					<td><code>vLLM</code>, <code>vLLM-Ascend</code> <em>Server</em>/<em>Prefill</em> (non-<em>EPD</em>, single-<code>Pod</code> DP)</td>
+					<td><code>kv_aware</code> (<code>&gt;= 0.31.0</code>, hybrid models, <em>Server</em>/<em>Prefill</em>)</td>
+					<td>Native <code>kv-events</code> (<em>Server</em>/<em>Prefill</em>)</td>
+					<td>None</td>
+			</tr>
+			<tr>
+					<td><em>PD</em> and <em>EPD</em></td>
+					<td><em>PD</em>/<em>EPD</em> with <code>v1.0.0</code> sidecar (concurrent <em>PD</em> cancel, per-rank EC, <code>/metrics</code>)</td>
+					<td>Native <em>PD</em>, post-prefill <em>Decode</em> pick, cancellation-safe load, <em>EPD</em> consumer <code>DP &gt; 1</code></td>
+					<td>Native <em>PD</em> via selectors; <em>Prefill</em> dials <code>--encoder-urls</code></td>
+					<td>Native <code>--pd-disaggregation</code>; <em>Prefill</em> dials <code>--encoder-urls</code></td>
+			</tr>
+			<tr>
+					<td><em>External DP</em></td>
+					<td>Balanced (<code>prefix-cache-scorer</code> omitted on <em>Server</em>, round-robin tie-break)</td>
+					<td>Per-rank endpoints (<code>--policy round_robin</code>)</td>
+					<td><code>--dp-aware</code> (<em>Server</em> and <em>PD</em>; <code>--dp-rank-policy least_tokens</code>)</td>
+					<td><code>--dp-aware</code> (undivided <em>Server</em> only)</td>
+			</tr>
+			<tr>
+					<td>Fault resilience</td>
+					<td><code>endpoint-health-filter</code> (<code>502</code>/<code>503</code> eject on <code>server</code>/<code>prefill</code>/<code>decode</code>, never <code>encode</code>)</td>
+					<td>Built-in circuit breaker</td>
+					<td>Built-in circuit breaker</td>
+					<td>Built-in circuit breaker</td>
+			</tr>
+			<tr>
+					<td>API highlights</td>
+					<td><code>/v1/responses</code> via <code>v1.0.0</code> sidecar</td>
+					<td>OpenAI-compatible HTTP</td>
+					<td>Stateless <code>/v1/responses</code>, <code>--cache-media-affinity-ttl-ms</code></td>
+					<td>OpenAI-compatible HTTP</td>
+			</tr>
+			<tr>
+					<td>Image floor</td>
+					<td>See <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/#router-image-floors">Router image floors</a>
+</td>
+					<td>See <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/#router-image-floors">Router image floors</a>
+</td>
+					<td>See <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/#router-image-floors">Router image floors</a>
+</td>
+					<td>Frozen <code>gateway-v0.3.1</code></td>
+			</tr>
+	</tbody>
+</table>
+<h3 id="fault-resilience">Fault resilience</h3>
+<p><code>llm-d-router</code> activates <code>endpoint-health-filter</code> on <code>server</code>, <code>prefill</code>, and <code>decode</code> profiles
+and excludes it from <code>encode</code> (encoders do not export metrics to <code>metrics-data-source</code>). The
+operator passes <code>--allow-experimental-plugins=true</code> so <code>epp</code> loads the filter.</p>
+<ul>
+<li><strong>Ejection bounds</strong>: Ejects endpoints on HTTP <code>502</code> and <code>503</code> (<code>responseFailureThreshold: 5</code>,
+<code>maxEjectionPercent: 50</code>), with <code>pollFailureThreshold: 3</code> (<code>0</code> when any non-<code>encode</code> role is an
+unmanaged take-over role).</li>
+<li><strong>Observer reporting</strong>: <code>/observer/endpoints</code> conservatively reports <code>circuit_open: false</code> so
+temporarily ejected <code>Pod</code>s are not prematurely marked retired.</li>
+<li><strong>Rust routers</strong>: <code>vllm-router</code> and <code>sgl-router</code> rely on their built-in circuit breakers without
+<code>endpoint-health-filter</code>.</li>
 </ul>
 <h2 id="traffic-targets">Traffic targets</h2>
 <p>The serving mode decides which <code>Pod</code>s are HTTP candidates; the router policy chooses only among
@@ -1262,21 +1366,21 @@ both:</p>
 			<tr>
 					<td>Multi-replica <em>Server</em></td>
 					<td>Fixed scoring profile (<code>precise-prefix-cache-producer</code> on vLLM/Ascend; <code>approx-prefix-cache-producer</code> on SGLang)</td>
-					<td><code>cache_aware</code> default; <code>--policy kv_aware</code> (<code>&gt;= 0.31.0</code>) or <code>round_robin</code></td>
+					<td><code>cache_aware</code> default; <code>--policy kv_aware</code> (<code>&gt;= 0.31.0</code>, hybrid models) or <code>round_robin</code></td>
 					<td><code>EndpointSlice</code> discovery + native SGLang KV events (<code>kv-events</code>)</td>
 					<td>Frozen at <code>gateway-v0.3.1</code>; <code>cache_aware</code> default or <code>--policy</code></td>
 			</tr>
 			<tr>
 					<td><em>PD</em> pair</td>
-					<td>Token-counted <em>PD</em> split, connector docs, and decode sidecar</td>
-					<td>Native <em>PD</em> mode; optional <code>kv_aware</code> (<code>&gt;= 0.31.0</code>)</td>
+					<td>Token-counted <em>PD</em> split, connector docs, and <code>v1.0.0</code> decode sidecar (concurrent <em>PD</em> failure cancellation)</td>
+					<td>Native <em>PD</em> mode, post-prefill <em>Decode</em> selection; optional <code>kv_aware</code> (<code>&gt;= 0.31.0</code>)</td>
 					<td>Inferred from <code>--prefill-selector</code> + <code>--decode-selector</code> + KV events</td>
 					<td>Native <code>--pd-disaggregation</code> (never combined with <code>--dp-aware</code>)</td>
 			</tr>
 			<tr>
 					<td><em>EPD</em></td>
-					<td><code>encode</code> profile + decode sidecar transfer</td>
-					<td>Operator-owned <code>--epd-config</code>, no sidecar</td>
+					<td><code>encode</code> profile (no health filter) + <code>v1.0.0</code> decode sidecar (per-rank EC binding)</td>
+					<td>Operator-owned <code>--epd-config</code> (supports consumer <code>DP &gt; 1</code>), no sidecar</td>
 					<td>Native pair; <em>Prefill</em> dials <code>--encoder-urls</code></td>
 					<td>Native pair; <em>Prefill</em> dials <code>--encoder-urls</code></td>
 			</tr>
@@ -1289,15 +1393,15 @@ both:</p>
 			</tr>
 			<tr>
 					<td><em>External DP</em></td>
-					<td>Admitted, no <code>--policy</code> flag; prefer engine router</td>
+					<td>Balanced <em>Server</em> profile (omits <code>prefix-cache-scorer</code>, round-robin tie-breaking)</td>
 					<td>Per-rank endpoints with <code>--policy round_robin</code></td>
 					<td>Per-member endpoints with <code>--dp-aware</code> (including <em>PD</em>)</td>
 					<td>Per-member endpoints with <code>--dp-aware</code> (undivided only)</td>
 			</tr>
 	</tbody>
 </table>
-<p>Where even spread matters (multi-replica <em>Server</em> or <em>External DP</em>), choose <code>vllm-router</code> for vLLM
-or <code>sgl-router</code> for SGLang because <code>llm-d-router</code> has no policy switch
+<p>For explicit policy control (<code>round_robin</code>, <code>kv_aware</code>, or <code>least_tokens</code>), choose <code>vllm-router</code>
+for vLLM or <code>sgl-router</code> for SGLang because <code>llm-d-router</code> has no policy switch
 (<a href="#fixed-scoring-profile">Fixed scoring profile</a>
 ). Prefer <code>sgl-router</code> over deprecated
 <code>sglang-gateway</code> (frozen at <code>gateway-v0.3.1</code>) for new SGLang deployments.</p>
@@ -1419,7 +1523,7 @@ media requests through <em>Encode</em> first, and routes text-only requests stra
 			<tr>
 					<td><code>sgl-router</code></td>
 					<td><code>power_of_two</code></td>
-					<td>Picks the less-loaded of two sampled workers under <code>--chat-routing=reorg</code> (override with <code>--policy cache_aware</code> or <code>--policy session_aware</code>)</td>
+					<td>Picks the less-loaded of two sampled workers under <code>--chat-routing=reorg</code> (override with <code>--policy cache_aware</code> or <code>--policy session_aware</code>; <code>--dp-rank-policy least_tokens</code> and <code>--decode-dp-rank-policy</code> tune <em>DP</em> rank selection)</td>
 			</tr>
 			<tr>
 					<td><code>sglang-gateway</code></td>
@@ -1429,7 +1533,7 @@ media requests through <em>Encode</em> first, and routes text-only requests stra
 			<tr>
 					<td><code>llm-d-router</code></td>
 					<td>Fixed profile</td>
-					<td>Highest sum of prefix match (weight <code>3</code>, omitted on <em>Decode</em>), queue depth (<code>2</code>) and KV utilization (<code>2</code>)</td>
+					<td>Highest sum of prefix match (weight <code>3</code>, omitted on <em>Decode</em> and managed <em>External DP</em> <em>Server</em> roles), queue depth (<code>2</code>) and KV utilization (<code>2</code>), with <code>max-score-picker</code> round-robin tie-breaking</td>
 			</tr>
 	</tbody>
 </table>
@@ -1510,11 +1614,11 @@ inference allowlist sidecar with a <code>:9091</code> observer (<code>sgl-router
 	<tbody>
 			<tr>
 					<td><code>vllm-router</code></td>
-					<td><code>random</code>, <code>round_robin</code>, <code>cache_aware</code>, <code>kv_aware</code> (<code>vLLM &gt;= 0.31.0</code>), <code>power_of_two</code>, <code>consistent_hash</code>, <code>rendezvous_hash</code></td>
+					<td><code>random</code>, <code>round_robin</code>, <code>cache_aware</code>, <code>kv_aware</code> (<code>vLLM &gt;= 0.31.0</code>, supports hybrid architectures), <code>power_of_two</code>, <code>consistent_hash</code>, <code>rendezvous_hash</code></td>
 			</tr>
 			<tr>
 					<td><code>sgl-router</code></td>
-					<td><code>power_of_two</code> (default), <code>cache_aware</code> (omits <code>--no-tokenizer</code>), <code>session_aware</code> (under <code>--chat-routing=reorg</code>, <code>--decode-policy</code> accepts <code>power_of_two</code> only and <code>--filter</code> accepts <code>overloaded</code> only)</td>
+					<td><code>power_of_two</code> (default), <code>cache_aware</code> (omits <code>--no-tokenizer</code>), <code>session_aware</code> (under <code>--chat-routing=reorg</code>, <code>--decode-policy</code> accepts <code>power_of_two</code> only and <code>--filter</code> accepts <code>overloaded</code> only; supports <code>--dp-rank-policy least_tokens</code>, <code>--decode-dp-rank-policy</code>, <code>--cache-media-affinity-ttl-ms</code>, and rejects legacy <code>sgl-model-gateway</code> flags)</td>
 			</tr>
 			<tr>
 					<td><code>sglang-gateway</code> (deprecated)</td>
@@ -1737,6 +1841,11 @@ after scale-down, retired workers remain in <code>smg_worker_health</code> with 
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
+    <li><a href="#router-capabilities-matrix">Router capabilities matrix</a>
+      <ul>
+        <li><a href="#fault-resilience">Fault resilience</a></li>
+      </ul>
+    </li>
     <li><a href="#traffic-targets">Traffic targets</a>
       <ul>
         <li><a href="#excluded-replica-groups">Excluded replica groups</a></li>

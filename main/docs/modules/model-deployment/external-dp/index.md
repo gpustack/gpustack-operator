@@ -239,6 +239,13 @@ and *`endpoints.serving`* (Router-confirmed HTTP endpoints, `4` in the four-rank
 per-worker balance in the Router registry and metrics
 ([Endpoint status](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md#endpoint-status)).
 
+- **`llm-d-router`**: Managed *External DP* *Server* profiles omit `prefix-cache-scorer` while
+  keeping `queue-scorer`, `kv-cache-utilization-scorer`, and `max-score-picker` round-robin
+  tie-breaking, spreading requests across ranks without prefix stickiness.
+- **`vllm-router` and `sgl-router`**: `vllm-router` balances ranks with `--policy round_robin`;
+  `sgl-router` renders `--dp-aware` and supports `--dp-rank-policy least_tokens`. Deprecated
+  `sglang-gateway` renders `--dp-aware` on undivided *Server* roles only.
+
 ### Rank health checks
 
 A member's `/health` checks only that member, not the collective. Qualification therefore runs a

@@ -295,7 +295,7 @@ In whole-unit aggregated fallback, *`status.resolvedCapacityPriors`* records one
 
 ## Local synthetic evaluation
 
-Evidence: synthetic simulation. The [capacity priors and local evaluation spec](https://github.com/gpustack/gpustack-operator/blob/91f2780d95ab466926a1f3bb83e299e4ffdadb21/specs/2026-10-26-inferencex-model-deployment-scaling.md)
+Evidence: synthetic simulation. The [capacity priors and local evaluation spec](https://github.com/gpustack/gpustack-operator/blob/3d169f4a42b654a46624be33f7723d4f791f0551/specs/2026-10-26-inferencex-model-deployment-scaling.md)
 records `48` deterministic synthetic result rows across eight tuning traces (`manual`, `resolved`,
 and one `passive` candidate at seed factor `1`) plus two open-loop vs closed-loop examples, and two
 held-out traces (`heldout_bursts` and `heldout_length_cache_shift`, `11` rows each across `manual`

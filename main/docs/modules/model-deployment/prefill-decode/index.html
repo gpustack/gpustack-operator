@@ -1333,13 +1333,19 @@ hit rate for availability (upstream reports unsynchronized radix trees and a 10%
 drop).</li>
 <li><strong>Owned router flags</strong>: Admission refuses operator-derived flags in <em><code>spec.router.extraArgs</code></em>. On
 <code>llm-d-router</code>: <code>--endpoint-selector</code>, <code>--endpoint-target-ports</code>, <code>--config-file</code>,
-<code>--secure-serving</code>, <code>--grpc-health-port</code>, and <code>--metrics-endpoint-auth</code>. On <code>vllm-router</code>,
-<code>sgl-router</code>, and <code>sglang-gateway</code>: bind addresses/ports, service-discovery flags, disaggregation
-flags, <code>vllm-router</code>&rsquo;s <code>--kv-connector</code>, and <code>sgl-router</code>&rsquo;s <code>--model-id</code>, <code>--chat-routing</code>,
-<code>--no-tokenizer</code>, and <code>--dp-aware</code>.</li>
+<code>--secure-serving</code>, <code>--grpc-health-port</code>, <code>--metrics-endpoint-auth</code>, and
+<code>--allow-experimental-plugins</code>. On <code>vllm-router</code>, <code>sgl-router</code>, and <code>sglang-gateway</code>: bind
+addresses/ports, service-discovery flags, disaggregation flags, <code>vllm-router</code>&rsquo;s <code>--kv-connector</code>,
+and <code>sgl-router</code>&rsquo;s <code>--model-id</code>, <code>--chat-routing</code>, <code>--no-tokenizer</code>, and <code>--dp-aware</code>.</li>
 <li><strong>Fixed east-west flags</strong>: <code>llm-d-router</code> fixes <code>--secure-serving=false</code> (loopback gRPC inside
-the <code>Pod</code>) and <code>--metrics-endpoint-auth=false</code> (in-cluster scrape). Enforce caller TLS and auth at
-the north-south cluster gateway.</li>
+the <code>Pod</code>) and <code>--metrics-endpoint-auth=false</code> (in-cluster scrape), and enables
+<a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#fault-resilience">Fault resilience</a>
+ via <code>--allow-experimental-plugins=true</code>. Enforce
+caller TLS and auth at the north-south cluster gateway.</li>
+<li><strong>Disaggregation runtime enhancements</strong>: <code>vllm-router</code> supports post-prefill <em>Decode</em> selection,
+cancellation-safe load accounting, and <em>EPD</em> consumer <code>DP &gt; 1</code>. <code>llm-d-router</code> <code>v1.0.0</code> decode
+sidecars add concurrent <em>PD</em> failure cancellation, per-rank EC binding, <code>/metrics</code>, and
+<code>/v1/responses</code>.</li>
 </ul>
 <h3 id="router-fields">Router fields</h3>
 <ul>

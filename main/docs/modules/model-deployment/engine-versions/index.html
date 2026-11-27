@@ -1330,6 +1330,31 @@ admits a member, <code>Unknown</code> keeps prior eligibility, and only a failed
 (<a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#endpoint-status">Endpoint status</a>
 ).</li>
 </ul>
+<h3 id="router-image-floors">Router image floors</h3>
+<p>When overriding <em><code>spec.router.image</code></em> or pinning router/sidecar settings, meet these minimum
+image floors:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Component</th>
+					<th>Minimum image</th>
+					<th>Compatibility notes</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Managed routers (<code>llm-d-router</code>, <code>vllm-router</code>, <code>sgl-router</code>)</td>
+					<td><code>gpustack/llm-router &gt;= v0.6.1</code></td>
+					<td>Required for <code>llm-d-router</code> <a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#fault-resilience">Fault resilience</a>
+; earlier <code>v0.6.0</code> images crash-loop on <code>epp.yaml</code>.</td>
+			</tr>
+			<tr>
+					<td><code>llm-d-router</code> <em>Decode</em> sidecar</td>
+					<td><code>gpustack/mirrored-llm-d-router-disagg-sidecar &gt;= v1.0.0</code></td>
+					<td>Standing <code>v0.11.0</code> <em>Decode</em> <code>Pod</code>s stay compatible on basic <em>PD</em>/<em>EPD</em> and adopt <code>v1.0.0</code> on next trigger.</td>
+			</tr>
+	</tbody>
+</table>
 <h2 id="engine-version-resolution">Engine version resolution</h2>
 <p>Managed roles (<em><code>roles[].command</code></em> empty) resolve an engine version from <em><code>spec.roles[].engineVersion</code></em>
 or fall back to <em><code>spec.engine.version</code></em>. Admission backfills empty version fields automatically from
@@ -1586,6 +1611,7 @@ without a store and at most 16 with a <code>TCP</code> store.</li>
     <li><a href="#minimum-versions">Minimum versions</a>
       <ul>
         <li><a href="#engine-image-requirements">Engine image requirements</a></li>
+        <li><a href="#router-image-floors">Router image floors</a></li>
       </ul>
     </li>
     <li><a href="#engine-version-resolution">Engine version resolution</a>
