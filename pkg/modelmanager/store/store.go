@@ -145,13 +145,28 @@ type Marker struct {
 	FileCount int64 `json:"fileCount"`
 	// PublishedTime is when it was published.
 	PublishedTime time.Time `json:"publishedTime"`
-	// Source is where the tree's bytes came from, SourceHub; empty for a tree published before it
-	// was recorded.
+	// Source is where the tree's bytes came from: Hub, Peer or Forge; empty for a tree published
+	// before it was recorded.
 	Source string `json:"source,omitempty"`
+	// Kind classifies the tree's content: Model (or empty for trees published before the field
+	// existed) versus Kernel.
+	Kind string `json:"kind,omitempty"`
 }
 
-// SourceHub is a tree downloaded from the model hub.
-const SourceHub = "Hub"
+// Published tree sources and content classes recorded on Marker.
+const (
+	// SourceHub is a tree downloaded from the model hub.
+	SourceHub = "Hub"
+	// SourcePeer is a tree pulled from peer plugins.
+	SourcePeer = "Peer"
+	// SourceForge is a verified forged kernel tree published locally on this node.
+	SourceForge = "Forge"
+
+	// MarkerKindModel is a model weight tree; an empty Marker.Kind also denotes a model tree.
+	MarkerKindModel = "Model"
+	// MarkerKindKernel is a forged or imported GPU kernel bundle tree.
+	MarkerKindKernel = "Kernel"
+)
 
 // IsPublished reports whether hex has a published tree. It reads only the marker, so the check a
 // mount makes is one stat whatever the tree's size.

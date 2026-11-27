@@ -32,6 +32,10 @@ type Config struct {
 	// PeerSync, when not nil, serves this node's published trees to the other nodes' plugins and
 	// pulls from theirs.
 	PeerSync *peer.Sync
+
+	// IngestServiceAccount names the operator worker ServiceAccount whose gpustack-model-ingest
+	// projected tokens may call POST /ingest/v1/trees.
+	IngestServiceAccount string
 }
 
 // Apply builds the plugin: its server, a controller manager whose cache watches only what the
@@ -43,7 +47,8 @@ func (c *Config) Apply(ctx context.Context) (*Manager, error) {
 	}
 	c.ManagerConfig.WebhookServer = srv
 	// The plugin's role reads its own NodeModelStore and ConfigMaps in the operator's namespace
-	// only, so the cache watches exactly those; ModelArtifacts are read cluster-wide.
+	// only, so the cache watches exactly those; ModelArtifacts and ModelKernelArtifacts are read
+	// cluster-wide.
 	c.ManagerConfig.CacheByObject = map[ctrlcli.Object]ctrlcache.ByObject{
 		&workercore.NodeModelStore{}: {Field: fields.OneTermEqualSelector("metadata.name", c.NodeName)},
 		&core.ConfigMap{}:            {Namespaces: map[string]ctrlcache.Config{systemname.NamespaceName: {}}},
@@ -66,5 +71,6 @@ func (c *Config) Apply(ctx context.Context) (*Manager, error) {
 		CSISocket:              c.CSISocket,
 		ModelTransferStateRoot: c.ModelTransferStateRoot,
 		PeerSync:               c.PeerSync,
+		IngestServiceAccount:   c.IngestServiceAccount,
 	}, nil
 }

@@ -3,10 +3,13 @@ package modelmanager
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"gpustack.ai/gpustack/pkg/manager"
 	"gpustack.ai/gpustack/pkg/modelmanager/peer"
@@ -40,6 +43,9 @@ type Options struct {
 	PeerSyncServiceAccount    string
 	PeerSyncMaxServingStreams int
 	PeerSyncStreamsPerSource  int
+
+	// Local ingest.
+	IngestServiceAccount string
 }
 
 // NewOptions returns the options with their defaults: the kubelet directory and cache root of a
@@ -92,6 +98,10 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 		"how many peer file answers this node serves at once.")
 	fs.IntVar(&o.PeerSyncStreamsPerSource, "peer-sync-streams-per-source", o.PeerSyncStreamsPerSource,
 		"how many requests this node opens to one peer at once.")
+
+	// Local ingest.
+	fs.StringVar(&o.IngestServiceAccount, "ingest-service-account", o.IngestServiceAccount,
+		"the operator worker ServiceAccount name in the system namespace whose gpustack-model-ingest tokens may publish local trees.")
 }
 
 // Validate checks the options: a node name is required, and every path must be absolute.
@@ -113,6 +123,11 @@ func (o *Options) Validate(ctx context.Context) error {
 		return errors.New("--model-transfer-state-root: must be absolute")
 	case o.CSISocket != "" && !filepath.IsAbs(o.CSISocket):
 		return errors.New("--csi-socket: must be absolute")
+	}
+	if o.IngestServiceAccount != "" {
+		if errs := validation.IsDNS1123Subdomain(o.IngestServiceAccount); len(errs) != 0 {
+			return fmt.Errorf("--ingest-service-account: %s", strings.Join(errs, "; "))
+		}
 	}
 
 	_, err := o.PeerSync()
@@ -190,5 +205,6 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 		ModelTransferStateRoot: modelTransferStateRoot,
 		CSISocket:              socket,
 		PeerSync:               peerSync,
+		IngestServiceAccount:   o.IngestServiceAccount,
 	}, nil
 }

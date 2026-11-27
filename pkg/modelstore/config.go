@@ -30,7 +30,29 @@ const (
 	VolumeAttrArtifact       = "artifact"
 	VolumeAttrArtifactUID    = "artifactUID"
 	VolumeAttrManifestDigest = "manifestDigest"
+	VolumeAttrArtifactKind   = "artifactKind"
 )
+
+// The artifact kinds VolumeAttrArtifactKind selects. An omitted or empty attribute selects
+// ModelArtifact so volumes rendered before the attribute existed keep their meaning.
+const (
+	ArtifactKindModel  = "ModelArtifact"
+	ArtifactKindKernel = "ModelKernelArtifact"
+)
+
+// ResolveArtifactKind normalizes a VolumeAttrArtifactKind value to its canonical kind, rejecting
+// unknown values.
+func ResolveArtifactKind(raw string) (string, error) {
+	switch raw {
+	case "", ArtifactKindModel:
+		return ArtifactKindModel, nil
+	case ArtifactKindKernel:
+		return ArtifactKindKernel, nil
+	default:
+		return "", fmt.Errorf("unknown %s %q: want %q or %q",
+			VolumeAttrArtifactKind, raw, ArtifactKindModel, ArtifactKindKernel)
+	}
+}
 
 // The bounds a spec's numbers must keep.
 const (
@@ -213,4 +235,34 @@ type Download struct {
 	DownloadedBytes int64  `json:"downloadedBytes"`
 	SizeBytes       int64  `json:"sizeBytes"`
 	Source          string `json:"source,omitempty"`
+}
+
+// IngestTreesPath is the model-manager plugin's authenticated local ingestion path on its secure
+// port, used by the worker to publish verified ForgeSandbox emptyDir output trees.
+const IngestTreesPath = "/ingest/v1/trees"
+
+// IngestAudience and IngestTokenFile are the projected ServiceAccount token audience and mount
+// path the worker authenticates to IngestTreesPath with.
+const (
+	IngestAudience  = "gpustack-model-ingest"
+	IngestTokenFile = "/var/run/secrets/gpustack-model-ingest/token"
+)
+
+// IngestTreeRequest identifies the worker-owned ForgeSandbox Pod whose verified emptyDir output
+// tree the node's model-manager plugin should ingest and publish.
+type IngestTreeRequest struct {
+	Namespace  string `json:"namespace"`
+	ForgerName string `json:"forgerName"`
+	ForgerUID  string `json:"forgerUID,omitempty"`
+	PodName    string `json:"podName"`
+	PodUID     string `json:"podUID"`
+}
+
+// IngestTreeResponse reports the content-addressed kernel tree published by IngestTreesPath.
+type IngestTreeResponse struct {
+	ManifestDigest         string `json:"manifestDigest"`
+	DispatchManifestDigest string `json:"dispatchManifestDigest"`
+	SizeBytes              int64  `json:"sizeBytes"`
+	FileCount              int64  `json:"fileCount"`
+	SeedNode               string `json:"seedNode"`
 }

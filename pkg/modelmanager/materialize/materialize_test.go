@@ -190,7 +190,7 @@ func (e *testEnv) artifact(repo, uid, digest string) *workercore.ModelArtifact {
 
 func (e *testEnv) request(repo, uid, token string) driver.Request {
 	digest := e.hub.manifest(repo).Digest
-	return driver.Request{Hex: store.HexOf(digest), Artifact: e.artifact(repo, uid, digest), Token: token}
+	return driver.Request{Hex: store.HexOf(digest), Source: driver.ModelArtifactSource(e.artifact(repo, uid, digest)), Token: token}
 }
 
 // TestEnsureExpectedIdentityIsPeersOnly pins an Expected identity's chain: no commit exists to list
@@ -203,7 +203,7 @@ func TestEnsureExpectedIdentityIsPeersOnly(t *testing.T) {
 	ma := env.artifact("owner/repo", "uid-a", digest)
 	ma.Status.Resolved.Revision = ""
 	ma.Status.Resolved.DigestSource = workercore.ModelArtifactDigestSourceExpected
-	req := driver.Request{Hex: store.HexOf(digest), Artifact: ma}
+	req := driver.Request{Hex: store.HexOf(digest), Source: driver.ModelArtifactSource(ma)}
 
 	env.m.Ensure(context.Background(), req)
 	env.waitIdle(t, req.Hex)
@@ -233,7 +233,7 @@ func TestEnsureExpectedIdentityPeersListingFailure(t *testing.T) {
 	env.m.Peers = &peer.Puller{Discover: func(context.Context, string) ([]*peer.Source, error) {
 		return nil, fmt.Errorf("discovery refused")
 	}}
-	req := driver.Request{Hex: store.HexOf(digest), Artifact: ma}
+	req := driver.Request{Hex: store.HexOf(digest), Source: driver.ModelArtifactSource(ma)}
 
 	env.m.Ensure(context.Background(), req)
 	env.waitIdle(t, req.Hex)
@@ -333,7 +333,7 @@ func TestEnsureTriesTheOtherKindWhenOneEnvironmentFails(t *testing.T) {
 			Revision: testCommit, ManifestDigest: digest,
 		}},
 	}
-	req := driver.Request{Hex: store.HexOf(digest), Artifact: ma, Token: "ms-token"}
+	req := driver.Request{Hex: store.HexOf(digest), Source: driver.ModelArtifactSource(ma), Token: "ms-token"}
 
 	m.Ensure(context.Background(), req)
 	require.Eventually(t, func() bool { return !m.Downloading()[req.Hex] }, 10*time.Second, 5*time.Millisecond)
@@ -383,7 +383,7 @@ func TestEnsureMaterializesAModelScopeSource(t *testing.T) {
 			Revision: testCommit, ManifestDigest: digest,
 		}},
 	}
-	req := driver.Request{Hex: store.HexOf(digest), Artifact: ma, Token: "ms-token"}
+	req := driver.Request{Hex: store.HexOf(digest), Source: driver.ModelArtifactSource(ma), Token: "ms-token"}
 
 	m.Ensure(context.Background(), req)
 	require.Eventually(t, func() bool { return !m.Downloading()[req.Hex] }, 10*time.Second, 5*time.Millisecond)
@@ -496,7 +496,6 @@ func TestEnsureRefusesAManifestThatIsNotTheArtifacts(t *testing.T) {
 	env := newTestEnv(t, repoFiles())
 	req := env.request("owner/repo", "uid-a", "token-a")
 	req.Hex = strings.Repeat("f", 64)
-	req.Artifact.Status.Resolved.ManifestDigest = "sha256:" + req.Hex
 
 	env.m.Ensure(context.Background(), req)
 	env.waitIdle(t, req.Hex)
@@ -714,4 +713,154 @@ func TestPublicMessage(t *testing.T) {
 			assert.NotContains(t, got, "team-secret")
 		})
 	}
+}
+
+func TestEnsureKernelFromPeersOnlyPreservesKind(t *testing.T) {
+	seedRoot := t.TempDir()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(seedRoot, func(p string, d os.DirEntry, _ error) error {
+			if d != nil && d.IsDir() {
+				_ = os.Chmod(p, 0o755)
+			} else if d != nil {
+				_ = os.Chmod(p, 0o644)
+			}
+			return nil
+		})
+	})
+	seedStore, err := store.Open(seedRoot)
+	require.NoError(t, err)
+
+	dispatchBody := `{"schemaVersion":"gpustack-forge-dispatch/v1","entries":[{"localKernelKey":"vllm/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef","libraryPath":"kernels/k.py"}]}`
+	kernelBody := "def run(x): return x\n"
+	manifest, err := modelartifact.NewManifest([]modelartifact.ManifestEntry{
+		{Path: "dispatch-manifest.json", Size: int64(len(dispatchBody)), Digest: "sha256:" + stringx.SumBySHA256(dispatchBody)},
+		{Path: "kernels/k.py", Size: int64(len(kernelBody)), Digest: "sha256:" + stringx.SumBySHA256(kernelBody)},
+	})
+	require.NoError(t, err)
+	hex := store.HexOf(manifest.Digest)
+
+	attempt, err := seedStore.NewAttempt(hex)
+	require.NoError(t, err)
+	for path, body := range map[string]string{"dispatch-manifest.json": dispatchBody, "kernels/k.py": kernelBody} {
+		dest, ferr := attempt.FilePath(path)
+		require.NoError(t, ferr)
+		require.NoError(t, os.MkdirAll(filepath.Dir(dest), 0o755))
+		require.NoError(t, os.WriteFile(dest, []byte(body), 0o644))
+	}
+	listingBytes, err := json.Marshal(peer.Listing{
+		Digest: manifest.Digest,
+		Kind:   store.MarkerKindKernel,
+		Entries: []peer.ManifestFile{
+			{Path: manifest.Entries[0].Path, Size: manifest.Entries[0].Size, Digest: manifest.Entries[0].Digest},
+			{Path: manifest.Entries[1].Path, Size: manifest.Entries[1].Size, Digest: manifest.Entries[1].Digest},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(attempt.Dir(), "manifest.json"), listingBytes, 0o600))
+	require.NoError(t, attempt.Publish(store.Marker{
+		Digest: manifest.Digest, ManifestFormat: modelartifact.ManifestHeader,
+		SizeBytes: manifest.SizeBytes, FileCount: manifest.FileCount,
+		Source: store.SourceForge, Kind: store.MarkerKindKernel,
+	}))
+
+	seedTS := httptest.NewServer((&peer.Server{Store: seedStore}).Handler())
+	t.Cleanup(seedTS.Close)
+	peerClient, err := peer.NewClient(peer.AuthOptions{Mode: peer.AuthNone})
+	require.NoError(t, err)
+
+	env := newTestEnv(t, map[string]map[string][]byte{})
+	env.m.Peers = &peer.Puller{
+		Discover: func(context.Context, string) ([]*peer.Source, error) {
+			return []*peer.Source{{NodeName: "seed-node", BaseURL: seedTS.URL, Client: peerClient}}, nil
+		},
+	}
+
+	mka := &workercore.ModelKernelArtifact{
+		ObjectMeta: meta.ObjectMeta{UID: "uid-k-peer"},
+		Spec: workercore.ModelKernelArtifactSpec{
+			Source: workercore.ModelKernelArtifactSource{
+				NodeStore: &workercore.ModelKernelArtifactNodeStoreSource{ManifestDigest: manifest.Digest},
+			},
+		},
+		Status: workercore.ModelKernelArtifactStatus{
+			Resolved: &workercore.ModelKernelArtifactResolved{ManifestDigest: manifest.Digest},
+		},
+	}
+	req := driver.Request{Hex: hex, Source: driver.KernelArtifactSource(mka)}
+	env.m.Ensure(context.Background(), req)
+	env.waitIdle(t, hex)
+
+	assert.Empty(t, env.hub.recorded(), "cold peer pull must never contact external Hub")
+	require.True(t, env.store.IsPublished(hex))
+
+	marker, err := env.store.ReadMarker(hex)
+	require.NoError(t, err)
+	assert.Equal(t, store.MarkerKindKernel, marker.Kind)
+	assert.Equal(t, store.SourcePeer, marker.Source)
+
+	rawManifest, err := os.ReadFile(env.store.PublishedManifestPath(hex))
+	require.NoError(t, err)
+	var pulledListing peer.Listing
+	require.NoError(t, json.Unmarshal(rawManifest, &pulledListing))
+	assert.Equal(t, store.MarkerKindKernel, pulledListing.Kind)
+}
+
+func TestEnsureKernelFromHuggingFacePublishesKindKernel(t *testing.T) {
+	files := map[string]map[string][]byte{
+		"owner/kernels": {
+			"dispatch-manifest.json": []byte(`{"schemaVersion":"gpustack-forge-dispatch/v1","entries":[]}`),
+			"kernels/k.py":           []byte("def run(x): return x\n"),
+		},
+		"owner/not-a-kernel": {
+			"config.json": []byte(`{}`),
+		},
+	}
+	env := newTestEnv(t, files)
+
+	t.Run("valid HuggingFace kernel tree publishes with Kind Kernel", func(t *testing.T) {
+		digest := env.hub.manifest("owner/kernels").Digest
+		mka := &workercore.ModelKernelArtifact{
+			ObjectMeta: meta.ObjectMeta{UID: "uid-k-hf"},
+			Spec: workercore.ModelKernelArtifactSpec{
+				Source: workercore.ModelKernelArtifactSource{
+					HuggingFace: &workercore.ModelArtifactHubSource{Repository: "owner/kernels", Revision: testCommit},
+				},
+			},
+			Status: workercore.ModelKernelArtifactStatus{
+				Resolved: &workercore.ModelKernelArtifactResolved{Revision: testCommit, ManifestDigest: digest},
+			},
+		}
+		req := driver.Request{Hex: store.HexOf(digest), Source: driver.KernelArtifactSource(mka), Token: "hf-k-token"}
+		env.m.Ensure(context.Background(), req)
+		env.waitIdle(t, req.Hex)
+
+		require.True(t, env.store.IsPublished(req.Hex))
+		marker, err := env.store.ReadMarker(req.Hex)
+		require.NoError(t, err)
+		assert.Equal(t, store.MarkerKindKernel, marker.Kind)
+		assert.Equal(t, store.SourceHub, marker.Source)
+	})
+
+	t.Run("HuggingFace tree missing dispatch-manifest.json is refused", func(t *testing.T) {
+		digest := env.hub.manifest("owner/not-a-kernel").Digest
+		mka := &workercore.ModelKernelArtifact{
+			ObjectMeta: meta.ObjectMeta{UID: "uid-k-bad"},
+			Spec: workercore.ModelKernelArtifactSpec{
+				Source: workercore.ModelKernelArtifactSource{
+					HuggingFace: &workercore.ModelArtifactHubSource{Repository: "owner/not-a-kernel", Revision: testCommit},
+				},
+			},
+			Status: workercore.ModelKernelArtifactStatus{
+				Resolved: &workercore.ModelKernelArtifactResolved{Revision: testCommit, ManifestDigest: digest},
+			},
+		}
+		req := driver.Request{Hex: store.HexOf(digest), Source: driver.KernelArtifactSource(mka), Token: "hf-k-token"}
+		env.m.Ensure(context.Background(), req)
+		env.waitIdle(t, req.Hex)
+
+		require.False(t, env.store.IsPublished(req.Hex))
+		rec, err := env.store.ReadDigest(req.Hex)
+		require.NoError(t, err)
+		assert.Equal(t, download.ReasonIntegrityMismatch, rec.Reason)
+	})
 }

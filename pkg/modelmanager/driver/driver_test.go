@@ -23,6 +23,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
+	"gpustack.ai/gpustack/pkg/modelstore"
 )
 
 var (
@@ -459,7 +460,8 @@ func TestNodePublishHandsMissingContentToTheMaterializer(t *testing.T) {
 			got := env.materializer.requests[0]
 			assert.Equal(t, testHex, got.Hex)
 			assert.Equal(t, "hf_secret", got.Token, "kubelet's Secret of this call is handed over")
-			assert.Equal(t, "uid-qwen", string(got.Artifact.UID))
+			assert.Equal(t, "uid-qwen", got.Source.ArtifactUID)
+			assert.Equal(t, store.MarkerKindModel, got.Source.Kind)
 			if !c.wantMount {
 				assert.Equal(t, c.wantCode, status.Code(err))
 				assert.Contains(t, err.Error(), c.progress.Message)
@@ -527,4 +529,257 @@ func TestLockTargetForgetsAReleasedTarget(t *testing.T) {
 	d.targetsMu.Lock()
 	defer d.targetsMu.Unlock()
 	assert.Empty(t, d.targets, "a target no call holds or waits for is not kept")
+}
+
+func testKernelArtifact(namespace, name, uid, digest string, resolved, quarantined bool) *workercore.ModelKernelArtifact {
+	condStatus := meta.ConditionTrue
+	if !resolved {
+		condStatus = meta.ConditionFalse
+	}
+	return &workercore.ModelKernelArtifact{
+		ObjectMeta: meta.ObjectMeta{Namespace: namespace, Name: name, UID: types.UID(uid)},
+		Spec: workercore.ModelKernelArtifactSpec{
+			Source: workercore.ModelKernelArtifactSource{
+				NodeStore: &workercore.ModelKernelArtifactNodeStoreSource{
+					ManifestDigest:         digest,
+					DispatchManifestDigest: digest,
+					SizeBytes:              128,
+					FileCount:              2,
+					SeedNode:               "node-1",
+					ForgerRef:              workercore.ModelKernelArtifactForgerReference{Name: "forger", UID: "uid-forger"},
+				},
+			},
+			Compatibility: workercore.ModelKernelArtifactCompatibility{
+				Engine:        "vLLM",
+				EngineVersion: "0.8.5",
+				Manufacturer:  "nvidia",
+				Architecture:  "sm_90a",
+				KernelKeys:    []string{"vllm/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
+			},
+		},
+		Status: workercore.ModelKernelArtifactStatus{
+			Resolved:    &workercore.ModelKernelArtifactResolved{ManifestDigest: digest, DispatchManifestDigest: digest},
+			Quarantined: quarantined,
+			Conditions:  []gpustack.Condition{{Type: "Resolved", Status: condStatus}},
+		},
+	}
+}
+
+func (e *testEnv) publishWithKind(t *testing.T, hex, kind string) {
+	t.Helper()
+	a, err := e.d.Store.NewAttempt(hex)
+	require.NoError(t, err)
+	p, err := a.FilePath("dispatch-manifest.json")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(p, []byte("{}"), 0o644))
+	require.NoError(t, a.Publish(store.Marker{Digest: "sha256:" + hex, Kind: kind}))
+}
+
+func kernelHints(artifact, uid, digest string) map[string]string {
+	return map[string]string{
+		AttrArtifactKind:   modelstore.ArtifactKindKernel,
+		AttrArtifact:       artifact,
+		AttrArtifactUID:    uid,
+		AttrManifestDigest: digest,
+	}
+}
+
+func TestNodePublishKernelAuthorization(t *testing.T) {
+	cases := []struct {
+		name      string
+		objs      []ctrlcli.Object
+		attrs     map[string]string
+		namespace string
+		wantRule  string
+	}{
+		{
+			name:      "the Pod's own resolved unquarantined nodeStore kernel artifact",
+			objs:      []ctrlcli.Object{testKernelArtifact("team-a", "qwen-gen-1", "uid-k1", testDigest, true, false)},
+			attrs:     kernelHints("qwen-gen-1", "uid-k1", testDigest),
+			namespace: "team-a",
+		},
+		{
+			name: "the Pod's own resolved huggingFace kernel artifact",
+			objs: []ctrlcli.Object{func() *workercore.ModelKernelArtifact {
+				mka := testKernelArtifact("team-a", "qwen-hf-1", "uid-k1", testDigest, true, false)
+				mka.Spec.Source = workercore.ModelKernelArtifactSource{
+					HuggingFace: &workercore.ModelArtifactHubSource{
+						Repository: "owner/kernels",
+						Revision:   strings.Repeat("a", 40),
+					},
+				}
+				mka.Status.Resolved.Revision = strings.Repeat("a", 40)
+				return mka
+			}()},
+			attrs:     kernelHints("qwen-hf-1", "uid-k1", testDigest),
+			namespace: "team-a",
+		},
+		{
+			name:      "kernel artifact in another namespace",
+			objs:      []ctrlcli.Object{testKernelArtifact("team-a", "qwen-gen-1", "uid-k1", testDigest, true, false)},
+			attrs:     kernelHints("qwen-gen-1", "uid-k1", testDigest),
+			namespace: "team-b",
+			wantRule:  ruleKernelArtifactMissing,
+		},
+		{
+			name:      "kernel artifact with wrong UID",
+			objs:      []ctrlcli.Object{testKernelArtifact("team-a", "qwen-gen-1", "uid-new", testDigest, true, false)},
+			attrs:     kernelHints("qwen-gen-1", "uid-old", testDigest),
+			namespace: "team-a",
+			wantRule:  ruleKernelUIDMismatch,
+		},
+		{
+			name:      "unresolved kernel artifact",
+			objs:      []ctrlcli.Object{testKernelArtifact("team-a", "qwen-gen-1", "uid-k1", testDigest, false, false)},
+			attrs:     kernelHints("qwen-gen-1", "uid-k1", testDigest),
+			namespace: "team-a",
+			wantRule:  ruleKernelNotResolved,
+		},
+		{
+			name:      "quarantined kernel artifact",
+			objs:      []ctrlcli.Object{testKernelArtifact("team-a", "qwen-gen-1", "uid-k1", testDigest, true, true)},
+			attrs:     kernelHints("qwen-gen-1", "uid-k1", testDigest),
+			namespace: "team-a",
+			wantRule:  ruleKernelQuarantined,
+		},
+		{
+			name:      "mismatched kernel manifest digest",
+			objs:      []ctrlcli.Object{testKernelArtifact("team-a", "qwen-gen-1", "uid-k1", "sha256:"+otherHex, true, false)},
+			attrs:     kernelHints("qwen-gen-1", "uid-k1", testDigest),
+			namespace: "team-a",
+			wantRule:  ruleKernelDigestMismatch,
+		},
+		{
+			name: "OCI image kernel artifact is not node-delivered",
+			objs: []ctrlcli.Object{func() *workercore.ModelKernelArtifact {
+				mka := testKernelArtifact("team-a", "qwen-img-1", "uid-k1", testDigest, true, false)
+				mka.Spec.Source = workercore.ModelKernelArtifactSource{
+					Image: &workercore.ModelArtifactImageSource{Reference: "reg/kernels@sha256:" + testHex},
+				}
+				return mka
+			}()},
+			attrs:     kernelHints("qwen-img-1", "uid-k1", testDigest),
+			namespace: "team-a",
+			wantRule:  ruleKernelUnsupportedSource,
+		},
+		{
+			name: "forged unknown artifactKind",
+			objs: []ctrlcli.Object{testKernelArtifact("team-a", "qwen-gen-1", "uid-k1", testDigest, true, false)},
+			attrs: map[string]string{
+				AttrArtifactKind:   "ConfigMap",
+				AttrArtifact:       "qwen-gen-1",
+				AttrArtifactUID:    "uid-k1",
+				AttrManifestDigest: testDigest,
+			},
+			namespace: "team-a",
+			wantRule:  "unknown artifactKind",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			env := newTestEnv(t, c.objs...)
+			env.publishWithKind(t, testHex, store.MarkerKindKernel)
+			target := env.target("uid-p")
+
+			_, err := env.d.NodePublishVolume(context.Background(),
+				publishRequest(target, kubeletVolumeContext(c.attrs, c.namespace)))
+			if c.wantRule == "" {
+				require.NoError(t, err)
+				assert.Equal(t, env.d.Store.PublishedTree(testHex), env.mounter.mounted[target])
+				return
+			}
+			require.Error(t, err)
+			assert.Equal(t, codes.PermissionDenied, status.Code(err))
+			assert.Contains(t, err.Error(), c.wantRule)
+			assert.Empty(t, env.mounter.mounted)
+		})
+	}
+}
+
+func TestNodePublishContentClassIsolation(t *testing.T) {
+	t.Run("ModelKernelArtifact mount refuses a published Model tree", func(t *testing.T) {
+		for _, modelKind := range []string{"", store.MarkerKindModel} {
+			env := newTestEnv(t, testKernelArtifact("team-a", "qwen-gen-1", "uid-k1", testDigest, true, false))
+			env.publishWithKind(t, testHex, modelKind)
+			target := env.target("uid-p")
+
+			_, err := env.d.NodePublishVolume(context.Background(),
+				publishRequest(target, kubeletVolumeContext(kernelHints("qwen-gen-1", "uid-k1", testDigest), "team-a")))
+			require.Error(t, err)
+			assert.Equal(t, codes.PermissionDenied, status.Code(err))
+			assert.Contains(t, err.Error(), ruleKernelClassMismatch)
+			assert.Empty(t, env.mounter.mounted)
+
+			_, found, rerr := env.d.Store.ReadRef("csi-vol-1")
+			require.NoError(t, rerr)
+			assert.False(t, found, "denied cross-class mount must drop its claimed reference")
+		}
+	})
+
+	t.Run("ModelArtifact mount including expectedDigest refuses a published Kernel tree", func(t *testing.T) {
+		expectedMA := testArtifact("team-a", "qwen-expected", "uid-exp", testDigest, true)
+		expectedMA.Status.Resolved.Revision = ""
+		expectedMA.Status.Resolved.DigestSource = workercore.ModelArtifactDigestSourceExpected
+
+		for _, ma := range []*workercore.ModelArtifact{
+			testArtifact("team-a", "qwen-hub", "uid-hub", testDigest, true),
+			expectedMA,
+		} {
+			env := newTestEnv(t, ma)
+			env.publishWithKind(t, testHex, store.MarkerKindKernel)
+			target := env.target("uid-p")
+
+			_, err := env.d.NodePublishVolume(context.Background(),
+				publishRequest(target, kubeletVolumeContext(hints(ma.Name, string(ma.UID), testDigest), "team-a")))
+			require.Error(t, err)
+			assert.Equal(t, codes.PermissionDenied, status.Code(err))
+			assert.Contains(t, err.Error(), ruleModelClassMismatch)
+			assert.Empty(t, env.mounter.mounted)
+
+			_, found, rerr := env.d.Store.ReadRef("csi-vol-1")
+			require.NoError(t, rerr)
+			assert.False(t, found, "denied cross-class mount must drop its claimed reference")
+		}
+	})
+
+	t.Run("missing kernel content forwards typed source descriptor to Materializer", func(t *testing.T) {
+		nodeStoreMKA := testKernelArtifact("team-a", "qwen-ns", "uid-ns", testDigest, true, false)
+		hfMKA := testKernelArtifact("team-a", "qwen-hf", "uid-hf", "sha256:"+otherHex, true, false)
+		hfCommit := strings.Repeat("b", 40)
+		hfMKA.Spec.Source = workercore.ModelKernelArtifactSource{
+			HuggingFace: &workercore.ModelArtifactHubSource{Repository: "owner/kernels", Revision: hfCommit},
+		}
+		hfMKA.Status.Resolved.Revision = hfCommit
+
+		env := newTestEnv(t, nodeStoreMKA, hfMKA)
+		env.materializer.progress = Progress{Published: true}
+		env.materializer.publish = func(hex string) { env.publishWithKind(t, hex, store.MarkerKindKernel) }
+
+		target1 := env.target("uid-1")
+		_, err := env.d.NodePublishVolume(context.Background(),
+			publishRequest(target1, kubeletVolumeContext(kernelHints("qwen-ns", "uid-ns", testDigest), "team-a")))
+		require.NoError(t, err)
+		require.Len(t, env.materializer.requests, 1)
+		assert.Equal(t, Source{
+			Kind:        store.MarkerKindKernel,
+			ArtifactUID: "uid-ns",
+			PeersOnly:   true,
+		}, env.materializer.requests[0].Source)
+
+		target2 := env.target("uid-2")
+		req2 := publishRequest(target2, kubeletVolumeContext(kernelHints("qwen-hf", "uid-hf", "sha256:"+otherHex), "team-a"))
+		req2.VolumeId = "csi-vol-2"
+		_, err = env.d.NodePublishVolume(context.Background(), req2)
+		require.NoError(t, err)
+		require.Len(t, env.materializer.requests, 2)
+		assert.Equal(t, Source{
+			Kind:        store.MarkerKindKernel,
+			ArtifactUID: "uid-hf",
+			HubKind:     HubKindHuggingFace,
+			Repository:  "owner/kernels",
+			Commit:      hfCommit,
+			PeersOnly:   false,
+		}, env.materializer.requests[1].Source)
+		assert.Equal(t, "hf_secret", env.materializer.requests[1].Token)
+	})
 }

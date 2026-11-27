@@ -201,6 +201,9 @@ spec:
           volumeMounts:
             - name: gpustack-data-dir
               mountPath: /var/lib/gpustack
+            - name: gpustack-model-ingest-token
+              mountPath: /var/run/secrets/gpustack-model-ingest
+              readOnly: true
             {{- if $certmanager }}
             - name: gpustack-cert-dir
               mountPath: /var/run/gpustack/certs
@@ -210,6 +213,14 @@ spec:
           hostPath:
             path: {{ .Values.worker.dataDir }}
             type: DirectoryOrCreate
+        - name: gpustack-model-ingest-token
+          projected:
+            defaultMode: 420
+            sources:
+              - serviceAccountToken:
+                  audience: gpustack-model-ingest
+                  expirationSeconds: 3600
+                  path: token
         {{- if $certmanager }}
         - name: gpustack-cert-dir
           secret:

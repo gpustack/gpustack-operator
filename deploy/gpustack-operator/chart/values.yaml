@@ -496,7 +496,8 @@ modelManager:
   # -- kubelet's root directory, the convention the bundled CSI drivers follow. The plugin mounts
   # its pods directory with Bidirectional propagation so its bind mounts reach the Pods.
   kubeletDir: /var/lib/kubelet
-  # -- Secure serving port of the model-manager container: metrics, readiness and liveness.
+  # -- Secure serving port of the model-manager container: metrics, readiness, liveness, live
+  # download progress, and authenticated local kernel ingestion (`/ingest/v1/trees`).
   securePort: 32444
   # -- TCP port the node's published trees are served to the other nodes' plugins on, for
   # node-to-node sync, enabled by default; `0` is off. Plugins authenticate each other with a

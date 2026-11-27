@@ -66,6 +66,7 @@ spec:
             - --kubelet-dir={{ $kubeletDir }}
             - --cache-root={{ $rootPath }}
             - --csi-socket={{ $pluginDir }}/csi.sock
+            - --ingest-service-account={{ include "gpustack-operator.worker.fullname" . }}
             {{- with .Values.modelTransfer.enabled }}
             {{- /*
               The source brokers' ledger parent, read-only: the reporter reads each vendor's

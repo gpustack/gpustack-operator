@@ -54,8 +54,10 @@ type Hub interface {
 
 // The hub kinds a source may name, which the environment builds a hub for.
 const (
-	HubHuggingFace = "huggingFace"
-	HubModelScope  = "modelscope"
+	HubHuggingFace = driver.HubKindHuggingFace
+	HubModelScope  = driver.HubKindModelScope
+
+	dispatchManifestFile = "dispatch-manifest.json"
 )
 
 // HubKindOf names the hub an artifact's source resolves against, or "" when it names none.
@@ -118,12 +120,13 @@ var _ driver.Materializer = (*Materializer)(nil)
 
 // job is one running attempt at a digest.
 type job struct {
-	hex      string
-	cancel   context.CancelCauseFunc
-	asked    atomic.Int64 // unix nanoseconds of the last mount that asked
-	received atomic.Int64
-	peer     atomic.Int64 // how much of what was received came from the other nodes
-	total    atomic.Int64
+	hex         string
+	contentKind string
+	cancel      context.CancelCauseFunc
+	asked       atomic.Int64 // unix nanoseconds of the last mount that asked
+	received    atomic.Int64
+	peer        atomic.Int64 // how much of what was received came from the other nodes
+	total       atomic.Int64
 
 	mu sync.Mutex
 	// sources are the artifacts that asked, by UID, each with its own repository and credential,
@@ -140,7 +143,15 @@ type source struct {
 	repository string
 	commit     string
 	filter     modelartifact.Filter
+	peersOnly  bool
 	token      atomic.Value
+}
+
+func normalizeContentKind(raw string) string {
+	if raw == store.MarkerKindKernel {
+		return store.MarkerKindKernel
+	}
+	return store.MarkerKindModel
 }
 
 func (s *source) currentToken() string {
@@ -169,7 +180,14 @@ func (m *Materializer) Ensure(_ context.Context, req driver.Request) driver.Prog
 	if m.jobs == nil {
 		m.jobs = map[string]*job{}
 	}
+	wantKind := normalizeContentKind(req.Source.Kind)
 	if j, ok := m.jobs[req.Hex]; ok {
+		if j.contentKind != wantKind {
+			return driver.Progress{
+				Code:    codes.PermissionDenied,
+				Message: fmt.Sprintf("sha256:%s is being materialized for %s, not %s", req.Hex[:12], j.contentKind, wantKind),
+			}
+		}
 		j.join(req, m.now())
 		return j.progress()
 	}
@@ -191,7 +209,7 @@ func (m *Materializer) Ensure(_ context.Context, req driver.Request) driver.Prog
 		base = context.Background()
 	}
 	ctx, cancel := context.WithCancelCause(base)
-	j := &job{hex: req.Hex, cancel: cancel, sources: map[string]*source{}}
+	j := &job{hex: req.Hex, contentKind: wantKind, cancel: cancel, sources: map[string]*source{}}
 	j.join(req, m.now())
 	m.jobs[req.Hex] = j
 	go m.run(ctx, j)
@@ -246,18 +264,21 @@ func (m *Materializer) Downloading() map[string]bool {
 
 func (j *job) join(req driver.Request, now time.Time) {
 	j.asked.Store(now.UnixNano())
-	ma := req.Artifact
-	uid := string(ma.UID)
+	uid := req.Source.ArtifactUID
+	if uid == "" {
+		uid = "_"
+	}
 
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	s, ok := j.sources[uid]
 	if !ok {
 		s = &source{
-			kind:       HubKindOf(ma),
-			repository: HubRepository(ma),
-			commit:     ma.Status.Resolved.Revision,
-			filter:     modelartifact.Filter{Allow: ma.Spec.AllowPatterns, Ignore: ma.Spec.IgnorePatterns},
+			kind:       req.Source.HubKind,
+			repository: req.Source.Repository,
+			commit:     req.Source.Commit,
+			filter:     req.Source.Filter,
+			peersOnly:  req.Source.PeersOnly,
 		}
 		j.sources[uid] = s
 		j.order = append(j.order, uid)
@@ -360,9 +381,9 @@ func (m *Materializer) attempt(ctx context.Context, j *job) error {
 
 	var lastErr error
 	for _, src := range j.snapshotSources() {
-		// An Expected identity has no commit to list at and no hub to ask: the peers holding the
-		// published tree are the only source there is.
-		if src.commit == "" {
+		// An Expected or nodeStore identity has no commit to list at and no hub to ask: the peers
+		// holding the published tree are the only source there is.
+		if src.peersOnly || src.commit == "" {
 			lastErr = m.fromPeersOnly(ctx, j, a, src)
 			break
 		}
@@ -398,9 +419,9 @@ func errNoSourceForAnchored(hex string) *download.Error {
 	}
 }
 
-// fromPeersOnly materializes an Expected identity from the peers alone: the manifest comes from a
-// peer's published listing, bound to the digest before it is trusted, and every byte comes from a
-// peer — there is no hub to fall back to.
+// fromPeersOnly materializes an Expected or nodeStore identity from the peers alone: the manifest
+// comes from a peer's published listing, bound to the digest and content class before it is
+// trusted, and every byte comes from a peer — there is no hub to fall back to.
 func (m *Materializer) fromPeersOnly(ctx context.Context, j *job, a *store.Attempt, src *source) error {
 	if !m.Peers.Enabled() {
 		noSource := errNoSourceForAnchored(j.hex)
@@ -408,7 +429,7 @@ func (m *Materializer) fromPeersOnly(ctx context.Context, j *job, a *store.Attem
 
 		return noSource
 	}
-	manifest, err := m.Peers.FetchManifest(ctx, "sha256:"+j.hex)
+	manifest, err := m.Peers.FetchManifestForKind(ctx, "sha256:"+j.hex, j.contentKind)
 	if err != nil {
 		// A cancellation under us — the waiter window firing, the plugin stopping — is the
 		// outcome, not a source verdict: it must not consume the digest's backoff.
@@ -421,6 +442,13 @@ func (m *Materializer) fromPeersOnly(ctx context.Context, j *job, a *store.Attem
 		klog.V(1).InfoS("the peers-only listing found no source", "digest", "sha256:"+j.hex, "error", err.Error())
 
 		return errNoSourceForAnchored(j.hex)
+	}
+	if j.contentKind == store.MarkerKindKernel && !hasManifestPath(manifest, dispatchManifestFile) {
+		return &download.Error{
+			Reason:  download.ReasonIntegrityMismatch,
+			Message: fmt.Sprintf("kernel manifest sha256:%s lacks %s", j.hex, dispatchManifestFile),
+			Detail:  dispatchManifestFile + " is missing",
+		}
 	}
 
 	return m.fetchTree(ctx, j, a, manifest, nil, nil, src)
@@ -449,6 +477,13 @@ func (m *Materializer) fromSource(
 			"the hub lists %s at commit %s as %s, the artifact's digest is sha256:%s",
 			src.repository, src.commit, manifest.Digest, j.hex,
 		), Detail: "the hub lists " + manifest.Digest}
+	}
+	if j.contentKind == store.MarkerKindKernel && !hasManifestPath(manifest, dispatchManifestFile) {
+		return &download.Error{
+			Reason:  download.ReasonIntegrityMismatch,
+			Message: fmt.Sprintf("kernel manifest sha256:%s lacks %s", j.hex, dispatchManifestFile),
+			Detail:  dispatchManifestFile + " is missing",
+		}
 	}
 
 	return m.fetchTree(ctx, j, a, manifest, hub, dl, src)
@@ -538,12 +573,16 @@ func (m *Materializer) fetchTree(
 		return err
 	}
 
-	full := peer.Listing{Digest: manifest.Digest}
+	markerKind := ""
+	if j.contentKind == store.MarkerKindKernel {
+		markerKind = store.MarkerKindKernel
+	}
+	full := peer.Listing{Digest: manifest.Digest, Kind: markerKind}
 	for _, e := range manifest.Entries {
 		full.Entries = append(full.Entries, peer.ManifestFile{Path: e.Path, Size: e.Size, Digest: e.Digest})
 	}
 	if b, err := json.Marshal(full); err == nil {
-		if err := os.WriteFile(filepath.Join(a.Dir(), "manifest.json"), b, 0o600); err != nil {
+		if err := writeManifestFile0600(filepath.Join(a.Dir(), "manifest.json"), b); err != nil {
 			return fmt.Errorf("store the published manifest: %w", err)
 		}
 	}
@@ -551,8 +590,37 @@ func (m *Materializer) fetchTree(
 	return a.Publish(store.Marker{
 		Digest: manifest.Digest, ManifestFormat: modelartifact.ManifestHeader,
 		SizeBytes: manifest.SizeBytes, FileCount: manifest.FileCount, PublishedTime: m.now(),
-		Source: string(j.source()),
+		Source: string(j.source()), Kind: markerKind,
 	})
+}
+
+func hasManifestPath(manifest modelartifact.Manifest, want string) bool {
+	for _, e := range manifest.Entries {
+		if e.Path == want {
+			return true
+		}
+	}
+	return false
+}
+
+func writeManifestFile0600(dest string, b []byte) error {
+	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // pullFromPeers fills f from the other nodes that hold the digest, and says whether it
@@ -570,7 +638,7 @@ func (m *Materializer) pullFromPeers(ctx context.Context, j *job, digest string,
 			f.Received(n)
 		}
 	}
-	if err := m.Peers.FetchFile(ctx, digest, withPeerCounting); err != nil {
+	if err := m.Peers.FetchFileForKind(ctx, digest, j.contentKind, withPeerCounting); err != nil {
 		j.received.Add(-fromPeers.Load())
 		klog.V(1).InfoS("a file the peers could not deliver goes to the hub", "digest", digest,
 			"path", f.Path, "error", err.Error())

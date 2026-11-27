@@ -256,3 +256,30 @@ func TestParseThreshold(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveArtifactKind(t *testing.T) {
+	assert.Equal(t, "artifactKind", VolumeAttrArtifactKind)
+	cases := []struct {
+		name    string
+		raw     string
+		want    string
+		wantErr bool
+	}{
+		{name: "empty defaults to ModelArtifact", raw: "", want: ArtifactKindModel},
+		{name: "explicit ModelArtifact", raw: "ModelArtifact", want: ArtifactKindModel},
+		{name: "explicit ModelKernelArtifact", raw: "ModelKernelArtifact", want: ArtifactKindKernel},
+		{name: "surrounding whitespace is rejected", raw: " ModelKernelArtifact ", wantErr: true},
+		{name: "unknown kind is rejected", raw: "ConfigMap", wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := ResolveArtifactKind(c.raw)
+			if c.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.want, got)
+		})
+	}
+}

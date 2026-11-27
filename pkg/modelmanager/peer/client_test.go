@@ -160,3 +160,77 @@ func TestPullerFailsWithoutADigest(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not a manifest digest")
 }
+
+func TestPullerEnforcesListingKind(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(writableAgain(st.Root()))
+	content := `{"schemaVersion":"gpustack-forge-dispatch/v1","entries":[]}`
+	manifest, err := modelartifact.NewManifest([]modelartifact.ManifestEntry{{
+		Path: "dispatch-manifest.json", Size: int64(len(content)), Digest: "sha256:" + stringx.SumBySHA256(content),
+	}})
+	require.NoError(t, err)
+	khex := strings.TrimPrefix(manifest.Digest, "sha256:")
+	a, err := st.NewAttempt(khex)
+	require.NoError(t, err)
+	dest, err := a.FilePath("dispatch-manifest.json")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(dest, []byte(content), 0o644))
+	stored, err := json.Marshal(Listing{
+		Digest: manifest.Digest,
+		Kind:   store.MarkerKindKernel,
+		Entries: []ManifestFile{{
+			Path: "dispatch-manifest.json", Size: manifest.SizeBytes, Digest: manifest.Entries[0].Digest,
+		}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(a.Dir(), "manifest.json"), stored, 0o600))
+	require.NoError(t, a.Publish(store.Marker{
+		Digest: manifest.Digest, SizeBytes: manifest.SizeBytes, FileCount: manifest.FileCount,
+		Source: store.SourceForge, Kind: store.MarkerKindKernel,
+	}))
+	kernelTS := httptest.NewServer((&Server{Store: st}).Handler())
+	t.Cleanup(kernelTS.Close)
+
+	client, err := NewClient(AuthOptions{Mode: AuthNone})
+	require.NoError(t, err)
+	kernelSrc := &Source{NodeName: "seed-1", BaseURL: kernelTS.URL, Client: client}
+
+	modelPS := newPeerServer(t, "model-weights")
+	modelSrc := modelPS.source(t, "model-1")
+
+	t.Run("kernel pull succeeds on kernel peer and refuses model peer", func(t *testing.T) {
+		p := &Puller{Discover: func(context.Context, string) ([]*Source, error) {
+			return []*Source{kernelSrc}, nil
+		}}
+		got, err := p.FetchManifestForKind(context.Background(), manifest.Digest, store.MarkerKindKernel)
+		require.NoError(t, err)
+		assert.Equal(t, manifest.Digest, got.Digest)
+
+		dir := t.TempDir()
+		err = p.FetchFileForKind(context.Background(), manifest.Digest, store.MarkerKindKernel, download.File{
+			Path:       "dispatch-manifest.json",
+			Size:       int64(len(content)),
+			Digest:     manifest.Entries[0].Digest,
+			Dest:       filepath.Join(dir, "dispatch-manifest.json"),
+			Checkpoint: filepath.Join(dir, "cp"),
+		})
+		require.NoError(t, err)
+
+		pModel := &Puller{Discover: func(context.Context, string) ([]*Source, error) {
+			return []*Source{modelSrc}, nil
+		}}
+		_, err = pModel.FetchManifestForKind(context.Background(), "sha256:"+modelPS.hex, store.MarkerKindKernel)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "kind")
+	})
+
+	t.Run("model pull refuses kernel peer", func(t *testing.T) {
+		p := &Puller{Discover: func(context.Context, string) ([]*Source, error) {
+			return []*Source{kernelSrc}, nil
+		}}
+		_, err := p.FetchManifest(context.Background(), manifest.Digest)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "kind")
+	})
+}

@@ -497,3 +497,93 @@ func TestMountedRecordsTheUse(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, testNow, rec.LastUsedTime)
 }
+
+func TestReportMapsUnrecognizedSourceToEmpty(t *testing.T) {
+	env := newTestEnv(t, validSpec())
+	cases := []struct {
+		hex        string
+		rawSource  string
+		wantSource workercore.NodeModelStoreModelSource
+	}{
+		{hex: hexOf('1'), rawSource: "Hub", wantSource: workercore.NodeModelStoreModelSourceHub},
+		{hex: hexOf('2'), rawSource: "Peer", wantSource: workercore.NodeModelStoreModelSourcePeer},
+		{hex: hexOf('3'), rawSource: "Forge", wantSource: workercore.NodeModelStoreModelSourceForge},
+		{hex: hexOf('4'), rawSource: "", wantSource: ""},
+		{hex: hexOf('5'), rawSource: "FutureRegistry", wantSource: ""},
+	}
+	for _, c := range cases {
+		a, err := env.store.NewAttempt(c.hex)
+		require.NoError(t, err)
+		p, err := a.FilePath("file.bin")
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(p, []byte("x"), 0o644))
+		require.NoError(t, a.Publish(store.Marker{
+			Digest: "sha256:" + c.hex, SizeBytes: 1, PublishedTime: testNow, Source: c.rawSource,
+		}))
+	}
+
+	require.NoError(t, env.r.Report(context.Background()))
+	got := map[string]workercore.NodeModelStoreModelSource{}
+	for _, m := range env.nms(t).Status.Models {
+		got[m.Digest] = m.Source
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.wantSource, got["sha256:"+c.hex], c.rawSource)
+	}
+}
+
+func TestReportPrioritizesPinnedAndKernelEntriesUnderCap(t *testing.T) {
+	spec := validSpec()
+	pinnedHex := hexOf('e')
+	kernelHex := hexOf('d')
+	referencedHex := hexOf('f')
+	spec.Pinned = []string{"sha256:" + pinnedHex}
+	env := newTestEnv(t, spec)
+	env.r.Collector.Pinned = env.r.Pinned
+
+	// Create MaxModels+4 unpinned non-kernel entries with more recent LastUsedTime than the
+	// pinned and kernel entries.
+	for i := range MaxModels + 4 {
+		hex := fmt.Sprintf("%064x", i+1)
+		a, err := env.store.NewAttempt(hex)
+		require.NoError(t, err)
+		p, err := a.FilePath("model.bin")
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(p, []byte("x"), 0o644))
+		require.NoError(t, a.Publish(store.Marker{
+			Digest: "sha256:" + hex, SizeBytes: 1, PublishedTime: testNow, Source: store.SourceHub,
+		}))
+		require.NoError(t, env.store.WriteDigest(hex, store.DigestRecord{
+			LastUsedTime: testNow.Add(-time.Duration(i) * time.Minute),
+		}))
+	}
+
+	// Referenced entry (highest priority).
+	env.publish(t, referencedHex, 1)
+	require.NoError(t, env.store.WriteRef(store.Ref{VolumeID: "csi-1", TargetPath: "/t", Hex: referencedHex}))
+	require.NoError(t, env.store.WriteDigest(referencedHex, store.DigestRecord{LastUsedTime: testNow.Add(-48 * time.Hour)}))
+
+	// Pinned model entry (old LastUsedTime, still prioritized ahead of unpinned LRU).
+	env.publish(t, pinnedHex, 1)
+	require.NoError(t, env.store.WriteDigest(pinnedHex, store.DigestRecord{LastUsedTime: testNow.Add(-36 * time.Hour)}))
+
+	// Unpinned forged kernel entry (old LastUsedTime, prioritized ahead of unpinned model LRU).
+	ka, err := env.store.NewAttempt(kernelHex)
+	require.NoError(t, err)
+	kp, err := ka.FilePath("dispatch-manifest.json")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(kp, []byte("{}"), 0o644))
+	require.NoError(t, ka.Publish(store.Marker{
+		Digest: "sha256:" + kernelHex, SizeBytes: 2, PublishedTime: testNow.Add(-24 * time.Hour),
+		Source: store.SourceForge, Kind: store.MarkerKindKernel,
+	}))
+	require.NoError(t, env.store.WriteDigest(kernelHex, store.DigestRecord{LastUsedTime: testNow.Add(-24 * time.Hour)}))
+
+	require.NoError(t, env.r.Report(context.Background()))
+	st := env.nms(t).Status
+	require.Len(t, st.Models, MaxModels)
+	assert.Equal(t, "sha256:"+referencedHex, st.Models[0].Digest, "referenced entry comes first")
+	assert.Equal(t, "sha256:"+pinnedHex, st.Models[1].Digest, "pinned entry comes ahead of unpinned entries")
+	assert.Equal(t, "sha256:"+kernelHex, st.Models[2].Digest, "kernel entry comes ahead of unpinned model LRU")
+	assert.Equal(t, workercore.NodeModelStoreModelSourceForge, st.Models[2].Source)
+}
