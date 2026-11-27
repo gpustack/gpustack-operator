@@ -3723,6 +3723,9 @@ func validateModelDeploymentRoleRuntimeControlScope(
 	if workerctrl.ModelDeploymentRoleUsesSGLangRay(engine, role) {
 		errs = append(errs, field.Forbidden(ctrlPath, "not supported on SGLang Ray roles"))
 	}
+	if workerctrl.ModelDeploymentRoleUsesSGLangRustServer(engine, role) {
+		errs = append(errs, field.Forbidden(ctrlPath, "not supported on SGLang Rust server roles"))
+	}
 	return errs
 }
 

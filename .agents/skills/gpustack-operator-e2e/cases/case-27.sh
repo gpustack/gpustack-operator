@@ -882,13 +882,13 @@ else
       -l "modeldeployment.gpustack.ai/router=llm-d-router,app.kubernetes.io/instance=${ROUTER_READY}" \
       -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
     obs_rc=0
-    obs_body="$(k get --raw "/api/v1/namespaces/${OPERATOR_NS}/pods/http:${rpod}:9091/proxy/observer/endpoints" 2>&1)" || obs_rc=$?
-    if [ "$obs_rc" -eq 0 ] && printf '%s' "$obs_body" | jq -e '(.endpoints | type == "array") and ([.endpoints[]? | select(.selection.circuit_open == true)] | length == 0)' >/dev/null 2>&1; then
-      obs_count="$(printf '%s' "$obs_body" | jq -r '.endpoints | length')"
-      record PASS "llm-d-router :9091/observer/endpoints responds 200 with conservative circuit_open=false" \
-        "endpoints=${obs_count}, circuit_open_true=0"
+    obs_body="$(k get --raw "/api/v1/namespaces/${OPERATOR_NS}/pods/http:${rpod}:9090/proxy/observer/endpoints" 2>&1)" || obs_rc=$?
+    if [ "$obs_rc" -eq 0 ] && printf '%s' "$obs_body" | jq -e '(.workers | type == "array") and ([.workers[]? | select(.selection.circuit_open == true)] | length == 0)' >/dev/null 2>&1; then
+      obs_count="$(printf '%s' "$obs_body" | jq -r '.workers | length')"
+      record PASS "llm-d-router :9090/observer/endpoints responds 200 with conservative circuit_open=false" \
+        "workers=${obs_count}, circuit_open_true=0"
     else
-      record FAIL "llm-d-router :9091/observer/endpoints responds 200 with conservative circuit_open=false" \
+      record FAIL "llm-d-router :9090/observer/endpoints responds 200 with conservative circuit_open=false" \
         "rc=${obs_rc} body=$(printf '%s' "$obs_body" | tr '\n' ' ' | cut -c1-180)"
     fi
     envoy_r0="$(k -n "$OPERATOR_NS" get pod "$rpod" -o jsonpath='{.status.containerStatuses[?(@.name=="envoy")].restartCount}' 2>/dev/null)"
@@ -927,6 +927,7 @@ spec:
   engine:
     name: vLLM
     image: ${IMAGE}
+    version: "0.19.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   router:
@@ -939,6 +940,7 @@ spec:
     replicas: 1
     size: 2
     image: ${IMAGE}
+    engineVersion: "0.19.0"
     extraArgs:
       - --data-parallel-size
       - "2"

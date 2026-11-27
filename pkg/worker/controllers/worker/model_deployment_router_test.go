@@ -116,6 +116,74 @@ func TestRenderModelDeploymentRouterObjects_ExternalDPShapeRendersDPAware(t *tes
 		"the recorded shape declares --attn-dp-size 2 and no --dp-size; the attention width is what the gate reads")
 }
 
+// TestRenderModelDeploymentRouterObjects_SingleRoleSGLangDPAware verifies that undivided SGLang
+// Server roles emit --dp-aware on sgl-router and sglang-gateway whenever a managed role declares
+// --dp-size >= 2 or --attn-dp-size >= 2, and omit it for width 1 or unmanaged roles.
+func TestRenderModelDeploymentRouterObjects_SingleRoleSGLangDPAware(t *testing.T) {
+	testCases := []struct {
+		name        string
+		routerName  string
+		extraArgs   []string
+		command     []string
+		wantDPAware bool
+	}{
+		{
+			name:        "sgl-router single-role --dp-size=2 emits --dp-aware",
+			routerName:  workercore.ModelDeploymentRouterSGL,
+			extraArgs:   []string{"--dp-size=2", "--tp-size=1"},
+			wantDPAware: true,
+		},
+		{
+			name:        "sgl-router single-role --dp-size=1 omits --dp-aware",
+			routerName:  workercore.ModelDeploymentRouterSGL,
+			extraArgs:   []string{"--dp-size=1", "--tp-size=1"},
+			wantDPAware: false,
+		},
+		{
+			name:        "sgl-router single-role without dp flags omits --dp-aware",
+			routerName:  workercore.ModelDeploymentRouterSGL,
+			extraArgs:   []string{"--tp-size=2"},
+			wantDPAware: false,
+		},
+		{
+			name:        "sglang-gateway single-role --dp-size=2 emits --dp-aware",
+			routerName:  workercore.ModelDeploymentRouterSGLang,
+			extraArgs:   []string{"--dp-size", "2"},
+			wantDPAware: true,
+		},
+		{
+			name:        "sgl-router unmanaged role with --dp-size=2 omits --dp-aware",
+			routerName:  workercore.ModelDeploymentRouterSGL,
+			command:     []string{"python", "-m", "sglang.launch_server"},
+			extraArgs:   []string{"--dp-size=2"},
+			wantDPAware: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := twoRoleDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: tc.routerName}
+				md.Spec.Roles = md.Spec.Roles[:1]
+				md.Spec.Roles[0].Name = "server"
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+				md.Spec.Roles[0].Command = tc.command
+				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
+			})
+
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+			require.NoError(t, err)
+			args := routerContainerArgs(objects.Deployment.Spec.Template.Spec.Containers)
+			if tc.wantDPAware {
+				assert.Contains(t, args, "--dp-aware")
+			} else {
+				assert.NotContains(t, args, "--dp-aware")
+			}
+		})
+	}
+}
+
 // TestRenderModelDeploymentRouterObjects_BothSelectorsSelectOnlyThePodsThatAnswer states the set
 // every discovery path names: the members that answer the API, one per replica, at every role size.
 //
@@ -3224,6 +3292,18 @@ func TestRenderModelDeploymentRouterObjects_AutoAllowlistSidecarOnRuntimeControl
 			mutateRole: func(role *workercore.ModelDeploymentRole) {
 				role.ReplicaSize = 2
 				role.ExtraArgs = []string{"--distributed-executor-backend=ray", "--nnodes", "2"}
+			},
+			wantAllowlist:  false,
+			wantContainers: 1,
+		},
+		{
+			name:       "SGLang Rust server role stays single-container",
+			routerName: workercore.ModelDeploymentRouterSGL,
+			engineName: workercore.ModelDeploymentEngineSGLang,
+			mutateRole: func(role *workercore.ModelDeploymentRole) {
+				role.ReplicaSize = 2
+				role.ExtraArgs = []string{"--attn-dp-size", "2", "--nnodes", "2"}
+				role.Env = []workercore.ModelDeploymentEnvVar{{Name: modelDeploymentSGLangRustServerEnv, Value: "1"}}
 			},
 			wantAllowlist:  false,
 			wantContainers: 1,

@@ -603,22 +603,27 @@ func renderModelDeploymentRouterObjectsWithProxy(
 		ExtraArgs:         md.Spec.Router.ExtraArgs,
 		HasUnmanagedRoles: hasUnmanagedRoles,
 	}
-	// THE SGLANG EXTERNAL DP SHAPE NAMES ITS WIDTH TO THE GATEWAY. The gateway's --dp-aware fans
-	// its worker registration out per dp member, which is the one-worker-per-member contract the
-	// shape is held to; a width under two renders nothing, and so does every other engine. The
-	// first external role the declaration carries decides the width: a deployment declaring more
-	// than one such role is outside the validated shapes, and the later roles are not read.
-	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang {
-		if md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL &&
-			ModelDeploymentDeclaresBothHalves(md) {
+	// SGLang DP shapes (both --attn-dp-size and --dp-size at width >= 2) name their DP width to
+	// sglang-gateway and sgl-router so the router renders --dp-aware. On disaggregated PD shapes
+	// only sgl-router permits --dp-aware alongside PD selectors; on undivided Server shapes both
+	// sgl-router and sglang-gateway take --dp-aware from the highest managed role DP width.
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang &&
+		(md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL ||
+			md.Spec.Router.Name == workercore.ModelDeploymentRouterSGLang) {
+		isPD := ModelDeploymentDeclaresBothHalves(md)
+		if !isPD || md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL {
 			for i := range md.Spec.Roles {
 				role := &md.Spec.Roles[i]
 				if len(role.Command) > 0 {
 					continue
 				}
 				kind := ModelDeploymentEffectiveRoleKind(role)
-				if kind != workercore.ModelDeploymentRoleKindPrefill &&
+				if isPD &&
+					kind != workercore.ModelDeploymentRoleKindPrefill &&
 					kind != workercore.ModelDeploymentRoleKindDecode {
+					continue
+				}
+				if !isPD && kind == workercore.ModelDeploymentRoleKindEncode {
 					continue
 				}
 				reading, err := scanModelDeploymentParallelism(
@@ -626,7 +631,7 @@ func renderModelDeploymentRouterObjectsWithProxy(
 				)
 				if err != nil {
 					return ModelDeploymentRouterObjects{}, fmt.Errorf(
-						"read the pd dp width the router renders: %w", err,
+						"read the dp width the router renders: %w", err,
 					)
 				}
 				dpWidth := max(reading.declared.AttentionDataParallel, reading.declared.DataParallel)
@@ -636,22 +641,6 @@ func renderModelDeploymentRouterObjectsWithProxy(
 						routerInput.AttentionDataParallelSize = clamped
 					}
 				}
-			}
-		} else {
-			for i := range md.Spec.Roles {
-				if !modelDeploymentRoleExternalDP(md, &md.Spec.Roles[i]) {
-					continue
-				}
-				reading, err := scanModelDeploymentParallelism(
-					md.Spec.Engine.Name, md.Spec.Roles[i].ExtraArgs, md.Spec.Roles[i].Env,
-				)
-				if err != nil {
-					return ModelDeploymentRouterObjects{}, fmt.Errorf(
-						"read the external-dp width the router renders: %w", err,
-					)
-				}
-				routerInput.AttentionDataParallelSize = int32(reading.declared.AttentionDataParallel)
-				break
 			}
 		}
 	}

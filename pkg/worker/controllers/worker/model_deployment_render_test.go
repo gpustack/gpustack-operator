@@ -5178,6 +5178,66 @@ func TestRenderModelDeploymentPod_EngineSentinel(t *testing.T) {
 		})
 		assert.True(t, ModelDeploymentRoleSupportsEngineSentinel(sglangMP, &sglangMP.Spec.Roles[0]))
 
+		// SGLANG_RUST_SERVER=1/true runs the Rust sglang_server binary instead of Python uvicorn,
+		// so engine-sentinel must not be injected and probes fall back to /health.
+		rustCases := []struct {
+			name         string
+			engine       string
+			env          []workercore.ModelDeploymentEnvVar
+			wantSentinel bool
+		}{
+			{
+				name:         "SGLang with SGLANG_RUST_SERVER=1 skips engine-sentinel",
+				engine:       workercore.ModelDeploymentEngineSGLang,
+				env:          []workercore.ModelDeploymentEnvVar{{Name: modelDeploymentSGLangRustServerEnv, Value: "1"}},
+				wantSentinel: false,
+			},
+			{
+				name:         "SGLang with SGLANG_RUST_SERVER=true skips engine-sentinel",
+				engine:       workercore.ModelDeploymentEngineSGLang,
+				env:          []workercore.ModelDeploymentEnvVar{{Name: modelDeploymentSGLangRustServerEnv, Value: "true"}},
+				wantSentinel: false,
+			},
+			{
+				name:         "SGLang with SGLANG_RUST_SERVER=0 keeps engine-sentinel",
+				engine:       workercore.ModelDeploymentEngineSGLang,
+				env:          []workercore.ModelDeploymentEnvVar{{Name: modelDeploymentSGLangRustServerEnv, Value: "0"}},
+				wantSentinel: true,
+			},
+			{
+				name:         "SGLang with normal Python frontend keeps engine-sentinel",
+				engine:       workercore.ModelDeploymentEngineSGLang,
+				wantSentinel: true,
+			},
+			{
+				name:         "vLLM ignores SGLANG_RUST_SERVER and keeps engine-sentinel",
+				engine:       workercore.ModelDeploymentEngineVLLM,
+				env:          []workercore.ModelDeploymentEnvVar{{Name: modelDeploymentSGLangRustServerEnv, Value: "1"}},
+				wantSentinel: true,
+			},
+		}
+		for _, rc := range rustCases {
+			rustMD := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = rc.engine
+				md.Spec.Roles[0].Env = rc.env
+			})
+			assert.Equal(t, rc.wantSentinel, ModelDeploymentRoleSupportsEngineSentinel(rustMD, &rustMD.Spec.Roles[0]), rc.name)
+			pod := renderOne(t, rustMD, nvidiaAT)
+			if rc.wantSentinel {
+				assert.NotNil(t, findVolume(pod, modelDeploymentEngineSentinelVolumeName), rc.name)
+				assert.NotNil(t, envByName(pod.Spec.Containers[0].Env, modelDeploymentEngineSentinelEnableEnv), rc.name)
+				assert.Equal(t, "/gpustack/v1/live", pod.Spec.Containers[0].StartupProbe.HTTPGet.Path, rc.name)
+				assert.Equal(t, "/gpustack/v1/ready", pod.Spec.Containers[0].ReadinessProbe.HTTPGet.Path, rc.name)
+				assert.Equal(t, "/gpustack/v1/live", pod.Spec.Containers[0].LivenessProbe.HTTPGet.Path, rc.name)
+			} else {
+				assert.Nil(t, findVolume(pod, modelDeploymentEngineSentinelVolumeName), rc.name)
+				assert.Nil(t, envByName(pod.Spec.Containers[0].Env, modelDeploymentEngineSentinelEnableEnv), rc.name)
+				assert.Equal(t, "/health", pod.Spec.Containers[0].StartupProbe.HTTPGet.Path, rc.name)
+				assert.Equal(t, "/health", pod.Spec.Containers[0].ReadinessProbe.HTTPGet.Path, rc.name)
+				assert.Equal(t, "/health", pod.Spec.Containers[0].LivenessProbe.HTTPGet.Path, rc.name)
+			}
+		}
+
 		vllmRay := newRenderDeployment(func(md *workercore.ModelDeployment) {
 			md.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
 			md.Spec.Roles[0].ExtraArgs = []string{"--distributed-executor-backend=ray"}

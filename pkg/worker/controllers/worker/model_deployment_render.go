@@ -2718,7 +2718,25 @@ func modelDeploymentRoleSupportsEngineSentinelCommon(
 	if engine != workercore.ModelDeploymentEngineVLLM && engine != workercore.ModelDeploymentEngineSGLang {
 		return false
 	}
-	return !ModelDeploymentRoleUsesSGLangRay(engine, role)
+	if ModelDeploymentRoleUsesSGLangRay(engine, role) || ModelDeploymentRoleUsesSGLangRustServer(engine, role) {
+		return false
+	}
+
+	return true
+}
+
+// ModelDeploymentRoleUsesSGLangRustServer reports whether an SGLang role enables the Rust server
+// frontend via SGLANG_RUST_SERVER, which does not load Python's sitecustomize engine-sentinel hook.
+func ModelDeploymentRoleUsesSGLangRustServer(engine string, role *workercore.ModelDeploymentRole) bool {
+	if engine != workercore.ModelDeploymentEngineSGLang || role == nil {
+		return false
+	}
+	val, ok := modelDeploymentEnvValue(role.Env, modelDeploymentSGLangRustServerEnv)
+	if !ok {
+		return false
+	}
+
+	return modelDeploymentEngineBool(val)
 }
 
 // ModelDeploymentRoleUsesSGLangRay reports whether an SGLang role configures Ray-backed execution.
