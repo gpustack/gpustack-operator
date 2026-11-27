@@ -152,7 +152,8 @@ that had a reason to run. See [Preflight Checks](../modules/devices/preflight.md
 
 No operator-generated `ResourceFlavor` pins any of these keys: a flavor selects on accelerator and pool
 labels only, so withholding `rdma.capable` removes a node from the workloads that select on it, not
-from a queue.
+from a queue. None of the keys says whether *RDMA* traffic passes between two nodes; that is a check
+you run between them, see [Fabric check between nodes](../modules/rdma/operations.md#fabric-check-between-nodes).
 
 `rdma.software` means software ONLY. A node with a usable hardware adapter beside a software device
 does not carry it, and a node with no usable endpoint carries neither key. A software-carried
