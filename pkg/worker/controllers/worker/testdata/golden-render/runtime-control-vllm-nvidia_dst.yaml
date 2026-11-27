@@ -321,7 +321,7 @@ spec:
         - modeldeployment.gpustack.ai/member-index=0
         command:
         - vllm-router
-        image: gpustack/llm-router:v0.5.0
+        image: gpustack/llm-router:v0.6.0
         imagePullPolicy: IfNotPresent
         name: router
         ports:
