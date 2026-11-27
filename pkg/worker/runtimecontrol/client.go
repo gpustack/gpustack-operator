@@ -33,6 +33,8 @@ const (
 	PathPause = "/gpustack/v1/pause"
 	// PathRuntimeConfig is the engine sentinel runtime-config inspection and apply route.
 	PathRuntimeConfig = "/gpustack/v1/runtime_config"
+	// PathProbe is the engine sentinel short-window profiler probe route.
+	PathProbe = "/gpustack/v1/probe"
 )
 
 var (
@@ -112,6 +114,7 @@ type Target struct {
 	Port               int
 	TLSConfig          *tls.Config
 	InsecureSkipVerify bool
+	ProbeAuthToken     string
 }
 
 func (t Target) baseURL() (string, error) {
@@ -134,11 +137,14 @@ func (t Target) baseURL() (string, error) {
 
 // ReadyResponse matches GET /gpustack/v1/ready and POST /gpustack/v1/ack responses.
 type ReadyResponse struct {
-	Ready               bool   `json:"ready"`
-	BootID              string `json:"boot_id"`
-	ObservedGeneration  *int64 `json:"observed_generation"`
-	AppliedConfigDigest string `json:"applied_config_digest"`
-	Reason              string `json:"reason,omitempty"`
+	Ready                  bool     `json:"ready"`
+	BootID                 string   `json:"boot_id"`
+	ObservedGeneration     *int64   `json:"observed_generation"`
+	AppliedConfigDigest    string   `json:"applied_config_digest"`
+	Reason                 string   `json:"reason,omitempty"`
+	LoadedKernelKeys       []string `json:"loaded_kernel_keys,omitempty"`
+	DispatchManifestDigest string   `json:"dispatch_manifest_digest,omitempty"`
+	KernelLoadError        string   `json:"kernel_load_error,omitempty"`
 }
 
 // LiveResponse matches GET /gpustack/v1/live responses.
@@ -170,28 +176,34 @@ type PauseResponse struct {
 
 // RankReceipt captures per-rank convergence metadata returned by /gpustack/v1/runtime_config.
 type RankReceipt struct {
-	RankID          int            `json:"rank_id"`
-	BootID          string         `json:"boot_id"`
-	MembershipEpoch int64          `json:"membership_epoch"`
-	AppliedDigest   string         `json:"applied_digest"`
-	Values          map[string]any `json:"values,omitempty"`
+	RankID                 int            `json:"rank_id"`
+	BootID                 string         `json:"boot_id"`
+	MembershipEpoch        int64          `json:"membership_epoch"`
+	AppliedDigest          string         `json:"applied_digest"`
+	Values                 map[string]any `json:"values,omitempty"`
+	LoadedKernelKeys       []string       `json:"loaded_kernel_keys,omitempty"`
+	DispatchManifestDigest string         `json:"dispatch_manifest_digest,omitempty"`
+	KernelLoadError        string         `json:"kernel_load_error,omitempty"`
 }
 
 // RuntimeConfigState matches GET and POST /gpustack/v1/runtime_config responses.
 type RuntimeConfigState struct {
-	Engine              string         `json:"engine"`
-	BootID              string         `json:"boot_id"`
-	MembershipEpoch     int64          `json:"membership_epoch"`
-	ObservedGeneration  *int64         `json:"observed_generation"`
-	AppliedConfigDigest string         `json:"applied_config_digest"`
-	LastOperationID     string         `json:"last_operation_id"`
-	Ready               bool           `json:"ready"`
-	Paused              bool           `json:"paused"`
-	SupportedFields     []string       `json:"supported_fields"`
-	UnsupportedFields   []string       `json:"unsupported_fields"`
-	BootDefaults        map[string]any `json:"boot_defaults"`
-	Ranks               []RankReceipt  `json:"ranks"`
-	Values              map[string]any `json:"values"`
+	Engine                 string         `json:"engine"`
+	BootID                 string         `json:"boot_id"`
+	MembershipEpoch        int64          `json:"membership_epoch"`
+	ObservedGeneration     *int64         `json:"observed_generation"`
+	AppliedConfigDigest    string         `json:"applied_config_digest"`
+	LastOperationID        string         `json:"last_operation_id"`
+	Ready                  bool           `json:"ready"`
+	Paused                 bool           `json:"paused"`
+	SupportedFields        []string       `json:"supported_fields"`
+	UnsupportedFields      []string       `json:"unsupported_fields"`
+	BootDefaults           map[string]any `json:"boot_defaults"`
+	Ranks                  []RankReceipt  `json:"ranks"`
+	Values                 map[string]any `json:"values"`
+	LoadedKernelKeys       []string       `json:"loaded_kernel_keys,omitempty"`
+	DispatchManifestDigest string         `json:"dispatch_manifest_digest,omitempty"`
+	KernelLoadError        string         `json:"kernel_load_error,omitempty"`
 }
 
 // ApplyRuntimeConfigRequest matches POST /gpustack/v1/runtime_config request bodies.
@@ -304,6 +316,7 @@ func (c *Client) httpClientFor(target Target) (*http.Client, func()) {
 
 type rawResponse struct {
 	StatusCode int
+	Headers    http.Header
 	Body       []byte
 }
 
@@ -341,6 +354,9 @@ func (c *Client) do(
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if pathWithQuery == PathProbe && strings.TrimSpace(target.ProbeAuthToken) != "" {
+		req.Header.Set("X-GPUStack-Probe-Token", strings.TrimSpace(target.ProbeAuthToken))
+	}
 
 	httpClient, cleanup := c.httpClientFor(target)
 	defer cleanup()
@@ -369,7 +385,7 @@ func (c *Client) do(
 		return nil, fmt.Errorf("%w: %s %s exceeded %d bytes", ErrResponseTooLarge, method, pathWithQuery, c.maxResponseBytes)
 	}
 
-	return &rawResponse{StatusCode: resp.StatusCode, Body: raw}, nil
+	return &rawResponse{StatusCode: resp.StatusCode, Headers: resp.Header.Clone(), Body: raw}, nil
 }
 
 func wrapAmbiguous(op, operationID string, err error) *AmbiguousOperationError {

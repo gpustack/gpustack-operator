@@ -565,3 +565,81 @@ func TestClient_ValidationErrorPathsAndCustomTLS(t *testing.T) {
 	}, "b1", "sha256:123")
 	require.ErrorIs(t, dupErr, ErrRankApplyFailed)
 }
+
+func TestClient_AdditiveKernelLoaderFields(t *testing.T) {
+	t.Parallel()
+
+	const (
+		bootID         = "boot-kernel-1"
+		dispatchDigest = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+		kernelKey      = "vllm/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef"
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case PathReady:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ready":                    true,
+				"boot_id":                  bootID,
+				"observed_generation":      int64(2),
+				"applied_config_digest":    "sha256:cfg",
+				"loaded_kernel_keys":       []string{kernelKey},
+				"dispatch_manifest_digest": dispatchDigest,
+			})
+		case PathRuntimeConfig:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"engine":                   "vllm",
+				"boot_id":                  bootID,
+				"membership_epoch":         int64(1),
+				"observed_generation":      int64(2),
+				"applied_config_digest":    "sha256:cfg",
+				"last_operation_id":        "op-1",
+				"ready":                    true,
+				"paused":                   false,
+				"supported_fields":         []string{},
+				"unsupported_fields":       []string{},
+				"boot_defaults":            map[string]any{},
+				"values":                   map[string]any{},
+				"loaded_kernel_keys":       []string{kernelKey},
+				"dispatch_manifest_digest": dispatchDigest,
+				"kernel_load_error":        "unsupported_kernel_artifact",
+				"ranks": []map[string]any{
+					{
+						"rank_id":                  0,
+						"boot_id":                  "rank-0",
+						"membership_epoch":         int64(1),
+						"applied_digest":           "sha256:cfg",
+						"loaded_kernel_keys":       []string{kernelKey},
+						"dispatch_manifest_digest": dispatchDigest,
+						"kernel_load_error":        "unsupported_kernel_artifact",
+					},
+				},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := NewClient()
+	target := targetFromServer(t, srv)
+	ctx := context.Background()
+
+	readyResp, err := client.GetReady(ctx, target)
+	require.NoError(t, err)
+	require.True(t, readyResp.Ready)
+	require.Equal(t, []string{kernelKey}, readyResp.LoadedKernelKeys)
+	require.Equal(t, dispatchDigest, readyResp.DispatchManifestDigest)
+	require.Empty(t, readyResp.KernelLoadError)
+
+	rcResp, err := client.GetRuntimeConfig(ctx, target)
+	require.NoError(t, err)
+	require.Equal(t, []string{kernelKey}, rcResp.LoadedKernelKeys)
+	require.Equal(t, dispatchDigest, rcResp.DispatchManifestDigest)
+	require.Equal(t, "unsupported_kernel_artifact", rcResp.KernelLoadError)
+	require.Len(t, rcResp.Ranks, 1)
+	require.Equal(t, []string{kernelKey}, rcResp.Ranks[0].LoadedKernelKeys)
+	require.Equal(t, dispatchDigest, rcResp.Ranks[0].DispatchManifestDigest)
+	require.Equal(t, "unsupported_kernel_artifact", rcResp.Ranks[0].KernelLoadError)
+}
