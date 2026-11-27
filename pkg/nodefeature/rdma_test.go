@@ -42,6 +42,15 @@ func softNIC(name string, link *workercore.DeviceInterfaceLink) device.Interface
 	}
 }
 
+// externalRDMA is a verbs device under another owner's allocation, as discovery records the AWS
+// EFA driver's: its PCI function has no netdev, so no interface record names it, and GPUStack
+// never allocates it.
+func externalRDMA(name string) device.RDMADevice {
+	return device.RDMADevice{
+		Name: name, Driver: "efa", Owner: device.RDMADeviceOwnerExternal,
+	}
+}
+
 // vfRDMA is a virtual function carrying a bound RDMA device and a link verdict.
 //
 // It has its own NUMA affinity, because the API type carries one and the sysfs reader fills it from
@@ -87,6 +96,7 @@ func TestConstructRDMANodeLabels(t *testing.T) {
 		name       string
 		groups     device.DevicesGroupList
 		interfaces []device.Interface
+		devices    []device.RDMADevice
 		want       map[string]string
 	}{
 		{
@@ -369,11 +379,54 @@ func TestConstructRDMANodeLabels(t *testing.T) {
 				NodeRDMASoftwareLabelKey: "true",
 			},
 		},
+		{
+			// The two keys answer different questions, and here both answers are true: the RDMA
+			// GPUStack hands out is software, and there is RDMA on the node GPUStack never allocates.
+			// Suppressing the software key on the strength of the external device would send a
+			// workload that needs hardware RDMA to a node whose only allocatable RDMA is software.
+			name:   "an external device beside a usable software interface",
+			groups: acceleratorAt("0000:01:00.0", "0000:00:01.0", "0", []string{"0000:00:01.0"}),
+			interfaces: []device.Interface{
+				softNIC("bond0", linkState(workercore.DeviceInterfaceLinkStateOK)),
+			},
+			devices: []device.RDMADevice{externalRDMA("efa_0")},
+			want: map[string]string{
+				NodeRDMACapableLabelKey:  "true",
+				NodeRDMASoftwareLabelKey: "true",
+				NodeRDMAExternalLabelKey: "true",
+			},
+		},
+		{
+			// An external device beside a hardware one: the locality keys still describe the hardware
+			// endpoint, and the software key stays absent because that endpoint is not software.
+			name:   "an external device beside a usable hardware interface",
+			groups: acceleratorAt("0000:01:00.0", "0000:00:01.0", "0", []string{"0000:00:01.0"}),
+			interfaces: []device.Interface{
+				rdmaNIC("eth0", "0000:02:00.0", "0000:00:01.0", "0", []string{"0000:00:01.0"},
+					linkState(workercore.DeviceInterfaceLinkStateOK)),
+			},
+			devices: []device.RDMADevice{externalRDMA("efa_0")},
+			want: map[string]string{
+				NodeRDMACapableLabelKey:  "true",
+				NodeRDMANumaLabelKey:     "0",
+				NodeRDMADistanceLabelKey: "PIX",
+				NodeRDMAExternalLabelKey: "true",
+			},
+		},
+		{
+			// The EFA-only node. No interface record names the device, so no endpoint is usable and
+			// none of the other four keys is set; the map is non-nil and carries the one key, which is
+			// the only fact about RDMA such a node can publish.
+			name:    "an external device alone carries only the external key",
+			groups:  acceleratorAt("0000:01:00.0", "0000:00:01.0", "0", []string{"0000:00:01.0"}),
+			devices: []device.RDMADevice{externalRDMA("efa_0")},
+			want:    map[string]string{NodeRDMAExternalLabelKey: "true"},
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ConstructRDMANodeLabels(tc.groups, tc.interfaces)
+			got := ConstructRDMANodeLabels(tc.groups, tc.interfaces, tc.devices)
 
 			if len(got) != len(tc.want) {
 				t.Fatalf("labels = %v, want %v", got, tc.want)
@@ -438,12 +491,14 @@ func TestRDMALabelsAreNotPoolDiscriminators(t *testing.T) {
 	labels := PoolScheduleLabels(true, true, "amd-25-1", "nvidia-h100", "linux", "amd64")
 	labels[NodeRDMACapableLabelKey] = "true"
 	labels[NodeRDMASoftwareLabelKey] = "true"
+	labels[NodeRDMAExternalLabelKey] = "true"
 	labels[NodeRDMADistanceLabelKey] = "PIX"
 	labels[NodeRDMANumaLabelKey] = "0"
 
 	selector := PoolFlavorSelector(labels)
 	for k := range selector {
 		if k == NodeRDMACapableLabelKey || k == NodeRDMASoftwareLabelKey ||
+			k == NodeRDMAExternalLabelKey ||
 			k == NodeRDMADistanceLabelKey || k == NodeRDMANumaLabelKey {
 			t.Errorf("%s reached the pool selector; a link going down would then move nodes "+
 				"between pools instead of stopping a flavor from selecting them", k)
@@ -472,7 +527,7 @@ func TestRDMALabelValuesAreValidBeforeSanitizing(t *testing.T) {
 				linkState(workercore.DeviceInterfaceLinkStateOK)),
 			rdmaNIC("eth2", "0000:82:00.0", "0000:80:02.0", "12", []string{"0000:80:02.0"},
 				linkState(workercore.DeviceInterfaceLinkStateOK)),
-		},
+		}, nil,
 	)
 
 	if len(labels) == 0 {

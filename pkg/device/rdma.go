@@ -23,7 +23,8 @@ const (
 	// device.
 	RDMADeviceOwnerGPUStack RDMADeviceOwner = "GPUStack"
 	// RDMADeviceOwnerExternal marks a device that authoritative evidence places under another
-	// owner's allocation, such as the AWS EFA driver. The observation still records the device.
+	// owner's allocation, such as the AWS EFA driver. The observation still records the device,
+	// which the node label `feature.gpustack.ai/rdma.external` names without GPUStack allocating it.
 	RDMADeviceOwnerExternal RDMADeviceOwner = "External"
 )
 

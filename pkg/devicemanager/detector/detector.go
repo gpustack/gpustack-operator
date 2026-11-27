@@ -724,6 +724,19 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 				"and the fabric labels are left as previously published")
 	}
 
+	// The RDMA feature labels take one more input: this round's host verbs inventory. It is read
+	// from the snapshot this round's DetectRDMAInterfaces refreshed at the top of the detect loop,
+	// not enumerated again here, so the labels and the plugin read one observation per pass; the
+	// monitor loop that would refresh the snapshot again runs only after this pass. An absent or
+	// incomplete snapshot is a read that failed, and the pass then carries no devices: the
+	// external-owner key is simply not reported, never computed from the devices a failed pass
+	// retained.
+	rdmaSnapshot := d.rdmaInterfaceSnapshot.Load()
+	var rdmaDevices []device.RDMADevice
+	if rdmaSnapshot != nil && rdmaSnapshot.Complete {
+		rdmaDevices = rdmaSnapshot.Devices
+	}
+
 	// NodeFeature.
 
 	nfCli := lpCli.NfdV1alpha1().NodeFeatures(kuberess.SystemNamespaceName)
@@ -738,7 +751,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		},
 		Spec: func() nfd.NodeFeatureSpec {
 			nfs := nfd.NewNodeFeatureSpec()
-			nfs.Labels = nodeFeatureLabels(eGroups, nodeGroups, eInterfaces,
+			nfs.Labels = nodeFeatureLabels(eGroups, nodeGroups, eInterfaces, rdmaDevices,
 				eInterfacesErr == nil, syncNodeWide)
 			return *nfs
 		}(),
@@ -856,10 +869,13 @@ func nodeWideReadSynced(err error) bool {
 // computes, the object still looks healthy, and only a mixed-vendor node ever shows the difference.
 //
 // ownGroups are this pass's own accelerators; nodeGroups are those plus the other manufacturers'.
-// syncInterfaces and syncNodeWide report whether the read behind each node-wide set actually
-// happened, and a label withheld here is removed from the object by nodeFeatureAlignment.
+// rdmaDevices is this pass's host verbs inventory, complete or nil — nil is a read that failed, and
+// it publishes no external-owner key rather than one a failed pass could not support. syncInterfaces
+// and syncNodeWide report whether the read behind each node-wide set actually happened, and a label
+// withheld here is removed from the object by nodeFeatureAlignment.
 func nodeFeatureLabels(
 	ownGroups, nodeGroups device.DevicesGroupList, interfaces []device.Interface,
+	rdmaDevices []device.RDMADevice,
 	syncInterfaces, syncNodeWide bool,
 ) map[string]string {
 	// Accelerator labels describe what this pass detected, and each manufacturer's pass contributes
@@ -886,9 +902,11 @@ func nodeFeatureLabels(
 	// Only when this pass enumerated. A failed read must leave whatever was published before it
 	// standing: emitting nothing here, combined with the stale-key removal, would withhold the RDMA
 	// labels on the strength of a read that never happened — and withholding one of them stops a
-	// flavor selecting this node.
+	// flavor selecting this node. The external-owner key joins the set on the same gate: its evidence
+	// is the verbs inventory rather than the interface record, but the set is published and removed
+	// as one, and a pass that could not enumerate the interfaces cannot support moving any of it.
 	if syncInterfaces {
-		maps.Copy(labels, nodefeature.ConstructRDMANodeLabels(nodeGroups, interfaces))
+		maps.Copy(labels, nodefeature.ConstructRDMANodeLabels(nodeGroups, interfaces, rdmaDevices))
 	}
 
 	return labels

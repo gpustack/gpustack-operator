@@ -1361,6 +1361,80 @@ func TestReportDevices_MockAnnotationBoundary(t *testing.T) {
 	}
 }
 
+// TestReportDevices_RDMAExternalOwnerLabel pins the external-owner key against the whole pass it
+// travels: the mock verbs inventory, the snapshot the round refreshed from it, and the NodeFeature
+// the pass writes. The EFA-only shape is the one the key exists for — no interface record names the
+// device, so no other RDMA key is published — and the second phase is the failed-read contract: the
+// key is removed rather than computed from the devices a failed pass retained, so a stale `true`
+// never outlives the read that stopped supporting it.
+func TestReportDevices_RDMAExternalOwnerLabel(t *testing.T) {
+	const nodeName = "node-rdma-external"
+	t.Setenv("KUBERNETES_NODE_NAME", nodeName)
+
+	node := &core.Node{
+		ObjectMeta: meta.ObjectMeta{
+			Name: nodeName,
+			UID:  types.UID("uid-" + nodeName),
+			Labels: map[string]string{
+				core.LabelOSStable:   "linux",
+				core.LabelArchStable: "amd64",
+			},
+		},
+	}
+	cli := configureFakeLoopbackClient(t, node)
+
+	specPath := writeTempMockSpec(t, `
+manufacturers:
+  nvidia:
+    preset: nvidia-h100
+    count: 1
+rdmaDevices:
+  - name: efa_0
+    driver: efa
+    pciBusId: "0000:20:00.0"
+`)
+	d, err := New(&Config{
+		Manufacturers:   sets.New("nvidia"),
+		MonitorPeriod:   time.Hour,
+		MockDevicesFile: specPath,
+	})
+	require.NoError(t, err)
+
+	// The round's own order: the inventory is folded into the snapshot before the pass reports.
+	d.DetectRDMAInterfaces(context.Background())
+	grps, _ := d.DetectAccelerator(context.Background())
+	require.NoError(t, d.reportDevices(context.Background(), grps))
+
+	nfName := nodeName + "-gpustack-device-manager"
+	nf, err := cli.NfdV1alpha1().NodeFeatures(kuberess.SystemNamespaceName).Get(
+		context.Background(), nfName, meta.GetOptions{},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "true", nf.Spec.Labels[nodefeature.NodeRDMAExternalLabelKey],
+		"an externally owned device publishes its key through the pass")
+	assert.NotContains(t, nf.Spec.Labels, nodefeature.NodeRDMACapableLabelKey,
+		"no interface names the EFA device, so no other RDMA key is published")
+
+	// The read fails. The snapshot retains the devices but is no longer complete, and a pass that
+	// could not read the inventory must not keep publishing the key they used to support.
+	atomicRewriteMockSpec(t, specPath, `
+manufacturers:
+  nvidia:
+    preset: nvidia-h100
+    count: 1
+rdmaError: simulated unreadable RDMA class
+`)
+	d.DetectRDMAInterfaces(context.Background())
+	require.NoError(t, d.reportDevices(context.Background(), grps))
+
+	nf, err = cli.NfdV1alpha1().NodeFeatures(kuberess.SystemNamespaceName).Get(
+		context.Background(), nfName, meta.GetOptions{},
+	)
+	require.NoError(t, err)
+	assert.NotContains(t, nf.Spec.Labels, nodefeature.NodeRDMAExternalLabelKey,
+		"a failed inventory read removes the key rather than keeping a stale one")
+}
+
 func TestStart_MockDetectorLoopAndHotReload(t *testing.T) {
 	const nodeName = "node-mock-loop"
 	t.Setenv("KUBERNETES_NODE_NAME", nodeName)

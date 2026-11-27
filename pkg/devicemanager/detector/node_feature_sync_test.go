@@ -76,7 +76,7 @@ func TestNodeFeatureLabelsGroupSets(t *testing.T) {
 	nodeWide := device.DevicesGroupList{npu, gpu}
 
 	t.Run("the fabric domain is reduced over the whole node", func(t *testing.T) {
-		labels := nodeFeatureLabels(own, nodeWide, nil, false, true)
+		labels := nodeFeatureLabels(own, nodeWide, nil, nil, false, true)
 
 		// Over own alone this key would read `ub-7` — a promise about the GPU too, which is in no
 		// such domain.
@@ -85,7 +85,7 @@ func TestNodeFeatureLabelsGroupSets(t *testing.T) {
 	})
 
 	t.Run("the accelerator labels are reduced over this pass alone", func(t *testing.T) {
-		labels := nodeFeatureLabels(own, nodeWide, nil, false, true)
+		labels := nodeFeatureLabels(own, nodeWide, nil, nil, false, true)
 
 		assert.Contains(t, labels, "acceleratable.feature.gpustack.ai/ascend",
 			"this pass's own manufacturer is labelled")
@@ -98,7 +98,7 @@ func TestNodeFeatureLabelsGroupSets(t *testing.T) {
 	t.Run("a node-wide read that failed publishes no fabric label", func(t *testing.T) {
 		// Same inputs, gate down. The label is withheld rather than computed from a partial view,
 		// and nodeFeatureAlignment leaves whatever was published before it standing.
-		labels := nodeFeatureLabels(own, own, nil, false, false)
+		labels := nodeFeatureLabels(own, own, nil, nil, false, false)
 
 		assert.NotContains(t, labels, nodefeature.NodeFabricDomainLabelKey)
 	})
@@ -106,7 +106,7 @@ func TestNodeFeatureLabelsGroupSets(t *testing.T) {
 	t.Run("a unanimous node publishes the domain", func(t *testing.T) {
 		// The positive baseline: without it every assertion above would still pass if the fabric
 		// labels were never produced at all.
-		labels := nodeFeatureLabels(own, own, nil, false, true)
+		labels := nodeFeatureLabels(own, own, nil, nil, false, true)
 
 		assert.Equal(t, "ub-7", labels[nodefeature.NodeFabricDomainLabelKey])
 		assert.Equal(t, "384", labels[nodefeature.NodeFabricMembersLabelKey])

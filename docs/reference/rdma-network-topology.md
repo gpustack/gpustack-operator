@@ -106,6 +106,11 @@ matched: only devices without a PCI address take part, so the adapter is never a
 
 iWARP (`siw`) names no netdev this way, so a `siw` interface gets no record, no verdict and no label.
 
+An externally owned device is labeled on ownership evidence alone. The AWS EFA driver's device
+sits on a *PCI* function with no netdev, so no interface record names it and it contributes no
+endpoint. The Device Manager still records the device in its verbs inventory and sets
+`rdma.external=true`, the one *RDMA* label such a node can carry.
+
 A node with a broken NIC beside a working one keeps the label, because it can still serve an *RDMA*
 workload. Withholding there would let an unplugged second card take a working node out of
 scheduling, the same error as withholding on an unreadable file. A node label says nothing about
@@ -141,6 +146,7 @@ that had a reason to run. See [Preflight Checks](../modules/devices/preflight.md
 |---|---|---|
 | `feature.gpustack.ai/rdma.capable` | `true` | **yes** — the link gate, for a nodeSelector or affinity you write |
 | `feature.gpustack.ai/rdma.software` | `true` when every usable *RDMA* endpoint is software-carried | **yes** — to keep a hardware pool off software *RDMA*, for a nodeSelector or affinity you write |
+| `feature.gpustack.ai/rdma.external` | `true` when the node has an *RDMA* device under another owner's allocation, one GPUStack never allocates | no — informational |
 | `feature.gpustack.ai/rdma.distance` | the closest bus distance any accelerator has to an *RDMA*-capable interface | no — informational |
 | `feature.gpustack.ai/rdma.numa` | the *NUMA* nodes carrying one, joined with `_` | no — informational |
 
@@ -152,6 +158,15 @@ from a queue.
 does not carry it, and a node with no usable endpoint carries neither key. A software-carried
 endpoint contributes to neither informational key: the *PCI* coordinates it may have are its
 netdev's, and they place no *RDMA* hardware an accelerator can sit near.
+
+`rdma.external` answers a different question from `rdma.software`: that key says the *RDMA* GPUStack
+hands out on this node is software, this one says there is *RDMA* here GPUStack never allocates. Both
+can be true — an EFA device beside a software one publishes `capable`, `software` and `external`,
+because hiding the software fact on the strength of an unallocatable device would send a workload
+that needs hardware *RDMA* to a node whose only allocatable *RDMA* is software.
+
+An EFA-only node carries `rdma.external` alone, with no `capable`: the key needs no usable
+interface, and it never changes the other four.
 
 Only the gate key is unconditional. **`rdma.distance` is omitted on a node with no accelerator**,
 because a distance is a statement about a pair and a node with no accelerator gives the label no pair

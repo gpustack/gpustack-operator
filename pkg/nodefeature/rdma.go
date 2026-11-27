@@ -68,6 +68,25 @@ const (
 	// excludes this key through its own nodeSelector or affinity. No operator-generated
 	// ResourceFlavor pins it, the same as the capable key.
 	NodeRDMASoftwareLabelKey = RDMAFeatureLabelPrefix + "software"
+
+	// NodeRDMAExternalLabelKey says this node has an RDMA device under another owner's allocation,
+	// one GPUStack never hands out, as device.RDMADeviceOwnerExternal marks the device. It is set
+	// on ownership evidence alone: the device's driver names another owner, today the AWS EFA
+	// driver, and a usable interface is not required. An EFA device sits on a PCI function with no
+	// netdev, so no interface record names it, and a node whose only RDMA is that device carries
+	// this key with neither capable nor software.
+	//
+	// It answers a different question from NodeRDMASoftwareLabelKey: that key says the RDMA
+	// GPUStack hands out on this node is software, this one says there is RDMA here GPUStack never
+	// allocates. Both may be true at once — an EFA device beside a software one publishes capable,
+	// software and external — because hiding the software fact on the strength of an unallocatable
+	// device would send a workload that needs hardware RDMA to a node whose only allocatable RDMA
+	// is the software one.
+	//
+	// Informational only, and pinned by no operator-generated ResourceFlavor. It never changes the
+	// other four keys: those are reduced over the interfaces alone, so an external device beside a
+	// usable one moves none of them.
+	NodeRDMAExternalLabelKey = RDMAFeatureLabelPrefix + "external"
 )
 
 // rdmaResourceNameBase is the base of the RDMA resource keys: the operator's own device
@@ -132,6 +151,8 @@ func GetRDMAResourceName(mode workercore.DeviceAllocationMode) core.ResourceName
 }
 
 // ConstructRDMANodeLabels constructs the RDMA feature labels from one detect pass's inventory.
+// The devices argument is the pass's host verbs inventory, and it decides one key alone: the
+// external-owner key, which is set on ownership evidence rather than on any usable endpoint.
 //
 // An endpoint counts as RDMA-capable when its link check did not conclude that the link is broken,
 // falling back to whether a device is bound only when no verdict was reached at all. So `failed` is
@@ -145,15 +166,27 @@ func GetRDMAResourceName(mode workercore.DeviceAllocationMode) core.ResourceName
 // an RDMA workload. Which endpoint is broken lives in `Devices`, per interface and per virtual
 // function; a node label cannot express it.
 //
-// It returns an empty map rather than nil for a node with no such interface, and the caller's
-// removal of stale keys is what makes that absence take effect — the labels are additive at the
-// object they are written to, so a key that stops being reported does not stop existing.
+// It returns a non-nil map that may carry only the external key — a node with no usable interface
+// and an externally owned device is exactly that — and is otherwise empty for a node with no such
+// interface and no such device. The caller's removal of stale keys is what makes that absence take
+// effect — the labels are additive at the object they are written to, so a key that stops being
+// reported does not stop existing.
 func ConstructRDMANodeLabels(
-	groups device.DevicesGroupList, interfaces []device.Interface,
+	groups device.DevicesGroupList, interfaces []device.Interface, devices []device.RDMADevice,
 ) map[string]string {
 	capable := rdmaEndpoints(interfaces)
 
 	labels := map[string]string{}
+	// The external key is decided on the verbs inventory alone, so it is set before the early
+	// return below rather than after the locality logic: a node whose only RDMA is externally owned
+	// has no usable endpoint, takes that return, and is the one node this key exists for. It never
+	// feeds the other four keys, so computing it here changes none of them.
+	for i := range devices {
+		if devices[i].Owner == device.RDMADeviceOwnerExternal {
+			labels[NodeRDMAExternalLabelKey] = "true"
+			break
+		}
+	}
 	if len(capable) == 0 {
 		return labels
 	}

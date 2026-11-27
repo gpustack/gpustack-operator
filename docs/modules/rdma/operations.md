@@ -128,6 +128,11 @@ NIC. Device Manager records such an interface with `rdma: true`, `rdmaSoftware: 
 verdict, and sets `feature.gpustack.ai/rdma.software=true` when every usable *RDMA* endpoint on the
 `Node` is software-carried. The device itself is advertised under its own name, such as `rxe0`.
 
+A `Node` can also carry `feature.gpustack.ai/rdma.external=true`: it has an *RDMA* device under
+another owner's allocation, such as the AWS EFA driver's, which GPUStack never allocates. The key
+is independent of `rdma.software`, and a `Node` with such a device beside a software one carries
+both.
+
 A VLAN device cannot carry Soft-RoCE: the kernel's `rxe_newlink` refuses an 8021Q or 8021ad device
 with `rxe creation allowed on top of a real device only`.
 

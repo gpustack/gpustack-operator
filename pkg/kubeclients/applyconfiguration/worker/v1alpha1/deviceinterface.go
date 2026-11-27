@@ -68,6 +68,9 @@ type DeviceInterfaceApplyConfiguration struct {
 	// A node whose usable RDMA interfaces are all software-carried carries the node label
 	// `feature.gpustack.ai/rdma.software=true`. The `rdma.distance` and `rdma.numa` node labels
 	// are never derived from such an interface. Performance is far below a hardware adapter's.
+	// The `feature.gpustack.ai/rdma.external` node label is independent of this field: it names
+	// an RDMA device under another owner's allocation, which GPUStack never allocates, so an
+	// externally owned device beside a software one publishes both keys.
 	RDMASoftware *bool `json:"rdmaSoftware,omitempty"`
 	// SRIOV reports that this interface is an SR-IOV physical function. It is a SEPARATE fact
 	// from the length of VirtualFunctions: "a PF with zero VFs configured" and "not a PF at

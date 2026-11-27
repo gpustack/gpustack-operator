@@ -1251,7 +1251,7 @@ func TestEnumerateInterfacesJoinsSoftwareRDMAByNetdev(t *testing.T) {
 				}
 			}
 
-			labels := nodefeature.ConstructRDMANodeLabels(rdmaLabelGroups(), ifaces)
+			labels := nodefeature.ConstructRDMANodeLabels(rdmaLabelGroups(), ifaces, nil)
 			if !maps.Equal(labels, tc.wantLabels) {
 				t.Errorf("labels = %v, want %v", labels, tc.wantLabels)
 			}
@@ -1385,7 +1385,7 @@ func TestEnumerateInterfacesDegradesWhenSoftwarePortsAreUnreadable(t *testing.T)
 			"for a hardware candidate and is read as an open question on every PCI path")
 	}
 
-	labels := nodefeature.ConstructRDMANodeLabels(rdmaLabelGroups(), ifaces)
+	labels := nodefeature.ConstructRDMANodeLabels(rdmaLabelGroups(), ifaces, nil)
 	want := map[string]string{
 		nodefeature.NodeRDMACapableLabelKey:  "true",
 		nodefeature.NodeRDMANumaLabelKey:     "0",
@@ -1469,7 +1469,7 @@ func TestEnumerateInterfacesDegradesWhenSoftwareNetdevsAreUnreadable(t *testing.
 			"reason can name it", class.unreadableSoftwarePorts, want)
 	}
 
-	labels := nodefeature.ConstructRDMANodeLabels(rdmaLabelGroups(), ifaces)
+	labels := nodefeature.ConstructRDMANodeLabels(rdmaLabelGroups(), ifaces, nil)
 	wantLabels := map[string]string{
 		nodefeature.NodeRDMACapableLabelKey:  "true",
 		nodefeature.NodeRDMANumaLabelKey:     "0",
