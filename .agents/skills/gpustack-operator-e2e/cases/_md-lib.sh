@@ -132,6 +132,26 @@ md_role_block() {
   fi
 }
 
+# md_engine_version_line prints a spec.engine.version YAML line when the given image is not a
+# gpustack/runner image whose tag encodes the named engine's version. Placeholder images such as
+# registry.k8s.io/pause:3.10 need an explicit version to pass the validating webhook for managed
+# roles, whereas runner images for the same engine must omit it so auto-detection never disagrees.
+md_engine_version_line() {
+  local engine="$1" image="$2" indent="${3:-    }"
+  case "$image" in
+    */runner:*vllm[0-9]* | runner:*vllm[0-9]*)
+      [ "$engine" = vLLM ] && return 0
+      ;;
+    */runner:*sglang[0-9]* | runner:*sglang[0-9]*)
+      [ "$engine" = SGLang ] && return 0
+      ;;
+  esac
+  case "$engine" in
+    vLLM)   printf '%sversion: "0.32.0"\n' "$indent" ;;
+    SGLang) printf '%sversion: "0.5.22"\n' "$indent" ;;
+  esac
+}
+
 # md_manifest prints a ModelDeployment manifest whose roles block is supplied whole by the caller.
 #
 # The poolRef name expands with a bare dash and NOT with a colon-dash when the CALLER resolves it:
@@ -139,6 +159,8 @@ md_role_block() {
 # rewrite an empty name a row is trying to submit. The kvCache block is the extra lines under
 # kvCache, and it is empty for a manifest that declares nothing but the pool reference.
 md_manifest() {
+  local ver_line
+  ver_line="$(md_engine_version_line "$3" "$4")"
   cat <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
@@ -148,7 +170,8 @@ metadata:
 spec:
   engine:
     name: ${3}
-    image: ${4}
+    image: ${4}${ver_line:+
+${ver_line}}
   model:
     name: ${8:-Qwen/Qwen2.5-0.5B-Instruct}
   kvCache:
