@@ -16,8 +16,10 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/setting"
 	"gpustack.ai/gpustack/pkg/webhook"
 	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
@@ -42,10 +44,12 @@ func newTestModelDeploymentForger(mutate ...func(*workercore.ModelDeploymentForg
 				MinActiveRequests: 1,
 			},
 			Sandbox: workercore.ModelDeploymentForgerSandboxSpec{
-				RunnerMode:      workercore.ModelDeploymentForgerRunnerModeExternal,
-				RunnerImage:     "gpustack/forge-runner:v0.1.0",
-				TimeoutSeconds:  1800,
-				OutputSizeLimit: ptr.To(resource.MustParse("2Gi")),
+				RunnerMode: workercore.ModelDeploymentForgerRunnerModeExternal,
+				Runner: &workercore.ModelDeploymentForgerSandboxRunner{
+					Image: "gpustack/forge-runner:v0.1.0",
+				},
+				ActiveDeadlineSeconds: 1800,
+				OutputSizeLimit:       ptr.To(resource.MustParse("2Gi")),
 			},
 			Rollout: workercore.ModelDeploymentForgerRolloutSpec{
 				MaxRetainedGenerations: 3,
@@ -125,24 +129,68 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				m.Spec.Probe.Steps = 3
 				m.Spec.Probe.CooldownSeconds = 60
 				m.Spec.Probe.MinActiveRequests = 0
-				m.Spec.Sandbox.TimeoutSeconds = 60
+				m.Spec.Sandbox.ActiveDeadlineSeconds = 60
 				m.Spec.Sandbox.OutputSizeLimit = ptr.To(resource.MustParse("64Mi"))
+				m.Spec.Sandbox.ImagePullSecrets = []core.LocalObjectReference{{Name: "regcred"}}
+				m.Spec.Sandbox.Runner.ImagePullPolicy = core.PullIfNotPresent
+				m.Spec.Sandbox.Runner.Command = []string{"loopwright-forger"}
+				m.Spec.Sandbox.Runner.Args = []string{"--budget", "4"}
+				m.Spec.Sandbox.Runner.Env = []workercore.ModelDeploymentForgerSandboxEnvVar{
+					{Name: "LOOPWRIGHT_MODEL", Value: "gpt-5"},
+					{
+						Name: "LOOPWRIGHT_TOKEN",
+						ValueFrom: &workercore.ModelDeploymentForgerSandboxEnvVarSource{
+							SecretKeyRef: &core.SecretKeySelector{
+								LocalObjectReference: core.LocalObjectReference{Name: "llm-sec"},
+								Key:                  "api-key",
+							},
+						},
+					},
+					{
+						Name: "LOOPWRIGHT_ENDPOINT",
+						ValueFrom: &workercore.ModelDeploymentForgerSandboxEnvVarSource{
+							ConfigMapKeyRef: &core.ConfigMapKeySelector{
+								LocalObjectReference: core.LocalObjectReference{Name: "llm-cm"},
+								Key:                  "endpoint",
+							},
+						},
+					},
+				}
+				m.Spec.Sandbox.Runner.EnvFrom = []core.EnvFromSource{
+					{
+						Prefix: "RUNNER_",
+						ConfigMapRef: &core.ConfigMapEnvSource{
+							LocalObjectReference: core.LocalObjectReference{Name: "runner-cm"},
+						},
+					},
+					{
+						SecretRef: &core.SecretEnvSource{
+							LocalObjectReference: core.LocalObjectReference{Name: "runner-sec"},
+						},
+					},
+				}
 				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
-					CPU: ptr.To(resource.MustParse("4")),
-					RAM: ptr.To(resource.MustParse("16Gi")),
+					CPU:                               ptr.To(resource.MustParse("4")),
+					RAM:                               ptr.To(resource.MustParse("16Gi")),
+					LocalStorage:                      ptr.To(resource.MustParse("20Gi")),
+					AcceleratorSlicedMemoryPercentage: 50,
+					AcceleratorSlicedCoresPercentage:  50,
 				}
 				m.Spec.Rollout.MaxRetainedGenerations = 1
 				m.Spec.Rollout.FailureTimeoutSeconds = 1
 			}),
 		},
 		{
-			name: "valid Shadow mode with upper boundary values",
+			name: "valid Shadow mode with upper boundary values and partitioned profile",
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
 				m.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
 				m.Spec.Roles[0].MaxKernelsPerGeneration = 16
 				m.Spec.Probe.Steps = 5
-				m.Spec.Sandbox.TimeoutSeconds = 14400
+				m.Spec.Sandbox.ActiveDeadlineSeconds = 14400
 				m.Spec.Sandbox.OutputSizeLimit = ptr.To(resource.MustParse("16Gi"))
+				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorPartitionedProfile: "3g.40gb",
+				}
 				m.Spec.Rollout.MaxRetainedGenerations = 16
 			}),
 		},
@@ -252,32 +300,254 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 			wantField: "spec.sandbox.runnerMode",
 		},
 		{
-			name: "rejects External mode without runnerImage",
+			name: "rejects External mode with nil runner",
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.RunnerImage = ""
+				m.Spec.Sandbox.Runner = nil
 			}),
-			wantField: "spec.sandbox.runnerImage",
+			wantField: "spec.sandbox.runner",
 		},
 		{
-			name: "rejects External runnerImage with whitespace",
+			name: "rejects External mode without runner.image",
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.RunnerImage = "gpustack/forge runner:v1"
+				m.Spec.Sandbox.Runner.Image = ""
 			}),
-			wantField: "spec.sandbox.runnerImage",
+			wantField: "spec.sandbox.runner.image",
 		},
 		{
-			name: "rejects sandbox timeoutSeconds below 60",
+			name: "rejects External runner.image with whitespace",
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.TimeoutSeconds = 59
+				m.Spec.Sandbox.Runner.Image = "gpustack/forge runner:v1"
 			}),
-			wantField: "spec.sandbox.timeoutSeconds",
+			wantField: "spec.sandbox.runner.image",
 		},
 		{
-			name: "rejects sandbox timeoutSeconds above 14400",
+			name: "rejects Mock mode with non-nil runner",
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.TimeoutSeconds = 14401
+				m.Spec.Sandbox.RunnerMode = workercore.ModelDeploymentForgerRunnerModeMock
 			}),
-			wantField: "spec.sandbox.timeoutSeconds",
+			wantField: "spec.sandbox.runner",
+		},
+		{
+			name: "rejects invalid runner.imagePullPolicy",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.ImagePullPolicy = "Sometimes"
+			}),
+			wantField: "spec.sandbox.runner.imagePullPolicy",
+		},
+		{
+			name: "rejects runner.command exceeding 64 entries",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.Command = make([]string, 65)
+			}),
+			wantField: "spec.sandbox.runner.command",
+		},
+		{
+			name: "rejects runner.args entry exceeding 4096 bytes",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.Args = []string{strings.Repeat("a", 4097)}
+			}),
+			wantField: "spec.sandbox.runner.args[0]",
+		},
+		{
+			name: "rejects runner.args entry containing NUL byte",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.Args = []string{"--flag\x00bad"}
+			}),
+			wantField: "spec.sandbox.runner.args[0]",
+		},
+		{
+			name: "rejects runner.env exceeding 64 entries",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.Env = make([]workercore.ModelDeploymentForgerSandboxEnvVar, 65)
+				for i := range m.Spec.Sandbox.Runner.Env {
+					m.Spec.Sandbox.Runner.Env[i] = workercore.ModelDeploymentForgerSandboxEnvVar{
+						Name:  "VAR_" + strings.Repeat("A", 1) + string(rune('A'+(i%26))) + string(rune('0'+(i/26))),
+						Value: "1",
+					}
+				}
+			}),
+			wantField: "spec.sandbox.runner.env",
+		},
+		{
+			name: "rejects runner.env reserved GPUSTACK_FORGE_ name",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.Env = []workercore.ModelDeploymentForgerSandboxEnvVar{
+					{Name: "GPUSTACK_FORGE_INPUT_DIR", Value: "/tmp/evil"},
+				}
+			}),
+			wantField: "spec.sandbox.runner.env[0].name",
+		},
+		{
+			name: "rejects runner.env lowercase gpustack_forge_ name",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.Env = []workercore.ModelDeploymentForgerSandboxEnvVar{
+					{Name: "gpustack_forge_override", Value: "1"},
+				}
+			}),
+			wantField: "spec.sandbox.runner.env[0].name",
+		},
+		{
+			name: "rejects runner.env duplicate variable name",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.Env = []workercore.ModelDeploymentForgerSandboxEnvVar{
+					{Name: "MY_VAR", Value: "a"},
+					{Name: "MY_VAR", Value: "b"},
+				}
+			}),
+			wantField: "spec.sandbox.runner.env[1].name",
+		},
+		{
+			name: "rejects runner.env invalid identifier",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.Env = []workercore.ModelDeploymentForgerSandboxEnvVar{
+					{Name: "123_BAD", Value: "a"},
+				}
+			}),
+			wantField: "spec.sandbox.runner.env[0].name",
+		},
+		{
+			name: "rejects runner.env setting both value and valueFrom",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.Env = []workercore.ModelDeploymentForgerSandboxEnvVar{
+					{
+						Name:  "MY_SECRET",
+						Value: "literal",
+						ValueFrom: &workercore.ModelDeploymentForgerSandboxEnvVarSource{
+							SecretKeyRef: &core.SecretKeySelector{
+								LocalObjectReference: core.LocalObjectReference{Name: "sec"},
+								Key:                  "k",
+							},
+						},
+					},
+				}
+			}),
+			wantField: "spec.sandbox.runner.env[0].valueFrom",
+		},
+		{
+			name: "rejects runner.env valueFrom with neither configMapKeyRef nor secretKeyRef",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.Env = []workercore.ModelDeploymentForgerSandboxEnvVar{
+					{
+						Name:      "MY_SECRET",
+						ValueFrom: &workercore.ModelDeploymentForgerSandboxEnvVarSource{},
+					},
+				}
+			}),
+			wantField: "spec.sandbox.runner.env[0].valueFrom",
+		},
+		{
+			name: "rejects runner.env valueFrom with both configMapKeyRef and secretKeyRef",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.Env = []workercore.ModelDeploymentForgerSandboxEnvVar{
+					{
+						Name: "MY_SECRET",
+						ValueFrom: &workercore.ModelDeploymentForgerSandboxEnvVarSource{
+							ConfigMapKeyRef: &core.ConfigMapKeySelector{
+								LocalObjectReference: core.LocalObjectReference{Name: "cm"},
+								Key:                  "k",
+							},
+							SecretKeyRef: &core.SecretKeySelector{
+								LocalObjectReference: core.LocalObjectReference{Name: "sec"},
+								Key:                  "k",
+							},
+						},
+					},
+				}
+			}),
+			wantField: "spec.sandbox.runner.env[0].valueFrom",
+		},
+		{
+			name: "rejects runner.env secretKeyRef with invalid secret name",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.Env = []workercore.ModelDeploymentForgerSandboxEnvVar{
+					{
+						Name: "MY_SECRET",
+						ValueFrom: &workercore.ModelDeploymentForgerSandboxEnvVarSource{
+							SecretKeyRef: &core.SecretKeySelector{
+								LocalObjectReference: core.LocalObjectReference{Name: "Bad_Secret"},
+								Key:                  "k",
+							},
+						},
+					},
+				}
+			}),
+			wantField: "spec.sandbox.runner.env[0].valueFrom.secretKeyRef.name",
+		},
+		{
+			name: "rejects runner.envFrom with neither configMapRef nor secretRef",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.EnvFrom = []core.EnvFromSource{{Prefix: "P_"}}
+			}),
+			wantField: "spec.sandbox.runner.envFrom[0]",
+		},
+		{
+			name: "rejects runner.envFrom with both configMapRef and secretRef",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.EnvFrom = []core.EnvFromSource{
+					{
+						ConfigMapRef: &core.ConfigMapEnvSource{LocalObjectReference: core.LocalObjectReference{Name: "cm"}},
+						SecretRef:    &core.SecretEnvSource{LocalObjectReference: core.LocalObjectReference{Name: "sec"}},
+					},
+				}
+			}),
+			wantField: "spec.sandbox.runner.envFrom[0]",
+		},
+		{
+			name: "rejects runner.envFrom reserved GPUSTACK_FORGE_ prefix",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Runner.EnvFrom = []core.EnvFromSource{
+					{
+						Prefix:       "gpustack_forge_",
+						ConfigMapRef: &core.ConfigMapEnvSource{LocalObjectReference: core.LocalObjectReference{Name: "cm"}},
+					},
+				}
+			}),
+			wantField: "spec.sandbox.runner.envFrom[0].prefix",
+		},
+		{
+			name: "rejects sandbox activeDeadlineSeconds below 60",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.ActiveDeadlineSeconds = 59
+			}),
+			wantField: "spec.sandbox.activeDeadlineSeconds",
+		},
+		{
+			name: "rejects negative sandbox activeDeadlineSeconds",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.ActiveDeadlineSeconds = -1
+			}),
+			wantField: "spec.sandbox.activeDeadlineSeconds",
+		},
+		{
+			name: "rejects sandbox activeDeadlineSeconds above 14400",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.ActiveDeadlineSeconds = 14401
+			}),
+			wantField: "spec.sandbox.activeDeadlineSeconds",
+		},
+		{
+			name: "rejects sandbox imagePullSecrets with empty name",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.ImagePullSecrets = []core.LocalObjectReference{{}}
+			}),
+			wantField: "spec.sandbox.imagePullSecrets[0].name",
+		},
+		{
+			name: "rejects sandbox imagePullSecrets with invalid DNS-1123 subdomain",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.ImagePullSecrets = []core.LocalObjectReference{{Name: "Bad_Creds"}}
+			}),
+			wantField: "spec.sandbox.imagePullSecrets[0].name",
+		},
+		{
+			name: "rejects duplicate sandbox imagePullSecrets",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.ImagePullSecrets = []core.LocalObjectReference{
+					{Name: "regcred"},
+					{Name: "regcred"},
+				}
+			}),
+			wantField: "spec.sandbox.imagePullSecrets[1].name",
 		},
 		{
 			name: "rejects sandbox outputSizeLimit below 64Mi",
@@ -310,6 +580,52 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				}
 			}),
 			wantField: "spec.sandbox.resources.ram",
+		},
+		{
+			name: "rejects non-positive sandbox localStorage resource",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
+					LocalStorage: ptr.To(resource.MustParse("0")),
+				}
+			}),
+			wantField: "spec.sandbox.resources.localStorage",
+		},
+		{
+			name: "rejects acceleratorSlicedMemoryPercentage above 100",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorSlicedMemoryPercentage: 101,
+				}
+			}),
+			wantField: "spec.sandbox.resources.acceleratorSlicedMemoryPercentage",
+		},
+		{
+			name: "rejects acceleratorSlicedCoresPercentage > 0 without acceleratorSlicedMemoryPercentage > 0",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorSlicedCoresPercentage: 50,
+				}
+			}),
+			wantField: "spec.sandbox.resources.acceleratorSlicedCoresPercentage",
+		},
+		{
+			name: "rejects combining acceleratorPartitionedProfile and acceleratorSlicedMemoryPercentage",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorPartitionedProfile:     "3g.40gb",
+					AcceleratorSlicedMemoryPercentage: 50,
+				}
+			}),
+			wantField: "spec.sandbox.resources.acceleratorPartitionedProfile",
+		},
+		{
+			name: "rejects acceleratorPartitionedProfile with whitespace",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorPartitionedProfile: "3g 40gb",
+				}
+			}),
+			wantField: "spec.sandbox.resources.acceleratorPartitionedProfile",
 		},
 		{
 			name: "rejects rollout maxRetainedGenerations above 16",
@@ -354,7 +670,7 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				},
 			},
 			in:        newTestModelDeploymentForger(),
-			wantField: "spec.sandbox.runnerImage",
+			wantField: "spec.sandbox.runner.image",
 		},
 		{
 			name: "boundary-aware prefix docker.io/gpustack accepts slash separator",
@@ -370,7 +686,7 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				},
 			},
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.RunnerImage = "docker.io/gpustack/runner:v1"
+				m.Spec.Sandbox.Runner.Image = "docker.io/gpustack/runner:v1"
 			}),
 		},
 		{
@@ -387,7 +703,7 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				},
 			},
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.RunnerImage = "docker.io/gpustack:v1"
+				m.Spec.Sandbox.Runner.Image = "docker.io/gpustack:v1"
 			}),
 		},
 		{
@@ -404,7 +720,7 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				},
 			},
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.RunnerImage = "docker.io/gpustack@sha256:" + strings.Repeat("a", 64)
+				m.Spec.Sandbox.Runner.Image = "docker.io/gpustack@sha256:" + strings.Repeat("a", 64)
 			}),
 		},
 		{
@@ -421,9 +737,9 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				},
 			},
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.RunnerImage = "docker.io/gpustack-evil/runner:v1"
+				m.Spec.Sandbox.Runner.Image = "docker.io/gpustack-evil/runner:v1"
 			}),
-			wantField: "spec.sandbox.runnerImage",
+			wantField: "spec.sandbox.runner.image",
 		},
 		{
 			name: "prefix gpustack rejects host:port/repo registry reinterpretation",
@@ -439,9 +755,9 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				},
 			},
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.RunnerImage = "gpustack:5000/attacker/evil:v1"
+				m.Spec.Sandbox.Runner.Image = "gpustack:5000/attacker/evil:v1"
 			}),
-			wantField: "spec.sandbox.runnerImage",
+			wantField: "spec.sandbox.runner.image",
 		},
 		{
 			name: "prefix registry.corp.internal rejects :port/repo registry reinterpretation",
@@ -457,9 +773,9 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				},
 			},
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.RunnerImage = "registry.corp.internal:8080/attacker/evil:v1"
+				m.Spec.Sandbox.Runner.Image = "registry.corp.internal:8080/attacker/evil:v1"
 			}),
-			wantField: "spec.sandbox.runnerImage",
+			wantField: "spec.sandbox.runner.image",
 		},
 		{
 			name: "prefix gpustack allows gpustack:v1 tag",
@@ -475,7 +791,7 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				},
 			},
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.RunnerImage = "gpustack:v1"
+				m.Spec.Sandbox.Runner.Image = "gpustack:v1"
 			}),
 		},
 		{
@@ -492,7 +808,7 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				},
 			},
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.RunnerImage = "gpustack/runner:v1"
+				m.Spec.Sandbox.Runner.Image = "gpustack/runner:v1"
 			}),
 		},
 		{
@@ -509,7 +825,7 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				},
 			},
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Sandbox.RunnerImage = "gpustack@sha256:" + strings.Repeat("a", 64)
+				m.Spec.Sandbox.Runner.Image = "gpustack@sha256:" + strings.Repeat("a", 64)
 			}),
 		},
 		{
@@ -588,12 +904,76 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "api unreachable")
 	})
+	t.Run("Default populates ActiveDeadlineSeconds when <= 0", func(t *testing.T) {
+		wh := newTestForgerWebhook()
+		mdfZero := newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+			m.Spec.Sandbox.ActiveDeadlineSeconds = 0
+		})
+		require.NoError(t, wh.Default(context.Background(), mdfZero))
+		assert.Equal(t, int64(1800), mdfZero.Spec.Sandbox.ActiveDeadlineSeconds)
+
+		mdfNeg := newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+			m.Spec.Sandbox.ActiveDeadlineSeconds = -5
+		})
+		require.NoError(t, wh.Default(context.Background(), mdfNeg))
+		assert.Equal(t, int64(1800), mdfNeg.Spec.Sandbox.ActiveDeadlineSeconds)
+	})
 }
 
 func TestModelDeploymentForgerWebhookValidateAgainstTarget(t *testing.T) {
+	plainPool := &worker.AcceleratorType{
+		ObjectMeta: meta.ObjectMeta{Name: "h20-8x"},
+		Status: workercore.AcceleratorTypeStatus{
+			Detail: workercore.InstanceTypeDetail{
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+			},
+		},
+	}
+	sliceablePool := &worker.AcceleratorType{
+		ObjectMeta: meta.ObjectMeta{Name: "h20-8x"},
+		Status: workercore.AcceleratorTypeStatus{
+			Detail: workercore.InstanceTypeDetail{
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{
+					SlicedDetail: workercore.AcceleratorSlicedDetail{
+						Logical: workercore.AcceleratorSlicedLogicalDetail{Count: 4},
+					},
+				},
+			},
+		},
+	}
+	partitionablePool := &worker.AcceleratorType{
+		ObjectMeta: meta.ObjectMeta{Name: "h20-8x"},
+		Status: workercore.AcceleratorTypeStatus{
+			Detail: workercore.InstanceTypeDetail{
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{
+					SlicedDetail: workercore.AcceleratorSlicedDetail{
+						Physical: workercore.AcceleratorSlicedPhysicalDetail{
+							Count: 2,
+							Profiles: []workercore.AcceleratorSlicedPhysicalDetailProfile{
+								{Name: "1g.10gb"},
+								{Name: "3g.40gb"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	amdPool := &workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: "h20-8x"},
+		Status: workercore.InstanceTypeStatus{
+			Detail: workercore.InstanceTypeDetail{
+				Manufacturer: nodefeature.ManufacturerAMD,
+			},
+		},
+	}
+
 	cases := []struct {
 		name      string
 		target    *workercore.ModelDeployment
+		extraObjs []ctrlcli.Object
 		forger    *workercore.ModelDeploymentForger
 		wantField string
 		wantMsg   string
@@ -744,6 +1124,74 @@ func TestModelDeploymentForgerWebhookValidateAgainstTarget(t *testing.T) {
 				m.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
 			}),
 		},
+		{
+			name:      "admits Sliced sandbox resources when target AcceleratorType offers logical slicing",
+			target:    newTestForgerTargetDeployment(workercore.ModelDeploymentEngineVLLM),
+			extraObjs: []ctrlcli.Object{sliceablePool},
+			forger: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorSlicedMemoryPercentage: 50,
+				}
+			}),
+		},
+		{
+			name:      "rejects Sliced sandbox resources when target AcceleratorType does not offer logical slicing",
+			target:    newTestForgerTargetDeployment(workercore.ModelDeploymentEngineVLLM),
+			extraObjs: []ctrlcli.Object{plainPool},
+			forger: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorSlicedMemoryPercentage: 50,
+				}
+			}),
+			wantField: "spec.sandbox.resources.acceleratorSlicedMemoryPercentage",
+			wantMsg:   "does not offer logical slicing",
+		},
+		{
+			name:      "admits Partitioned sandbox resources when target AcceleratorType offers profile",
+			target:    newTestForgerTargetDeployment(workercore.ModelDeploymentEngineVLLM),
+			extraObjs: []ctrlcli.Object{partitionablePool},
+			forger: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorPartitionedProfile: "3g.40gb",
+				}
+			}),
+		},
+		{
+			name:      "rejects Partitioned sandbox resources when target AcceleratorType does not offer hardware partitioning",
+			target:    newTestForgerTargetDeployment(workercore.ModelDeploymentEngineVLLM),
+			extraObjs: []ctrlcli.Object{plainPool},
+			forger: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorPartitionedProfile: "3g.40gb",
+				}
+			}),
+			wantField: "spec.sandbox.resources.acceleratorPartitionedProfile",
+			wantMsg:   "does not offer hardware partitioning",
+		},
+		{
+			name:      "rejects Partitioned sandbox resources when profile is not in offered inventory",
+			target:    newTestForgerTargetDeployment(workercore.ModelDeploymentEngineVLLM),
+			extraObjs: []ctrlcli.Object{partitionablePool},
+			forger: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorPartitionedProfile: "7g.80gb",
+				}
+			}),
+			wantField: "spec.sandbox.resources.acceleratorPartitionedProfile",
+			wantMsg:   "does not offer this partition profile",
+		},
+		{
+			name:      "rejects Partitioned sandbox resources when target InstanceType manufacturer does not support partitioning",
+			target:    newTestForgerTargetDeployment(workercore.ModelDeploymentEngineVLLM),
+			extraObjs: []ctrlcli.Object{amdPool},
+			forger: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.Resources = &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorPartitionedProfile: "3g.40gb",
+				}
+			}),
+			wantField: "spec.sandbox.resources.acceleratorPartitionedProfile",
+			wantMsg:   "does not support partition profile",
+		},
 	}
 
 	for _, c := range cases {
@@ -752,6 +1200,7 @@ func TestModelDeploymentForgerWebhookValidateAgainstTarget(t *testing.T) {
 			if c.target != nil {
 				objs = append(objs, c.target)
 			}
+			objs = append(objs, c.extraObjs...)
 			wh := newTestForgerWebhook(objs...)
 			_, err := wh.ValidateCreate(context.Background(), c.forger)
 			if c.wantField == "" {
@@ -920,11 +1369,11 @@ func TestModelDeploymentForgerRunnerImageSecurity(t *testing.T) {
 		for _, img := range badRefs {
 			t.Run(img, func(t *testing.T) {
 				mdf := newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-					m.Spec.Sandbox.RunnerImage = img
+					m.Spec.Sandbox.Runner.Image = img
 				})
 				_, err := wh.ValidateCreate(context.Background(), mdf)
 				require.Error(t, err)
-				assertInvalidField(t, err, "spec.sandbox.runnerImage")
+				assertInvalidField(t, err, "spec.sandbox.runner.image")
 			})
 		}
 	})
@@ -1074,7 +1523,7 @@ func TestModelDeploymentForgerRunnerImageSecurity(t *testing.T) {
 				}
 				wh := newTestForgerWebhook(sec)
 				mdf := newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-					m.Spec.Sandbox.RunnerImage = c.image
+					m.Spec.Sandbox.Runner.Image = c.image
 				})
 				_, err := wh.ValidateCreate(context.Background(), mdf)
 				if !c.wantErr {
@@ -1082,7 +1531,7 @@ func TestModelDeploymentForgerRunnerImageSecurity(t *testing.T) {
 					return
 				}
 				require.Error(t, err)
-				assertInvalidField(t, err, "spec.sandbox.runnerImage")
+				assertInvalidField(t, err, "spec.sandbox.runner.image")
 			})
 		}
 	})

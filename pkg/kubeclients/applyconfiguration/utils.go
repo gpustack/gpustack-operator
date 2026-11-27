@@ -1554,8 +1554,14 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerRoleStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerRolloutSpec"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerRolloutSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerSandboxEnvVar"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerSandboxEnvVarApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerSandboxEnvVarSource"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerSandboxEnvVarSourceApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerSandboxResources"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerSandboxResourcesApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerSandboxRunner"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerSandboxRunnerApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerSandboxSpec"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerSandboxSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerSandboxStatus"):

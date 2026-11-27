@@ -837,11 +837,11 @@ func effectiveMinSpeedupRatio(roleSpec *workercore.ModelDeploymentForgerRoleSpec
 	return parsed
 }
 
-func effectiveSandboxTimeoutSeconds(mdf *workercore.ModelDeploymentForger) int32 {
-	if mdf == nil || mdf.Spec.Sandbox.TimeoutSeconds <= 0 {
+func effectiveSandboxTimeoutSeconds(mdf *workercore.ModelDeploymentForger) int64 {
+	if mdf == nil || mdf.Spec.Sandbox.ActiveDeadlineSeconds <= 0 {
 		return forgerDefaultSandboxTimeoutSeconds
 	}
-	return mdf.Spec.Sandbox.TimeoutSeconds
+	return mdf.Spec.Sandbox.ActiveDeadlineSeconds
 }
 
 func effectiveMaxRetainedGenerations(mdf *workercore.ModelDeploymentForger) int {

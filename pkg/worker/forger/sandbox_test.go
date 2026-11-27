@@ -316,10 +316,10 @@ func TestBuildSandboxPod_MockAndExternalModes(t *testing.T) {
 			Hardware:           hw,
 			OperatorImage:      "gpustack/operator:v1.0.0",
 			SandboxSpec: workercore.ModelDeploymentForgerSandboxSpec{
-				RunnerMode:        workercore.ModelDeploymentForgerRunnerModeMock,
-				PriorityClassName: "forge-low",
-				TimeoutSeconds:    900,
-				OutputSizeLimit:   &outLimit,
+				RunnerMode:            workercore.ModelDeploymentForgerRunnerModeMock,
+				PriorityClassName:     "forge-low",
+				ActiveDeadlineSeconds: 900,
+				OutputSizeLimit:       &outLimit,
 				Resources: &workercore.ModelDeploymentForgerSandboxResources{
 					CPU: &cpuQty,
 					RAM: &ramQty,
@@ -370,6 +370,49 @@ func TestBuildSandboxPod_MockAndExternalModes(t *testing.T) {
 	t.Run("External mode stages engine-sentinel via emptyDir without hostPath", func(t *testing.T) {
 		t.Parallel()
 
+		runnerSpec := &workercore.ModelDeploymentForgerSandboxRunner{
+			Image:           "registry.local/forge-runner:v0.2.0",
+			ImagePullPolicy: core.PullAlways,
+			Command:         []string{"loopwright-forger"},
+			Args:            []string{"--budget", "4"},
+			Env: []workercore.ModelDeploymentForgerSandboxEnvVar{
+				{Name: "LOOPWRIGHT_MODEL", Value: "gpt-5"},
+				{
+					Name: "LOOPWRIGHT_CONFIG_KEY",
+					ValueFrom: &workercore.ModelDeploymentForgerSandboxEnvVarSource{
+						ConfigMapKeyRef: &core.ConfigMapKeySelector{
+							LocalObjectReference: core.LocalObjectReference{Name: "runner-cm"},
+							Key:                  "endpoint",
+						},
+					},
+				},
+				{
+					Name: "LOOPWRIGHT_TOKEN",
+					ValueFrom: &workercore.ModelDeploymentForgerSandboxEnvVarSource{
+						SecretKeyRef: &core.SecretKeySelector{
+							LocalObjectReference: core.LocalObjectReference{Name: "runner-secret"},
+							Key:                  "api-key",
+						},
+					},
+				},
+				{Name: "GPUSTACK_FORGE_INPUT_DIR", Value: "/evil/input"},
+				{Name: "gpustack_forge_custom", Value: "filtered"},
+			},
+			EnvFrom: []core.EnvFromSource{
+				{
+					Prefix: "CFG_",
+					ConfigMapRef: &core.ConfigMapEnvSource{
+						LocalObjectReference: core.LocalObjectReference{Name: "runner-env-cm"},
+					},
+				},
+				{
+					SecretRef: &core.SecretEnvSource{
+						LocalObjectReference: core.LocalObjectReference{Name: "runner-env-sec"},
+					},
+				},
+			},
+		}
+
 		pod, err := BuildSandboxPod(SandboxPodSpec{
 			Forger:             forger,
 			Name:               "qwen-decode-forger-sb-ext-2",
@@ -380,22 +423,99 @@ func TestBuildSandboxPod_MockAndExternalModes(t *testing.T) {
 			Hardware:           hw,
 			OperatorImage:      "gpustack/operator:v1.0.0",
 			EngineImage:        "vllm/vllm-openai:v0.8.5",
+			ImagePullSecrets: []core.LocalObjectReference{
+				{Name: "engine-regcred"},
+				{Name: "shared-regcred"},
+			},
 			SandboxSpec: workercore.ModelDeploymentForgerSandboxSpec{
-				RunnerMode:  workercore.ModelDeploymentForgerRunnerModeExternal,
-				RunnerImage: "registry.local/forge-runner:v0.2.0",
+				RunnerMode: workercore.ModelDeploymentForgerRunnerModeExternal,
+				Runner:     runnerSpec,
+				ImagePullSecrets: []core.LocalObjectReference{
+					{Name: "shared-regcred"},
+					{Name: "runner-regcred"},
+				},
 			},
 		})
 		require.NoError(t, err)
 		assertRestrictedPSACompliant(t, pod)
 
+		require.Equal(t, DefaultSandboxTimeoutSeconds, *pod.Spec.ActiveDeadlineSeconds)
+		require.Equal(t, []core.LocalObjectReference{
+			{Name: "engine-regcred"},
+			{Name: "shared-regcred"},
+			{Name: "runner-regcred"},
+		}, pod.Spec.ImagePullSecrets)
+
 		require.Len(t, pod.Spec.InitContainers, 3)
-		require.Equal(t, RunnerContainerName, pod.Spec.InitContainers[0].Name)
-		require.Equal(t, "registry.local/forge-runner:v0.2.0", pod.Spec.InitContainers[0].Image)
-		require.Equal(t, StageSentinelContainerName, pod.Spec.InitContainers[1].Name)
-		require.Equal(t, VerifierContainerName, pod.Spec.InitContainers[2].Name)
-		require.Equal(t, "vllm/vllm-openai:v0.8.5", pod.Spec.InitContainers[2].Image)
-		require.Equal(t, []string{"python3", "-m", "gpustack_engine_sentinel.forge_verifier"},
-			pod.Spec.InitContainers[2].Command)
+		runnerCtr := pod.Spec.InitContainers[0]
+		stageCtr := pod.Spec.InitContainers[1]
+		verifierCtr := pod.Spec.InitContainers[2]
+		holdCtr := pod.Spec.Containers[0]
+
+		require.Equal(t, RunnerContainerName, runnerCtr.Name)
+		require.Equal(t, "registry.local/forge-runner:v0.2.0", runnerCtr.Image)
+		require.Equal(t, core.PullAlways, runnerCtr.ImagePullPolicy)
+		require.Equal(t, []string{"loopwright-forger"}, runnerCtr.Command)
+		require.Equal(t, []string{"--budget", "4"}, runnerCtr.Args)
+		require.Len(t, runnerCtr.EnvFrom, 2)
+		require.Equal(t, "runner-env-cm", runnerCtr.EnvFrom[0].ConfigMapRef.Name)
+		require.Equal(t, "CFG_", runnerCtr.EnvFrom[0].Prefix)
+		require.Equal(t, "runner-env-sec", runnerCtr.EnvFrom[1].SecretRef.Name)
+
+		require.Equal(t, []core.EnvVar{
+			{Name: envForgeInputDir, Value: InputMountPath},
+			{Name: envForgeOutputDir, Value: OutputMountPath},
+			{Name: "LOOPWRIGHT_MODEL", Value: "gpt-5"},
+			{
+				Name: "LOOPWRIGHT_CONFIG_KEY",
+				ValueFrom: &core.EnvVarSource{
+					ConfigMapKeyRef: &core.ConfigMapKeySelector{
+						LocalObjectReference: core.LocalObjectReference{Name: "runner-cm"},
+						Key:                  "endpoint",
+					},
+				},
+			},
+			{
+				Name: "LOOPWRIGHT_TOKEN",
+				ValueFrom: &core.EnvVarSource{
+					SecretKeyRef: &core.SecretKeySelector{
+						LocalObjectReference: core.LocalObjectReference{Name: "runner-secret"},
+						Key:                  "api-key",
+					},
+				},
+			},
+		}, runnerCtr.Env)
+
+		// Mutating input slices after BuildSandboxPod must not mutate rendered container fields.
+		runnerSpec.Command[0] = "mutated"
+		runnerSpec.Args[0] = "mutated"
+		runnerSpec.EnvFrom[0].ConfigMapRef.Name = "mutated"
+		require.Equal(t, "loopwright-forger", runnerCtr.Command[0])
+		require.Equal(t, "--budget", runnerCtr.Args[0])
+		require.Equal(t, "runner-env-cm", runnerCtr.EnvFrom[0].ConfigMapRef.Name)
+
+		// Stage-sentinel, verifier, and hold containers must never receive runner overrides.
+		require.Equal(t, StageSentinelContainerName, stageCtr.Name)
+		require.Empty(t, stageCtr.Env)
+		require.Empty(t, stageCtr.EnvFrom)
+		require.Empty(t, stageCtr.Args)
+		require.Empty(t, stageCtr.ImagePullPolicy)
+
+		require.Equal(t, VerifierContainerName, verifierCtr.Name)
+		require.Equal(t, "vllm/vllm-openai:v0.8.5", verifierCtr.Image)
+		require.Equal(t, []string{"python3", "-m", "gpustack_engine_sentinel.forge_verifier"}, verifierCtr.Command)
+		require.NotContains(t, verifierCtr.Args, "--budget")
+		require.Empty(t, verifierCtr.EnvFrom)
+		require.Empty(t, verifierCtr.ImagePullPolicy)
+		for _, ev := range verifierCtr.Env {
+			require.NotContains(t, []string{"LOOPWRIGHT_MODEL", "LOOPWRIGHT_CONFIG_KEY", "LOOPWRIGHT_TOKEN"}, ev.Name)
+		}
+
+		require.Equal(t, HoldContainerName, holdCtr.Name)
+		require.Empty(t, holdCtr.Env)
+		require.Empty(t, holdCtr.EnvFrom)
+		require.NotContains(t, holdCtr.Args, "--budget")
+		require.Empty(t, holdCtr.ImagePullPolicy)
 
 		// Default output emptyDir size limit is 2Gi.
 		var outVol *core.Volume
@@ -406,6 +526,128 @@ func TestBuildSandboxPod_MockAndExternalModes(t *testing.T) {
 		}
 		require.NotNil(t, outVol)
 		require.True(t, defaultOutputSizeLimitQty.Equal(*outVol.EmptyDir.SizeLimit))
+	})
+
+	t.Run("Accelerator Exclusive, Sliced, Partitioned, and LocalStorage resources", func(t *testing.T) {
+		t.Parallel()
+
+		localStorageQty := resource.MustParse("20Gi")
+		sliceableType := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: "nvidia-h100-sliceable"},
+			Status: workercore.InstanceTypeStatus{
+				Detail: workercore.InstanceTypeDetail{
+					Manufacturer: nodefeature.ManufacturerNVIDIA,
+					InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{
+						SlicedDetail: workercore.AcceleratorSlicedDetail{
+							Logical: workercore.AcceleratorSlicedLogicalDetail{Count: 4},
+						},
+					},
+				},
+			},
+		}
+		nonSliceableType := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: "nvidia-h100-exclusive"},
+			Status: workercore.InstanceTypeStatus{
+				Detail: workercore.InstanceTypeDetail{
+					Manufacturer: nodefeature.ManufacturerNVIDIA,
+				},
+			},
+		}
+
+		// Sliced mode + LocalStorage
+		slicedPod, err := BuildSandboxPod(SandboxPodSpec{
+			Forger:             forger,
+			Name:               "sb-sliced",
+			RoleName:           "decode",
+			Generation:         1,
+			InputConfigMapName: "cm-1",
+			EntranceQueue:      "nvidia-h100-lq",
+			AcceleratorType:    sliceableType,
+			Hardware:           hw,
+			OperatorImage:      "gpustack/operator:v1.0.0",
+			SandboxSpec: workercore.ModelDeploymentForgerSandboxSpec{
+				RunnerMode: workercore.ModelDeploymentForgerRunnerModeMock,
+				Resources: &workercore.ModelDeploymentForgerSandboxResources{
+					CPU:                               &cpuQty,
+					RAM:                               &ramQty,
+					LocalStorage:                      &localStorageQty,
+					AcceleratorSlicedMemoryPercentage: 50,
+					AcceleratorSlicedCoresPercentage:  25,
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		slicedCardRes := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+		slicedMemRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(nodefeature.ManufacturerNVIDIA)
+		slicedCoresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(nodefeature.ManufacturerNVIDIA)
+		one := resource.MustParse("1")
+		fifty := resource.MustParse("50")
+		twentyFive := resource.MustParse("25")
+
+		for _, ctr := range slicedPod.Spec.InitContainers {
+			require.True(t, one.Equal(ctr.Resources.Requests[slicedCardRes]))
+			require.True(t, one.Equal(ctr.Resources.Limits[slicedCardRes]))
+			require.True(t, fifty.Equal(ctr.Resources.Requests[slicedMemRes]))
+			require.True(t, fifty.Equal(ctr.Resources.Limits[slicedMemRes]))
+			require.True(t, twentyFive.Equal(ctr.Resources.Requests[slicedCoresRes]))
+			require.True(t, twentyFive.Equal(ctr.Resources.Limits[slicedCoresRes]))
+			require.True(t, localStorageQty.Equal(ctr.Resources.Requests[core.ResourceEphemeralStorage]))
+			require.True(t, localStorageQty.Equal(ctr.Resources.Limits[core.ResourceEphemeralStorage]))
+			require.NotContains(t, ctr.Resources.Requests, accelRes)
+		}
+
+		// Sliced mode rejected when AcceleratorType is not logically sliceable.
+		_, err = BuildSandboxPod(SandboxPodSpec{
+			Forger:             forger,
+			Name:               "sb-sliced-bad",
+			RoleName:           "decode",
+			Generation:         1,
+			InputConfigMapName: "cm-1",
+			EntranceQueue:      "nvidia-h100-lq",
+			AcceleratorType:    nonSliceableType,
+			Hardware:           hw,
+			OperatorImage:      "gpustack/operator:v1.0.0",
+			SandboxSpec: workercore.ModelDeploymentForgerSandboxSpec{
+				RunnerMode: workercore.ModelDeploymentForgerRunnerModeMock,
+				Resources: &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorSlicedMemoryPercentage: 50,
+				},
+			},
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "logical slicing")
+
+		// Partitioned mode renders .partitioned and .partitioned.<kind>-<profile> = 1.
+		partPod, err := BuildSandboxPod(SandboxPodSpec{
+			Forger:             forger,
+			Name:               "sb-partitioned",
+			RoleName:           "decode",
+			Generation:         1,
+			InputConfigMapName: "cm-1",
+			EntranceQueue:      "nvidia-h100-lq",
+			AcceleratorType:    nonSliceableType,
+			Hardware:           hw,
+			OperatorImage:      "gpustack/operator:v1.0.0",
+			SandboxSpec: workercore.ModelDeploymentForgerSandboxSpec{
+				RunnerMode: workercore.ModelDeploymentForgerRunnerModeMock,
+				Resources: &workercore.ModelDeploymentForgerSandboxResources{
+					AcceleratorPartitionedProfile: "3g.40gb",
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		partCardRes := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModePartitioned)
+		partProfRes := nodefeature.GetAcceleratablePartitionedProfileResourceName(nodefeature.ManufacturerNVIDIA, "3g.40gb")
+		require.Equal(t, core.ResourceName("nvidia.com/gpu.partitioned.mig-3g.40gb"), partProfRes)
+		for _, ctr := range partPod.Spec.InitContainers {
+			require.True(t, one.Equal(ctr.Resources.Requests[partCardRes]))
+			require.True(t, one.Equal(ctr.Resources.Limits[partCardRes]))
+			require.True(t, one.Equal(ctr.Resources.Requests[partProfRes]))
+			require.True(t, one.Equal(ctr.Resources.Limits[partProfRes]))
+			require.NotContains(t, ctr.Resources.Requests, accelRes)
+		}
 	})
 
 	t.Run("validation rejects missing required inputs", func(t *testing.T) {
@@ -430,7 +672,50 @@ func TestBuildSandboxPod_MockAndExternalModes(t *testing.T) {
 			},
 			{
 				Forger: forger, Name: "sb", RoleName: "decode", Generation: 1, InputConfigMapName: "cm", EntranceQueue: "lq", OperatorImage: "op", Hardware: hw,
-				SandboxSpec: workercore.ModelDeploymentForgerSandboxSpec{RunnerMode: workercore.ModelDeploymentForgerRunnerModeExternal, RunnerImage: "runner:v1"},
+				SandboxSpec: workercore.ModelDeploymentForgerSandboxSpec{
+					RunnerMode: workercore.ModelDeploymentForgerRunnerModeExternal,
+					Runner:     &workercore.ModelDeploymentForgerSandboxRunner{Image: "runner:v1"},
+				},
+			},
+			{
+				Forger: forger, Name: "sb", RoleName: "decode", Generation: 1, InputConfigMapName: "cm", EntranceQueue: "lq", OperatorImage: "op", Hardware: hw,
+				SandboxSpec: workercore.ModelDeploymentForgerSandboxSpec{
+					RunnerMode: workercore.ModelDeploymentForgerRunnerModeMock,
+					Runner:     &workercore.ModelDeploymentForgerSandboxRunner{Image: "runner:v1"},
+				},
+			},
+			{
+				Forger: forger, Name: "sb", RoleName: "decode", Generation: 1, InputConfigMapName: "cm", EntranceQueue: "lq", OperatorImage: "op", Hardware: hw,
+				SandboxSpec: workercore.ModelDeploymentForgerSandboxSpec{
+					RunnerMode: workercore.ModelDeploymentForgerRunnerModeMock,
+					Resources: &workercore.ModelDeploymentForgerSandboxResources{
+						AcceleratorSlicedCoresPercentage: 50,
+					},
+				},
+			},
+			{
+				Forger: forger, Name: "sb", RoleName: "decode", Generation: 1, InputConfigMapName: "cm", EntranceQueue: "lq", OperatorImage: "op", Hardware: hw,
+				SandboxSpec: workercore.ModelDeploymentForgerSandboxSpec{
+					RunnerMode: workercore.ModelDeploymentForgerRunnerModeMock,
+					Resources: &workercore.ModelDeploymentForgerSandboxResources{
+						AcceleratorPartitionedProfile:     "3g.40gb",
+						AcceleratorSlicedMemoryPercentage: 50,
+					},
+				},
+			},
+			{
+				Forger: forger, Name: "sb", RoleName: "decode", Generation: 1, InputConfigMapName: "cm", EntranceQueue: "lq", OperatorImage: "op",
+				Manufacturer: nodefeature.ManufacturerAMD,
+				Hardware: kernelkey.NodeHardware{
+					Manufacturer:   nodefeature.ManufacturerAMD,
+					SelectorLabels: map[string]string{"feature.node.kubernetes.io/gpustack-acceleratable-amd-mi300x": "true"},
+				},
+				SandboxSpec: workercore.ModelDeploymentForgerSandboxSpec{
+					RunnerMode: workercore.ModelDeploymentForgerRunnerModeMock,
+					Resources: &workercore.ModelDeploymentForgerSandboxResources{
+						AcceleratorPartitionedProfile: "3g.40gb",
+					},
+				},
 			},
 			{
 				Forger: forger, Name: "sb", RoleName: "decode", Generation: 1, InputConfigMapName: "cm", EntranceQueue: "lq", OperatorImage: "op",

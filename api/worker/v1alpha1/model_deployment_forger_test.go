@@ -45,10 +45,23 @@ func TestModelDeploymentForgerCRDSchemaBoundsAndDefaults(t *testing.T) {
 	assert.Equal(t, `{}`, string(sandbox.Default.Raw))
 	assert.ElementsMatch(t, []string{`"External"`, `"Mock"`}, enumValues(t, sandbox, "runnerMode"))
 	assert.Equal(t, `"External"`, string(sandbox.Properties["runnerMode"].Default.Raw))
-	assert.Equal(t, `1800`, string(sandbox.Properties["timeoutSeconds"].Default.Raw))
-	assert.InDelta(t, 60, *sandbox.Properties["timeoutSeconds"].Minimum, 0)
-	assert.InDelta(t, 14400, *sandbox.Properties["timeoutSeconds"].Maximum, 0)
+	assert.Equal(t, `1800`, string(sandbox.Properties["activeDeadlineSeconds"].Default.Raw))
+	assert.InDelta(t, 60, *sandbox.Properties["activeDeadlineSeconds"].Minimum, 0)
+	assert.InDelta(t, 14400, *sandbox.Properties["activeDeadlineSeconds"].Maximum, 0)
 	assert.Equal(t, `"2Gi"`, string(sandbox.Properties["outputSizeLimit"].Default.Raw))
+	assert.Contains(t, sandbox.Properties, "imagePullSecrets")
+
+	runner := sandbox.Properties["runner"]
+	for _, fieldName := range []string{"image", "imagePullPolicy", "command", "args", "env", "envFrom"} {
+		assert.Contains(t, runner.Properties, fieldName)
+	}
+	res := sandbox.Properties["resources"]
+	for _, fieldName := range []string{
+		"cpu", "ram", "localStorage",
+		"acceleratorSlicedMemoryPercentage", "acceleratorSlicedCoresPercentage", "acceleratorPartitionedProfile",
+	} {
+		assert.Contains(t, res.Properties, fieldName)
+	}
 
 	rollout := spec.Properties["rollout"]
 	require.NotNil(t, rollout.Default)

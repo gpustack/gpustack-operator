@@ -21,7 +21,9 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
+	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/setting"
 	"gpustack.ai/gpustack/pkg/webhook"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -40,13 +42,21 @@ const (
 	modelDeploymentForgerDefaultCooldownSeconds = 600
 	modelDeploymentForgerMinCooldownSeconds     = 60
 
-	modelDeploymentForgerDefaultTimeoutSeconds  = 1800
-	modelDeploymentForgerMinTimeoutSeconds      = 60
-	modelDeploymentForgerMaxTimeoutSeconds      = 14400
-	modelDeploymentForgerMaxRunnerImageLen      = 512
-	modelDeploymentForgerMaxNameLen             = 253
-	modelDeploymentForgerMinOutputSizeLimitByte = 64 << 20
-	modelDeploymentForgerMaxOutputSizeLimitByte = 16 << 30
+	modelDeploymentForgerDefaultActiveDeadlineSeconds int64 = 1800
+	modelDeploymentForgerMinActiveDeadlineSeconds     int64 = 60
+	modelDeploymentForgerMaxActiveDeadlineSeconds     int64 = 14400
+	modelDeploymentForgerMaxRunnerImageLen                  = 512
+	modelDeploymentForgerMaxRunnerArgEntries                = 64
+	modelDeploymentForgerMaxRunnerArgBytes                  = 4096
+	modelDeploymentForgerMaxRunnerEnvEntries                = 64
+	modelDeploymentForgerMaxRunnerEnvNameLen                = 256
+	modelDeploymentForgerMaxRunnerEnvFromEntries            = 16
+	modelDeploymentForgerMaxImagePullSecrets                = 32
+	modelDeploymentForgerMaxPartitionProfileLen             = 64
+	modelDeploymentForgerMaxNameLen                         = 253
+	modelDeploymentForgerMinOutputSizeLimitByte             = 64 << 20
+	modelDeploymentForgerMaxOutputSizeLimitByte             = 16 << 30
+	modelDeploymentForgerReservedEnvPrefix                  = "GPUSTACK_FORGE_"
 
 	modelDeploymentForgerDefaultMaxRetainedGenerations = 3
 	modelDeploymentForgerMinRetainedGenerations        = 1
@@ -176,6 +186,18 @@ func (*ModelDeploymentForgerWebhook) ValidateDelete(
 	return nil, nil
 }
 
+func (*ModelDeploymentForgerWebhook) Default(_ context.Context, obj runtime.Object) error {
+	mdf := obj.(*workercore.ModelDeploymentForger)
+	if !mdf.DeletionTimestamp.IsZero() {
+		return nil
+	}
+	if mdf.Spec.Sandbox.ActiveDeadlineSeconds <= 0 {
+		mdf.Spec.Sandbox.ActiveDeadlineSeconds = modelDeploymentForgerDefaultActiveDeadlineSeconds
+	}
+	defaultModelDeploymentForger(mdf)
+	return nil
+}
+
 func defaultModelDeploymentForger(mdf *workercore.ModelDeploymentForger) {
 	if mdf.Spec.Mode == "" {
 		mdf.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
@@ -197,8 +219,8 @@ func defaultModelDeploymentForger(mdf *workercore.ModelDeploymentForger) {
 	if mdf.Spec.Sandbox.RunnerMode == "" {
 		mdf.Spec.Sandbox.RunnerMode = workercore.ModelDeploymentForgerRunnerModeExternal
 	}
-	if mdf.Spec.Sandbox.TimeoutSeconds == 0 {
-		mdf.Spec.Sandbox.TimeoutSeconds = modelDeploymentForgerDefaultTimeoutSeconds
+	if mdf.Spec.Sandbox.ActiveDeadlineSeconds == 0 {
+		mdf.Spec.Sandbox.ActiveDeadlineSeconds = modelDeploymentForgerDefaultActiveDeadlineSeconds
 	}
 	if mdf.Spec.Sandbox.OutputSizeLimit == nil {
 		mdf.Spec.Sandbox.OutputSizeLimit = ptr.To(modelDeploymentForgerDefaultOutputQty.DeepCopy())
@@ -239,7 +261,7 @@ func (r *ModelDeploymentForgerWebhook) validateModelDeploymentForger(
 		return nil
 	}
 
-	return validateModelDeploymentForgerAgainstTarget(effective, md)
+	return r.validateModelDeploymentForgerAgainstTarget(ctx, effective, md)
 }
 
 func (r *ModelDeploymentForgerWebhook) readModelDeploymentForgerTarget(
@@ -412,40 +434,27 @@ func (r *ModelDeploymentForgerWebhook) validateModelDeploymentForgerSandbox(
 
 	switch sandbox.RunnerMode {
 	case workercore.ModelDeploymentForgerRunnerModeExternal:
-		img := sandbox.RunnerImage
-		imgPath := sandboxPath.Child("runnerImage")
-		switch {
-		case strings.TrimSpace(img) == "":
-			errs = append(errs, field.Required(imgPath,
-				"runnerImage is required when runnerMode is External"))
-		case len(img) > modelDeploymentForgerMaxRunnerImageLen:
-			errs = append(errs, field.Invalid(imgPath, img,
-				fmt.Sprintf("must be at most %d characters", modelDeploymentForgerMaxRunnerImageLen)))
-		case strings.ContainsFunc(img, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }):
-			errs = append(errs, field.Invalid(imgPath, img,
-				"must not contain whitespace or control characters"))
-		default:
-			if err := validateRunnerImageReference(img); err != nil {
-				errs = append(errs, field.Invalid(imgPath, img, err.Error()))
-			} else if prefixErr := r.validateModelDeploymentForgerRunnerImagePrefix(ctx, img, imgPath); prefixErr != nil {
-				errs = append(errs, prefixErr)
-			}
+		if sandbox.Runner == nil {
+			errs = append(errs, field.Required(sandboxPath.Child("runner"),
+				"runner is required when runnerMode is External"))
+		} else {
+			errs = append(errs, r.validateModelDeploymentForgerSandboxRunner(ctx, sandbox.Runner, sandboxPath.Child("runner"))...)
 		}
 	case workercore.ModelDeploymentForgerRunnerModeMock:
-		if len(sandbox.RunnerImage) > modelDeploymentForgerMaxRunnerImageLen {
-			errs = append(errs, field.Invalid(sandboxPath.Child("runnerImage"), sandbox.RunnerImage,
-				fmt.Sprintf("must be at most %d characters", modelDeploymentForgerMaxRunnerImageLen)))
+		if sandbox.Runner != nil {
+			errs = append(errs, field.Invalid(sandboxPath.Child("runner"), sandbox.Runner,
+				"runner container overrides are only allowed when runnerMode is External"))
 		}
 	default:
 		errs = append(errs, field.Invalid(sandboxPath.Child("runnerMode"), sandbox.RunnerMode,
 			"must be External or Mock"))
 	}
 
-	if sandbox.TimeoutSeconds < modelDeploymentForgerMinTimeoutSeconds ||
-		sandbox.TimeoutSeconds > modelDeploymentForgerMaxTimeoutSeconds {
-		errs = append(errs, field.Invalid(sandboxPath.Child("timeoutSeconds"), sandbox.TimeoutSeconds,
+	if sandbox.ActiveDeadlineSeconds < modelDeploymentForgerMinActiveDeadlineSeconds ||
+		sandbox.ActiveDeadlineSeconds > modelDeploymentForgerMaxActiveDeadlineSeconds {
+		errs = append(errs, field.Invalid(sandboxPath.Child("activeDeadlineSeconds"), sandbox.ActiveDeadlineSeconds,
 			fmt.Sprintf("must be between %d and %d seconds",
-				modelDeploymentForgerMinTimeoutSeconds, modelDeploymentForgerMaxTimeoutSeconds)))
+				modelDeploymentForgerMinActiveDeadlineSeconds, modelDeploymentForgerMaxActiveDeadlineSeconds)))
 	}
 
 	if sandbox.OutputSizeLimit != nil {
@@ -458,15 +467,291 @@ func (r *ModelDeploymentForgerWebhook) validateModelDeploymentForgerSandbox(
 		}
 	}
 
+	errs = append(errs, validateModelDeploymentForgerSandboxImagePullSecrets(
+		sandbox.ImagePullSecrets, sandboxPath.Child("imagePullSecrets"),
+	)...)
+
 	if sandbox.Resources != nil {
-		resPath := sandboxPath.Child("resources")
-		if sandbox.Resources.CPU != nil && sandbox.Resources.CPU.Sign() <= 0 {
-			errs = append(errs, field.Invalid(resPath.Child("cpu"), sandbox.Resources.CPU.String(),
-				"must be greater than zero"))
+		errs = append(errs, validateModelDeploymentForgerSandboxResources(
+			sandbox.Resources, sandboxPath.Child("resources"),
+		)...)
+	}
+
+	return errs
+}
+
+func (r *ModelDeploymentForgerWebhook) validateModelDeploymentForgerSandboxRunner(
+	ctx context.Context, runner *workercore.ModelDeploymentForgerSandboxRunner, runnerPath *field.Path,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	img := runner.Image
+	imgPath := runnerPath.Child("image")
+	switch {
+	case strings.TrimSpace(img) == "":
+		errs = append(errs, field.Required(imgPath,
+			"image is required when runnerMode is External"))
+	case len(img) > modelDeploymentForgerMaxRunnerImageLen:
+		errs = append(errs, field.Invalid(imgPath, img,
+			fmt.Sprintf("must be at most %d characters", modelDeploymentForgerMaxRunnerImageLen)))
+	case strings.ContainsFunc(img, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }):
+		errs = append(errs, field.Invalid(imgPath, img,
+			"must not contain whitespace or control characters"))
+	default:
+		if err := validateRunnerImageReference(img); err != nil {
+			errs = append(errs, field.Invalid(imgPath, img, err.Error()))
+		} else if prefixErr := r.validateModelDeploymentForgerRunnerImagePrefix(ctx, img, imgPath); prefixErr != nil {
+			errs = append(errs, prefixErr)
 		}
-		if sandbox.Resources.RAM != nil && sandbox.Resources.RAM.Sign() <= 0 {
-			errs = append(errs, field.Invalid(resPath.Child("ram"), sandbox.Resources.RAM.String(),
-				"must be greater than zero"))
+	}
+
+	if runner.ImagePullPolicy != "" {
+		switch runner.ImagePullPolicy {
+		case core.PullAlways, core.PullNever, core.PullIfNotPresent:
+		default:
+			errs = append(errs, field.NotSupported(runnerPath.Child("imagePullPolicy"), runner.ImagePullPolicy,
+				[]string{string(core.PullAlways), string(core.PullNever), string(core.PullIfNotPresent)}))
+		}
+	}
+
+	errs = append(errs, validateModelDeploymentForgerStringArgs(runner.Command, runnerPath.Child("command"))...)
+	errs = append(errs, validateModelDeploymentForgerStringArgs(runner.Args, runnerPath.Child("args"))...)
+	errs = append(errs, validateModelDeploymentForgerRunnerEnv(runner.Env, runnerPath.Child("env"))...)
+	errs = append(errs, validateModelDeploymentForgerRunnerEnvFrom(runner.EnvFrom, runnerPath.Child("envFrom"))...)
+
+	return errs
+}
+
+func validateModelDeploymentForgerStringArgs(values []string, fldPath *field.Path) field.ErrorList {
+	var errs field.ErrorList
+	if len(values) > modelDeploymentForgerMaxRunnerArgEntries {
+		errs = append(errs, field.TooMany(fldPath, len(values), modelDeploymentForgerMaxRunnerArgEntries))
+	}
+	for i, val := range values {
+		itemPath := fldPath.Index(i)
+		if len(val) > modelDeploymentForgerMaxRunnerArgBytes {
+			errs = append(errs, field.Invalid(itemPath, fmt.Sprintf("<%d bytes>", len(val)),
+				fmt.Sprintf("must be at most %d bytes", modelDeploymentForgerMaxRunnerArgBytes)))
+		}
+		if strings.IndexByte(val, 0) != -1 {
+			errs = append(errs, field.Invalid(itemPath, val, "must not contain NUL bytes"))
+		}
+	}
+	return errs
+}
+
+func validateModelDeploymentForgerRunnerEnv(
+	env []workercore.ModelDeploymentForgerSandboxEnvVar, envPath *field.Path,
+) field.ErrorList {
+	var errs field.ErrorList
+	if len(env) > modelDeploymentForgerMaxRunnerEnvEntries {
+		errs = append(errs, field.TooMany(envPath, len(env), modelDeploymentForgerMaxRunnerEnvEntries))
+	}
+
+	seen := sets.New[string]()
+	for i := range env {
+		ev := &env[i]
+		evPath := envPath.Index(i)
+		namePath := evPath.Child("name")
+
+		switch {
+		case ev.Name == "":
+			errs = append(errs, field.Required(namePath, "must not be empty"))
+		case len(ev.Name) > modelDeploymentForgerMaxRunnerEnvNameLen:
+			errs = append(errs, field.Invalid(namePath, ev.Name,
+				fmt.Sprintf("must be at most %d characters", modelDeploymentForgerMaxRunnerEnvNameLen)))
+		default:
+			if msgs := kvalidation.IsEnvVarName(ev.Name); len(msgs) > 0 {
+				errs = append(errs, field.Invalid(namePath, ev.Name,
+					fmt.Sprintf("must be a valid environment variable name: %s", strings.Join(msgs, "; "))))
+			} else if strings.HasPrefix(strings.ToUpper(ev.Name), modelDeploymentForgerReservedEnvPrefix) {
+				errs = append(errs, field.Forbidden(namePath,
+					"environment variable names starting with GPUSTACK_FORGE_ are reserved by the operator"))
+			}
+			if seen.Has(ev.Name) {
+				errs = append(errs, field.Duplicate(namePath, ev.Name))
+			} else {
+				seen.Insert(ev.Name)
+			}
+		}
+
+		if ev.Value != "" && ev.ValueFrom != nil {
+			errs = append(errs, field.Invalid(evPath.Child("valueFrom"), ev.ValueFrom,
+				"may not be specified when value is non-empty"))
+		}
+		if ev.ValueFrom != nil {
+			vfPath := evPath.Child("valueFrom")
+			cmRef := ev.ValueFrom.ConfigMapKeyRef
+			secRef := ev.ValueFrom.SecretKeyRef
+			switch {
+			case cmRef == nil && secRef == nil:
+				errs = append(errs, field.Required(vfPath,
+					"must specify exactly one of configMapKeyRef or secretKeyRef"))
+			case cmRef != nil && secRef != nil:
+				errs = append(errs, field.Invalid(vfPath, ev.ValueFrom,
+					"may not specify more than one of configMapKeyRef or secretKeyRef"))
+			case cmRef != nil:
+				errs = append(errs, validateModelDeploymentForgerKeySelector(
+					cmRef.Name, cmRef.Key, vfPath.Child("configMapKeyRef"),
+				)...)
+			case secRef != nil:
+				errs = append(errs, validateModelDeploymentForgerKeySelector(
+					secRef.Name, secRef.Key, vfPath.Child("secretKeyRef"),
+				)...)
+			}
+		}
+	}
+	return errs
+}
+
+func validateModelDeploymentForgerKeySelector(name, key string, refPath *field.Path) field.ErrorList {
+	var errs field.ErrorList
+	namePath := refPath.Child("name")
+	if name == "" {
+		errs = append(errs, field.Required(namePath, "must not be empty"))
+	} else if msgs := kvalidation.IsDNS1123Subdomain(name); len(msgs) > 0 {
+		errs = append(errs, field.Invalid(namePath, name, strings.Join(msgs, "; ")))
+	}
+
+	keyPath := refPath.Child("key")
+	if key == "" {
+		errs = append(errs, field.Required(keyPath, "must not be empty"))
+	} else if msgs := kvalidation.IsConfigMapKey(key); len(msgs) > 0 {
+		errs = append(errs, field.Invalid(keyPath, key, strings.Join(msgs, "; ")))
+	}
+	return errs
+}
+
+func validateModelDeploymentForgerRunnerEnvFrom(
+	envFrom []core.EnvFromSource, envFromPath *field.Path,
+) field.ErrorList {
+	var errs field.ErrorList
+	if len(envFrom) > modelDeploymentForgerMaxRunnerEnvFromEntries {
+		errs = append(errs, field.TooMany(envFromPath, len(envFrom), modelDeploymentForgerMaxRunnerEnvFromEntries))
+	}
+
+	for i := range envFrom {
+		ef := &envFrom[i]
+		efPath := envFromPath.Index(i)
+
+		switch {
+		case ef.ConfigMapRef == nil && ef.SecretRef == nil:
+			errs = append(errs, field.Required(efPath,
+				"must specify exactly one of configMapRef or secretRef"))
+		case ef.ConfigMapRef != nil && ef.SecretRef != nil:
+			errs = append(errs, field.Invalid(efPath, ef,
+				"may not specify more than one of configMapRef or secretRef"))
+		case ef.ConfigMapRef != nil:
+			namePath := efPath.Child("configMapRef", "name")
+			if ef.ConfigMapRef.Name == "" {
+				errs = append(errs, field.Required(namePath, "must not be empty"))
+			} else if msgs := kvalidation.IsDNS1123Subdomain(ef.ConfigMapRef.Name); len(msgs) > 0 {
+				errs = append(errs, field.Invalid(namePath, ef.ConfigMapRef.Name, strings.Join(msgs, "; ")))
+			}
+		case ef.SecretRef != nil:
+			namePath := efPath.Child("secretRef", "name")
+			if ef.SecretRef.Name == "" {
+				errs = append(errs, field.Required(namePath, "must not be empty"))
+			} else if msgs := kvalidation.IsDNS1123Subdomain(ef.SecretRef.Name); len(msgs) > 0 {
+				errs = append(errs, field.Invalid(namePath, ef.SecretRef.Name, strings.Join(msgs, "; ")))
+			}
+		}
+
+		if ef.Prefix != "" {
+			prefixPath := efPath.Child("prefix")
+			if len(ef.Prefix) > modelDeploymentForgerMaxRunnerEnvNameLen {
+				errs = append(errs, field.Invalid(prefixPath, ef.Prefix,
+					fmt.Sprintf("must be at most %d characters", modelDeploymentForgerMaxRunnerEnvNameLen)))
+			} else if msgs := kvalidation.IsEnvVarName(ef.Prefix); len(msgs) > 0 {
+				errs = append(errs, field.Invalid(prefixPath, ef.Prefix,
+					fmt.Sprintf("must be a valid environment variable prefix: %s", strings.Join(msgs, "; "))))
+			} else if strings.HasPrefix(strings.ToUpper(ef.Prefix), modelDeploymentForgerReservedEnvPrefix) {
+				errs = append(errs, field.Forbidden(prefixPath,
+					"environment variable prefixes starting with GPUSTACK_FORGE_ are reserved by the operator"))
+			}
+		}
+	}
+	return errs
+}
+
+func validateModelDeploymentForgerSandboxImagePullSecrets(
+	refs []core.LocalObjectReference, secretsPath *field.Path,
+) field.ErrorList {
+	var errs field.ErrorList
+	if len(refs) > modelDeploymentForgerMaxImagePullSecrets {
+		errs = append(errs, field.TooMany(secretsPath, len(refs), modelDeploymentForgerMaxImagePullSecrets))
+	}
+
+	seen := sets.New[string]()
+	for i := range refs {
+		name := refs[i].Name
+		namePath := secretsPath.Index(i).Child("name")
+		if name == "" {
+			errs = append(errs, field.Required(namePath, "name of the referenced secret must be specified"))
+			continue
+		}
+		if msgs := kvalidation.IsDNS1123Subdomain(name); len(msgs) > 0 {
+			errs = append(errs, field.Invalid(namePath, name, strings.Join(msgs, "; ")))
+			continue
+		}
+		if seen.Has(name) {
+			errs = append(errs, field.Duplicate(namePath, name))
+			continue
+		}
+		seen.Insert(name)
+	}
+	return errs
+}
+
+func validateModelDeploymentForgerSandboxResources(
+	res *workercore.ModelDeploymentForgerSandboxResources, resPath *field.Path,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	if res.CPU != nil && res.CPU.Sign() <= 0 {
+		errs = append(errs, field.Invalid(resPath.Child("cpu"), res.CPU.String(),
+			"must be greater than zero"))
+	}
+	if res.RAM != nil && res.RAM.Sign() <= 0 {
+		errs = append(errs, field.Invalid(resPath.Child("ram"), res.RAM.String(),
+			"must be greater than zero"))
+	}
+	if res.LocalStorage != nil && res.LocalStorage.Sign() <= 0 {
+		errs = append(errs, field.Invalid(resPath.Child("localStorage"), res.LocalStorage.String(),
+			"must be greater than zero"))
+	}
+
+	if res.AcceleratorSlicedMemoryPercentage < 0 || res.AcceleratorSlicedMemoryPercentage > 100 {
+		errs = append(errs, field.Invalid(resPath.Child("acceleratorSlicedMemoryPercentage"),
+			res.AcceleratorSlicedMemoryPercentage, "must be between 0 and 100"))
+	}
+	if res.AcceleratorSlicedCoresPercentage < 0 || res.AcceleratorSlicedCoresPercentage > 100 {
+		errs = append(errs, field.Invalid(resPath.Child("acceleratorSlicedCoresPercentage"),
+			res.AcceleratorSlicedCoresPercentage, "must be between 0 and 100"))
+	}
+	if res.AcceleratorSlicedCoresPercentage > 0 && res.AcceleratorSlicedMemoryPercentage == 0 {
+		errs = append(errs, field.Invalid(resPath.Child("acceleratorSlicedCoresPercentage"),
+			res.AcceleratorSlicedCoresPercentage,
+			"acceleratorSlicedMemoryPercentage must be greater than 0 when acceleratorSlicedCoresPercentage is set"))
+	}
+
+	if profile := res.AcceleratorPartitionedProfile; profile != "" {
+		profilePath := resPath.Child("acceleratorPartitionedProfile")
+		if len(profile) > modelDeploymentForgerMaxPartitionProfileLen {
+			errs = append(errs, field.Invalid(profilePath, profile,
+				fmt.Sprintf("must be at most %d characters", modelDeploymentForgerMaxPartitionProfileLen)))
+		} else if strings.ContainsFunc(profile, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+			errs = append(errs, field.Invalid(profilePath, profile,
+				"must not contain whitespace or control characters"))
+		}
+		if res.AcceleratorSlicedMemoryPercentage > 0 || res.AcceleratorSlicedCoresPercentage > 0 {
+			errs = append(errs, field.Invalid(profilePath, profile,
+				fmt.Sprintf(
+					"a partition profile cannot be combined with %s or %s: hardware partitioning and "+
+						"software slicing cannot both apply to one accelerator",
+					resPath.Child("acceleratorSlicedMemoryPercentage"),
+					resPath.Child("acceleratorSlicedCoresPercentage"),
+				)))
 		}
 	}
 
@@ -654,16 +939,24 @@ func validateModelDeploymentForgerRollout(rollout *workercore.ModelDeploymentFor
 	return errs
 }
 
-func validateModelDeploymentForgerAgainstTarget(
-	mdf *workercore.ModelDeploymentForger, md *workercore.ModelDeployment,
+func (r *ModelDeploymentForgerWebhook) validateModelDeploymentForgerAgainstTarget(
+	ctx context.Context, mdf *workercore.ModelDeploymentForger, md *workercore.ModelDeployment,
 ) field.ErrorList {
 	declared := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		declared[md.Spec.Roles[i].Name] = &md.Spec.Roles[i]
 	}
 
+	res := mdf.Spec.Sandbox.Resources
+	needsPoolCheck := r.APIReader != nil && res != nil &&
+		(res.AcceleratorSlicedMemoryPercentage > 0 ||
+			res.AcceleratorSlicedCoresPercentage > 0 ||
+			res.AcceleratorPartitionedProfile != "")
+	checkedPools := sets.New[string]()
+
 	var errs field.ErrorList
 	rolesPath := field.NewPath("spec", "roles")
+	resPath := field.NewPath("spec", "sandbox", "resources")
 	for i := range mdf.Spec.Roles {
 		rSpec := &mdf.Spec.Roles[i]
 		namePath := rolesPath.Index(i).Child("name")
@@ -687,6 +980,101 @@ func validateModelDeploymentForgerAgainstTarget(
 					break
 				}
 			}
+		}
+
+		if needsPoolCheck && role.AcceleratorType != "" && !checkedPools.Has(role.AcceleratorType) {
+			checkedPools.Insert(role.AcceleratorType)
+			detail, found, err := r.readForgerTargetPoolDetail(ctx, role.AcceleratorType)
+			if err != nil {
+				errs = append(errs, field.InternalError(resPath, err))
+				continue
+			}
+			if found {
+				errs = append(errs, validateForgerSandboxResourcesAgainstPoolDetail(
+					role.AcceleratorType, detail, res, resPath,
+				)...)
+			}
+		}
+	}
+
+	return errs
+}
+
+func (r *ModelDeploymentForgerWebhook) readForgerTargetPoolDetail(
+	ctx context.Context, name string,
+) (*workercore.InstanceTypeDetail, bool, error) {
+	key := ctrlcli.ObjectKey{Name: name}
+
+	v1AT := new(worker.AcceleratorType)
+	if err := r.APIReader.Get(ctx, key, v1AT); err == nil {
+		return &v1AT.Status.Detail, true, nil
+	} else if !kerrors.IsNotFound(err) {
+		return nil, false, fmt.Errorf("read AcceleratorType %q: %w", name, err)
+	}
+
+	at := new(workercore.AcceleratorType)
+	if err := r.APIReader.Get(ctx, key, at); err == nil {
+		return &at.Status.Detail, true, nil
+	} else if !kerrors.IsNotFound(err) {
+		return nil, false, fmt.Errorf("read AcceleratorType %q: %w", name, err)
+	}
+
+	v1IT := new(worker.InstanceType)
+	if err := r.APIReader.Get(ctx, key, v1IT); err == nil {
+		return &v1IT.Status.Detail, true, nil
+	} else if !kerrors.IsNotFound(err) {
+		return nil, false, fmt.Errorf("read InstanceType %q: %w", name, err)
+	}
+
+	it := new(workercore.InstanceType)
+	if err := r.APIReader.Get(ctx, key, it); err == nil {
+		return &it.Status.Detail, true, nil
+	} else if !kerrors.IsNotFound(err) {
+		return nil, false, fmt.Errorf("read InstanceType %q: %w", name, err)
+	}
+
+	return nil, false, nil
+}
+
+func validateForgerSandboxResourcesAgainstPoolDetail(
+	typeName string,
+	detail *workercore.InstanceTypeDetail,
+	res *workercore.ModelDeploymentForgerSandboxResources,
+	resPath *field.Path,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	switch {
+	case res.AcceleratorPartitionedProfile != "":
+		profile := res.AcceleratorPartitionedProfile
+		profilePath := resPath.Child("acceleratorPartitionedProfile")
+		if nodefeature.GetAcceleratablePartitionedProfileResourceName(detail.Manufacturer, profile) == "" {
+			errs = append(errs, field.Invalid(profilePath, profile,
+				fmt.Sprintf("accelerator type %s (manufacturer %q) does not support partition profile %q",
+					typeName, detail.Manufacturer, profile)))
+			return errs
+		}
+		if !detail.IsPhysicallySliceable() && len(detail.SlicedDetail.Physical.Profiles) == 0 {
+			errs = append(errs, field.Forbidden(profilePath,
+				fmt.Sprintf("accelerator type %s does not offer hardware partitioning", typeName)))
+			return errs
+		}
+		profiles := detail.SlicedDetail.Physical.Profiles
+		offered := make([]string, 0, len(profiles))
+		for _, p := range profiles {
+			if p.Name == profile {
+				return nil
+			}
+			offered = append(offered, p.Name)
+		}
+		errs = append(errs, field.Invalid(profilePath, profile,
+			fmt.Sprintf("accelerator type %s does not offer this partition profile; offered: %v",
+				typeName, offered)))
+
+	case res.AcceleratorSlicedMemoryPercentage > 0 || res.AcceleratorSlicedCoresPercentage > 0:
+		if !detail.IsLogicallySliceable() {
+			errs = append(errs, field.Forbidden(resPath.Child("acceleratorSlicedMemoryPercentage"),
+				fmt.Sprintf("accelerator type %s does not offer logical slicing", typeName)))
 		}
 	}
 

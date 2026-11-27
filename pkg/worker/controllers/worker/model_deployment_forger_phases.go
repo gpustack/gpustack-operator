@@ -43,12 +43,49 @@ const (
 	forgerTargetDeploymentAnnotationKey  = "forger.gpustack.ai/target-deployment"
 )
 
+type forgerRunnerEnvFingerprint struct {
+	Name      string                                               `json:"name"`
+	Value     string                                               `json:"value,omitempty"`
+	ValueFrom *workercore.ModelDeploymentForgerSandboxEnvVarSource `json:"valueFrom,omitempty"`
+}
+
+type forgerRunnerFingerprintInput struct {
+	RunnerMode workercore.ModelDeploymentForgerRunnerMode `json:"runnerMode"`
+	Image      string                                     `json:"image,omitempty"`
+	Command    []string                                   `json:"command,omitempty"`
+	Args       []string                                   `json:"args,omitempty"`
+	Env        []forgerRunnerEnvFingerprint               `json:"env,omitempty"`
+	EnvFrom    []core.EnvFromSource                       `json:"envFrom,omitempty"`
+}
+
 func forgerRunnerFingerprint(mdf *workercore.ModelDeploymentForger) string {
-	var runnerImage string
-	if mdf != nil {
-		runnerImage = strings.TrimSpace(mdf.Spec.Sandbox.RunnerImage)
+	input := forgerRunnerFingerprintInput{
+		RunnerMode: effectiveRunnerMode(mdf),
 	}
-	sum := sha256.Sum256([]byte(string(effectiveRunnerMode(mdf)) + "\x00" + runnerImage))
+	if mdf != nil && mdf.Spec.Sandbox.Runner != nil {
+		runner := mdf.Spec.Sandbox.Runner
+		input.Image = strings.TrimSpace(runner.Image)
+		input.Command = runner.Command
+		input.Args = runner.Args
+		if len(runner.Env) > 0 {
+			input.Env = make([]forgerRunnerEnvFingerprint, 0, len(runner.Env))
+			for i := range runner.Env {
+				e := &runner.Env[i]
+				input.Env = append(input.Env, forgerRunnerEnvFingerprint{
+					Name:      e.Name,
+					Value:     e.Value,
+					ValueFrom: e.ValueFrom,
+				})
+			}
+		}
+		input.EnvFrom = runner.EnvFrom
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		sum := sha256.Sum256([]byte(string(input.RunnerMode) + "\x00" + input.Image))
+		return hex.EncodeToString(sum[:])[:16]
+	}
+	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])[:16]
 }
 
@@ -913,6 +950,7 @@ func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 		InputConfigMapName:  cmName,
 		InputConfigMapItems: items,
 		EntranceQueue:       accType.Status.Entrance,
+		AcceleratorType:     acceleratorTypeAsInstanceType(accType),
 		Manufacturer:        hw.Manufacturer,
 		Hardware:            hw,
 		OperatorImage:       operatorImg,
@@ -1097,7 +1135,7 @@ func (r *ModelDeploymentForgerReconciler) reconcileSandboxRole(
 		r.cleanupRoleSandboxObjects(ctx, mdf.Namespace, sb)
 		rs.ActiveSandbox = nil
 		recordForgerSandboxMetric(runnerMode, forgerSandboxResultTimeout)
-		r.recordFailedGeneration(mdf, rs, "SandboxTimeout", "ForgeSandbox exceeded sandbox.timeoutSeconds", startedAt, now)
+		r.recordFailedGeneration(mdf, rs, "SandboxTimeout", "ForgeSandbox exceeded sandbox.activeDeadlineSeconds", startedAt, now)
 		return ctrl.Result{RequeueAfter: effectiveProbeCooldown(mdf)}, nil
 	}
 
@@ -2223,7 +2261,7 @@ func quarantinedArtifactMatchesRole(
 	if annFP := strings.TrimSpace(mka.Annotations[forgerRunnerFingerprintAnnotationKey]); annFP != "" {
 		return annFP == runnerFingerprint
 	}
-	return strings.TrimSpace(mdf.Spec.Sandbox.RunnerImage) == ""
+	return mdf.Spec.Sandbox.Runner == nil || strings.TrimSpace(mdf.Spec.Sandbox.Runner.Image) == ""
 }
 
 func (r *ModelDeploymentForgerReconciler) collectCoveredAndQuarantinedKeys(
@@ -2449,4 +2487,33 @@ func (r *ModelDeploymentForgerReconciler) getAcceleratorType(
 		return nil, err
 	}
 	return (*worker.AcceleratorType)(at), nil
+}
+
+func acceleratorTypeAsInstanceType(at *worker.AcceleratorType) *workercore.InstanceType {
+	if at == nil {
+		return nil
+	}
+	return &workercore.InstanceType{
+		ObjectMeta: *at.ObjectMeta.DeepCopy(),
+		Spec: workercore.InstanceTypeSpec{
+			DisplayName:      at.Spec.DisplayName,
+			Description:      at.Spec.Description,
+			Inactive:         at.Spec.Inactive,
+			AcceleratorGroup: at.Spec.AcceleratorGroup,
+			GeneralGroup:     at.Spec.GeneralGroup,
+			Acceleratable:    true,
+			OS:               at.Spec.OS,
+			Arch:             at.Spec.Arch,
+		},
+		Status: workercore.InstanceTypeStatus{
+			Detail:                 *at.Status.Detail.DeepCopy(),
+			Entrance:               at.Status.Entrance,
+			Phase:                  at.Status.Phase,
+			PhaseMessage:           at.Status.PhaseMessage,
+			Accelerator:            *at.Status.Accelerator.DeepCopy(),
+			AcceleratorShared:      *at.Status.AcceleratorShared.DeepCopy(),
+			AcceleratorSliced:      *at.Status.AcceleratorSliced.DeepCopy(),
+			AcceleratorPartitioned: *at.Status.AcceleratorPartitioned.DeepCopy(),
+		},
+	}
 }

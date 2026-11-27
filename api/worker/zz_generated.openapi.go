@@ -211,7 +211,10 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentForgerRoleSpec{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerRoleSpec(ref),
 		v1alpha1.ModelDeploymentForgerRoleStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerRoleStatus(ref),
 		v1alpha1.ModelDeploymentForgerRolloutSpec{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerRolloutSpec(ref),
+		v1alpha1.ModelDeploymentForgerSandboxEnvVar{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxEnvVar(ref),
+		v1alpha1.ModelDeploymentForgerSandboxEnvVarSource{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxEnvVarSource(ref),
 		v1alpha1.ModelDeploymentForgerSandboxResources{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxResources(ref),
+		v1alpha1.ModelDeploymentForgerSandboxRunner{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxRunner(ref),
 		v1alpha1.ModelDeploymentForgerSandboxSpec{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxSpec(ref),
 		v1alpha1.ModelDeploymentForgerSandboxStatus{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxStatus(ref),
 		v1alpha1.ModelDeploymentForgerSpec{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSpec(ref),
@@ -10958,11 +10961,77 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerRolloutSpec(ref co
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxEnvVar(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerSandboxEnvVar represents one environment variable injected into initContainer: forge-runner.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the environment variable name. Must be a valid environment variable identifier and must not start with GPUSTACK_FORGE_.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](256),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"value": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Value is a literal environment variable value. Mutually exclusive with ValueFrom.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"valueFrom": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ValueFrom selects a value from a same-namespace ConfigMap or Secret key. Mutually exclusive with Value.",
+							Ref:         ref(v1alpha1.ModelDeploymentForgerSandboxEnvVarSource{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentForgerSandboxEnvVarSource{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxEnvVarSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerSandboxEnvVarSource selects an environment variable value from a same-namespace ConfigMap or Secret key without exposing Pod downward API fields.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"configMapKeyRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ConfigMapKeyRef selects a key of a ConfigMap in the same namespace.",
+							Ref:         ref(corev1.ConfigMapKeySelector{}.OpenAPIModelName()),
+						},
+					},
+					"secretKeyRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SecretKeyRef selects a key of a Secret in the same namespace.",
+							Ref:         ref(corev1.SecretKeySelector{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			corev1.ConfigMapKeySelector{}.OpenAPIModelName(), corev1.SecretKeySelector{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxResources(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentForgerSandboxResources specifies host CPU and memory requests for ForgeSandbox.",
+				Description: "ModelDeploymentForgerSandboxResources specifies host resources and optional accelerator slicing or hardware partitioning for ForgeSandbox containers.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"cpu": {
@@ -10977,11 +11046,160 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxResources(r
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
+					"localStorage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LocalStorage is the host ephemeral storage request and limit for the ForgeSandbox Pod, such as \"20Gi\".",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"acceleratorSlicedMemoryPercentage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorSlicedMemoryPercentage requests software slicing with this per-accelerator VRAM percentage (0 to 100) on a sliceable AcceleratorType. 0 disables slicing (exclusive whole card, recommended for deterministic verification timing).",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](100),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"acceleratorSlicedCoresPercentage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorSlicedCoresPercentage requests software slicing with this per-accelerator compute percentage (0 to 100) alongside AcceleratorSlicedMemoryPercentage.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](100),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"acceleratorPartitionedProfile": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorPartitionedProfile requests a hardware partition profile (for example \"3g.40gb\") on a partition-offering AcceleratorType. Mutually exclusive with software slicing percentages.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
 			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxRunner(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerSandboxRunner configures the initContainer: forge-runner container in External runner mode using a restricted subset of corev1.Container fields.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"image": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Image is the container image executed by initContainer: forge-runner.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](512),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"imagePullPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullPolicy optionally sets the image pull policy for Image.\n\n\nPossible enum values:\n - `\"Always\"` means that kubelet always attempts to pull the latest image. Container will fail If the pull fails.\n - `\"IfNotPresent\"` means that kubelet pulls if the image isn't present on disk. Container will fail if the image isn't present and the pull fails.\n - `\"Never\"` means that kubelet never pulls an image, but only uses a local image. Container will fail if the image isn't present",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Always", "IfNotPresent", "Never"},
+						},
+					},
+					"command": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Command optionally overrides the container entrypoint argv.",
+							MaxItems:    ptr.To[int64](64),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
+					"args": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Args optionally sets arguments passed to the container entrypoint.",
+							MaxItems:    ptr.To[int64](64),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
+					"env": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Env optionally injects environment variables into initContainer: forge-runner. Names starting with GPUSTACK_FORGE_ are reserved by the operator and rejected.",
+							MaxItems:    ptr.To[int64](64),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelDeploymentForgerSandboxEnvVar{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"envFrom": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "EnvFrom optionally populates environment variables into initContainer: forge-runner from same-namespace ConfigMaps or Secrets. Prefixes starting with GPUSTACK_FORGE_ are rejected, and operator-owned GPUSTACK_FORGE_INPUT_DIR and GPUSTACK_FORGE_OUTPUT_DIR always take precedence.",
+							MaxItems:    ptr.To[int64](16),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(corev1.EnvFromSource{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"image"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentForgerSandboxEnvVar{}.OpenAPIModelName(), corev1.EnvFromSource{}.OpenAPIModelName()},
 	}
 }
 
@@ -10994,18 +11212,16 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxSpec(ref co
 				Properties: map[string]spec.Schema{
 					"runnerMode": {
 						SchemaProps: spec.SchemaProps{
-							Description: "RunnerMode selects External (black-box synthesis container image) or Mock (deterministic built-in operator subcommands for pipeline qualification).\n\n\nPossible enum values:\n - `\"External\"` runs the user-supplied RunnerImage container.\n - `\"Mock\"` runs the deterministic built-in forge-mock subcommand.",
+							Description: "RunnerMode selects External (black-box synthesis container image) or Mock (deterministic built-in operator subcommands for pipeline qualification).\n\n\nPossible enum values:\n - `\"External\"` runs the user-supplied runner container image.\n - `\"Mock\"` runs the deterministic built-in forge-mock subcommand.",
 							Type:        []string{"string"},
 							Format:      "",
 							Enum:        []interface{}{"External", "Mock"},
 						},
 					},
-					"runnerImage": {
+					"runner": {
 						SchemaProps: spec.SchemaProps{
-							Description: "RunnerImage is the container image executed by forge-runner when RunnerMode is External.",
-							MaxLength:   ptr.To[int64](512),
-							Type:        []string{"string"},
-							Format:      "",
+							Description: "Runner configures the initContainer: forge-runner container when RunnerMode is External.",
+							Ref:         ref(v1alpha1.ModelDeploymentForgerSandboxRunner{}.OpenAPIModelName()),
 						},
 					},
 					"priorityClassName": {
@@ -11016,13 +11232,13 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxSpec(ref co
 							Format:      "",
 						},
 					},
-					"timeoutSeconds": {
+					"activeDeadlineSeconds": {
 						SchemaProps: spec.SchemaProps{
-							Description: "TimeoutSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400, default 1800).",
+							Description: "ActiveDeadlineSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400, default 1800), matching PodSpec.activeDeadlineSeconds.",
 							Minimum:     ptr.To[float64](60),
 							Maximum:     ptr.To[float64](14400),
 							Type:        []string{"integer"},
-							Format:      "int32",
+							Format:      "int64",
 						},
 					},
 					"outputSizeLimit": {
@@ -11033,15 +11249,34 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxSpec(ref co
 					},
 					"resources": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Resources optionally specifies host CPU and memory requests and limits for ForgeSandbox containers alongside the single whole accelerator card requested from Kueue.",
+							Description: "Resources optionally specifies host CPU, memory, ephemeral storage, and accelerator slicing or partitioning mode for ForgeSandbox containers. When slicing and partitioning fields are omitted, the sandbox requests one exclusive whole accelerator card (recommended for deterministic verification latency).",
 							Ref:         ref(v1alpha1.ModelDeploymentForgerSandboxResources{}.OpenAPIModelName()),
+						},
+					},
+					"imagePullSecrets": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullSecrets optionally specifies image pull secrets in this namespace for pulling the ForgeSandbox runner image. When omitted, the sandbox inherits the target role's imagePullSecrets.",
+							MaxItems:    ptr.To[int64](32),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+									},
+								},
+							},
 						},
 					},
 				},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelDeploymentForgerSandboxResources{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentForgerSandboxResources{}.OpenAPIModelName(), v1alpha1.ModelDeploymentForgerSandboxRunner{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
 	}
 }
 

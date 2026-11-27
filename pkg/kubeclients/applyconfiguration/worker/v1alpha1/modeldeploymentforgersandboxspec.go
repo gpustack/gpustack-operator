@@ -4,6 +4,7 @@ package v1alpha1
 
 import (
 	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
+	v1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/core/v1"
 	resource "k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -16,23 +17,30 @@ type ModelDeploymentForgerSandboxSpecApplyConfiguration struct {
 	// built-in operator subcommands for pipeline qualification).
 	//
 	RunnerMode *workerv1alpha1.ModelDeploymentForgerRunnerMode `json:"runnerMode,omitempty"`
-	// RunnerImage is the container image executed by forge-runner when RunnerMode is External.
+	// Runner configures the initContainer: forge-runner container when RunnerMode is External.
 	//
-	RunnerImage *string `json:"runnerImage,omitempty"`
+	Runner *ModelDeploymentForgerSandboxRunnerApplyConfiguration `json:"runner,omitempty"`
 	// PriorityClassName optionally sets the Kubernetes PriorityClass on the ForgeSandbox Pod.
 	//
 	PriorityClassName *string `json:"priorityClassName,omitempty"`
-	// TimeoutSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400,
-	// default 1800).
+	// ActiveDeadlineSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400,
+	// default 1800), matching PodSpec.activeDeadlineSeconds.
 	//
-	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty"`
+	ActiveDeadlineSeconds *int64 `json:"activeDeadlineSeconds,omitempty"`
 	// OutputSizeLimit bounds the forge-output emptyDir staging volume (64Mi to 16Gi, default 2Gi).
 	//
 	OutputSizeLimit *resource.Quantity `json:"outputSizeLimit,omitempty"`
-	// Resources optionally specifies host CPU and memory requests and limits for ForgeSandbox
-	// containers alongside the single whole accelerator card requested from Kueue.
+	// Resources optionally specifies host CPU, memory, ephemeral storage, and accelerator slicing
+	// or partitioning mode for ForgeSandbox containers. When slicing and partitioning fields are
+	// omitted, the sandbox requests one exclusive whole accelerator card (recommended for
+	// deterministic verification latency).
 	//
 	Resources *ModelDeploymentForgerSandboxResourcesApplyConfiguration `json:"resources,omitempty"`
+	// ImagePullSecrets optionally specifies image pull secrets in this namespace for pulling the
+	// ForgeSandbox runner image. When omitted, the sandbox inherits the target role's
+	// imagePullSecrets.
+	//
+	ImagePullSecrets []v1.LocalObjectReferenceApplyConfiguration `json:"imagePullSecrets,omitempty"`
 }
 
 // ModelDeploymentForgerSandboxSpecApplyConfiguration constructs a declarative configuration of the ModelDeploymentForgerSandboxSpec type for use with
@@ -49,11 +57,11 @@ func (b *ModelDeploymentForgerSandboxSpecApplyConfiguration) WithRunnerMode(valu
 	return b
 }
 
-// WithRunnerImage sets the RunnerImage field in the declarative configuration to the given value
+// WithRunner sets the Runner field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the RunnerImage field is set to the value of the last call.
-func (b *ModelDeploymentForgerSandboxSpecApplyConfiguration) WithRunnerImage(value string) *ModelDeploymentForgerSandboxSpecApplyConfiguration {
-	b.RunnerImage = &value
+// If called multiple times, the Runner field is set to the value of the last call.
+func (b *ModelDeploymentForgerSandboxSpecApplyConfiguration) WithRunner(value *ModelDeploymentForgerSandboxRunnerApplyConfiguration) *ModelDeploymentForgerSandboxSpecApplyConfiguration {
+	b.Runner = value
 	return b
 }
 
@@ -65,11 +73,11 @@ func (b *ModelDeploymentForgerSandboxSpecApplyConfiguration) WithPriorityClassNa
 	return b
 }
 
-// WithTimeoutSeconds sets the TimeoutSeconds field in the declarative configuration to the given value
+// WithActiveDeadlineSeconds sets the ActiveDeadlineSeconds field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the TimeoutSeconds field is set to the value of the last call.
-func (b *ModelDeploymentForgerSandboxSpecApplyConfiguration) WithTimeoutSeconds(value int32) *ModelDeploymentForgerSandboxSpecApplyConfiguration {
-	b.TimeoutSeconds = &value
+// If called multiple times, the ActiveDeadlineSeconds field is set to the value of the last call.
+func (b *ModelDeploymentForgerSandboxSpecApplyConfiguration) WithActiveDeadlineSeconds(value int64) *ModelDeploymentForgerSandboxSpecApplyConfiguration {
+	b.ActiveDeadlineSeconds = &value
 	return b
 }
 
@@ -86,5 +94,18 @@ func (b *ModelDeploymentForgerSandboxSpecApplyConfiguration) WithOutputSizeLimit
 // If called multiple times, the Resources field is set to the value of the last call.
 func (b *ModelDeploymentForgerSandboxSpecApplyConfiguration) WithResources(value *ModelDeploymentForgerSandboxResourcesApplyConfiguration) *ModelDeploymentForgerSandboxSpecApplyConfiguration {
 	b.Resources = value
+	return b
+}
+
+// WithImagePullSecrets adds the given value to the ImagePullSecrets field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the ImagePullSecrets field.
+func (b *ModelDeploymentForgerSandboxSpecApplyConfiguration) WithImagePullSecrets(values ...*v1.LocalObjectReferenceApplyConfiguration) *ModelDeploymentForgerSandboxSpecApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithImagePullSecrets")
+		}
+		b.ImagePullSecrets = append(b.ImagePullSecrets, *values[i])
+	}
 	return b
 }

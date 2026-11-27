@@ -112,14 +112,44 @@ func fullDeploymentForgerFixture() *ModelDeploymentForger {
 				MinActiveRequests: 1,
 			},
 			Sandbox: workercore.ModelDeploymentForgerSandboxSpec{
-				RunnerMode:        workercore.ModelDeploymentForgerRunnerModeExternal,
-				RunnerImage:       "gpustack/forge-runner:v0.1.0",
-				PriorityClassName: "system-cluster-critical",
-				TimeoutSeconds:    1800,
-				OutputSizeLimit:   ptr.To(resource.MustParse("2Gi")),
+				RunnerMode: workercore.ModelDeploymentForgerRunnerModeExternal,
+				Runner: &workercore.ModelDeploymentForgerSandboxRunner{
+					Image:           "gpustack/forge-runner:v0.1.0",
+					ImagePullPolicy: core.PullIfNotPresent,
+					Command:         []string{"loopwright-forger"},
+					Args:            []string{"--budget", "4"},
+					Env: []workercore.ModelDeploymentForgerSandboxEnvVar{
+						{Name: "LOOPWRIGHT_MODEL", Value: "gpt-5"},
+						{
+							Name: "LOOPWRIGHT_PROVIDER_TOKEN",
+							ValueFrom: &workercore.ModelDeploymentForgerSandboxEnvVarSource{
+								SecretKeyRef: &core.SecretKeySelector{
+									LocalObjectReference: core.LocalObjectReference{Name: "llm-creds"},
+									Key:                  "token",
+								},
+							},
+						},
+					},
+					EnvFrom: []core.EnvFromSource{
+						{
+							ConfigMapRef: &core.ConfigMapEnvSource{
+								LocalObjectReference: core.LocalObjectReference{Name: "forger-config"},
+							},
+						},
+					},
+				},
+				PriorityClassName:     "system-cluster-critical",
+				ActiveDeadlineSeconds: 1800,
+				OutputSizeLimit:       ptr.To(resource.MustParse("2Gi")),
+				ImagePullSecrets: []core.LocalObjectReference{
+					{Name: "regcred"},
+				},
 				Resources: &workercore.ModelDeploymentForgerSandboxResources{
-					CPU: ptr.To(resource.MustParse("8")),
-					RAM: ptr.To(resource.MustParse("32Gi")),
+					CPU:                               ptr.To(resource.MustParse("8")),
+					RAM:                               ptr.To(resource.MustParse("32Gi")),
+					LocalStorage:                      ptr.To(resource.MustParse("20Gi")),
+					AcceleratorSlicedMemoryPercentage: 50,
+					AcceleratorSlicedCoresPercentage:  50,
 				},
 			},
 			Rollout: workercore.ModelDeploymentForgerRolloutSpec{

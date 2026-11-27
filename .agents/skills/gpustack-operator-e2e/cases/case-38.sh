@@ -966,7 +966,7 @@ spec:
     minActiveRequests: 1
   sandbox:
     runnerMode: Mock
-    timeoutSeconds: 600
+    activeDeadlineSeconds: 600
   rollout:
     maxRetainedGenerations: 1
     failureTimeoutSeconds: 90
@@ -1611,8 +1611,9 @@ spec:
     minActiveRequests: 1
   sandbox:
     runnerMode: External
-    runnerImage: ${LIVE_RUNNER_IMAGE}
-    timeoutSeconds: 1800
+    runner:
+      image: ${LIVE_RUNNER_IMAGE}
+    activeDeadlineSeconds: 1800
   rollout:
     maxRetainedGenerations: 2
     failureTimeoutSeconds: 600

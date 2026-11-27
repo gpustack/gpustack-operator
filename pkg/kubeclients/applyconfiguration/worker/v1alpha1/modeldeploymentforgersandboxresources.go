@@ -9,7 +9,8 @@ import (
 // ModelDeploymentForgerSandboxResourcesApplyConfiguration represents a declarative configuration of the ModelDeploymentForgerSandboxResources type for use
 // with apply.
 //
-// ModelDeploymentForgerSandboxResources specifies host CPU and memory requests for ForgeSandbox.
+// ModelDeploymentForgerSandboxResources specifies host resources and optional accelerator slicing
+// or hardware partitioning for ForgeSandbox containers.
 type ModelDeploymentForgerSandboxResourcesApplyConfiguration struct {
 	// CPU is the host CPU request and limit for the ForgeSandbox Pod, such as "8".
 	//
@@ -17,6 +18,23 @@ type ModelDeploymentForgerSandboxResourcesApplyConfiguration struct {
 	// RAM is the host memory request and limit for the ForgeSandbox Pod, such as "32Gi".
 	//
 	RAM *resource.Quantity `json:"ram,omitempty"`
+	// LocalStorage is the host ephemeral storage request and limit for the ForgeSandbox Pod, such
+	// as "20Gi".
+	//
+	LocalStorage *resource.Quantity `json:"localStorage,omitempty"`
+	// AcceleratorSlicedMemoryPercentage requests software slicing with this per-accelerator VRAM
+	// percentage (0 to 100) on a sliceable AcceleratorType. 0 disables slicing (exclusive whole
+	// card, recommended for deterministic verification timing).
+	//
+	AcceleratorSlicedMemoryPercentage *int32 `json:"acceleratorSlicedMemoryPercentage,omitempty"`
+	// AcceleratorSlicedCoresPercentage requests software slicing with this per-accelerator compute
+	// percentage (0 to 100) alongside AcceleratorSlicedMemoryPercentage.
+	//
+	AcceleratorSlicedCoresPercentage *int32 `json:"acceleratorSlicedCoresPercentage,omitempty"`
+	// AcceleratorPartitionedProfile requests a hardware partition profile (for example "3g.40gb")
+	// on a partition-offering AcceleratorType. Mutually exclusive with software slicing percentages.
+	//
+	AcceleratorPartitionedProfile *string `json:"acceleratorPartitionedProfile,omitempty"`
 }
 
 // ModelDeploymentForgerSandboxResourcesApplyConfiguration constructs a declarative configuration of the ModelDeploymentForgerSandboxResources type for use with
@@ -38,5 +56,37 @@ func (b *ModelDeploymentForgerSandboxResourcesApplyConfiguration) WithCPU(value 
 // If called multiple times, the RAM field is set to the value of the last call.
 func (b *ModelDeploymentForgerSandboxResourcesApplyConfiguration) WithRAM(value resource.Quantity) *ModelDeploymentForgerSandboxResourcesApplyConfiguration {
 	b.RAM = &value
+	return b
+}
+
+// WithLocalStorage sets the LocalStorage field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the LocalStorage field is set to the value of the last call.
+func (b *ModelDeploymentForgerSandboxResourcesApplyConfiguration) WithLocalStorage(value resource.Quantity) *ModelDeploymentForgerSandboxResourcesApplyConfiguration {
+	b.LocalStorage = &value
+	return b
+}
+
+// WithAcceleratorSlicedMemoryPercentage sets the AcceleratorSlicedMemoryPercentage field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AcceleratorSlicedMemoryPercentage field is set to the value of the last call.
+func (b *ModelDeploymentForgerSandboxResourcesApplyConfiguration) WithAcceleratorSlicedMemoryPercentage(value int32) *ModelDeploymentForgerSandboxResourcesApplyConfiguration {
+	b.AcceleratorSlicedMemoryPercentage = &value
+	return b
+}
+
+// WithAcceleratorSlicedCoresPercentage sets the AcceleratorSlicedCoresPercentage field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AcceleratorSlicedCoresPercentage field is set to the value of the last call.
+func (b *ModelDeploymentForgerSandboxResourcesApplyConfiguration) WithAcceleratorSlicedCoresPercentage(value int32) *ModelDeploymentForgerSandboxResourcesApplyConfiguration {
+	b.AcceleratorSlicedCoresPercentage = &value
+	return b
+}
+
+// WithAcceleratorPartitionedProfile sets the AcceleratorPartitionedProfile field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AcceleratorPartitionedProfile field is set to the value of the last call.
+func (b *ModelDeploymentForgerSandboxResourcesApplyConfiguration) WithAcceleratorPartitionedProfile(value string) *ModelDeploymentForgerSandboxResourcesApplyConfiguration {
+	b.AcceleratorPartitionedProfile = &value
 	return b
 }

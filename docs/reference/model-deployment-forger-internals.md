@@ -104,6 +104,18 @@ The verifier asserts `overallStatus: "PASSED"` (requiring `failedCount == 0` and
 so all entries must pass), `evaluation.status == "PASSED"`, element-wise `allclose` within `atol`
 and `rtol` (`allclose_passed: true`), and `speedup_factor >= minSpeedupRatio`.
 
+### Sandbox pod contract
+
+`pkg/worker/forger.BuildSandboxPod` and `ModelDeploymentForgerWebhook` enforce the PodSpec-style
+`spec.sandbox` contract:
+
+| Surface | Fields and bounds | Rendering and isolation |
+|---|---|---|
+| Pod envelope | `priorityClassName`, `activeDeadlineSeconds` (`60..14400`, default `1800`), `outputSizeLimit` (`64Mi..16Gi`, default `2Gi`), `imagePullSecrets` (`<= 32` valid DNS-1123 subdomain names, no duplicates) | `imagePullSecrets` merges target `role.imagePullSecrets` followed by `sandbox.imagePullSecrets` (deduplicated in order) so `forge-verifier` still pulls private engine images. |
+| `runnerMode` & `runner` | `External` (default; requires `runner != nil` and `runner.image` `<= 512` chars matching `forger-allowed-runner-image-prefixes`) or `Mock` (rejects non-nil `runner`); `imagePullPolicy` (`Always`, `Never`, `IfNotPresent`); `command` & `args` (`<= 64` entries, `<= 4096` bytes each, no NUL `\x00`) | `runner.{imagePullPolicy,command,args,env,envFrom}` renders strictly on `initContainer: forge-runner` and is never passed to `forge-stage-sentinel`, `forge-verifier`, or `forge-hold`. |
+| `runner.env` & `runner.envFrom` | `env` (`<= 64` unique valid env names `<= 256` chars; mutually exclusive `value` vs `valueFrom.{configMapKeyRef,secretKeyRef}`, no downward API); `envFrom` (`<= 16` entries, exactly one of `configMapRef` or `secretRef`, optional valid `prefix`) | Case-insensitive `GPUSTACK_FORGE_*` names and `envFrom[].prefix` values are rejected at admission and stripped defensively in `BuildSandboxPod`; operator `GPUSTACK_FORGE_INPUT_DIR` and `GPUSTACK_FORGE_OUTPUT_DIR` are always injected in `Env` so Kubernetes prioritizes them over `EnvFrom`. |
+| Host & accelerator `resources` | Positive `cpu`, `ram`, `localStorage` (`ephemeral-storage`); `acceleratorSlicedMemoryPercentage` (`0..100`), `acceleratorSlicedCoresPercentage` (`0..100`, requires `memory > 0`), `acceleratorPartitionedProfile` (`<= 64` chars, mutually exclusive with slicing) | Applied to sequential `initContainer`s `forge-runner` and `forge-verifier` (effective Pod request of `1` unit): `Exclusive` whole-card default (`<vendor>/<dev>: 1`, recommended for deterministic verification timing), `Partitioned` (`.partitioned: 1` + `.partitioned.<kind>-<profile>: 1` on a partition-offering pool), or `Sliced` (`.sliced: 1` + `.sliced.memory-percentage` + `.sliced.cores-percentage` on a sliceable pool). |
+
 ## Sentinel probe and loader
 
 ### Probe HTTP wire contract

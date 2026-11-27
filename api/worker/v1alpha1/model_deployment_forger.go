@@ -320,11 +320,10 @@ type ModelDeploymentForgerSandboxSpec struct {
 	// +k8s:validation:default="External"
 	RunnerMode ModelDeploymentForgerRunnerMode `json:"runnerMode,omitempty" protobuf:"bytes,1,opt,name=runnerMode,casttype=ModelDeploymentForgerRunnerMode"` // nolint: lll
 
-	// RunnerImage is the container image executed by forge-runner when RunnerMode is External.
+	// Runner configures the initContainer: forge-runner container when RunnerMode is External.
 	//
 	// +optional
-	// +k8s:validation:maxLength=512
-	RunnerImage string `json:"runnerImage,omitempty" protobuf:"bytes,2,opt,name=runnerImage"`
+	Runner *ModelDeploymentForgerSandboxRunner `json:"runner,omitempty" protobuf:"bytes,2,opt,name=runner"`
 
 	// PriorityClassName optionally sets the Kubernetes PriorityClass on the ForgeSandbox Pod.
 	//
@@ -332,14 +331,14 @@ type ModelDeploymentForgerSandboxSpec struct {
 	// +k8s:validation:maxLength=253
 	PriorityClassName string `json:"priorityClassName,omitempty" protobuf:"bytes,3,opt,name=priorityClassName"`
 
-	// TimeoutSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400,
-	// default 1800).
+	// ActiveDeadlineSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400,
+	// default 1800), matching PodSpec.activeDeadlineSeconds.
 	//
 	// +optional
 	// +k8s:validation:default=1800
 	// +k8s:validation:minimum=60
 	// +k8s:validation:maximum=14400
-	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty" protobuf:"varint,4,opt,name=timeoutSeconds"`
+	ActiveDeadlineSeconds int64 `json:"activeDeadlineSeconds,omitempty" protobuf:"varint,4,opt,name=activeDeadlineSeconds"` // nolint: lll
 
 	// OutputSizeLimit bounds the forge-output emptyDir staging volume (64Mi to 16Gi, default 2Gi).
 	//
@@ -347,11 +346,110 @@ type ModelDeploymentForgerSandboxSpec struct {
 	// +k8s:validation:default="2Gi"
 	OutputSizeLimit *resource.Quantity `json:"outputSizeLimit,omitempty" protobuf:"bytes,5,opt,name=outputSizeLimit"`
 
-	// Resources optionally specifies host CPU and memory requests and limits for ForgeSandbox
-	// containers alongside the single whole accelerator card requested from Kueue.
+	// Resources optionally specifies host CPU, memory, ephemeral storage, and accelerator slicing
+	// or partitioning mode for ForgeSandbox containers. When slicing and partitioning fields are
+	// omitted, the sandbox requests one exclusive whole accelerator card (recommended for
+	// deterministic verification latency).
 	//
 	// +optional
 	Resources *ModelDeploymentForgerSandboxResources `json:"resources,omitempty" protobuf:"bytes,6,opt,name=resources"`
+
+	// ImagePullSecrets optionally specifies image pull secrets in this namespace for pulling the
+	// ForgeSandbox runner image. When omitted, the sandbox inherits the target role's
+	// imagePullSecrets.
+	//
+	// +optional
+	// +listType=atomic
+	// +k8s:validation:maxItems=32
+	ImagePullSecrets []core.LocalObjectReference `json:"imagePullSecrets,omitempty" protobuf:"bytes,7,rep,name=imagePullSecrets"` // nolint: lll
+}
+
+// ModelDeploymentForgerSandboxRunner configures the initContainer: forge-runner container in
+// External runner mode using a restricted subset of corev1.Container fields.
+type ModelDeploymentForgerSandboxRunner struct {
+	// Image is the container image executed by initContainer: forge-runner.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=512
+	Image string `json:"image" protobuf:"bytes,1,name=image"`
+
+	// ImagePullPolicy optionally sets the image pull policy for Image.
+	//
+	// +optional
+	ImagePullPolicy core.PullPolicy `json:"imagePullPolicy,omitempty" protobuf:"bytes,2,opt,name=imagePullPolicy"`
+
+	// Command optionally overrides the container entrypoint argv.
+	//
+	// +optional
+	// +listType=atomic
+	// +k8s:validation:maxItems=64
+	Command []string `json:"command,omitempty" protobuf:"bytes,3,rep,name=command"`
+
+	// Args optionally sets arguments passed to the container entrypoint.
+	//
+	// +optional
+	// +listType=atomic
+	// +k8s:validation:maxItems=64
+	Args []string `json:"args,omitempty" protobuf:"bytes,4,rep,name=args"`
+
+	// Env optionally injects environment variables into initContainer: forge-runner. Names starting
+	// with GPUSTACK_FORGE_ are reserved by the operator and rejected.
+	//
+	// +optional
+	// +patchMergeKey=name
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=name
+	// +k8s:validation:maxItems=64
+	Env []ModelDeploymentForgerSandboxEnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,5,rep,name=env"` // nolint: lll
+
+	// EnvFrom optionally populates environment variables into initContainer: forge-runner from
+	// same-namespace ConfigMaps or Secrets. Prefixes starting with GPUSTACK_FORGE_ are rejected,
+	// and operator-owned GPUSTACK_FORGE_INPUT_DIR and GPUSTACK_FORGE_OUTPUT_DIR always take
+	// precedence.
+	//
+	// +optional
+	// +listType=atomic
+	// +k8s:validation:maxItems=16
+	EnvFrom []core.EnvFromSource `json:"envFrom,omitempty" protobuf:"bytes,6,rep,name=envFrom"`
+}
+
+// ModelDeploymentForgerSandboxEnvVar represents one environment variable injected into
+// initContainer: forge-runner.
+type ModelDeploymentForgerSandboxEnvVar struct {
+	// Name is the environment variable name. Must be a valid environment variable identifier and
+	// must not start with GPUSTACK_FORGE_.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=256
+	Name string `json:"name" protobuf:"bytes,1,name=name"`
+
+	// Value is a literal environment variable value. Mutually exclusive with ValueFrom.
+	//
+	// +optional
+	Value string `json:"value,omitempty" protobuf:"bytes,2,opt,name=value"`
+
+	// ValueFrom selects a value from a same-namespace ConfigMap or Secret key. Mutually exclusive
+	// with Value.
+	//
+	// +optional
+	ValueFrom *ModelDeploymentForgerSandboxEnvVarSource `json:"valueFrom,omitempty" protobuf:"bytes,3,opt,name=valueFrom"` // nolint: lll
+}
+
+// ModelDeploymentForgerSandboxEnvVarSource selects an environment variable value from a
+// same-namespace ConfigMap or Secret key without exposing Pod downward API fields.
+type ModelDeploymentForgerSandboxEnvVarSource struct {
+	// ConfigMapKeyRef selects a key of a ConfigMap in the same namespace.
+	//
+	// +optional
+	ConfigMapKeyRef *core.ConfigMapKeySelector `json:"configMapKeyRef,omitempty" protobuf:"bytes,1,opt,name=configMapKeyRef"` // nolint: lll
+
+	// SecretKeyRef selects a key of a Secret in the same namespace.
+	//
+	// +optional
+	SecretKeyRef *core.SecretKeySelector `json:"secretKeyRef,omitempty" protobuf:"bytes,2,opt,name=secretKeyRef"`
 }
 
 // ModelDeploymentForgerRunnerMode selects the synthesis runner implementation inside ForgeSandbox.
@@ -359,14 +457,15 @@ type ModelDeploymentForgerSandboxSpec struct {
 type ModelDeploymentForgerRunnerMode string
 
 const (
-	// ModelDeploymentForgerRunnerModeExternal runs the user-supplied RunnerImage container.
+	// ModelDeploymentForgerRunnerModeExternal runs the user-supplied runner container image.
 	ModelDeploymentForgerRunnerModeExternal ModelDeploymentForgerRunnerMode = "External"
 
 	// ModelDeploymentForgerRunnerModeMock runs the deterministic built-in forge-mock subcommand.
 	ModelDeploymentForgerRunnerModeMock ModelDeploymentForgerRunnerMode = "Mock"
 )
 
-// ModelDeploymentForgerSandboxResources specifies host CPU and memory requests for ForgeSandbox.
+// ModelDeploymentForgerSandboxResources specifies host resources and optional accelerator slicing
+// or hardware partitioning for ForgeSandbox containers.
 type ModelDeploymentForgerSandboxResources struct {
 	// CPU is the host CPU request and limit for the ForgeSandbox Pod, such as "8".
 	//
@@ -377,6 +476,36 @@ type ModelDeploymentForgerSandboxResources struct {
 	//
 	// +optional
 	RAM *resource.Quantity `json:"ram,omitempty" protobuf:"bytes,2,opt,name=ram"`
+
+	// LocalStorage is the host ephemeral storage request and limit for the ForgeSandbox Pod, such
+	// as "20Gi".
+	//
+	// +optional
+	LocalStorage *resource.Quantity `json:"localStorage,omitempty" protobuf:"bytes,3,opt,name=localStorage"`
+
+	// AcceleratorSlicedMemoryPercentage requests software slicing with this per-accelerator VRAM
+	// percentage (0 to 100) on a sliceable AcceleratorType. 0 disables slicing (exclusive whole
+	// card, recommended for deterministic verification timing).
+	//
+	// +optional
+	// +k8s:validation:minimum=0
+	// +k8s:validation:maximum=100
+	AcceleratorSlicedMemoryPercentage int32 `json:"acceleratorSlicedMemoryPercentage,omitempty" protobuf:"varint,4,opt,name=acceleratorSlicedMemoryPercentage"` // nolint: lll
+
+	// AcceleratorSlicedCoresPercentage requests software slicing with this per-accelerator compute
+	// percentage (0 to 100) alongside AcceleratorSlicedMemoryPercentage.
+	//
+	// +optional
+	// +k8s:validation:minimum=0
+	// +k8s:validation:maximum=100
+	AcceleratorSlicedCoresPercentage int32 `json:"acceleratorSlicedCoresPercentage,omitempty" protobuf:"varint,5,opt,name=acceleratorSlicedCoresPercentage"` // nolint: lll
+
+	// AcceleratorPartitionedProfile requests a hardware partition profile (for example "3g.40gb")
+	// on a partition-offering AcceleratorType. Mutually exclusive with software slicing percentages.
+	//
+	// +optional
+	// +k8s:validation:maxLength=64
+	AcceleratorPartitionedProfile string `json:"acceleratorPartitionedProfile,omitempty" protobuf:"bytes,6,opt,name=acceleratorPartitionedProfile"` // nolint: lll
 }
 
 // ModelDeploymentForgerRolloutSpec configures artifact retention and canary rollback timing.

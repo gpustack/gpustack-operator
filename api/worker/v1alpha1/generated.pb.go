@@ -275,7 +275,15 @@ func (m *ModelDeploymentForgerRoleStatus) Reset() { *m = ModelDeploymentForgerRo
 
 func (m *ModelDeploymentForgerRolloutSpec) Reset() { *m = ModelDeploymentForgerRolloutSpec{} }
 
+func (m *ModelDeploymentForgerSandboxEnvVar) Reset() { *m = ModelDeploymentForgerSandboxEnvVar{} }
+
+func (m *ModelDeploymentForgerSandboxEnvVarSource) Reset() {
+	*m = ModelDeploymentForgerSandboxEnvVarSource{}
+}
+
 func (m *ModelDeploymentForgerSandboxResources) Reset() { *m = ModelDeploymentForgerSandboxResources{} }
+
+func (m *ModelDeploymentForgerSandboxRunner) Reset() { *m = ModelDeploymentForgerSandboxRunner{} }
 
 func (m *ModelDeploymentForgerSandboxSpec) Reset() { *m = ModelDeploymentForgerSandboxSpec{} }
 
@@ -7109,6 +7117,98 @@ func (m *ModelDeploymentForgerRolloutSpec) MarshalToSizedBuffer(dAtA []byte) (in
 	return len(dAtA) - i, nil
 }
 
+func (m *ModelDeploymentForgerSandboxEnvVar) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelDeploymentForgerSandboxEnvVar) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelDeploymentForgerSandboxEnvVar) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.ValueFrom != nil {
+		{
+			size, err := m.ValueFrom.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x1a
+	}
+	i -= len(m.Value)
+	copy(dAtA[i:], m.Value)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Value)))
+	i--
+	dAtA[i] = 0x12
+	i -= len(m.Name)
+	copy(dAtA[i:], m.Name)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Name)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *ModelDeploymentForgerSandboxEnvVarSource) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelDeploymentForgerSandboxEnvVarSource) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelDeploymentForgerSandboxEnvVarSource) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.SecretKeyRef != nil {
+		{
+			size, err := m.SecretKeyRef.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x12
+	}
+	if m.ConfigMapKeyRef != nil {
+		{
+			size, err := m.ConfigMapKeyRef.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
 func (m *ModelDeploymentForgerSandboxResources) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -7129,6 +7229,29 @@ func (m *ModelDeploymentForgerSandboxResources) MarshalToSizedBuffer(dAtA []byte
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.AcceleratorPartitionedProfile)
+	copy(dAtA[i:], m.AcceleratorPartitionedProfile)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.AcceleratorPartitionedProfile)))
+	i--
+	dAtA[i] = 0x32
+	i = encodeVarintGenerated(dAtA, i, uint64(m.AcceleratorSlicedCoresPercentage))
+	i--
+	dAtA[i] = 0x28
+	i = encodeVarintGenerated(dAtA, i, uint64(m.AcceleratorSlicedMemoryPercentage))
+	i--
+	dAtA[i] = 0x20
+	if m.LocalStorage != nil {
+		{
+			size, err := m.LocalStorage.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x1a
+	}
 	if m.RAM != nil {
 		{
 			size, err := m.RAM.MarshalToSizedBuffer(dAtA[:i])
@@ -7156,6 +7279,85 @@ func (m *ModelDeploymentForgerSandboxResources) MarshalToSizedBuffer(dAtA []byte
 	return len(dAtA) - i, nil
 }
 
+func (m *ModelDeploymentForgerSandboxRunner) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelDeploymentForgerSandboxRunner) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelDeploymentForgerSandboxRunner) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.EnvFrom) > 0 {
+		for iNdEx := len(m.EnvFrom) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.EnvFrom[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x32
+		}
+	}
+	if len(m.Env) > 0 {
+		for iNdEx := len(m.Env) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.Env[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x2a
+		}
+	}
+	if len(m.Args) > 0 {
+		for iNdEx := len(m.Args) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.Args[iNdEx])
+			copy(dAtA[i:], m.Args[iNdEx])
+			i = encodeVarintGenerated(dAtA, i, uint64(len(m.Args[iNdEx])))
+			i--
+			dAtA[i] = 0x22
+		}
+	}
+	if len(m.Command) > 0 {
+		for iNdEx := len(m.Command) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.Command[iNdEx])
+			copy(dAtA[i:], m.Command[iNdEx])
+			i = encodeVarintGenerated(dAtA, i, uint64(len(m.Command[iNdEx])))
+			i--
+			dAtA[i] = 0x1a
+		}
+	}
+	i -= len(m.ImagePullPolicy)
+	copy(dAtA[i:], m.ImagePullPolicy)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.ImagePullPolicy)))
+	i--
+	dAtA[i] = 0x12
+	i -= len(m.Image)
+	copy(dAtA[i:], m.Image)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Image)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
 func (m *ModelDeploymentForgerSandboxSpec) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -7176,6 +7378,20 @@ func (m *ModelDeploymentForgerSandboxSpec) MarshalToSizedBuffer(dAtA []byte) (in
 	_ = i
 	var l int
 	_ = l
+	if len(m.ImagePullSecrets) > 0 {
+		for iNdEx := len(m.ImagePullSecrets) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.ImagePullSecrets[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x3a
+		}
+	}
 	if m.Resources != nil {
 		{
 			size, err := m.Resources.MarshalToSizedBuffer(dAtA[:i])
@@ -7200,7 +7416,7 @@ func (m *ModelDeploymentForgerSandboxSpec) MarshalToSizedBuffer(dAtA []byte) (in
 		i--
 		dAtA[i] = 0x2a
 	}
-	i = encodeVarintGenerated(dAtA, i, uint64(m.TimeoutSeconds))
+	i = encodeVarintGenerated(dAtA, i, uint64(m.ActiveDeadlineSeconds))
 	i--
 	dAtA[i] = 0x20
 	i -= len(m.PriorityClassName)
@@ -7208,11 +7424,18 @@ func (m *ModelDeploymentForgerSandboxSpec) MarshalToSizedBuffer(dAtA []byte) (in
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.PriorityClassName)))
 	i--
 	dAtA[i] = 0x1a
-	i -= len(m.RunnerImage)
-	copy(dAtA[i:], m.RunnerImage)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.RunnerImage)))
-	i--
-	dAtA[i] = 0x12
+	if m.Runner != nil {
+		{
+			size, err := m.Runner.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x12
+	}
 	i -= len(m.RunnerMode)
 	copy(dAtA[i:], m.RunnerMode)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.RunnerMode)))
@@ -17017,6 +17240,40 @@ func (m *ModelDeploymentForgerRolloutSpec) Size() (n int) {
 	return n
 }
 
+func (m *ModelDeploymentForgerSandboxEnvVar) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Name)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Value)
+	n += 1 + l + sovGenerated(uint64(l))
+	if m.ValueFrom != nil {
+		l = m.ValueFrom.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	return n
+}
+
+func (m *ModelDeploymentForgerSandboxEnvVarSource) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.ConfigMapKeyRef != nil {
+		l = m.ConfigMapKeyRef.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	if m.SecretKeyRef != nil {
+		l = m.SecretKeyRef.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	return n
+}
+
 func (m *ModelDeploymentForgerSandboxResources) Size() (n int) {
 	if m == nil {
 		return 0
@@ -17031,6 +17288,51 @@ func (m *ModelDeploymentForgerSandboxResources) Size() (n int) {
 		l = m.RAM.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	if m.LocalStorage != nil {
+		l = m.LocalStorage.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	n += 1 + sovGenerated(uint64(m.AcceleratorSlicedMemoryPercentage))
+	n += 1 + sovGenerated(uint64(m.AcceleratorSlicedCoresPercentage))
+	l = len(m.AcceleratorPartitionedProfile)
+	n += 1 + l + sovGenerated(uint64(l))
+	return n
+}
+
+func (m *ModelDeploymentForgerSandboxRunner) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Image)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.ImagePullPolicy)
+	n += 1 + l + sovGenerated(uint64(l))
+	if len(m.Command) > 0 {
+		for _, s := range m.Command {
+			l = len(s)
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	if len(m.Args) > 0 {
+		for _, s := range m.Args {
+			l = len(s)
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	if len(m.Env) > 0 {
+		for _, e := range m.Env {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	if len(m.EnvFrom) > 0 {
+		for _, e := range m.EnvFrom {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
 	return n
 }
 
@@ -17042,11 +17344,13 @@ func (m *ModelDeploymentForgerSandboxSpec) Size() (n int) {
 	_ = l
 	l = len(m.RunnerMode)
 	n += 1 + l + sovGenerated(uint64(l))
-	l = len(m.RunnerImage)
-	n += 1 + l + sovGenerated(uint64(l))
+	if m.Runner != nil {
+		l = m.Runner.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
 	l = len(m.PriorityClassName)
 	n += 1 + l + sovGenerated(uint64(l))
-	n += 1 + sovGenerated(uint64(m.TimeoutSeconds))
+	n += 1 + sovGenerated(uint64(m.ActiveDeadlineSeconds))
 	if m.OutputSizeLimit != nil {
 		l = m.OutputSizeLimit.Size()
 		n += 1 + l + sovGenerated(uint64(l))
@@ -17054,6 +17358,12 @@ func (m *ModelDeploymentForgerSandboxSpec) Size() (n int) {
 	if m.Resources != nil {
 		l = m.Resources.Size()
 		n += 1 + l + sovGenerated(uint64(l))
+	}
+	if len(m.ImagePullSecrets) > 0 {
+		for _, e := range m.ImagePullSecrets {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
 	}
 	return n
 }
@@ -21599,6 +21909,29 @@ func (this *ModelDeploymentForgerRolloutSpec) String() string {
 	}, "")
 	return s
 }
+func (this *ModelDeploymentForgerSandboxEnvVar) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ModelDeploymentForgerSandboxEnvVar{`,
+		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
+		`Value:` + fmt.Sprintf("%v", this.Value) + `,`,
+		`ValueFrom:` + strings.Replace(this.ValueFrom.String(), "ModelDeploymentForgerSandboxEnvVarSource", "ModelDeploymentForgerSandboxEnvVarSource", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ModelDeploymentForgerSandboxEnvVarSource) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ModelDeploymentForgerSandboxEnvVarSource{`,
+		`ConfigMapKeyRef:` + strings.Replace(fmt.Sprintf("%v", this.ConfigMapKeyRef), "ConfigMapKeySelector", "v12.ConfigMapKeySelector", 1) + `,`,
+		`SecretKeyRef:` + strings.Replace(fmt.Sprintf("%v", this.SecretKeyRef), "SecretKeySelector", "v12.SecretKeySelector", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
 func (this *ModelDeploymentForgerSandboxResources) String() string {
 	if this == nil {
 		return "nil"
@@ -21606,6 +21939,35 @@ func (this *ModelDeploymentForgerSandboxResources) String() string {
 	s := strings.Join([]string{`&ModelDeploymentForgerSandboxResources{`,
 		`CPU:` + strings.Replace(fmt.Sprintf("%v", this.CPU), "Quantity", "resource.Quantity", 1) + `,`,
 		`RAM:` + strings.Replace(fmt.Sprintf("%v", this.RAM), "Quantity", "resource.Quantity", 1) + `,`,
+		`LocalStorage:` + strings.Replace(fmt.Sprintf("%v", this.LocalStorage), "Quantity", "resource.Quantity", 1) + `,`,
+		`AcceleratorSlicedMemoryPercentage:` + fmt.Sprintf("%v", this.AcceleratorSlicedMemoryPercentage) + `,`,
+		`AcceleratorSlicedCoresPercentage:` + fmt.Sprintf("%v", this.AcceleratorSlicedCoresPercentage) + `,`,
+		`AcceleratorPartitionedProfile:` + fmt.Sprintf("%v", this.AcceleratorPartitionedProfile) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ModelDeploymentForgerSandboxRunner) String() string {
+	if this == nil {
+		return "nil"
+	}
+	repeatedStringForEnv := "[]ModelDeploymentForgerSandboxEnvVar{"
+	for _, f := range this.Env {
+		repeatedStringForEnv += strings.Replace(strings.Replace(f.String(), "ModelDeploymentForgerSandboxEnvVar", "ModelDeploymentForgerSandboxEnvVar", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForEnv += "}"
+	repeatedStringForEnvFrom := "[]EnvFromSource{"
+	for _, f := range this.EnvFrom {
+		repeatedStringForEnvFrom += fmt.Sprintf("%v", f) + ","
+	}
+	repeatedStringForEnvFrom += "}"
+	s := strings.Join([]string{`&ModelDeploymentForgerSandboxRunner{`,
+		`Image:` + fmt.Sprintf("%v", this.Image) + `,`,
+		`ImagePullPolicy:` + fmt.Sprintf("%v", this.ImagePullPolicy) + `,`,
+		`Command:` + fmt.Sprintf("%v", this.Command) + `,`,
+		`Args:` + fmt.Sprintf("%v", this.Args) + `,`,
+		`Env:` + repeatedStringForEnv + `,`,
+		`EnvFrom:` + repeatedStringForEnvFrom + `,`,
 		`}`,
 	}, "")
 	return s
@@ -21614,13 +21976,19 @@ func (this *ModelDeploymentForgerSandboxSpec) String() string {
 	if this == nil {
 		return "nil"
 	}
+	repeatedStringForImagePullSecrets := "[]LocalObjectReference{"
+	for _, f := range this.ImagePullSecrets {
+		repeatedStringForImagePullSecrets += fmt.Sprintf("%v", f) + ","
+	}
+	repeatedStringForImagePullSecrets += "}"
 	s := strings.Join([]string{`&ModelDeploymentForgerSandboxSpec{`,
 		`RunnerMode:` + fmt.Sprintf("%v", this.RunnerMode) + `,`,
-		`RunnerImage:` + fmt.Sprintf("%v", this.RunnerImage) + `,`,
+		`Runner:` + strings.Replace(this.Runner.String(), "ModelDeploymentForgerSandboxRunner", "ModelDeploymentForgerSandboxRunner", 1) + `,`,
 		`PriorityClassName:` + fmt.Sprintf("%v", this.PriorityClassName) + `,`,
-		`TimeoutSeconds:` + fmt.Sprintf("%v", this.TimeoutSeconds) + `,`,
+		`ActiveDeadlineSeconds:` + fmt.Sprintf("%v", this.ActiveDeadlineSeconds) + `,`,
 		`OutputSizeLimit:` + strings.Replace(fmt.Sprintf("%v", this.OutputSizeLimit), "Quantity", "resource.Quantity", 1) + `,`,
 		`Resources:` + strings.Replace(this.Resources.String(), "ModelDeploymentForgerSandboxResources", "ModelDeploymentForgerSandboxResources", 1) + `,`,
+		`ImagePullSecrets:` + repeatedStringForImagePullSecrets + `,`,
 		`}`,
 	}, "")
 	return s
@@ -44745,6 +45113,278 @@ func (m *ModelDeploymentForgerRolloutSpec) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
+func (m *ModelDeploymentForgerSandboxEnvVar) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelDeploymentForgerSandboxEnvVar: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelDeploymentForgerSandboxEnvVar: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Name = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Value", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Value = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ValueFrom", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.ValueFrom == nil {
+				m.ValueFrom = &ModelDeploymentForgerSandboxEnvVarSource{}
+			}
+			if err := m.ValueFrom.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ModelDeploymentForgerSandboxEnvVarSource) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelDeploymentForgerSandboxEnvVarSource: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelDeploymentForgerSandboxEnvVarSource: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ConfigMapKeyRef", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.ConfigMapKeyRef == nil {
+				m.ConfigMapKeyRef = &v12.ConfigMapKeySelector{}
+			}
+			if err := m.ConfigMapKeyRef.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SecretKeyRef", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.SecretKeyRef == nil {
+				m.SecretKeyRef = &v12.SecretKeySelector{}
+			}
+			if err := m.SecretKeyRef.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 func (m *ModelDeploymentForgerSandboxResources) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -44846,6 +45486,358 @@ func (m *ModelDeploymentForgerSandboxResources) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LocalStorage", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.LocalStorage == nil {
+				m.LocalStorage = &resource.Quantity{}
+			}
+			if err := m.LocalStorage.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorSlicedMemoryPercentage", wireType)
+			}
+			m.AcceleratorSlicedMemoryPercentage = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AcceleratorSlicedMemoryPercentage |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorSlicedCoresPercentage", wireType)
+			}
+			m.AcceleratorSlicedCoresPercentage = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AcceleratorSlicedCoresPercentage |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorPartitionedProfile", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.AcceleratorPartitionedProfile = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ModelDeploymentForgerSandboxRunner) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelDeploymentForgerSandboxRunner: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelDeploymentForgerSandboxRunner: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Image", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Image = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ImagePullPolicy", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ImagePullPolicy = k8s_io_api_core_v1.PullPolicy(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Command", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Command = append(m.Command, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Args", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Args = append(m.Args, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Env", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Env = append(m.Env, ModelDeploymentForgerSandboxEnvVar{})
+			if err := m.Env[len(m.Env)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvFrom", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvFrom = append(m.EnvFrom, v12.EnvFromSource{})
+			if err := m.EnvFrom[len(m.EnvFrom)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -44930,9 +45922,9 @@ func (m *ModelDeploymentForgerSandboxSpec) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field RunnerImage", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Runner", wireType)
 			}
-			var stringLen uint64
+			var msglen int
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowGenerated
@@ -44942,23 +45934,27 @@ func (m *ModelDeploymentForgerSandboxSpec) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
+				msglen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
+			if msglen < 0 {
 				return ErrInvalidLengthGenerated
 			}
-			postIndex := iNdEx + intStringLen
+			postIndex := iNdEx + msglen
 			if postIndex < 0 {
 				return ErrInvalidLengthGenerated
 			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.RunnerImage = string(dAtA[iNdEx:postIndex])
+			if m.Runner == nil {
+				m.Runner = &ModelDeploymentForgerSandboxRunner{}
+			}
+			if err := m.Runner.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
@@ -44994,9 +45990,9 @@ func (m *ModelDeploymentForgerSandboxSpec) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 4:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field TimeoutSeconds", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ActiveDeadlineSeconds", wireType)
 			}
-			m.TimeoutSeconds = 0
+			m.ActiveDeadlineSeconds = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowGenerated
@@ -45006,7 +46002,7 @@ func (m *ModelDeploymentForgerSandboxSpec) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.TimeoutSeconds |= int32(b&0x7F) << shift
+				m.ActiveDeadlineSeconds |= int64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -45080,6 +46076,40 @@ func (m *ModelDeploymentForgerSandboxSpec) Unmarshal(dAtA []byte) error {
 				m.Resources = &ModelDeploymentForgerSandboxResources{}
 			}
 			if err := m.Resources.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ImagePullSecrets", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ImagePullSecrets = append(m.ImagePullSecrets, v12.LocalObjectReference{})
+			if err := m.ImagePullSecrets[len(m.ImagePullSecrets)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

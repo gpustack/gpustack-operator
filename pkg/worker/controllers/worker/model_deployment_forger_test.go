@@ -144,8 +144,8 @@ func newTestModelDeploymentForger(mutate ...func(*workercore.ModelDeploymentForg
 				MinActiveRequests: 1,
 			},
 			Sandbox: workercore.ModelDeploymentForgerSandboxSpec{
-				RunnerMode:     workercore.ModelDeploymentForgerRunnerModeMock,
-				TimeoutSeconds: 1800,
+				RunnerMode:            workercore.ModelDeploymentForgerRunnerModeMock,
+				ActiveDeadlineSeconds: 1800,
 			},
 			Rollout: workercore.ModelDeploymentForgerRolloutSpec{
 				MaxRetainedGenerations: 1,
@@ -2505,7 +2505,7 @@ func TestModelDeploymentForger_SandboxAndPromotingEdgeCases(t *testing.T) {
 				wantPhase:      workercore.ModelDeploymentForgerRolePhaseVerifying,
 			},
 			{
-				name:       "Sandbox exceeding timeoutSeconds records SandboxTimeout",
+				name:       "Sandbox exceeding activeDeadlineSeconds records SandboxTimeout",
 				age:        2000 * time.Second,
 				wantPhase:  workercore.ModelDeploymentForgerRolePhaseIdle,
 				wantReason: "SandboxTimeout",
@@ -2538,7 +2538,7 @@ func TestModelDeploymentForger_SandboxAndPromotingEdgeCases(t *testing.T) {
 				md := newForgerTestDeployment()
 				mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
 					f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
-					f.Spec.Sandbox.TimeoutSeconds = 1800
+					f.Spec.Sandbox.ActiveDeadlineSeconds = 1800
 				})
 				started := meta.NewTime(now.Add(-tc.age))
 				pod := &core.Pod{
@@ -2769,7 +2769,12 @@ func TestModelDeploymentForger_DefaultsResolversAndHistoryBounds(t *testing.T) {
 	assert.Equal(t, forgerDefaultMaxKernels, effectiveMaxKernelsPerGeneration(nil))
 	assert.Equal(t, forger.DefaultMinSpeedupRatio, effectiveMinSpeedupRatio(nil))
 	assert.Equal(t, forger.DefaultMinSpeedupRatio, effectiveMinSpeedupRatio(&workercore.ModelDeploymentForgerRoleSpec{MinSpeedupRatio: "bad"}))
-	assert.Equal(t, int32(forgerDefaultSandboxTimeoutSeconds), effectiveSandboxTimeoutSeconds(nil))
+	assert.Equal(t, int64(forgerDefaultSandboxTimeoutSeconds), effectiveSandboxTimeoutSeconds(nil))
+	assert.Equal(t, int64(900), effectiveSandboxTimeoutSeconds(&workercore.ModelDeploymentForger{
+		Spec: workercore.ModelDeploymentForgerSpec{
+			Sandbox: workercore.ModelDeploymentForgerSandboxSpec{ActiveDeadlineSeconds: 900},
+		},
+	}))
 	assert.Equal(t, forgerDefaultMaxRetainedGenerations, effectiveMaxRetainedGenerations(nil))
 	assert.Equal(t, int32(forgerDefaultFailureTimeoutSeconds), effectiveFailureTimeoutSeconds(nil))
 
@@ -4579,7 +4584,9 @@ func TestModelDeploymentForger_QuarantineScopedByForgerRoleAndRunner(t *testing.
 			f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
 			f.Spec.Probe.MinActiveRequests = 0
 			f.Spec.Sandbox.RunnerMode = workercore.ModelDeploymentForgerRunnerModeExternal
-			f.Spec.Sandbox.RunnerImage = "registry.local/forge-runner:v1"
+			f.Spec.Sandbox.Runner = &workercore.ModelDeploymentForgerSandboxRunner{
+				Image: "registry.local/forge-runner:v1",
+			}
 		})
 		cm, _, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
 			Forger:     mdf,
@@ -4695,8 +4702,10 @@ func TestModelDeploymentForger_QuarantineScopedByForgerRoleAndRunner(t *testing.
 		require.Len(t, rs.Generations, 1)
 		assert.Equal(t, workercore.ModelDeploymentForgerGenerationOutcomeSkipped, rs.Generations[0].Outcome)
 
-		// Update runnerImage to v2 -> fingerprint changes, allowing key1 to be re-forged!
-		liveMDF.Spec.Sandbox.RunnerImage = "registry.local/forge-runner:v2"
+		// Update runner.image to v2 -> fingerprint changes, allowing key1 to be re-forged!
+		liveMDF.Spec.Sandbox.Runner = &workercore.ModelDeploymentForgerSandboxRunner{
+			Image: "registry.local/forge-runner:v2",
+		}
 		liveMDF.Generation++
 		require.NoError(t, cli.Update(context.Background(), &liveMDF))
 
@@ -5683,4 +5692,446 @@ func TestModelDeploymentForger_RemovedRoleRollsBackCanaryAndCleansSandbox(t *tes
 			assert.Equal(t, decodeCommitted, decodeRS.ActiveKernelArtifact)
 		})
 	}
+}
+
+func TestModelDeploymentForger_LaunchForgeSandboxPodSpecRendering(t *testing.T) {
+	now := time.Date(2026, 11, 27, 18, 0, 0, 0, time.UTC)
+	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	ms := newMockSentinelServer(t, key1)
+	payload := ms.ProbePayload
+
+	findInitContainer := func(t *testing.T, pod *core.Pod, name string) core.Container {
+		t.Helper()
+		for i := range pod.Spec.InitContainers {
+			if pod.Spec.InitContainers[i].Name == name {
+				return pod.Spec.InitContainers[i]
+			}
+		}
+		t.Fatalf("initContainer %q not found in pod %s", name, pod.Name)
+		return core.Container{}
+	}
+
+	cases := []struct {
+		name                 string
+		mutateAT             func(*worker.AcceleratorType)
+		rolePullSecrets      []core.LocalObjectReference
+		sandboxPullSecrets   []core.LocalObjectReference
+		resources            *workercore.ModelDeploymentForgerSandboxResources
+		wantPullSecrets      []core.LocalObjectReference
+		wantResourceRequests map[core.ResourceName]resource.Quantity
+		absentResources      []core.ResourceName
+	}{
+		{
+			name:            "exclusive default renders whole GPU with runner args env envFrom and role imagePullSecrets fallback",
+			rolePullSecrets: []core.LocalObjectReference{{Name: "role-pull-secret"}},
+			resources: &workercore.ModelDeploymentForgerSandboxResources{
+				CPU:          ptr.To(resource.MustParse("8")),
+				RAM:          ptr.To(resource.MustParse("32Gi")),
+				LocalStorage: ptr.To(resource.MustParse("20Gi")),
+			},
+			wantPullSecrets: []core.LocalObjectReference{{Name: "role-pull-secret"}},
+			wantResourceRequests: map[core.ResourceName]resource.Quantity{
+				"nvidia.com/gpu":              resource.MustParse("1"),
+				core.ResourceCPU:              resource.MustParse("8"),
+				core.ResourceMemory:           resource.MustParse("32Gi"),
+				core.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+			},
+			absentResources: []core.ResourceName{
+				"nvidia.com/gpu.sliced",
+				"nvidia.com/gpu.partitioned",
+			},
+		},
+		{
+			name: "sliced acceleratorSlicedMemoryPercentage 50 renders sliced GPU resources and merges sandbox imagePullSecrets",
+			mutateAT: func(at *worker.AcceleratorType) {
+				at.Status.Detail.SlicedDetail.Logical.Count = 128
+			},
+			rolePullSecrets:    []core.LocalObjectReference{{Name: "role-pull-secret"}},
+			sandboxPullSecrets: []core.LocalObjectReference{{Name: "sandbox-pull-secret"}, {Name: "role-pull-secret"}},
+			resources: &workercore.ModelDeploymentForgerSandboxResources{
+				AcceleratorSlicedMemoryPercentage: 50,
+			},
+			wantPullSecrets: []core.LocalObjectReference{
+				{Name: "role-pull-secret"},
+				{Name: "sandbox-pull-secret"},
+			},
+			wantResourceRequests: map[core.ResourceName]resource.Quantity{
+				"nvidia.com/gpu.sliced":                   resource.MustParse("1"),
+				"nvidia.com/gpu.sliced.memory-percentage": resource.MustParse("50"),
+			},
+			absentResources: []core.ResourceName{
+				"nvidia.com/gpu",
+				"nvidia.com/gpu.partitioned",
+			},
+		},
+		{
+			name: "partitioned acceleratorPartitionedProfile 3g.40gb renders MIG partitioned GPU resources",
+			mutateAT: func(at *worker.AcceleratorType) {
+				at.Status.Detail.Memory = "80Gi"
+				at.Status.Detail.SlicedDetail.Physical = workercore.AcceleratorSlicedPhysicalDetail{
+					Count: 2,
+					Profiles: []workercore.AcceleratorSlicedPhysicalDetailProfile{
+						{Name: "3g.40gb", MemoryMib: 40 << 10, Count: 2},
+					},
+				}
+			},
+			sandboxPullSecrets: []core.LocalObjectReference{{Name: "mig-pull-secret"}},
+			resources: &workercore.ModelDeploymentForgerSandboxResources{
+				AcceleratorPartitionedProfile: "3g.40gb",
+			},
+			wantPullSecrets: []core.LocalObjectReference{{Name: "mig-pull-secret"}},
+			wantResourceRequests: map[core.ResourceName]resource.Quantity{
+				"nvidia.com/gpu.partitioned":             resource.MustParse("1"),
+				"nvidia.com/gpu.partitioned.mig-3g.40gb": resource.MustParse("1"),
+			},
+			absentResources: []core.ResourceName{
+				"nvidia.com/gpu",
+				"nvidia.com/gpu.sliced",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v1AT := newRenderAcceleratorType(func(at *worker.AcceleratorType) {
+				at.Name = "h20-sandbox-at"
+				at.Status.Entrance = "queue-for-h20-sandbox"
+				at.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+				at.Status.Detail.Memory = "80Gi"
+				if tc.mutateAT != nil {
+					tc.mutateAT(at)
+				}
+			})
+			v1alpha1AT := (*workercore.AcceleratorType)(v1AT.DeepCopy())
+			v1alpha1AT.TypeMeta = meta.TypeMeta{}
+
+			node0 := newForgerTestNode("node-0")
+			md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+				d.Spec.Roles[0].Replicas = 1
+				d.Spec.Roles[0].AcceleratorType = v1AT.Name
+				d.Spec.Roles[0].ImagePullSecrets = slices.Clone(tc.rolePullSecrets)
+			})
+			mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+				f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+				f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
+				f.Spec.Probe.MinActiveRequests = 0
+				f.Spec.Sandbox = workercore.ModelDeploymentForgerSandboxSpec{
+					RunnerMode:            workercore.ModelDeploymentForgerRunnerModeExternal,
+					ActiveDeadlineSeconds: 900,
+					ImagePullSecrets:      slices.Clone(tc.sandboxPullSecrets),
+					Resources:             tc.resources,
+					Runner: &workercore.ModelDeploymentForgerSandboxRunner{
+						Image:   "registry.local/forge-runner:v1",
+						Command: []string{"/usr/local/bin/forge-runner"},
+						Args:    []string{"--beam-width", "4", "--fast"},
+						Env: []workercore.ModelDeploymentForgerSandboxEnvVar{
+							{Name: "FORGE_OPT_LEVEL", Value: "3"},
+							{
+								Name: "FORGE_API_KEY",
+								ValueFrom: &workercore.ModelDeploymentForgerSandboxEnvVarSource{
+									SecretKeyRef: &core.SecretKeySelector{
+										LocalObjectReference: core.LocalObjectReference{Name: "runner-secret"},
+										Key:                  "api-key",
+									},
+								},
+							},
+						},
+						EnvFrom: []core.EnvFromSource{
+							{
+								Prefix: "CFG_",
+								ConfigMapRef: &core.ConfigMapEnvSource{
+									LocalObjectReference: core.LocalObjectReference{Name: "runner-config"},
+								},
+							},
+						},
+					},
+				}
+			})
+			leaderPod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Namespace: md.Namespace,
+					Name:      "qwen-pd-decode-0",
+					UID:       "leader-render-uid",
+					Labels: map[string]string{
+						modelDeploymentLabelKeyName:        modelDeploymentLabelValueName,
+						modelDeploymentLabelKeyInstance:    md.Name,
+						modelDeploymentLabelKeyComponent:   "decode",
+						modelDeploymentReplicaOrdinalLabel: "0",
+					},
+				},
+				Spec: core.PodSpec{NodeName: "node-0", Containers: []core.Container{{Name: modelDeploymentMainContainerName}}},
+			}
+
+			cli := newForgerTestFakeClient(v1AT, v1alpha1AT, node0, md, mdf, leaderPod)
+			markServingPodReadyEligible(t, cli, leaderPod, "node-0", "10.0.0.10", 8000)
+
+			r := &ModelDeploymentForgerReconciler{
+				Client:        cli,
+				APIReader:     cli,
+				Recorder:      ctrlrecord.NewFakeRecorder(32),
+				Now:           func() time.Time { return now },
+				OperatorImage: "gpustack/gpustack-operator:test",
+				ProbeClient: &stubProbeClient{
+					readyResp: &runtimecontrol.ReadyResponse{Ready: true, BootID: "b1"},
+					startResp: &runtimecontrol.ProbeResponse{State: runtimecontrol.ProbeStateCompleted, BootID: "b1", Payload: payload},
+				},
+			}
+
+			req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+			_, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+
+			var gotMDF workercore.ModelDeploymentForger
+			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &gotMDF))
+			rs := findForgerRoleStatus(&gotMDF, "decode")
+			require.NotNil(t, rs)
+			assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseForging, rs.Phase)
+			require.NotNil(t, rs.ActiveSandbox)
+
+			var sbPod core.Pod
+			require.NoError(t, cli.Get(context.Background(), types.NamespacedName{
+				Namespace: mdf.Namespace,
+				Name:      rs.ActiveSandbox.PodName,
+			}, &sbPod))
+
+			require.NotNil(t, sbPod.Spec.ActiveDeadlineSeconds)
+			assert.Equal(t, int64(900), *sbPod.Spec.ActiveDeadlineSeconds)
+			assert.Equal(t, tc.wantPullSecrets, sbPod.Spec.ImagePullSecrets)
+
+			runnerCtr := findInitContainer(t, &sbPod, forger.RunnerContainerName)
+			verifierCtr := findInitContainer(t, &sbPod, forger.VerifierContainerName)
+
+			assert.Equal(t, "registry.local/forge-runner:v1", runnerCtr.Image)
+			assert.Equal(t, []string{"/usr/local/bin/forge-runner"}, runnerCtr.Command)
+			assert.Equal(t, []string{"--beam-width", "4", "--fast"}, runnerCtr.Args)
+			require.Len(t, runnerCtr.EnvFrom, 1)
+			assert.Equal(t, "CFG_", runnerCtr.EnvFrom[0].Prefix)
+			require.NotNil(t, runnerCtr.EnvFrom[0].ConfigMapRef)
+			assert.Equal(t, "runner-config", runnerCtr.EnvFrom[0].ConfigMapRef.Name)
+
+			envByName := make(map[string]core.EnvVar, len(runnerCtr.Env))
+			for _, ev := range runnerCtr.Env {
+				envByName[ev.Name] = ev
+			}
+			assert.Equal(t, "3", envByName["FORGE_OPT_LEVEL"].Value)
+			require.NotNil(t, envByName["FORGE_API_KEY"].ValueFrom)
+			require.NotNil(t, envByName["FORGE_API_KEY"].ValueFrom.SecretKeyRef)
+			assert.Equal(t, "runner-secret", envByName["FORGE_API_KEY"].ValueFrom.SecretKeyRef.Name)
+			assert.Equal(t, "api-key", envByName["FORGE_API_KEY"].ValueFrom.SecretKeyRef.Key)
+			assert.Equal(t, forger.InputMountPath, envByName["GPUSTACK_FORGE_INPUT_DIR"].Value)
+			assert.Equal(t, forger.OutputMountPath, envByName["GPUSTACK_FORGE_OUTPUT_DIR"].Value)
+
+			for _, ctr := range []core.Container{runnerCtr, verifierCtr} {
+				for resName, wantQty := range tc.wantResourceRequests {
+					gotReq, hasReq := ctr.Resources.Requests[resName]
+					require.True(t, hasReq, "container %s missing request %s", ctr.Name, resName)
+					assert.True(t, wantQty.Equal(gotReq), "container %s request %s: want %s, got %s", ctr.Name, resName, wantQty.String(), gotReq.String())
+
+					gotLim, hasLim := ctr.Resources.Limits[resName]
+					require.True(t, hasLim, "container %s missing limit %s", ctr.Name, resName)
+					assert.True(t, wantQty.Equal(gotLim), "container %s limit %s: want %s, got %s", ctr.Name, resName, wantQty.String(), gotLim.String())
+				}
+				for _, absent := range tc.absentResources {
+					_, hasReq := ctr.Resources.Requests[absent]
+					assert.False(t, hasReq, "container %s unexpectedly requested %s", ctr.Name, absent)
+					_, hasLim := ctr.Resources.Limits[absent]
+					assert.False(t, hasLim, "container %s unexpectedly limited %s", ctr.Name, absent)
+				}
+			}
+		})
+	}
+}
+
+func TestModelDeploymentForger_RunnerFingerprintQuarantineReforge(t *testing.T) {
+	t.Run("forgerRunnerFingerprint is nil-safe and sensitive to image command args env and envFrom", func(t *testing.T) {
+		assert.Len(t, forgerRunnerFingerprint(nil), 16)
+
+		base := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Spec.Sandbox.RunnerMode = workercore.ModelDeploymentForgerRunnerModeExternal
+			f.Spec.Sandbox.Runner = &workercore.ModelDeploymentForgerSandboxRunner{
+				Image:   "registry.local/forge-runner:v1",
+				Command: []string{"/bin/runner"},
+				Args:    []string{"--beam", "2"},
+				Env:     []workercore.ModelDeploymentForgerSandboxEnvVar{{Name: "OPT", Value: "1"}},
+				EnvFrom: []core.EnvFromSource{{
+					ConfigMapRef: &core.ConfigMapEnvSource{LocalObjectReference: core.LocalObjectReference{Name: "cm-a"}},
+				}},
+			}
+		})
+		baseFP := forgerRunnerFingerprint(base)
+		assert.Len(t, baseFP, 16)
+
+		nilRunner := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Spec.Sandbox.RunnerMode = workercore.ModelDeploymentForgerRunnerModeExternal
+			f.Spec.Sandbox.Runner = nil
+		})
+		assert.NotEqual(t, baseFP, forgerRunnerFingerprint(nilRunner))
+
+		mutations := []struct {
+			name   string
+			mutate func(*workercore.ModelDeploymentForgerSandboxRunner)
+		}{
+			{
+				name:   "image changed",
+				mutate: func(r *workercore.ModelDeploymentForgerSandboxRunner) { r.Image = "registry.local/forge-runner:v2" },
+			},
+			{
+				name:   "command changed",
+				mutate: func(r *workercore.ModelDeploymentForgerSandboxRunner) { r.Command = []string{"/bin/runner-v2"} },
+			},
+			{
+				name:   "args changed",
+				mutate: func(r *workercore.ModelDeploymentForgerSandboxRunner) { r.Args = []string{"--beam", "8"} },
+			},
+			{
+				name: "env changed",
+				mutate: func(r *workercore.ModelDeploymentForgerSandboxRunner) {
+					r.Env = []workercore.ModelDeploymentForgerSandboxEnvVar{{Name: "OPT_V2", Value: "1"}}
+				},
+			},
+			{
+				name: "envFrom changed",
+				mutate: func(r *workercore.ModelDeploymentForgerSandboxRunner) {
+					r.EnvFrom = []core.EnvFromSource{{
+						ConfigMapRef: &core.ConfigMapEnvSource{LocalObjectReference: core.LocalObjectReference{Name: "cm-b"}},
+					}}
+				},
+			},
+		}
+		for _, mc := range mutations {
+			cp := base.DeepCopy()
+			mc.mutate(cp.Spec.Sandbox.Runner)
+			assert.NotEqual(t, baseFP, forgerRunnerFingerprint(cp), mc.name)
+		}
+	})
+
+	t.Run("updating runner.image or runner.args re-forges previously quarantined keys cleanly", func(t *testing.T) {
+		now := time.Date(2026, 11, 27, 19, 0, 0, 0, time.UTC)
+		key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+		ms := newMockSentinelServer(t, key1)
+		payload := ms.ProbePayload
+
+		cases := []struct {
+			name              string
+			mutateRunner      func(*workercore.ModelDeploymentForgerSandboxRunner)
+			wantPhase         workercore.ModelDeploymentForgerRolePhase
+			wantActiveSandbox bool
+			wantOutcome       workercore.ModelDeploymentForgerGenerationOutcome
+		}{
+			{
+				name:              "unchanged runner suppresses quarantined key",
+				mutateRunner:      func(*workercore.ModelDeploymentForgerSandboxRunner) {},
+				wantPhase:         workercore.ModelDeploymentForgerRolePhaseIdle,
+				wantActiveSandbox: false,
+				wantOutcome:       workercore.ModelDeploymentForgerGenerationOutcomeSkipped,
+			},
+			{
+				name: "updated runner.image re-forges quarantined key",
+				mutateRunner: func(r *workercore.ModelDeploymentForgerSandboxRunner) {
+					r.Image = "registry.local/forge-runner:v2"
+				},
+				wantPhase:         workercore.ModelDeploymentForgerRolePhaseForging,
+				wantActiveSandbox: true,
+			},
+			{
+				name: "updated runner.args re-forges quarantined key",
+				mutateRunner: func(r *workercore.ModelDeploymentForgerSandboxRunner) {
+					r.Args = []string{"--search-budget", "64"}
+				},
+				wantPhase:         workercore.ModelDeploymentForgerRolePhaseForging,
+				wantActiveSandbox: true,
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				node0 := newForgerTestNode("node-0")
+				md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+					d.Spec.Roles[0].Replicas = 1
+				})
+				mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+					f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+					f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
+					f.Spec.Probe.MinActiveRequests = 0
+					f.Spec.Sandbox.RunnerMode = workercore.ModelDeploymentForgerRunnerModeExternal
+					f.Spec.Sandbox.Runner = &workercore.ModelDeploymentForgerSandboxRunner{
+						Image: "registry.local/forge-runner:v1",
+						Args:  []string{"--search-budget", "16"},
+					}
+				})
+				initialFP := forgerRunnerFingerprint(mdf)
+
+				quarantinedMKA := newNodeStoreKernelArtifact("qwen-decode-forger-decode-gen-1", md.Namespace, "1", "2", func(k *workercore.ModelKernelArtifact) {
+					k.Labels = map[string]string{
+						forger.SandboxLabelName:       "model-deployment-forger",
+						forger.SandboxLabelInstance:   mdf.Name,
+						forger.SandboxLabelRole:       "decode",
+						forger.SandboxLabelGeneration: "1",
+					}
+					k.Annotations = map[string]string{
+						forgerRunnerFingerprintAnnotationKey: initialFP,
+						forgerTargetDeploymentAnnotationKey:  md.Name,
+					}
+					k.Spec.Compatibility.KernelKeys = []string{key1}
+					k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+						Name: mdf.Name,
+						UID:  string(mdf.UID),
+					}
+					k.Status.Quarantined = true
+					k.Status.QuarantineReason = "UnsupportedKernelArtifact"
+				})
+
+				tc.mutateRunner(mdf.Spec.Sandbox.Runner)
+				mdf.Generation++
+
+				leaderPod := &core.Pod{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: md.Namespace,
+						Name:      "qwen-pd-decode-0",
+						UID:       "leader-q-uid",
+						Labels: map[string]string{
+							modelDeploymentLabelKeyName:        modelDeploymentLabelValueName,
+							modelDeploymentLabelKeyInstance:    md.Name,
+							modelDeploymentLabelKeyComponent:   "decode",
+							modelDeploymentReplicaOrdinalLabel: "0",
+						},
+					},
+					Spec: core.PodSpec{NodeName: "node-0", Containers: []core.Container{{Name: modelDeploymentMainContainerName}}},
+				}
+
+				cli := newForgerTestFakeClient(node0, md, mdf, quarantinedMKA, leaderPod)
+				markServingPodReadyEligible(t, cli, leaderPod, "node-0", "10.0.0.10", 8000)
+
+				r := &ModelDeploymentForgerReconciler{
+					Client:        cli,
+					APIReader:     cli,
+					Recorder:      ctrlrecord.NewFakeRecorder(32),
+					Now:           func() time.Time { return now },
+					OperatorImage: "gpustack/gpustack-operator:test",
+					ProbeClient: &stubProbeClient{
+						readyResp: &runtimecontrol.ReadyResponse{Ready: true, BootID: "b1"},
+						startResp: &runtimecontrol.ProbeResponse{State: runtimecontrol.ProbeStateCompleted, BootID: "b1", Payload: payload},
+					},
+				}
+
+				req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+				_, err := r.Reconcile(context.Background(), req)
+				require.NoError(t, err)
+
+				var gotMDF workercore.ModelDeploymentForger
+				require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &gotMDF))
+				rs := findForgerRoleStatus(&gotMDF, "decode")
+				require.NotNil(t, rs)
+				assert.Equal(t, tc.wantPhase, rs.Phase)
+				if tc.wantActiveSandbox {
+					require.NotNil(t, rs.ActiveSandbox)
+					assert.Equal(t, int64(2), rs.ActiveGeneration)
+				} else {
+					assert.Nil(t, rs.ActiveSandbox)
+					require.Len(t, rs.Generations, 1)
+					assert.Equal(t, tc.wantOutcome, rs.Generations[0].Outcome)
+				}
+			})
+		}
+	})
 }

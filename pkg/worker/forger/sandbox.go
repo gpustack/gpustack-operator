@@ -80,6 +80,7 @@ const (
 
 	envForgeInputDir          = "GPUSTACK_FORGE_INPUT_DIR"
 	envForgeOutputDir         = "GPUSTACK_FORGE_OUTPUT_DIR"
+	reservedForgeEnvPrefix    = "GPUSTACK_FORGE_"
 	envEngineSentinelEnable   = "GPUSTACK_ENGINE_SENTINEL_ENABLE"
 	envPythonPath             = "PYTHONPATH"
 	configMapDefinitionPrefix = "def-"
@@ -312,6 +313,7 @@ type SandboxPodSpec struct {
 	InputConfigMapName      string
 	InputConfigMapItems     []core.KeyToPath
 	EntranceQueue           string
+	AcceleratorType         *workercore.InstanceType
 	Manufacturer            string
 	AcceleratorResourceName core.ResourceName
 	Hardware                kernelkey.NodeHardware
@@ -325,8 +327,8 @@ type SandboxPodSpec struct {
 }
 
 // BuildSandboxPod builds a Kueue-admitted, restricted Pod Security compliant ForgeSandbox Pod with
-// a single whole accelerator card, GPU architecture nodeSelector, emptyDir staging volumes, and
-// zero hostPath volumes.
+// a single accelerator card, slice, or hardware partition, GPU architecture nodeSelector, emptyDir
+// staging volumes, and zero hostPath volumes.
 func BuildSandboxPod(spec SandboxPodSpec) (*core.Pod, error) {
 	if spec.Forger == nil {
 		return nil, errors.New("forger must not be nil")
@@ -361,10 +363,12 @@ func BuildSandboxPod(spec SandboxPodSpec) (*core.Pod, error) {
 	}
 	switch runnerMode {
 	case workercore.ModelDeploymentForgerRunnerModeMock:
-		// Mock mode runs built-in Go subcommands inside OperatorImage.
+		if spec.SandboxSpec.Runner != nil {
+			return nil, errors.New("sandbox.runner must not be set when runnerMode is Mock")
+		}
 	case workercore.ModelDeploymentForgerRunnerModeExternal:
-		if strings.TrimSpace(spec.SandboxSpec.RunnerImage) == "" {
-			return nil, errors.New("sandbox.runnerImage is required when runnerMode is External")
+		if spec.SandboxSpec.Runner == nil || strings.TrimSpace(spec.SandboxSpec.Runner.Image) == "" {
+			return nil, errors.New("sandbox.runner.image is required when runnerMode is External")
 		}
 		if strings.TrimSpace(spec.EngineImage) == "" {
 			return nil, errors.New("engineImage is required for forge-verifier when runnerMode is External")
@@ -373,25 +377,9 @@ func BuildSandboxPod(spec SandboxPodSpec) (*core.Pod, error) {
 		return nil, fmt.Errorf("unsupported runnerMode %q", runnerMode)
 	}
 
-	accelResName := spec.AcceleratorResourceName
-	if accelResName == "" {
-		manufacturer := strings.TrimSpace(spec.Manufacturer)
-		if manufacturer == "" {
-			manufacturer = strings.TrimSpace(spec.Hardware.Manufacturer)
-		}
-		normManu, err := kernelkey.NormalizeManufacturer(manufacturer)
-		if err != nil {
-			return nil, fmt.Errorf("resolve accelerator manufacturer: %w", err)
-		}
-		accelResName = nodefeature.GetAcceleratableResourceName(normManu, workercore.DeviceAllocationModeExclusive)
-		if accelResName == "" {
-			return nil, fmt.Errorf("manufacturer %q yields no exclusive accelerator resource name", normManu)
-		}
-	}
-
-	timeoutSeconds := DefaultSandboxTimeoutSeconds
-	if spec.SandboxSpec.TimeoutSeconds > 0 {
-		timeoutSeconds = int64(spec.SandboxSpec.TimeoutSeconds)
+	deadlineSeconds := DefaultSandboxTimeoutSeconds
+	if spec.SandboxSpec.ActiveDeadlineSeconds > 0 {
+		deadlineSeconds = spec.SandboxSpec.ActiveDeadlineSeconds
 	}
 	outputLimit := defaultOutputSizeLimitQty.DeepCopy()
 	if spec.SandboxSpec.OutputSizeLimit != nil && spec.SandboxSpec.OutputSizeLimit.Sign() > 0 {
@@ -415,7 +403,10 @@ func BuildSandboxPod(spec SandboxPodSpec) (*core.Pod, error) {
 		return nil, errors.New("hardware selector labels are required to pin ForgeSandbox to the probed GPU architecture")
 	}
 
-	gpuResources := buildSandboxContainerResources(accelResName, spec.SandboxSpec.Resources)
+	gpuResources, err := buildSandboxContainerResources(spec)
+	if err != nil {
+		return nil, err
+	}
 	reportPath := path.Join(VerifiedMountPath, VerificationReportFileName)
 
 	volumes := []core.Volume{
@@ -484,21 +475,34 @@ func BuildSandboxPod(spec SandboxPodSpec) (*core.Pod, error) {
 				},
 			},
 		})
-		initContainers = []core.Container{
-			{
-				Name:  RunnerContainerName,
-				Image: strings.TrimSpace(spec.SandboxSpec.RunnerImage),
-				Env: []core.EnvVar{
-					{Name: envForgeInputDir, Value: InputMountPath},
-					{Name: envForgeOutputDir, Value: OutputMountPath},
-				},
-				Resources:       *gpuResources.DeepCopy(),
-				SecurityContext: restrictedContainerSecurityContext(),
-				VolumeMounts: []core.VolumeMount{
-					{Name: InputVolumeName, MountPath: InputMountPath, ReadOnly: true},
-					{Name: OutputVolumeName, MountPath: OutputMountPath},
-				},
+		runner := spec.SandboxSpec.Runner
+		runnerContainer := core.Container{
+			Name:            RunnerContainerName,
+			Image:           strings.TrimSpace(runner.Image),
+			ImagePullPolicy: runner.ImagePullPolicy,
+			Env:             buildSandboxRunnerEnv(runner.Env),
+			Resources:       *gpuResources.DeepCopy(),
+			SecurityContext: restrictedContainerSecurityContext(),
+			VolumeMounts: []core.VolumeMount{
+				{Name: InputVolumeName, MountPath: InputMountPath, ReadOnly: true},
+				{Name: OutputVolumeName, MountPath: OutputMountPath},
 			},
+		}
+		if len(runner.Command) > 0 {
+			runnerContainer.Command = slices.Clone(runner.Command)
+		}
+		if len(runner.Args) > 0 {
+			runnerContainer.Args = slices.Clone(runner.Args)
+		}
+		if len(runner.EnvFrom) > 0 {
+			runnerContainer.EnvFrom = make([]core.EnvFromSource, len(runner.EnvFrom))
+			for i := range runner.EnvFrom {
+				runner.EnvFrom[i].DeepCopyInto(&runnerContainer.EnvFrom[i])
+			}
+		}
+
+		initContainers = []core.Container{
+			runnerContainer,
 			{
 				Name:            StageSentinelContainerName,
 				Image:           operatorImage,
@@ -549,11 +553,11 @@ func BuildSandboxPod(spec SandboxPodSpec) (*core.Pod, error) {
 		},
 		Spec: core.PodSpec{
 			RestartPolicy:                core.RestartPolicyNever,
-			ActiveDeadlineSeconds:        ptr.To(timeoutSeconds),
+			ActiveDeadlineSeconds:        ptr.To(deadlineSeconds),
 			AutomountServiceAccountToken: ptr.To(false),
 			PriorityClassName:            strings.TrimSpace(spec.SandboxSpec.PriorityClassName),
 			NodeSelector:                 nodeSelector,
-			ImagePullSecrets:             slices.Clone(spec.ImagePullSecrets),
+			ImagePullSecrets:             mergeImagePullSecrets(spec.ImagePullSecrets, spec.SandboxSpec.ImagePullSecrets),
 			SecurityContext:              restrictedPodSecurityContext(),
 			InitContainers:               initContainers,
 			Containers:                   []core.Container{holdContainer},
@@ -561,6 +565,67 @@ func BuildSandboxPod(spec SandboxPodSpec) (*core.Pod, error) {
 		},
 	}
 	return pod, nil
+}
+
+func buildSandboxRunnerEnv(userEnv []workercore.ModelDeploymentForgerSandboxEnvVar) []core.EnvVar {
+	env := make([]core.EnvVar, 0, 2+len(userEnv))
+	env = append(env,
+		core.EnvVar{Name: envForgeInputDir, Value: InputMountPath},
+		core.EnvVar{Name: envForgeOutputDir, Value: OutputMountPath},
+	)
+	for i := range userEnv {
+		ev := &userEnv[i]
+		name := strings.TrimSpace(ev.Name)
+		if name == "" || strings.HasPrefix(strings.ToUpper(name), reservedForgeEnvPrefix) {
+			continue
+		}
+		out := core.EnvVar{
+			Name:  name,
+			Value: ev.Value,
+		}
+		if ev.ValueFrom != nil {
+			var src core.EnvVarSource
+			if ev.ValueFrom.ConfigMapKeyRef != nil {
+				src.ConfigMapKeyRef = ev.ValueFrom.ConfigMapKeyRef.DeepCopy()
+			}
+			if ev.ValueFrom.SecretKeyRef != nil {
+				src.SecretKeyRef = ev.ValueFrom.SecretKeyRef.DeepCopy()
+			}
+			if src.ConfigMapKeyRef != nil || src.SecretKeyRef != nil {
+				out.ValueFrom = &src
+			}
+		}
+		env = append(env, out)
+	}
+	return env
+}
+
+func mergeImagePullSecrets(
+	roleSecrets, sandboxSecrets []core.LocalObjectReference,
+) []core.LocalObjectReference {
+	total := len(roleSecrets) + len(sandboxSecrets)
+	if total == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, total)
+	merged := make([]core.LocalObjectReference, 0, total)
+	for _, list := range [][]core.LocalObjectReference{roleSecrets, sandboxSecrets} {
+		for _, ref := range list {
+			name := strings.TrimSpace(ref.Name)
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			merged = append(merged, core.LocalObjectReference{Name: name})
+		}
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
 }
 
 func verifierArgs(reportPath string, thresholds *VerificationThresholds) []string {
@@ -579,29 +644,140 @@ func verifierArgs(reportPath string, thresholds *VerificationThresholds) []strin
 	return args
 }
 
-func buildSandboxContainerResources(
-	accelResName core.ResourceName, hostRes *workercore.ModelDeploymentForgerSandboxResources,
-) core.ResourceRequirements {
-	oneCard := *resource.NewQuantity(1, resource.DecimalSI)
+func resolveSandboxManufacturer(spec SandboxPodSpec) (string, error) {
+	var detailManu string
+	if spec.AcceleratorType != nil {
+		detailManu = strings.TrimSpace(spec.AcceleratorType.Status.Detail.Manufacturer)
+	}
+	rawManu := detailManu
+	if rawManu == "" {
+		rawManu = strings.TrimSpace(spec.Manufacturer)
+	}
+	if rawManu == "" {
+		rawManu = strings.TrimSpace(spec.Hardware.Manufacturer)
+	}
+	normManu, err := kernelkey.NormalizeManufacturer(rawManu)
+	if err != nil {
+		return "", fmt.Errorf("resolve accelerator manufacturer: %w", err)
+	}
+	if detailManu != "" && nodefeature.GetAcceleratableResourceName(detailManu, workercore.DeviceAllocationModeExclusive) != "" {
+		return detailManu, nil
+	}
+	return normManu, nil
+}
+
+func buildSandboxContainerResources(spec SandboxPodSpec) (core.ResourceRequirements, error) {
 	rr := core.ResourceRequirements{
-		Requests: core.ResourceList{
-			accelResName: oneCard.DeepCopy(),
-		},
-		Limits: core.ResourceList{
-			accelResName: oneCard.DeepCopy(),
-		},
+		Requests: core.ResourceList{},
+		Limits:   core.ResourceList{},
 	}
-	if hostRes != nil {
-		if hostRes.CPU != nil && hostRes.CPU.Sign() > 0 {
-			rr.Requests[core.ResourceCPU] = hostRes.CPU.DeepCopy()
-			rr.Limits[core.ResourceCPU] = hostRes.CPU.DeepCopy()
+	res := spec.SandboxSpec.Resources
+	oneCard := *resource.NewQuantity(1, resource.DecimalSI)
+
+	var (
+		partProfile string
+		memPct      int32
+		coresPct    int32
+	)
+	if res != nil {
+		partProfile = res.AcceleratorPartitionedProfile
+		memPct = res.AcceleratorSlicedMemoryPercentage
+		coresPct = res.AcceleratorSlicedCoresPercentage
+	}
+
+	if memPct < 0 || memPct > 100 {
+		return rr, fmt.Errorf("acceleratorSlicedMemoryPercentage %d must be between 0 and 100", memPct)
+	}
+	if coresPct < 0 || coresPct > 100 {
+		return rr, fmt.Errorf("acceleratorSlicedCoresPercentage %d must be between 0 and 100", coresPct)
+	}
+
+	switch {
+	case partProfile != "":
+		if memPct > 0 || coresPct > 0 {
+			return rr, errors.New(
+				"acceleratorPartitionedProfile is mutually exclusive with " +
+					"acceleratorSlicedMemoryPercentage and acceleratorSlicedCoresPercentage",
+			)
 		}
-		if hostRes.RAM != nil && hostRes.RAM.Sign() > 0 {
-			rr.Requests[core.ResourceMemory] = hostRes.RAM.DeepCopy()
-			rr.Limits[core.ResourceMemory] = hostRes.RAM.DeepCopy()
+		if strings.TrimSpace(partProfile) != partProfile {
+			return rr, fmt.Errorf("invalid acceleratorPartitionedProfile %q: must not contain surrounding whitespace", partProfile)
+		}
+		manu, err := resolveSandboxManufacturer(spec)
+		if err != nil {
+			return rr, err
+		}
+		partCardResName := nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModePartitioned)
+		partProfileResName := nodefeature.GetAcceleratablePartitionedProfileResourceName(manu, partProfile)
+		if partCardResName == "" || partProfileResName == "" {
+			return rr, fmt.Errorf("manufacturer %q or partition profile %q does not yield valid partitioned resource names", manu, partProfile)
+		}
+		rr.Requests[partCardResName] = oneCard.DeepCopy()
+		rr.Limits[partCardResName] = oneCard.DeepCopy()
+		rr.Requests[partProfileResName] = oneCard.DeepCopy()
+		rr.Limits[partProfileResName] = oneCard.DeepCopy()
+
+	case memPct > 0:
+		if spec.AcceleratorType != nil && !spec.AcceleratorType.Status.Detail.IsLogicallySliceable() {
+			return rr, fmt.Errorf("accelerator type %q does not support logical slicing", spec.AcceleratorType.Name)
+		}
+		manu, err := resolveSandboxManufacturer(spec)
+		if err != nil {
+			return rr, err
+		}
+		if nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeExclusive) == "" {
+			return rr, fmt.Errorf("manufacturer %q yields no accelerator resource name", manu)
+		}
+		slicedResName := nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeSliced)
+		memResName := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(manu)
+		coresResName := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(manu)
+		if slicedResName == "" || memResName == "" || coresResName == "" {
+			return rr, fmt.Errorf("manufacturer %q yields empty sliced accelerator resource names", manu)
+		}
+		memQ := *resource.NewQuantity(int64(memPct), resource.DecimalSI)
+		coresQ := *resource.NewQuantity(int64(coresPct), resource.DecimalSI)
+		rr.Requests[slicedResName] = oneCard.DeepCopy()
+		rr.Limits[slicedResName] = oneCard.DeepCopy()
+		rr.Requests[memResName] = memQ.DeepCopy()
+		rr.Limits[memResName] = memQ.DeepCopy()
+		rr.Requests[coresResName] = coresQ.DeepCopy()
+		rr.Limits[coresResName] = coresQ.DeepCopy()
+
+	default:
+		if coresPct > 0 {
+			return rr, errors.New("acceleratorSlicedCoresPercentage requires acceleratorSlicedMemoryPercentage > 0")
+		}
+		accelResName := spec.AcceleratorResourceName
+		if accelResName == "" {
+			manu, err := resolveSandboxManufacturer(spec)
+			if err != nil {
+				return rr, err
+			}
+			accelResName = nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeExclusive)
+			if accelResName == "" {
+				return rr, fmt.Errorf("manufacturer %q yields no exclusive accelerator resource name", manu)
+			}
+		}
+		rr.Requests[accelResName] = oneCard.DeepCopy()
+		rr.Limits[accelResName] = oneCard.DeepCopy()
+	}
+
+	if res != nil {
+		if res.CPU != nil && res.CPU.Sign() > 0 {
+			rr.Requests[core.ResourceCPU] = res.CPU.DeepCopy()
+			rr.Limits[core.ResourceCPU] = res.CPU.DeepCopy()
+		}
+		if res.RAM != nil && res.RAM.Sign() > 0 {
+			rr.Requests[core.ResourceMemory] = res.RAM.DeepCopy()
+			rr.Limits[core.ResourceMemory] = res.RAM.DeepCopy()
+		}
+		if res.LocalStorage != nil && res.LocalStorage.Sign() > 0 {
+			rr.Requests[core.ResourceEphemeralStorage] = res.LocalStorage.DeepCopy()
+			rr.Limits[core.ResourceEphemeralStorage] = res.LocalStorage.DeepCopy()
 		}
 	}
-	return rr
+
+	return rr, nil
 }
 
 func restrictedPodSecurityContext() *core.PodSecurityContext {

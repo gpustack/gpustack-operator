@@ -606,8 +606,23 @@ func (in ModelDeploymentForgerRolloutSpec) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerSandboxEnvVar) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerSandboxEnvVar"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerSandboxEnvVarSource) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerSandboxEnvVarSource"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentForgerSandboxResources) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerSandboxResources"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerSandboxRunner) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerSandboxRunner"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

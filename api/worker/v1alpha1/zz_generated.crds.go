@@ -7554,6 +7554,37 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeploymentForger() *v1.CustomResource
 												Raw: []byte(`{}`),
 											},
 											Properties: map[string]v1.JSONSchemaProps{
+												"activeDeadlineSeconds": {
+													Description: "ActiveDeadlineSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400,\ndefault 1800), matching PodSpec.activeDeadlineSeconds.",
+													Type:        "integer",
+													Format:      "int64",
+													Default: &v1.JSON{
+														Raw: []byte(`1800`),
+													},
+													Maximum: ptr.To[float64](14400),
+													Minimum: ptr.To[float64](60),
+												},
+												"imagePullSecrets": {
+													Description: "ImagePullSecrets optionally specifies image pull secrets in this namespace for pulling the\nForgeSandbox runner image. When omitted, the sandbox inherits the target role's\nimagePullSecrets.",
+													Type:        "array",
+													MaxItems:    ptr.To[int64](32),
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"name": {
+																	Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`""`),
+																	},
+																},
+															},
+														},
+													},
+													Nullable:  true,
+													XListType: ptr.To[string]("atomic"),
+												},
 												"outputSizeLimit": {
 													Description: "OutputSizeLimit bounds the forge-output emptyDir staging volume (64Mi to 16Gi, default 2Gi).",
 													Default: &v1.JSON{
@@ -7577,11 +7608,44 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeploymentForger() *v1.CustomResource
 													MaxLength:   ptr.To[int64](253),
 												},
 												"resources": {
-													Description: "Resources optionally specifies host CPU and memory requests and limits for ForgeSandbox\ncontainers alongside the single whole accelerator card requested from Kueue.",
+													Description: "Resources optionally specifies host CPU, memory, ephemeral storage, and accelerator slicing\nor partitioning mode for ForgeSandbox containers. When slicing and partitioning fields are\nomitted, the sandbox requests one exclusive whole accelerator card (recommended for\ndeterministic verification latency).",
 													Type:        "object",
 													Properties: map[string]v1.JSONSchemaProps{
+														"acceleratorPartitionedProfile": {
+															Description: "AcceleratorPartitionedProfile requests a hardware partition profile (for example \"3g.40gb\")\non a partition-offering AcceleratorType. Mutually exclusive with software slicing percentages.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](64),
+														},
+														"acceleratorSlicedCoresPercentage": {
+															Description: "AcceleratorSlicedCoresPercentage requests software slicing with this per-accelerator compute\npercentage (0 to 100) alongside AcceleratorSlicedMemoryPercentage.",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](100),
+															Minimum:     ptr.To[float64](0),
+														},
+														"acceleratorSlicedMemoryPercentage": {
+															Description: "AcceleratorSlicedMemoryPercentage requests software slicing with this per-accelerator VRAM\npercentage (0 to 100) on a sliceable AcceleratorType. 0 disables slicing (exclusive whole\ncard, recommended for deterministic verification timing).",
+															Type:        "integer",
+															Format:      "int32",
+															Maximum:     ptr.To[float64](100),
+															Minimum:     ptr.To[float64](0),
+														},
 														"cpu": {
 															Description: "CPU is the host CPU request and limit for the ForgeSandbox Pod, such as \"8\".",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"localStorage": {
+															Description: "LocalStorage is the host ephemeral storage request and limit for the ForgeSandbox Pod, such\nas \"20Gi\".",
 															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
 															AnyOf: []v1.JSONSchemaProps{
 																{
@@ -7611,10 +7675,194 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeploymentForger() *v1.CustomResource
 													},
 													Nullable: true,
 												},
-												"runnerImage": {
-													Description: "RunnerImage is the container image executed by forge-runner when RunnerMode is External.",
-													Type:        "string",
-													MaxLength:   ptr.To[int64](512),
+												"runner": {
+													Description: "Runner configures the initContainer: forge-runner container when RunnerMode is External.",
+													Type:        "object",
+													Required: []string{
+														"image",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"args": {
+															Description: "Args optionally sets arguments passed to the container entrypoint.",
+															Type:        "array",
+															MaxItems:    ptr.To[int64](64),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "string",
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+														"command": {
+															Description: "Command optionally overrides the container entrypoint argv.",
+															Type:        "array",
+															MaxItems:    ptr.To[int64](64),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "string",
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+														"env": {
+															Description: "Env optionally injects environment variables into initContainer: forge-runner. Names starting\nwith GPUSTACK_FORGE_ are reserved by the operator and rejected.",
+															Type:        "array",
+															MaxItems:    ptr.To[int64](64),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"name",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"name": {
+																			Description: "Name is the environment variable name. Must be a valid environment variable identifier and\nmust not start with GPUSTACK_FORGE_.",
+																			Type:        "string",
+																			MaxLength:   ptr.To[int64](256),
+																			MinLength:   ptr.To[int64](1),
+																		},
+																		"value": {
+																			Description: "Value is a literal environment variable value. Mutually exclusive with ValueFrom.",
+																			Type:        "string",
+																		},
+																		"valueFrom": {
+																			Description: "ValueFrom selects a value from a same-namespace ConfigMap or Secret key. Mutually exclusive\nwith Value.",
+																			Type:        "object",
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"configMapKeyRef": {
+																					Description: "ConfigMapKeyRef selects a key of a ConfigMap in the same namespace.",
+																					Type:        "object",
+																					Required: []string{
+																						"key",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"key": {
+																							Description: "The key to select.",
+																							Type:        "string",
+																						},
+																						"name": {
+																							Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																							Type:        "string",
+																							Default: &v1.JSON{
+																								Raw: []byte(`""`),
+																							},
+																						},
+																						"optional": {
+																							Description: "Specify whether the ConfigMap or its key must be defined",
+																							Type:        "boolean",
+																							Nullable:    true,
+																						},
+																					},
+																					Nullable: true,
+																				},
+																				"secretKeyRef": {
+																					Description: "SecretKeyRef selects a key of a Secret in the same namespace.",
+																					Type:        "object",
+																					Required: []string{
+																						"key",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"key": {
+																							Description: "The key of the secret to select from.  Must be a valid secret key.",
+																							Type:        "string",
+																						},
+																						"name": {
+																							Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																							Type:        "string",
+																							Default: &v1.JSON{
+																								Raw: []byte(`""`),
+																							},
+																						},
+																						"optional": {
+																							Description: "Specify whether the Secret or its key must be defined",
+																							Type:        "boolean",
+																							Nullable:    true,
+																						},
+																					},
+																					Nullable: true,
+																				},
+																			},
+																			Nullable: true,
+																		},
+																	},
+																},
+															},
+															Nullable: true,
+															XListMapKeys: []string{
+																"name",
+															},
+															XListType: ptr.To[string]("map"),
+														},
+														"envFrom": {
+															Description: "EnvFrom optionally populates environment variables into initContainer: forge-runner from\nsame-namespace ConfigMaps or Secrets. Prefixes starting with GPUSTACK_FORGE_ are rejected,\nand operator-owned GPUSTACK_FORGE_INPUT_DIR and GPUSTACK_FORGE_OUTPUT_DIR always take\nprecedence.",
+															Type:        "array",
+															MaxItems:    ptr.To[int64](16),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"configMapRef": {
+																			Description: "The ConfigMap to select from",
+																			Type:        "object",
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"name": {
+																					Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																					Type:        "string",
+																					Default: &v1.JSON{
+																						Raw: []byte(`""`),
+																					},
+																				},
+																				"optional": {
+																					Description: "Specify whether the ConfigMap must be defined",
+																					Type:        "boolean",
+																					Nullable:    true,
+																				},
+																			},
+																			Nullable: true,
+																		},
+																		"prefix": {
+																			Description: "Optional text to prepend to the name of each environment variable.\nMay consist of any printable ASCII characters except '='.",
+																			Type:        "string",
+																		},
+																		"secretRef": {
+																			Description: "The Secret to select from",
+																			Type:        "object",
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"name": {
+																					Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																					Type:        "string",
+																					Default: &v1.JSON{
+																						Raw: []byte(`""`),
+																					},
+																				},
+																				"optional": {
+																					Description: "Specify whether the Secret must be defined",
+																					Type:        "boolean",
+																					Nullable:    true,
+																				},
+																			},
+																			Nullable: true,
+																		},
+																	},
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+														"image": {
+															Description: "Image is the container image executed by initContainer: forge-runner.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](512),
+															MinLength:   ptr.To[int64](1),
+														},
+														"imagePullPolicy": {
+															Description: "ImagePullPolicy optionally sets the image pull policy for Image.",
+															Type:        "string",
+														},
+													},
+													Nullable: true,
 												},
 												"runnerMode": {
 													Description: "RunnerMode selects External (black-box synthesis container image) or Mock (deterministic\nbuilt-in operator subcommands for pipeline qualification).",
@@ -7630,16 +7878,6 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeploymentForger() *v1.CustomResource
 															Raw: []byte(`"Mock"`),
 														},
 													},
-												},
-												"timeoutSeconds": {
-													Description: "TimeoutSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400,\ndefault 1800).",
-													Type:        "integer",
-													Format:      "int32",
-													Default: &v1.JSON{
-														Raw: []byte(`1800`),
-													},
-													Maximum: ptr.To[float64](14400),
-													Minimum: ptr.To[float64](60),
 												},
 											},
 										},

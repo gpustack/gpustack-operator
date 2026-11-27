@@ -3863,7 +3863,45 @@ message ModelDeploymentForgerRolloutSpec {
   optional int32 failureTimeoutSeconds = 2;
 }
 
-// ModelDeploymentForgerSandboxResources specifies host CPU and memory requests for ForgeSandbox.
+// ModelDeploymentForgerSandboxEnvVar represents one environment variable injected into
+// initContainer: forge-runner.
+message ModelDeploymentForgerSandboxEnvVar {
+  // Name is the environment variable name. Must be a valid environment variable identifier and
+  // must not start with GPUSTACK_FORGE_.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=256
+  optional string name = 1;
+
+  // Value is a literal environment variable value. Mutually exclusive with ValueFrom.
+  //
+  // +optional
+  optional string value = 2;
+
+  // ValueFrom selects a value from a same-namespace ConfigMap or Secret key. Mutually exclusive
+  // with Value.
+  //
+  // +optional
+  optional ModelDeploymentForgerSandboxEnvVarSource valueFrom = 3;
+}
+
+// ModelDeploymentForgerSandboxEnvVarSource selects an environment variable value from a
+// same-namespace ConfigMap or Secret key without exposing Pod downward API fields.
+message ModelDeploymentForgerSandboxEnvVarSource {
+  // ConfigMapKeyRef selects a key of a ConfigMap in the same namespace.
+  //
+  // +optional
+  optional .k8s.io.api.core.v1.ConfigMapKeySelector configMapKeyRef = 1;
+
+  // SecretKeyRef selects a key of a Secret in the same namespace.
+  //
+  // +optional
+  optional .k8s.io.api.core.v1.SecretKeySelector secretKeyRef = 2;
+}
+
+// ModelDeploymentForgerSandboxResources specifies host resources and optional accelerator slicing
+// or hardware partitioning for ForgeSandbox containers.
 message ModelDeploymentForgerSandboxResources {
   // CPU is the host CPU request and limit for the ForgeSandbox Pod, such as "8".
   //
@@ -3874,6 +3912,87 @@ message ModelDeploymentForgerSandboxResources {
   //
   // +optional
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity ram = 2;
+
+  // LocalStorage is the host ephemeral storage request and limit for the ForgeSandbox Pod, such
+  // as "20Gi".
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity localStorage = 3;
+
+  // AcceleratorSlicedMemoryPercentage requests software slicing with this per-accelerator VRAM
+  // percentage (0 to 100) on a sliceable AcceleratorType. 0 disables slicing (exclusive whole
+  // card, recommended for deterministic verification timing).
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  // +k8s:validation:maximum=100
+  optional int32 acceleratorSlicedMemoryPercentage = 4;
+
+  // AcceleratorSlicedCoresPercentage requests software slicing with this per-accelerator compute
+  // percentage (0 to 100) alongside AcceleratorSlicedMemoryPercentage.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  // +k8s:validation:maximum=100
+  optional int32 acceleratorSlicedCoresPercentage = 5;
+
+  // AcceleratorPartitionedProfile requests a hardware partition profile (for example "3g.40gb")
+  // on a partition-offering AcceleratorType. Mutually exclusive with software slicing percentages.
+  //
+  // +optional
+  // +k8s:validation:maxLength=64
+  optional string acceleratorPartitionedProfile = 6;
+}
+
+// ModelDeploymentForgerSandboxRunner configures the initContainer: forge-runner container in
+// External runner mode using a restricted subset of corev1.Container fields.
+message ModelDeploymentForgerSandboxRunner {
+  // Image is the container image executed by initContainer: forge-runner.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=512
+  optional string image = 1;
+
+  // ImagePullPolicy optionally sets the image pull policy for Image.
+  //
+  // +optional
+  optional string imagePullPolicy = 2;
+
+  // Command optionally overrides the container entrypoint argv.
+  //
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:maxItems=64
+  repeated string command = 3;
+
+  // Args optionally sets arguments passed to the container entrypoint.
+  //
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:maxItems=64
+  repeated string args = 4;
+
+  // Env optionally injects environment variables into initContainer: forge-runner. Names starting
+  // with GPUSTACK_FORGE_ are reserved by the operator and rejected.
+  //
+  // +optional
+  // +patchMergeKey=name
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=name
+  // +k8s:validation:maxItems=64
+  repeated ModelDeploymentForgerSandboxEnvVar env = 5;
+
+  // EnvFrom optionally populates environment variables into initContainer: forge-runner from
+  // same-namespace ConfigMaps or Secrets. Prefixes starting with GPUSTACK_FORGE_ are rejected,
+  // and operator-owned GPUSTACK_FORGE_INPUT_DIR and GPUSTACK_FORGE_OUTPUT_DIR always take
+  // precedence.
+  //
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:maxItems=16
+  repeated .k8s.io.api.core.v1.EnvFromSource envFrom = 6;
 }
 
 // ModelDeploymentForgerSandboxSpec configures Kueue-admitted single-GPU ForgeSandbox execution.
@@ -3886,11 +4005,10 @@ message ModelDeploymentForgerSandboxSpec {
   // +k8s:validation:default="External"
   optional string runnerMode = 1;
 
-  // RunnerImage is the container image executed by forge-runner when RunnerMode is External.
+  // Runner configures the initContainer: forge-runner container when RunnerMode is External.
   //
   // +optional
-  // +k8s:validation:maxLength=512
-  optional string runnerImage = 2;
+  optional ModelDeploymentForgerSandboxRunner runner = 2;
 
   // PriorityClassName optionally sets the Kubernetes PriorityClass on the ForgeSandbox Pod.
   //
@@ -3898,14 +4016,14 @@ message ModelDeploymentForgerSandboxSpec {
   // +k8s:validation:maxLength=253
   optional string priorityClassName = 3;
 
-  // TimeoutSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400,
-  // default 1800).
+  // ActiveDeadlineSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400,
+  // default 1800), matching PodSpec.activeDeadlineSeconds.
   //
   // +optional
   // +k8s:validation:default=1800
   // +k8s:validation:minimum=60
   // +k8s:validation:maximum=14400
-  optional int32 timeoutSeconds = 4;
+  optional int64 activeDeadlineSeconds = 4;
 
   // OutputSizeLimit bounds the forge-output emptyDir staging volume (64Mi to 16Gi, default 2Gi).
   //
@@ -3913,11 +4031,22 @@ message ModelDeploymentForgerSandboxSpec {
   // +k8s:validation:default="2Gi"
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity outputSizeLimit = 5;
 
-  // Resources optionally specifies host CPU and memory requests and limits for ForgeSandbox
-  // containers alongside the single whole accelerator card requested from Kueue.
+  // Resources optionally specifies host CPU, memory, ephemeral storage, and accelerator slicing
+  // or partitioning mode for ForgeSandbox containers. When slicing and partitioning fields are
+  // omitted, the sandbox requests one exclusive whole accelerator card (recommended for
+  // deterministic verification latency).
   //
   // +optional
   optional ModelDeploymentForgerSandboxResources resources = 6;
+
+  // ImagePullSecrets optionally specifies image pull secrets in this namespace for pulling the
+  // ForgeSandbox runner image. When omitted, the sandbox inherits the target role's
+  // imagePullSecrets.
+  //
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:maxItems=32
+  repeated .k8s.io.api.core.v1.LocalObjectReference imagePullSecrets = 7;
 }
 
 // ModelDeploymentForgerSandboxStatus records the identity of an active worker-owned ForgeSandbox
