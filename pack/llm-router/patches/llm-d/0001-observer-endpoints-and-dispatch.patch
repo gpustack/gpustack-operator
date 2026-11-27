@@ -2,30 +2,30 @@ Observe native endpoints and actual recent dispatch on the existing metrics serv
 The view refuses pending selection/send windows, unsynchronized membership and
 unsupported native profiles. GET does not mutate routing or expire native state.
 Removed dispatched listeners retain false selection flags with recent-dispatch evidence.
+Observed workers keep conservative circuit_open: false so transient endpoint-health-filter
+ejections are never misclassified as permanent retirement.
 
-AGAINST: llm-d/llm-d-router v1.0.0.
+AGAINST: llm-d/llm-d-router commit 3283d440334109fc785d4380355cc0375fc32755 (post-v1.0.0 main).
 
-Rebased from v0.11.0 to v1.0.0. v1.0.0 added the native responder plugin chain
-(StreamingServer.SetResponders, ExtProcServerRunner.Responders) and narrowed
-ExtProcServerRunner.GrpcPort from int to uint16; both upstream changes are kept
-and the Observer field/setter ride alongside them, with the drift-guard test's
-callerSet gaining "Responders" as well as "Observer".
+Rebased from v1.0.0 onto 3283d440334109fc785d4380355cc0375fc32755:
+- PR #3830 merged pkg/epp/framework/interface/requestcontrol into requesthandling.
+- PR #3665 added systemone-parser to the default parser set, PR #3328 added
+  endpoint-health-filter, parseConfigurationPhaseTwo registers datalayer-poll-status,
+  and StaticUsageLimitPolicyType is now "static-usage-limit-policy"; all are registered
+  in observer.SupportedPlugins.
+- PR #3462 routed WebSocket upgrades through fallbackToEndpoint alongside bodyless GETs;
+  fallbackToEndpoint opens the observer window before selecting the fallback endpoint.
+- PR #3382 dropped NewCachedEndpointCandidates in favor of NewDatastoreEndpointCandidates,
+  and NewDirectorWithConfig gained poolName.
+- TestObserverSupportsRenderedOperatorProfiles covers baseline server/pd fixtures plus
+  External DP server (omitting prefix-cache-scorer), unmanaged pollFailureThreshold=0,
+  precise KV-events PD with dataLayer, and EPD (confirming encode omits
+  endpoint-health-filter).
 
 The constructor-based ExtProcServerRunner surfaces every field through
 NewExtProcServerRunner, and TestNewExtProcServerRunnerPopulatesEveryField fails
 when any new field is zero. Observer is wired by post-constructor assignment in
-runner.go and is added to the test's callerSet (the smaller change; the
-alternative is adding an Observer parameter to NewExtProcServerRunner and
-threading it through every call site).
-
-v0.11.0 added passthrough-parser to the default parser set
-(pkg/epp/config/loader/defaults.go:261) and the operator's picker configs
-declare no parsers, so the parser is always registered. The observer's
-SupportedPlugins allowlist gains "passthrough-parser" so the operator's
-profiles do not hit a 503. The flow-control defaults (fcfs-ordering-policy,
-global-strict-fairness-policy, static-usage-limit-policy-type) and the
-utilization-detector saturation detector were already in the allowlist, so
-no further additions were needed.
+runner.go and is added to the test's callerSet.
 
 The patch carries the seven datastore observer-revision increments: the
 public mutation sites WithEndpointPool, Clear, PoolSet,
@@ -37,57 +37,110 @@ and an observerMu acquisition here would invert the lock order against
 ObserverSnapshot (which takes observerMu then ds.mu) into AB-BA deadlock.
 pkg/epp/datastore/observer_lock_order_test.go pins this invariant.
 
-The five short-block sites release observerMu before mutating ds.pods, so a
-snapshot racing between bump and mutation can see a revision that leads the
-data by one change; no production code reads registry_revision.
-
-The director -> dispatch-evidence leg has a test
-pkg/epp/requestcontrol/observer_test.go that builds the director with
-NewDirectorWithConfig + a canned mockScheduler (mockScheduler returns the
-pre-baked SchedulingResult) and verifies every ProfileResults TargetEndpoint
-is recorded into the observer window and shows up in the view with
-recent_dispatch.
-
 The operator collector must consume recent-dispatch evidence before using
 this view.
 
 diff --git a/cmd/epp/runner/observer_test.go b/cmd/epp/runner/observer_test.go
 new file mode 100644
-index 0000000000000000000000000000000000000000..7188e6d13c72cb0428355cb09a7acf4eba60898d
+index 0000000000000000000000000000000000000000..da52e727f246a973996f50a0e4c923f3316eb655
 --- /dev/null
 +++ b/cmd/epp/runner/observer_test.go
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,117 @@
 +// Copyright 2026 The Kubernetes Authors.
 +// SPDX-License-Identifier: Apache-2.0
 +package runner
 +
 +import (
 +	"context"
++	"os"
++	"slices"
++	"testing"
 +
 +	"github.com/llm-d/llm-d-router/pkg/epp/datastore"
 +	"github.com/llm-d/llm-d-router/pkg/epp/observer"
 +	runserver "github.com/llm-d/llm-d-router/pkg/epp/server"
-+	"os"
-+	"testing"
 +)
 +
 +// Fixtures come from the operator's router.Render, including native system defaults.
 +func TestObserverSupportsRenderedOperatorProfiles(t *testing.T) {
-+	for _, name := range []string{"server", "pd"} {
-+		t.Run(name, func(t *testing.T) {
-+			data, err := os.ReadFile("observer_testdata/" + name + ".yaml")
++	cases := []struct {
++		name      string
++		checkRefs func(t *testing.T, profiles map[string][]string)
++	}{
++		{name: "server"},
++		{
++			name: "server_external_dp",
++			checkRefs: func(t *testing.T, profiles map[string][]string) {
++				want := []string{
++					"server-pods",
++					"endpoint-health-filter",
++					"queue-scorer",
++					"kv-cache-utilization-scorer",
++					"max-score-picker",
++					"utilization-detector",
++				}
++				if !slices.Equal(profiles["server"], want) {
++					t.Fatalf("external-dp server profile = %v, want %v", profiles["server"], want)
++				}
++				if slices.Contains(profiles["server"], "prefix-cache-scorer") {
++					t.Fatalf("external-dp server profile must omit prefix-cache-scorer: %v", profiles["server"])
++				}
++			},
++		},
++		{
++			name: "server_unmanaged",
++			checkRefs: func(t *testing.T, profiles map[string][]string) {
++				if !slices.Contains(profiles["server"], "endpoint-health-filter") {
++					t.Fatalf("unmanaged server profile missing endpoint-health-filter: %v", profiles["server"])
++				}
++			},
++		},
++		{name: "pd"},
++		{
++			name: "pd_precise",
++			checkRefs: func(t *testing.T, profiles map[string][]string) {
++				for _, profile := range []string{"decode", "prefill"} {
++					if !slices.Contains(profiles[profile], "endpoint-health-filter") {
++						t.Fatalf("%s profile missing endpoint-health-filter: %v", profile, profiles[profile])
++					}
++				}
++			},
++		},
++		{
++			name: "epd",
++			checkRefs: func(t *testing.T, profiles map[string][]string) {
++				for _, profile := range []string{"decode", "prefill"} {
++					if !slices.Contains(profiles[profile], "endpoint-health-filter") {
++						t.Fatalf("%s profile missing endpoint-health-filter: %v", profile, profiles[profile])
++					}
++				}
++				if slices.Contains(profiles["encode"], "endpoint-health-filter") {
++					t.Fatalf("encode profile must not attach endpoint-health-filter: %v", profiles["encode"])
++				}
++			},
++		},
++	}
++
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			data, err := os.ReadFile("observer_testdata/" + tc.name + ".yaml")
 +			if err != nil {
 +				t.Fatal(err)
 +			}
 +			runner := NewRunner()
 +			opts := runserver.NewOptions()
 +			opts.ConfigText = string(data)
++			epf := runner.setupMetricsCollection(opts)
 +			raw, err := runner.parseConfigurationPhaseOne(context.Background(), opts)
 +			if err != nil {
 +				t.Fatal(err)
 +			}
-+			ds := datastore.NewDatastore(t.Context(), nil)
-+			if _, err := runner.parseConfigurationPhaseTwo(t.Context(), raw, ds, opts.RefreshMetricsInterval); err != nil {
++			ds := datastore.NewDatastore(t.Context(), epf)
++			cfg, err := runner.parseConfigurationPhaseTwo(t.Context(), raw, ds, opts.RefreshMetricsInterval)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if err := runner.dlRuntime.Configure(cfg.DataConfig, setupLog); err != nil {
 +				t.Fatal(err)
 +			}
 +			if !observer.SupportedPlugins(runner.PluginHandle) {
@@ -96,9 +149,108 @@ index 0000000000000000000000000000000000000000..7188e6d13c72cb0428355cb09a7acf4e
 +				}
 +				t.Fatal("actual rendered operator profile is refused")
 +			}
++			if tc.checkRefs != nil {
++				profiles := make(map[string][]string, len(raw.SchedulingProfiles))
++				for _, prof := range raw.SchedulingProfiles {
++					refs := make([]string, 0, len(prof.Plugins))
++					for _, p := range prof.Plugins {
++						refs = append(refs, p.PluginRef)
++					}
++					profiles[prof.Name] = refs
++				}
++				tc.checkRefs(t, profiles)
++			}
 +		})
 +	}
 +}
+diff --git a/cmd/epp/runner/observer_testdata/epd.yaml b/cmd/epp/runner/observer_testdata/epd.yaml
+new file mode 100644
+index 0000000000000000000000000000000000000000..0803fb7b19c48807550a9b481fd0e9aadcd47df5
+--- /dev/null
++++ b/cmd/epp/runner/observer_testdata/epd.yaml
+@@ -0,0 +1,82 @@
++apiVersion: llm-d.ai/v1alpha1
++kind: EndpointPickerConfig
++plugins:
++- name: decode-pods
++  parameters:
++    matchLabels:
++      modeldeployment.gpustack.ai/role-kind: decode
++  type: label-selector-filter
++- name: encode-pods
++  parameters:
++    matchLabels:
++      modeldeployment.gpustack.ai/endpoint-eligible: "true"
++      modeldeployment.gpustack.ai/role-kind: encode
++  type: label-selector-filter
++- name: prefill-pods
++  parameters:
++    matchLabels:
++      modeldeployment.gpustack.ai/role-kind: prefill
++  type: label-selector-filter
++- parameters:
++    maxEjectionPercent: 50
++    pollFailureThreshold: 3
++    responseFailureCodes:
++    - 502
++    - 503
++    responseFailureThreshold: 5
++  type: endpoint-health-filter
++- type: token-producer
++- type: approx-prefix-cache-producer
++- type: queue-scorer
++- type: kv-cache-utilization-scorer
++- type: max-score-picker
++- type: prefix-cache-scorer
++- parameters:
++    port: 8000
++  type: metrics-data-source
++- parameters:
++    engineConfigs:
++    - cacheInfoSpec: vllm:cache_config_info
++      kvUsageSpec: vllm:kv_cache_usage_perc
++      name: vllm
++      queuedRequestsSpec: vllm:num_requests_waiting
++      runningRequestsSpec: vllm:num_requests_running
++  type: core-metrics-extractor
++- type: always-disagg-multimodal-decider
++- parameters:
++    nonCachedTokens: 8
++    promptTokens: 0
++  type: prefix-based-pd-decider
++- parameters:
++    deciders:
++      encode: always-disagg-multimodal-decider
++      prefill: prefix-based-pd-decider
++    profiles:
++      decode: decode
++      encode: encode
++      prefill: prefill
++  type: disagg-profile-handler
++schedulingProfiles:
++- name: decode
++  plugins:
++  - pluginRef: decode-pods
++  - pluginRef: endpoint-health-filter
++  - pluginRef: queue-scorer
++    weight: 2
++  - pluginRef: kv-cache-utilization-scorer
++    weight: 2
++  - pluginRef: max-score-picker
++- name: encode
++  plugins:
++  - pluginRef: encode-pods
++- name: prefill
++  plugins:
++  - pluginRef: prefill-pods
++  - pluginRef: endpoint-health-filter
++  - pluginRef: queue-scorer
++    weight: 2
++  - pluginRef: kv-cache-utilization-scorer
++    weight: 2
++  - pluginRef: max-score-picker
++  - pluginRef: prefix-cache-scorer
++    weight: 3
 diff --git a/cmd/epp/runner/observer_testdata/pd.yaml b/cmd/epp/runner/observer_testdata/pd.yaml
 new file mode 100644
 index 0000000000000000000000000000000000000000..e18abb1336c8749767e7bb8d3cba5464df447ec9
@@ -162,6 +314,107 @@ index 0000000000000000000000000000000000000000..e18abb1336c8749767e7bb8d3cba5464
 +  - pluginRef: max-score-picker
 +  - pluginRef: prefix-cache-scorer
 +    weight: 3
+diff --git a/cmd/epp/runner/observer_testdata/pd_precise.yaml b/cmd/epp/runner/observer_testdata/pd_precise.yaml
+new file mode 100644
+index 0000000000000000000000000000000000000000..0db3c9c5426de5708f62d45b8dbda78065a15a98
+--- /dev/null
++++ b/cmd/epp/runner/observer_testdata/pd_precise.yaml
+@@ -0,0 +1,95 @@
++apiVersion: llm-d.ai/v1alpha1
++dataLayer:
++  sources:
++  - extractors:
++    - pluginRef: core-metrics-extractor
++    pluginRef: metrics-data-source
++  - extractors:
++    - pluginRef: precise-prefix-cache-producer
++    pluginRef: endpoint-notification-source
++kind: EndpointPickerConfig
++plugins:
++- name: decode-pods
++  parameters:
++    matchLabels:
++      modeldeployment.gpustack.ai/role-kind: decode
++  type: label-selector-filter
++- name: prefill-pods
++  parameters:
++    matchLabels:
++      modeldeployment.gpustack.ai/role-kind: prefill
++  type: label-selector-filter
++- parameters:
++    maxEjectionPercent: 50
++    pollFailureThreshold: 3
++    responseFailureCodes:
++    - 502
++    - 503
++    responseFailureThreshold: 5
++  type: endpoint-health-filter
++- parameters:
++    modelName: Qwen/Qwen3-8B
++    vllm:
++      url: http://qwen-prefill.team-a.svc:8000
++  type: token-producer
++- type: endpoint-notification-source
++- parameters:
++    kvEventsConfig:
++      concurrency: 4
++      discoverPods: true
++      engineType: vllm
++      podDiscoveryConfig:
++        podLabelSelector: app.kubernetes.io/name=modeldeployment,app.kubernetes.io/instance=qwen,modeldeployment.gpustack.ai/role-kind!=decode
++        podNamespace: team-a
++        replaySocketPort: 5558
++        socketPort: 5557
++      topicFilter: kv@
++  type: precise-prefix-cache-producer
++- type: queue-scorer
++- type: kv-cache-utilization-scorer
++- type: max-score-picker
++- parameters:
++    prefixMatchInfoProducerName: precise-prefix-cache-producer
++  type: prefix-cache-scorer
++- parameters:
++    port: 8000
++  type: metrics-data-source
++- parameters:
++    engineConfigs:
++    - kvUsageSpec: vllm:kv_cache_usage_perc
++      name: vllm
++      queuedRequestsSpec: vllm:num_requests_waiting
++      runningRequestsSpec: vllm:num_requests_running
++  type: core-metrics-extractor
++- parameters:
++    nonCachedTokens: 8
++    promptTokens: 0
++  type: prefix-based-pd-decider
++- parameters:
++    deciders:
++      prefill: prefix-based-pd-decider
++    profiles:
++      decode: decode
++      prefill: prefill
++  type: disagg-profile-handler
++schedulingProfiles:
++- name: decode
++  plugins:
++  - pluginRef: decode-pods
++  - pluginRef: endpoint-health-filter
++  - pluginRef: queue-scorer
++    weight: 2
++  - pluginRef: kv-cache-utilization-scorer
++    weight: 2
++  - pluginRef: max-score-picker
++- name: prefill
++  plugins:
++  - pluginRef: prefill-pods
++  - pluginRef: endpoint-health-filter
++  - pluginRef: queue-scorer
++    weight: 2
++  - pluginRef: kv-cache-utilization-scorer
++    weight: 2
++  - pluginRef: max-score-picker
++  - pluginRef: prefix-cache-scorer
++    weight: 3
 diff --git a/cmd/epp/runner/observer_testdata/server.yaml b/cmd/epp/runner/observer_testdata/server.yaml
 new file mode 100644
 index 0000000000000000000000000000000000000000..532453deaa7df528dbec8cf54e724a374eb593d5
@@ -201,11 +454,105 @@ index 0000000000000000000000000000000000000000..532453deaa7df528dbec8cf54e724a37
 +  - pluginRef: max-score-picker
 +  - pluginRef: prefix-cache-scorer
 +    weight: 3
+diff --git a/cmd/epp/runner/observer_testdata/server_external_dp.yaml b/cmd/epp/runner/observer_testdata/server_external_dp.yaml
+new file mode 100644
+index 0000000000000000000000000000000000000000..7e0306658962cd48dccb9a7a8f317b890293b9da
+--- /dev/null
++++ b/cmd/epp/runner/observer_testdata/server_external_dp.yaml
+@@ -0,0 +1,40 @@
++apiVersion: llm-d.ai/v1alpha1
++kind: EndpointPickerConfig
++plugins:
++- name: server-pods
++  parameters:
++    matchLabels:
++      modeldeployment.gpustack.ai/role-kind: server
++  type: label-selector-filter
++- parameters:
++    maxEjectionPercent: 50
++    pollFailureThreshold: 3
++    responseFailureCodes:
++    - 502
++    - 503
++    responseFailureThreshold: 5
++  type: endpoint-health-filter
++- type: approx-prefix-cache-producer
++- type: queue-scorer
++- type: kv-cache-utilization-scorer
++- type: max-score-picker
++- type: prefix-cache-scorer
++- type: metrics-data-source
++- parameters:
++    engineConfigs:
++    - cacheInfoSpec: vllm:cache_config_info
++      kvUsageSpec: vllm:kv_cache_usage_perc
++      name: vllm
++      queuedRequestsSpec: vllm:num_requests_waiting
++      runningRequestsSpec: vllm:num_requests_running
++  type: core-metrics-extractor
++schedulingProfiles:
++- name: server
++  plugins:
++  - pluginRef: server-pods
++  - pluginRef: endpoint-health-filter
++  - pluginRef: queue-scorer
++    weight: 2
++  - pluginRef: kv-cache-utilization-scorer
++    weight: 2
++  - pluginRef: max-score-picker
+diff --git a/cmd/epp/runner/observer_testdata/server_unmanaged.yaml b/cmd/epp/runner/observer_testdata/server_unmanaged.yaml
+new file mode 100644
+index 0000000000000000000000000000000000000000..4a36f6f7f030f355dc469aaa37045819e1ffc58c
+--- /dev/null
++++ b/cmd/epp/runner/observer_testdata/server_unmanaged.yaml
+@@ -0,0 +1,42 @@
++apiVersion: llm-d.ai/v1alpha1
++kind: EndpointPickerConfig
++plugins:
++- name: server-pods
++  parameters:
++    matchLabels:
++      modeldeployment.gpustack.ai/role-kind: server
++  type: label-selector-filter
++- parameters:
++    maxEjectionPercent: 50
++    pollFailureThreshold: 0
++    responseFailureCodes:
++    - 502
++    - 503
++    responseFailureThreshold: 5
++  type: endpoint-health-filter
++- type: approx-prefix-cache-producer
++- type: queue-scorer
++- type: kv-cache-utilization-scorer
++- type: max-score-picker
++- type: prefix-cache-scorer
++- type: metrics-data-source
++- parameters:
++    engineConfigs:
++    - cacheInfoSpec: vllm:cache_config_info
++      kvUsageSpec: vllm:kv_cache_usage_perc
++      name: vllm
++      queuedRequestsSpec: vllm:num_requests_waiting
++      runningRequestsSpec: vllm:num_requests_running
++  type: core-metrics-extractor
++schedulingProfiles:
++- name: server
++  plugins:
++  - pluginRef: server-pods
++  - pluginRef: endpoint-health-filter
++  - pluginRef: queue-scorer
++    weight: 2
++  - pluginRef: kv-cache-utilization-scorer
++    weight: 2
++  - pluginRef: max-score-picker
++  - pluginRef: prefix-cache-scorer
++    weight: 3
 diff --git a/cmd/epp/runner/runner.go b/cmd/epp/runner/runner.go
-index 7422e01e7e0935c09f36d696428d63d8e3909b21..883d903d58ce8d1e5be9c363fc0642c4acce91ad 100644
+index 422442506b5f8cbf303e031b4cbef8c23b3ebe26..ef55f53d86cafbb3518a83e0f2c12de329509f5e 100644
 --- a/cmd/epp/runner/runner.go
 +++ b/cmd/epp/runner/runner.go
-@@ -164,6 +164,7 @@ import (
+@@ -179,6 +179,7 @@ import (
  	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
  	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
  	"github.com/llm-d/llm-d-router/pkg/epp/metrics/collectors"
@@ -213,7 +560,7 @@ index 7422e01e7e0935c09f36d696428d63d8e3909b21..883d903d58ce8d1e5be9c363fc0642c4
  	"github.com/llm-d/llm-d-router/pkg/epp/requestcontrol"
  	"github.com/llm-d/llm-d-router/pkg/epp/scheduling"
  	runserver "github.com/llm-d/llm-d-router/pkg/epp/server"
-@@ -549,6 +550,15 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *
+@@ -592,6 +593,15 @@ func (r *Runner) setup(ctx, servingCtx context.Context, cfg *rest.Config, opts *
  		serverRunner.EvictChannelLookup = requestEvictor.EvictionRegistry()
  	}
  
@@ -230,10 +577,10 @@ index 7422e01e7e0935c09f36d696428d63d8e3909b21..883d903d58ce8d1e5be9c363fc0642c4
  		setupLog.Error(err, "Failed to setup EPP controllers")
  		return nil, nil, err
 diff --git a/pkg/epp/datastore/datastore.go b/pkg/epp/datastore/datastore.go
-index aad867ef96c6ef510465c3669bedbb9039dfe6a5..023427b2366750e5bbd41b28f0e629f9ad081a4a 100644
+index 3f28a454819c68299b463d9605c3a00517e3deb8..b129ff15360ec1750495a2f3e74a10ecac749a49 100644
 --- a/pkg/epp/datastore/datastore.go
 +++ b/pkg/epp/datastore/datastore.go
-@@ -126,6 +126,8 @@ func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory
+@@ -142,6 +142,8 @@ func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory
  }
  
  type datastore struct {
@@ -242,7 +589,7 @@ index aad867ef96c6ef510465c3669bedbb9039dfe6a5..023427b2366750e5bbd41b28f0e629f9
  	// parentCtx controls the lifecycle of the background metrics goroutines that spawn up by the datastore.
  	parentCtx context.Context
  	// mu is used to synchronize access to pool, objectives, and rewrites.
-@@ -146,11 +148,19 @@ type datastore struct {
+@@ -173,6 +175,11 @@ type datastore struct {
  }
  
  func (ds *datastore) WithEndpointPool(pool *datalayer.EndpointPool) Datastore {
@@ -254,7 +601,9 @@ index aad867ef96c6ef510465c3669bedbb9039dfe6a5..023427b2366750e5bbd41b28f0e629f9
  	ds.pool = pool
  	return ds
  }
- 
+@@ -202,6 +209,9 @@ func (ds *datastore) dataParallelStartRank(pod *corev1.Pod, ranksPerPort int) (i
+ 	return index * ranksPerPort, nil
+ }
  func (ds *datastore) Clear() {
 +	ds.observerMu.Lock()
 +	defer ds.observerMu.Unlock()
@@ -262,7 +611,7 @@ index aad867ef96c6ef510465c3669bedbb9039dfe6a5..023427b2366750e5bbd41b28f0e629f9
  	ds.mu.Lock()
  	defer ds.mu.Unlock()
  	ds.pool = nil
-@@ -170,6 +180,9 @@ func (ds *datastore) PoolSet(ctx context.Context, reader client.Reader, endpoint
+@@ -221,6 +231,9 @@ func (ds *datastore) PoolSet(ctx context.Context, reader client.Reader, endpoint
  		ds.Clear()
  		return nil
  	}
@@ -272,7 +621,7 @@ index aad867ef96c6ef510465c3669bedbb9039dfe6a5..023427b2366750e5bbd41b28f0e629f9
  	logger := log.FromContext(ctx)
  	ds.mu.Lock()
  	defer ds.mu.Unlock()
-@@ -298,6 +311,9 @@ func (ds *datastore) PodList(predicate func(fwkdl.Endpoint) bool) []fwkdl.Endpoi
+@@ -375,6 +388,9 @@ func (ds *datastore) podsSnapshotCurrent() []fwkdl.Endpoint {
  }
  
  func (ds *datastore) PodUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.Pod) error {
@@ -282,7 +631,7 @@ index aad867ef96c6ef510465c3669bedbb9039dfe6a5..023427b2366750e5bbd41b28f0e629f9
  	// Take a reference to pool under read lock to avoid racing with PoolSet().
  	// This is safe because PoolSet() replaces the entire pool struct rather than
  	// updating it in-place.
-@@ -391,6 +407,9 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
+@@ -478,6 +494,9 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
  }
  
  func (ds *datastore) PodDelete(podName string) {
@@ -292,7 +641,7 @@ index aad867ef96c6ef510465c3669bedbb9039dfe6a5..023427b2366750e5bbd41b28f0e629f9
  	ds.pods.Range(func(k, v any) bool {
  		ep := v.(fwkdl.Endpoint)
  		if ep.GetMetadata().Name == podName {
-@@ -402,12 +421,18 @@ func (ds *datastore) PodDelete(podName string) {
+@@ -490,12 +509,18 @@ func (ds *datastore) PodDelete(podName string) {
  }
  
  func (ds *datastore) EndpointUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata) {
@@ -309,9 +658,9 @@ index aad867ef96c6ef510465c3669bedbb9039dfe6a5..023427b2366750e5bbd41b28f0e629f9
 +	ds.observerRevision++
 +	ds.observerMu.Unlock()
  	if v, ok := ds.pods.LoadAndDelete(id); ok {
+ 		ds.podsVersion.Add(1)
  		ds.epf.ReleaseEndpoint(v.(fwkdl.Endpoint))
- 	}
-@@ -530,3 +555,22 @@ func selectorEqual(a, b labels.Selector) bool {
+@@ -660,3 +685,22 @@ func selectorEqual(a, b labels.Selector) bool {
  	}
  	return a.String() == b.String()
  }
@@ -682,28 +1031,51 @@ index 0000000000000000000000000000000000000000..9d0297d05a444b833d898cd77ac6662c
 +	}
 +}
 diff --git a/pkg/epp/handlers/request.go b/pkg/epp/handlers/request.go
-index a0d646e1d0fa96e56145c458e90c08edc0eedaf5..575d329e27c214c927ac083448bce739e395a179 100644
+index ca9f665be1a3c5d5e8c2d34f0407d2fd69f2b0b6..11ece82f43bdfa4e55ff696b0f7df131d91e4bc8 100644
 --- a/pkg/epp/handlers/request.go
 +++ b/pkg/epp/handlers/request.go
-@@ -70,10 +70,13 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
+@@ -71,7 +71,7 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
+ 		}
+ 		// The session needs one pod for its lifetime, and that pod must serve
+ 		// decode; a prefill-only pod fails every session after the handshake.
+-		if err := s.fallbackToEndpoint(ctx, reqCtx, s.director.GetRandomDecodeEndpoint(), 0); err != nil {
++		if err := s.fallbackToEndpoint(ctx, reqCtx, s.director.GetRandomDecodeEndpoint, 0); err != nil {
+ 			return err
+ 		}
+ 		reqCtx.requestState = requestResponseProcessingSkipped
+@@ -121,12 +121,15 @@ func isWebSocketUpgrade(req *extProcPb.ProcessingRequest_RequestHeaders) bool {
  }
  
  func (s *StreamingServer) fallbackToRandomEndpoint(ctx context.Context, reqCtx *RequestContext, requestSize int) error {
+-	return s.fallbackToEndpoint(ctx, reqCtx, s.director.GetRandomEndpoint(), requestSize)
++	return s.fallbackToEndpoint(ctx, reqCtx, s.director.GetRandomEndpoint, requestSize)
+ }
+ 
+-// fallbackToEndpoint routes reqCtx to endpoint, answering with the no-endpoints
+-// rejection when endpoint is nil.
+-func (s *StreamingServer) fallbackToEndpoint(ctx context.Context, reqCtx *RequestContext, endpoint *fwkdl.EndpointMetadata, requestSize int) error {
++// fallbackToEndpoint routes reqCtx to the endpoint chosen by selectEndpoint,
++// answering with the no-endpoints rejection when none is available.
++func (s *StreamingServer) fallbackToEndpoint(ctx context.Context, reqCtx *RequestContext, selectEndpoint func() *fwkdl.EndpointMetadata, requestSize int) error {
 +	reqCtx.ObserverWindow = s.observer.Begin()
 +	reqCtx.observerHeaderOnly = requestSize == 0
- 	endpoint := s.director.GetRandomEndpoint()
++	endpoint := selectEndpoint()
  	if endpoint == nil {
- 		return errcommon.Error{Code: errcommon.Internal, Msg: "no pods available in datastore"}
+ 		return errcommon.Error{
+ 			Code:    errcommon.ServiceUnavailable,
+@@ -134,6 +137,7 @@ func (s *StreamingServer) fallbackToEndpoint(ctx context.Context, reqCtx *Reques
+ 			Headers: map[string]string{errcommon.RequestDroppedReasonHeaderKey: string(errcommon.RequestDroppedReasonNoEndpoints)},
+ 		}
  	}
 +	reqCtx.ObserverWindow.Record(endpoint)
- 	reqCtx.TargetEndpoint = net.JoinHostPort(endpoint.GetIPAddress(), endpoint.GetPort())
- 	reqCtx.RequestSize = requestSize
- 	reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(ctx, reqCtx)
+ 	if endpoint.RankByHeader {
+ 		if reqCtx.Request.Headers == nil {
+ 			reqCtx.Request.Headers = map[string]string{}
 diff --git a/pkg/epp/handlers/server.go b/pkg/epp/handlers/server.go
-index bf96e6faff498acbf08e19afe5da3c5c1cdc2e9a..e493f92bc3b68182de487fa48166063a24a4c11e 100644
+index 9b1d3c40fbe8c85be206badb71682a42d607e612..58ccd51deee97a34f504d4d2c8f490116aa69de1 100644
 --- a/pkg/epp/handlers/server.go
 +++ b/pkg/epp/handlers/server.go
-@@ -54,6 +54,7 @@ import (
+@@ -59,6 +59,7 @@ import (
  	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
  	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
  	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
@@ -711,7 +1083,7 @@ index bf96e6faff498acbf08e19afe5da3c5c1cdc2e9a..e493f92bc3b68182de487fa48166063a
  )
  
  // EvictChannelLookup is an optional interface for looking up eviction channels by request ID.
-@@ -96,6 +97,9 @@ func (s *StreamingServer) SetResponders(responders []fwkrc.Responder) {
+@@ -123,6 +124,9 @@ func (s *StreamingServer) SetResponders(responders []fwkrh.Responder) {
  	s.responders = responders
  }
  
@@ -719,9 +1091,9 @@ index bf96e6faff498acbf08e19afe5da3c5c1cdc2e9a..e493f92bc3b68182de487fa48166063a
 +func (s *StreamingServer) SetObserver(o *observer.Observer) { s.observer = o }
 +
  type Director interface {
- 	HandleRequest(ctx context.Context, reqCtx *RequestContext, inferenceRequestBody *fwkrh.InferenceRequestBody) (*RequestContext, error)
+ 	HandleRequest(ctx context.Context, reqCtx *RequestContext, inferenceRequestBody *fwkrequest.InferenceRequestBody) (*RequestContext, error)
  	HandleResponseHeader(ctx context.Context, reqCtx *RequestContext) *RequestContext
-@@ -111,6 +115,7 @@ type Datastore interface {
+@@ -139,6 +143,7 @@ type Datastore interface {
  // Server implements the Envoy external processing server.
  // https://www.envoyproxy.io/docs/envoy/latest/api-v3/service/ext_proc/v3/external_processor.proto
  type StreamingServer struct {
@@ -729,7 +1101,7 @@ index bf96e6faff498acbf08e19afe5da3c5c1cdc2e9a..e493f92bc3b68182de487fa48166063a
  	datastore         Datastore
  	director          Director
  	parserRegistry    *ParserRegistry
-@@ -129,8 +134,10 @@ type StreamingServer struct {
+@@ -163,8 +168,10 @@ type StreamingServer struct {
  // Exported fields are read and written by the request-control layers (director and
  // admission control). Unexported fields are private to this package.
  type RequestContext struct {
@@ -742,7 +1114,7 @@ index bf96e6faff498acbf08e19afe5da3c5c1cdc2e9a..e493f92bc3b68182de487fa48166063a
  	// TargetEndpointScores maps endpoint address to the scheduler's score for it, covering
  	// every endpoint the primary profile scored rather than only those in TargetEndpoint.
  	// Nil when the primary profile ran no scorers.
-@@ -421,6 +428,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
+@@ -643,6 +650,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
  	var respBody []byte
  	var evictionRequestID string
  
@@ -751,30 +1123,30 @@ index bf96e6faff498acbf08e19afe5da3c5c1cdc2e9a..e493f92bc3b68182de487fa48166063a
  	// Start a single reader goroutine for the lifetime of the stream.
  	// This avoids spawning a new goroutine per message and allows the main loop to
  	// select on both incoming messages and the eviction channel.
-@@ -611,6 +620,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
- 					break
+@@ -881,6 +890,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
+ 				if hasInboundToolSnapshot {
+ 					ctx = toolcalling.WithRequestSnapshot(ctx, inboundBody, inboundToolSnapshot)
  				}
- 
 +				reqCtx.ObserverWindow = s.observer.Begin()
  				reqCtx, err = s.director.HandleRequest(ctx, reqCtx, parseResult.Body)
  				// The Director may resolve agent identity after this request span opened.
  				tracing.AttributeRequest(ctx, span)
-@@ -746,6 +756,9 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
- 		if err := reqCtx.updateStateAndSendIfNeeded(srv, logger); err != nil {
+@@ -1067,6 +1077,9 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
+ 		if err := reqCtx.updateStateAndSendIfNeeded(srv, logger, span); err != nil {
  			return err
  		}
 +		if reqCtx.requestState == bodyRequestResponsesComplete || reqCtx.requestState == requestResponseProcessingSkipped || (reqCtx.observerHeaderOnly && reqCtx.requestState == headerRequestResponseComplete) {
 +			reqCtx.ObserverWindow.Finish()
 +		}
  		if reqCtx.requestState == requestResponseProcessingSkipped {
- 			logger.V(logutil.DEFAULT).Info("EPP skipped response interception, routed request",
- 				"targetEndpoint", reqCtx.TargetEndpoint,
+ 			// A header-time skip (e.g. a WebSocket upgrade) never reaches the body
+ 			// phase, so the request-processing latency is recorded here. OnceFunc
 diff --git a/pkg/epp/observer/endpoints.go b/pkg/epp/observer/endpoints.go
 new file mode 100644
-index 0000000000000000000000000000000000000000..47d878a7d3c74aed66fe2485d07a2569f73b8cd2
+index 0000000000000000000000000000000000000000..70cfdbe6c4ecdf883dd9d529dfdcb6ef5e0e0a6d
 --- /dev/null
 +++ b/pkg/epp/observer/endpoints.go
-@@ -0,0 +1,262 @@
+@@ -0,0 +1,264 @@
 +// Copyright 2026 The Kubernetes Authors.
 +// SPDX-License-Identifier: Apache-2.0
 +
@@ -839,15 +1211,17 @@ index 0000000000000000000000000000000000000000..47d878a7d3c74aed66fe2485d07a2569
 +			return false
 +		}
 +		switch plugin.TypedName().Type {
-+		case "label-selector-filter", "queue-scorer", "kv-cache-utilization-scorer",
++		case "label-selector-filter", "endpoint-health-filter",
++			"queue-scorer", "kv-cache-utilization-scorer",
 +			"max-score-picker", "prefix-cache-scorer", "metrics-data-source",
-+			"core-metrics-extractor", "approx-prefix-cache-producer",
-+			"precise-prefix-cache-producer", "token-producer", "endpoint-notification-source",
++			"core-metrics-extractor", "datalayer-poll-status",
++			"approx-prefix-cache-producer", "precise-prefix-cache-producer",
++			"token-producer", "endpoint-notification-source",
 +			"prefix-based-pd-decider", "disagg-profile-handler", "single-profile-handler",
 +			"always-disagg-pd-decider", "always-disagg-multimodal-decider",
-+			"openai-parser", "anthropic-parser", "vllmhttp-parser", "passthrough-parser",
++			"openai-parser", "anthropic-parser", "vllmhttp-parser", "systemone-parser", "passthrough-parser",
 +			"fcfs-ordering-policy", "global-strict-fairness-policy",
-+			"static-usage-limit-policy-type", "strict-band-selection-policy", "utilization-detector":
++			"static-usage-limit-policy", "strict-band-selection-policy", "utilization-detector":
 +		default:
 +			return false
 +		}
@@ -1039,10 +1413,10 @@ index 0000000000000000000000000000000000000000..47d878a7d3c74aed66fe2485d07a2569
 +}
 diff --git a/pkg/epp/observer/endpoints_test.go b/pkg/epp/observer/endpoints_test.go
 new file mode 100644
-index 0000000000000000000000000000000000000000..ebfc1f035ccfa34d776cd28ad3605393c7be0fcf
+index 0000000000000000000000000000000000000000..923fd55285c6fb59def9a49e9504688342d7eb46
 --- /dev/null
 +++ b/pkg/epp/observer/endpoints_test.go
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,183 @@
 +// Copyright 2026 The Kubernetes Authors.
 +// SPDX-License-Identifier: Apache-2.0
 +package observer
@@ -1053,7 +1427,6 @@ index 0000000000000000000000000000000000000000..ebfc1f035ccfa34d776cd28ad3605393
 +	"errors"
 +	"net/http"
 +	"net/http/httptest"
-+	"reflect"
 +	"testing"
 +	"time"
 +
@@ -1093,7 +1466,7 @@ index 0000000000000000000000000000000000000000..ebfc1f035ccfa34d776cd28ad3605393
 +	o.now = func() time.Time { return now }
 +	before := meta.Clone()
 +	code, result := readView(t, o)
-+	if code != 200 || len(result.Workers) != 1 || !result.Workers[0].Selection.InSelection {
++	if code != 200 || len(result.Workers) != 1 || !result.Workers[0].Selection.InSelection || result.Workers[0].Selection.CircuitOpen {
 +		t.Fatalf("registered listener: %d %+v", code, result)
 +	}
 +	boot := result.Router.Boot
@@ -1106,10 +1479,10 @@ index 0000000000000000000000000000000000000000..ebfc1f035ccfa34d776cd28ad3605393
 +	window.Finish()
 +	window.Finish()
 +	code, result = readView(t, o)
-+	if code != 200 || len(result.Workers) != 1 || result.Workers[0].Selection.InSelection || result.Workers[0].LastJob == nil || !result.Workers[0].LastJob.Recent {
++	if code != 200 || len(result.Workers) != 1 || result.Workers[0].Selection.InSelection || result.Workers[0].Selection.CircuitOpen || result.Workers[0].LastJob == nil || !result.Workers[0].LastJob.Recent {
 +		t.Fatalf("removed dispatched endpoint was lost or fabricated registered: %d %+v", code, result)
 +	}
-+	if !reflect.DeepEqual(before, meta) {
++	if !before.Equal(meta) || meta.Attributes != nil {
 +		t.Fatal("observer changed native endpoint")
 +	}
 +	now = now.Add(freshness - time.Nanosecond)
@@ -1193,8 +1566,27 @@ index 0000000000000000000000000000000000000000..ebfc1f035ccfa34d776cd28ad3605393
 +		types []string
 +		want  bool
 +	}{
-+		{name: "missing", want: false}, {name: "operator default", types: []string{"single-profile-handler", "label-selector-filter", "queue-scorer", "kv-cache-utilization-scorer", "max-score-picker", "prefix-cache-scorer", "metrics-data-source", "core-metrics-extractor", "approx-prefix-cache-producer", "strict-band-selection-policy"}, want: true},
-+		{name: "operator disaggregation", types: []string{"disagg-profile-handler", "prefix-based-pd-decider", "always-disagg-pd-decider", "always-disagg-multimodal-decider", "precise-prefix-cache-producer", "token-producer", "endpoint-notification-source"}, want: true},
++		{name: "missing", want: false},
++		{
++			name: "operator default and health filter",
++			types: []string{
++				"single-profile-handler", "label-selector-filter", "endpoint-health-filter",
++				"queue-scorer", "kv-cache-utilization-scorer", "max-score-picker", "prefix-cache-scorer",
++				"metrics-data-source", "core-metrics-extractor", "datalayer-poll-status",
++				"approx-prefix-cache-producer", "static-usage-limit-policy", "strict-band-selection-policy",
++				"openai-parser", "anthropic-parser", "vllmhttp-parser", "systemone-parser", "passthrough-parser",
++			},
++			want: true,
++		},
++		{
++			name: "operator disaggregation",
++			types: []string{
++				"disagg-profile-handler", "prefix-based-pd-decider", "always-disagg-pd-decider",
++				"always-disagg-multimodal-decider", "precise-prefix-cache-producer",
++				"token-producer", "endpoint-notification-source",
++			},
++			want: true,
++		},
 +		{name: "unknown plugin", types: []string{"single-profile-handler", "retains-private-candidates"}, want: false},
 +	} {
 +		t.Run(tt.name, func(t *testing.T) {
@@ -1209,10 +1601,10 @@ index 0000000000000000000000000000000000000000..ebfc1f035ccfa34d776cd28ad3605393
 +	}
 +}
 diff --git a/pkg/epp/requestcontrol/director.go b/pkg/epp/requestcontrol/director.go
-index 7b902fdc400c7f5f9b2781423338bfe028b18939..8bbca33b2cf88db61675098afbee6c4ac2bfb303 100644
+index 1de518967c7140193162e9426af5651805821270..c0b4a7f51889e679a40a71b76097a0d4efb91b10 100644
 --- a/pkg/epp/requestcontrol/director.go
 +++ b/pkg/epp/requestcontrol/director.go
-@@ -328,6 +328,15 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
+@@ -451,6 +451,15 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
  	}
  
  	reqCtx.SchedulingRequest.SchedulingResult = result
@@ -1230,7 +1622,7 @@ index 7b902fdc400c7f5f9b2781423338bfe028b18939..8bbca33b2cf88db61675098afbee6c4a
  	// Insert target endpoint to instruct Envoy to route requests to the specified target pod and attach the port number.
 diff --git a/pkg/epp/requestcontrol/observer_test.go b/pkg/epp/requestcontrol/observer_test.go
 new file mode 100644
-index 0000000000000000000000000000000000000000..b6a67887e1dd1a3383e4476217691d1ee76498a4
+index 0000000000000000000000000000000000000000..5d34545a7af31fbaeeda1d867f7534e35358930e
 --- /dev/null
 +++ b/pkg/epp/requestcontrol/observer_test.go
 @@ -0,0 +1,96 @@
@@ -1245,11 +1637,11 @@ index 0000000000000000000000000000000000000000..b6a67887e1dd1a3383e4476217691d1e
 +	"testing"
 +	"time"
 +
-+	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 +	"github.com/llm-d/llm-d-router/pkg/epp/datalayer"
++	"github.com/llm-d/llm-d-router/pkg/epp/datastore"
++	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 +	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 +	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/openai"
-+	"github.com/llm-d/llm-d-router/pkg/epp/datastore"
 +	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
 +	"github.com/llm-d/llm-d-router/pkg/epp/observer"
 +	"k8s.io/apimachinery/pkg/types"
@@ -1281,14 +1673,14 @@ index 0000000000000000000000000000000000000000..b6a67887e1dd1a3383e4476217691d1e
 +	ds.WithEndpointPool(&datalayer.EndpointPool{TargetPorts: []int{8000}})
 +	ds.EndpointUpsert(ctx, &fwkdl.EndpointMetadata{ID: types.NamespacedName{Name: "decoder", Namespace: "ns"}, Name: "decoder", Address: "192.0.2.1", Port: "8000", Labels: map[string]string{"app.kubernetes.io/component": "decode-role"}})
 +	ds.EndpointUpsert(ctx, &fwkdl.EndpointMetadata{ID: types.NamespacedName{Name: "prefiller", Namespace: "ns"}, Name: "prefiller", Address: "192.0.2.2", Port: "8000", Labels: map[string]string{"app.kubernetes.io/component": "prefill-role"}})
-+	endpointCandidates := NewCachedEndpointCandidates(ctx, NewDatastoreEndpointCandidates(ds), time.Minute)
-+	director := NewDirectorWithConfig(ds, mockSched, &mockAdmissionController{}, endpointCandidates, NewConfig())
++	endpointCandidates := NewDatastoreEndpointCandidates(ds)
++	director := NewDirectorWithConfig(ds, mockSched, &mockAdmissionController{}, endpointCandidates, NewConfig(), "")
 +
 +	o := observer.New(observedStore{}, func() bool { return true })
 +	req := &handlers.RequestContext{
 +		ObserverWindow: o.Begin(),
-+		Request: &handlers.Request{Headers: map[string]string{":path": "/v1/completions"}, RawBody: []byte(`{"model":"m","prompt":"p"}`)},
-+		Parser: openai.NewOpenAIParser(),
++		Request:        &handlers.Request{Headers: map[string]string{":path": "/v1/completions"}, RawBody: []byte(`{"model":"m","prompt":"p"}`)},
++		Parser:         openai.NewOpenAIParser(),
 +	}
 +	defer req.ObserverWindow.Finish()
 +
@@ -1331,11 +1723,11 @@ index 0000000000000000000000000000000000000000..b6a67887e1dd1a3383e4476217691d1e
 +	}
 +}
 diff --git a/pkg/epp/server/runserver.go b/pkg/epp/server/runserver.go
-index 0c46244237b409bf4e1dd1fb5b4989282ebd4a10..a4da118c83ee8eb2da7249470b40296ce5bff21d 100644
+index aaa4dc4ab48fa6db8240f7f40fd553ee750461c8..49b67023342774271e465989d84fdc8f7ee5da84 100644
 --- a/pkg/epp/server/runserver.go
 +++ b/pkg/epp/server/runserver.go
-@@ -48,11 +48,13 @@ import (
- 	fwkrc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
+@@ -50,11 +50,13 @@ import (
+ 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
  	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
  	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
 +	"github.com/llm-d/llm-d-router/pkg/epp/observer"
@@ -1348,19 +1740,19 @@ index 0c46244237b409bf4e1dd1fb5b4989282ebd4a10..a4da118c83ee8eb2da7249470b40296c
  	GrpcPort uint16
  	// GrpcListener is an optional pre-bound listener for the ext_proc server.
  	// When set, GrpcPort is ignored. Reserving the port in advance of this
-@@ -277,6 +279,7 @@ func (r *ExtProcServerRunner) AsRunnable(logger logr.Logger) manager.Runnable {
+@@ -317,6 +319,7 @@ func (r *ExtProcServerRunner) AsRunnable(logger logr.Logger) manager.Runnable {
  			poolCap = 4 * 1024 * 1024 // gRPC default 4MB
  		}
  		extProcServer := handlers.NewStreamingServer(r.Datastore, r.Director, r.ParserRegistry, poolCap)
 +		extProcServer.SetObserver(r.Observer)
  		extProcServer.SetEmitEndpointScores(r.EmitEndpointScores)
- 		extProcServer.SetResponders(r.Responders)
- 		if r.EvictChannelLookup != nil {
+ 		extProcServer.SetTraceBaggageKeys(r.TraceBaggageKeys)
+ 		extProcServer.SetToolCallingTelemetryEnabled(r.EnableToolCallingTelemetry)
 diff --git a/pkg/epp/server/runserver_test.go b/pkg/epp/server/runserver_test.go
-index 1b42791953298167c9ad7062ea381b7575139b52..f66aee907b9cef14ee5654d679f46d4c84131063 100644
+index c001a5158b8545ec6be10e3d6a08b59133cc2b46..3e4ad9eeece16a0e8810d00e1acbd7c2ee734f75 100644
 --- a/pkg/epp/server/runserver_test.go
 +++ b/pkg/epp/server/runserver_test.go
-@@ -62,7 +62,7 @@ type stubBands struct {
+@@ -89,7 +89,7 @@ type stubBands struct {
  // a new Options flag reach only one of the two hand-written composite literals.
  func TestNewExtProcServerRunnerPopulatesEveryField(t *testing.T) {
  	// Fields the caller sets after construction, not the factory.
