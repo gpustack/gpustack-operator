@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrlrecord "k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
@@ -71,9 +71,10 @@ const modelTransferSourcePodLabel = "worker.gpustack.ai/model-transfer-source"
 // per node; the Pod reads the tree back and exits, dropping its reference. It never renders a
 // queue-name label, so neither Kueue nor the operator's Pod webhook has anything to say about it.
 type ModelPrefetchReconciler struct {
-	Client ctrlcli.Client
-	Reader ctrlcli.Reader
-	Now    func() time.Time
+	Client   ctrlcli.Client
+	Reader   ctrlcli.Reader
+	Recorder ctrlrecord.EventRecorder
+	Now      func() time.Time
 }
 
 var _ ctrlreconcile.Reconciler = (*ModelPrefetchReconciler)(nil)
@@ -96,7 +97,7 @@ func (r *ModelPrefetchReconciler) now() time.Time {
 func (r *ModelPrefetchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
 
-	if req.Namespace == "" && req.Name == "__pinned__" {
+	if req.Namespace == "" && req.Name == nodeModelStorePinnedRequestName {
 		return ctrl.Result{}, r.recomputePinned(ctx)
 	}
 
@@ -673,185 +674,6 @@ func bindingAllowsPinned(binding *workercore.ModelStoreBinding) bool {
 	return binding.Spec.AllowPinned != nil && *binding.Spec.AllowPinned
 }
 
-// recomputePinned rewrites every node's spec.pinned to the union of two voices: the surviving
-// prefetches' disk retention — a digest lands on the nodes whose delivery is ready and whose TTL
-// has not expired, and a digest two namespaces pin stays for both — and the nodes' own reports,
-// which pin every admitted generation's tree on its own node whatever the prefetches say. This
-// controller is the field's only writer, so the whole list is replaced rather than merged — there
-// is no second opinion to lose, and a pin that vanished from the desired set is gone by the end
-// of the pass.
-func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
-	pfs := new(workercore.ModelPrefetchList)
-	if err := r.Client.List(ctx, pfs); err != nil {
-		return err
-	}
-	nodes := new(core.NodeList)
-	if err := r.Client.List(ctx, nodes); err != nil {
-		return err
-	}
-	stores := new(workercore.NodeModelStoreList)
-	if err := r.Client.List(ctx, stores); err != nil {
-		return err
-	}
-	// depsByNS keeps the derived-placement expansion inside the prefetch's own namespace: a
-	// same-named artifact in another namespace must never widen this one's target set.
-	deps := new(workercore.ModelDeploymentList)
-	if err := r.Client.List(ctx, deps); err != nil {
-		return err
-	}
-	depsByNS := map[string][]workercore.ModelDeployment{}
-	for i := range deps.Items {
-		ns := deps.Items[i].Namespace
-		depsByNS[ns] = append(depsByNS[ns], deps.Items[i])
-	}
-
-	// Bindings and artifacts are read once each: a Get per prefetch turns the pass into 2P
-	// round-trips for a map the whole loop can share.
-	bindings := new(workercore.ModelStoreBindingList)
-	if err := r.Client.List(ctx, bindings); err != nil {
-		return err
-	}
-	bindingByKey := map[string]*workercore.ModelStoreBinding{}
-	for i := range bindings.Items {
-		b := &bindings.Items[i]
-		bindingByKey[b.Namespace+"/"+b.Name] = b
-	}
-	artifacts := new(workercore.ModelArtifactList)
-	if err := r.Client.List(ctx, artifacts); err != nil {
-		return err
-	}
-	artifactByKey := map[string]*workercore.ModelArtifact{}
-	for i := range artifacts.Items {
-		a := &artifacts.Items[i]
-		artifactByKey[a.Namespace+"/"+a.Name] = a
-	}
-
-	// desired[node] = the digests to pin there. Two independent voices pin:
-	// the DISK RETENTION (spec.retention.pinned under the binding's
-	// allowPinned, while the TTL holds, from live prefetches only), and the
-	// SOURCE-FILE RETENTION — a published tree an admitted generation reads
-	// is pinned for as long as that generation stands, whatever the intent,
-	// the TTL, or the prefetch's deletion say, because the fill and every
-	// refill re-verify against that tree and unpinning it under a live
-	// generation strands the next drain-and-refill.
-	storeByName := make(map[string]*workercore.NodeModelStore, len(stores.Items))
-	admittedSourceDigests := map[string]bool{}
-	for i := range stores.Items {
-		store := &stores.Items[i]
-		storeByName[store.Name] = store
-		if store.Status.ModelTransfer != nil {
-			for _, generation := range store.Status.ModelTransfer.Generations {
-				admittedSourceDigests[generation.Digest] = true
-			}
-		}
-	}
-	desired := map[string]map[string]bool{}
-	// The node's own report is the source-file pin's source: a generation
-	// keeps reading its tree after the prefetch that named it was
-	// retargeted, re-resolved to another revision, or deleted, so prefetch
-	// membership cannot decide whether the tree stays pinned. Every
-	// reported generation pins its digest on its own node, before any
-	// prefetch loop runs; the reports' own departure removes the pin.
-	for i := range stores.Items {
-		store := &stores.Items[i]
-		if store.Status.ModelTransfer == nil {
-			continue
-		}
-		for _, generation := range store.Status.ModelTransfer.Generations {
-			if generation.Digest == "" {
-				continue
-			}
-			if desired[store.Name] == nil {
-				desired[store.Name] = map[string]bool{}
-			}
-			desired[store.Name][generation.Digest] = true
-		}
-	}
-	for i := range pfs.Items {
-		pf := &pfs.Items[i]
-		deleting := pf.DeletionTimestamp != nil
-
-		artifact := artifactByKey[pf.Namespace+"/"+pf.Spec.ArtifactRef.Name]
-		if artifact == nil || artifact.Status.Resolved == nil {
-			continue
-		}
-		digest := artifact.Status.Resolved.ManifestDigest
-		if digest == "" {
-			continue
-		}
-		// A source intent pins no set it did not name: the derived-from-deployments default is
-		// the disk half's, and a source without a placement is refused before it renders.
-		hasSourcePlacement := pf.Spec.Source != nil && pf.Spec.Placement != nil &&
-			(len(pf.Spec.Placement.AcceleratorTypes) > 0 || pf.Spec.Placement.NodeSelector != nil)
-		binding := bindingByKey[pf.Namespace+"/"+pf.Spec.BindingRef.Name]
-		retentionPin := !deleting && pf.Spec.Retention.Pinned &&
-			binding != nil && bindingAllowsPinned(binding)
-		if !retentionPin && (pf.Spec.Source != nil && !hasSourcePlacement) {
-			continue
-		}
-		if !retentionPin && pf.Spec.Source == nil && !admittedSourceDigests[digest] {
-			continue
-		}
-		pools, err := ResolveAcceleratorTypeFlavorNames(ctx, r.Client, pf, depsByNS[pf.Namespace])
-		if err != nil {
-			if !deleting {
-				return err
-			}
-
-			continue
-		}
-		targets, err := prefetchTargetNodes(pf, nodes.Items, depsByNS[pf.Namespace], pools)
-		if err != nil {
-			continue // the placement is broken; the prefetch's own status carries it
-		}
-		entries := modelstore.NodeEntries(stores.Items, digest)
-
-		for _, node := range targets {
-			entry, ok := entries[node]
-			treeReady := ok && entry.State == workercore.NodeModelStoreModelStateReady
-			if !treeReady {
-				continue
-			}
-			ttlHolds := retentionPin && !r.ttlExpired(pf, entry)
-			// The source-file retention needs no grant, no pinned flag, and
-			// no living prefetch: the generation holding the memory is the
-			// reader, and the tree is what its next refill verifies against.
-			sourceHolds := (pf.Spec.Source == nil || hasSourcePlacement) &&
-				modelstore.ModelTransferAdmittedOnNode(storeByName[node], digest)
-			if !ttlHolds && !sourceHolds {
-				continue
-			}
-			if desired[node] == nil {
-				desired[node] = map[string]bool{}
-			}
-			desired[node][digest] = true
-		}
-	}
-
-	for i := range stores.Items {
-		nms := &stores.Items[i]
-		want := desired[nms.Name]
-		if want == nil && len(nms.Spec.Pinned) == 0 {
-			continue
-		}
-		fresh := make([]string, 0, len(want))
-		for digest := range want {
-			fresh = append(fresh, digest)
-		}
-		sort.Strings(fresh)
-		if slices.Equal(nms.Spec.Pinned, fresh) {
-			continue
-		}
-		updated := nms.DeepCopy()
-		updated.Spec.Pinned = fresh
-		if err := r.Client.Update(ctx, updated); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // ttlExpired says whether the node's last use of the content is older than the retention TTL. A
 // node that never reported a use has none to expire.
 func (r *ModelPrefetchReconciler) ttlExpired(pf *workercore.ModelPrefetch, entry workercore.NodeModelStoreModel) bool {
@@ -1370,6 +1192,9 @@ var nodeLabelsChanged = ctrlpredicate.Funcs{
 func (r *ModelPrefetchReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
 	r.Reader = opts.Manager.GetAPIReader()
+	if r.Recorder == nil {
+		r.Recorder = opts.Manager.GetEventRecorderFor("modelprefetch")
+	}
 	if err := opts.Manager.GetFieldIndexer().IndexField(ctx, &workercore.ModelPrefetch{},
 		modelPrefetchArtifactIndex, modelPrefetchArtifactIndexValues); err != nil {
 		return fmt.Errorf("index prefetches by artifact for source observation: %w", err)
@@ -1396,6 +1221,26 @@ func (r *ModelPrefetchReconciler) SetupController(ctx context.Context, opts cont
 			&workercore.ModelDeployment{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueuePrefetchesInNamespace),
 			ctrlbuilder.WithPredicates(ctrlpredicate.GenerationChangedPredicate{}),
+		).
+		Watches(
+			&workercore.ModelKernelArtifact{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueuePinned),
+			ctrlbuilder.WithPredicates(modelKernelArtifactPinChanged),
+		).
+		Watches(
+			&workercore.ModelDeployment{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueuePinned),
+			ctrlbuilder.WithPredicates(modelDeploymentKernelRefsChanged),
+		).
+		Watches(
+			&workercore.ModelDeploymentForger{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueuePinned),
+			ctrlbuilder.WithPredicates(modelDeploymentForgerPinChanged),
+		).
+		Watches(
+			&core.Pod{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueuePinnedForModelDeploymentPod),
+			ctrlbuilder.WithPredicates(modelDeploymentPodPinChanged),
 		).
 		Watches(
 			&workercore.AcceleratorType{},
@@ -1468,7 +1313,7 @@ func (r *ModelPrefetchReconciler) enqueueAllPrefetches(ctx context.Context, _ ct
 		return nil
 	}
 	if len(pfs.Items) == 0 {
-		return []ctrlreconcile.Request{{NamespacedName: ctrlcli.ObjectKey{Name: "__pinned__"}}}
+		return []ctrlreconcile.Request{{NamespacedName: ctrlcli.ObjectKey{Name: nodeModelStorePinnedRequestName}}}
 	}
 
 	reqs := make([]ctrlreconcile.Request, 0, len(pfs.Items))
