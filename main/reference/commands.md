@@ -135,7 +135,7 @@ subset of the allocation modes its hardware would otherwise offer.
 | `--no-pci-check` | `false` | skip the PCI check the detect pass makes |
 | `--no-fast-failed` | `false` | publish a first pass that found nothing rather than holding it back and detecting again. Only applies when `--manufacturer` names exactly one |
 | `--monitor-period` | `15s` | how often utilization is sampled; only the latest sample is kept |
-| `--mock-devices-file` | `$GPUSTACK_MOCK_DEVICES_FILE` | path to a YAML or JSON mock hardware specification for CPU-only testing; see [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/6b67489c745b3614fde1a95770bbcbdbd540108a/docs/contribute/local-cluster-setup.md#mock-device-manager) |
+| `--mock-devices-file` | `$GPUSTACK_MOCK_DEVICES_FILE` | path to a YAML or JSON mock hardware specification for CPU-only testing; see [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/b78d0b65c7adf8ac4bb7598c9cf4eb06c46438da/docs/contribute/local-cluster-setup.md#mock-device-manager) |
 | `--kube-socket` | `/var/lib/kubelet/device-plugins/kubelet.sock` | the kubelet socket to register on |
 | `--secure-port` | `32443` | the HTTPS port |
 | `--bind-address`, `--cert-dir`, `--kube-conn-*`, `--informer-cache-resync-period`, `--gopool-worker-factor` | as `worker` | serving, client and cache tuning |
@@ -221,7 +221,7 @@ cluster recorded; `kubectl get devices <node> -o yaml` beside it is a diff.
 | `--manufacturer` | all manufacturers | which manufacturers to detect |
 | `--no-pci-check` | `false` | skip the PCI check |
 | `--no-fast-failed` | `false` | publish a first pass that found nothing rather than detecting again |
-| `--mock-devices-file` | `$GPUSTACK_MOCK_DEVICES_FILE` | path to a YAML or JSON mock hardware specification for CPU-only testing; see [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/6b67489c745b3614fde1a95770bbcbdbd540108a/docs/contribute/local-cluster-setup.md#mock-device-manager) |
+| `--mock-devices-file` | `$GPUSTACK_MOCK_DEVICES_FILE` | path to a YAML or JSON mock hardware specification for CPU-only testing; see [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/b78d0b65c7adf8ac4bb7598c9cf4eb06c46438da/docs/contribute/local-cluster-setup.md#mock-device-manager) |
 
 ```bash
 docker run --rm --privileged -v /dev:/dev -v /sys:/sys \
@@ -385,5 +385,5 @@ answering.
 
 **See also** — [Preflight](../docs/modules/devices/preflight/index.md) for the procedure and the per-manufacturer
 tables · [Settings](settings.md) for what is configured through the `Setting` CR ·
-[Internals](https://github.com/gpustack/gpustack-operator/blob/6b67489c745b3614fde1a95770bbcbdbd540108a/docs/contribute/internals.md) for startup order and the invariants these commands rest
+[Internals](https://github.com/gpustack/gpustack-operator/blob/b78d0b65c7adf8ac4bb7598c9cf4eb06c46438da/docs/contribute/internals.md) for startup order and the invariants these commands rest
 on.

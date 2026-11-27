@@ -25,7 +25,7 @@ component's *`tolerations`*.
 If you are upgrading from an older release where Kueue controller manager, NFD master, and NFD GC
 tolerated all taints, add explicit *`tolerations`* first and run `helm upgrade` with
 `--reset-then-reuse-values` rather than `--reuse-values`; see
-[Upgrading the Chart](https://github.com/gpustack/gpustack-operator/blob/6b67489c745b3614fde1a95770bbcbdbd540108a/deploy/gpustack-operator/chart/README.md#upgrading-the-chart).
+[Upgrading the Chart](https://github.com/gpustack/gpustack-operator/blob/b78d0b65c7adf8ac4bb7598c9cf4eb06c46438da/deploy/gpustack-operator/chart/README.md#upgrading-the-chart).
 
 ## Configuration
 

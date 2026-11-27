@@ -1357,6 +1357,23 @@ with physical NIC count (exclusive <code>rdma</code> exhausts in <code>1</code> 
 <li><strong>Monitor Pending <code>Pod</code>s</strong>: Alert on <code>Pending</code> <code>Pod</code>s owned by <code>Admitted</code> <code>Workload</code>s rather than
 queue depth alone.</li>
 </ul>
+<h3 id="software-rdma">Software RDMA</h3>
+<p>Soft-RoCE (<code>rxe</code>) runs <em>RDMA</em> in the kernel over an ordinary interface, such as a bond or a plain
+NIC. Device Manager records such an interface with <code>rdma: true</code>, <code>rdmaSoftware: true</code> and a link
+verdict, and sets <code>feature.gpustack.ai/rdma.software=true</code> when every usable <em>RDMA</em> endpoint on the
+<code>Node</code> is software-carried. The device itself is advertised under its own name, such as <code>rxe0</code>.</p>
+<p>A <code>Node</code> can also carry <code>feature.gpustack.ai/rdma.external=true</code>: it has an <em>RDMA</em> device under
+another owner&rsquo;s allocation, such as the AWS EFA driver&rsquo;s, which GPUStack never allocates. The key
+is independent of <code>rdma.software</code>, and a <code>Node</code> with such a device beside a software one carries
+both.</p>
+<p>A VLAN device cannot carry Soft-RoCE: the kernel&rsquo;s <code>rxe_newlink</code> refuses an 8021Q or 8021ad device
+with <code>rxe creation allowed on top of a real device only</code>.</p>
+<p>Performance is far below a hardware adapter&rsquo;s. To keep a hardware pool off such <code>Node</code>s, write a node
+affinity that excludes <code>feature.gpustack.ai/rdma.software</code>, or exclude the <code>rxe</code> devices with a
+<a href="#selection-policy">selection policy</a>
+.</p>
+<p><code>rxe</code> is discovered this way. <code>siw</code> (iWARP) is not: its ports name no interface in sysfs, so a <code>Node</code>
+whose only <em>RDMA</em> is <code>siw</code> carries neither <code>rdma.capable</code> nor <code>rdma.software</code>.</p>
 <h2 id="selection-policy">Selection policy</h2>
 <p><code>DevicesRDMASelectionPolicy</code> (<code>rdmasel</code>, cluster-scoped) filters which HCAs and physical ports the
 RDMA device plugin advertises as healthy on matched <code>Node</code>s. Policy updates apply immediately to new
@@ -1482,16 +1499,17 @@ node labels and the <code>Devices</code> NIC inventory:</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get nodes -l feature.gpustack.ai/rdma.capable<span class="o">=</span><span class="nb">true</span>
 </span></span><span class="line"><span class="cl">kubectl get devices &lt;node&gt; -o json <span class="p">|</span>
 </span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;[.spec.interfaces[] | (., (.virtualFunctions // [])[])]
-</span></span></span><span class="line"><span class="cl"><span class="s1">      | map(select(.rdma or .link)) | map({name, pciBusId, rdmaDevice, link})&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="s1">      | map(select(.rdma or .link)) | map({name, pciBusId, rdmaDevice, rdmaSoftware, link})&#39;</span></span></span></code></pre></div>
 </div>
 <ul>
-<li><strong>Healthy (<code>rdma.capable=true</code>)</strong>: At least one physical NIC or SR-IOV VF reports <code>link.state</code>
-<code>OK</code> or <code>Unverified</code> (or <code>rdma: true</code> without a link verdict).</li>
-<li><strong>Missing (<code>rdma.capable</code> absent)</strong>: Every endpoint reports <code>link.state: Failed</code> (with port state
-and <code>firstSeen</code>) or has no bound <code>rdmaDevice</code>.</li>
+<li><strong>Healthy (<code>rdma.capable=true</code>)</strong>: At least one physical NIC, SR-IOV VF or software RDMA interface
+(a bond or NIC with <code>rdmaSoftware: true</code>) reports <code>link.state</code> <code>OK</code> or <code>Unverified</code> (or <code>rdma: true</code>
+without a link verdict).</li>
+<li><strong>Missing (<code>rdma.capable</code> absent)</strong>: Every endpoint that carries an RDMA record reports
+<code>link.state: Failed</code> (with port state and <code>firstSeen</code>), or no interface carries one.</li>
 <li><strong>Recovery</strong>: Repair physical links, transceivers, or the IB subnet manager on <code>Failed</code> ports,
-verify verbs driver binding when <code>rdmaDevice</code> is absent, and run <code>device-manager preflight</code> on the
-host.</li>
+verify verbs driver binding when a physical NIC has <code>rdmaDevice</code> absent, and run
+<code>device-manager preflight</code> on the host.</li>
 </ul>
 <h2 id="efa-engine-images">EFA engine images</h2>
 <p>Official GPUStack runner images carry standard Mooncake wheels without EFA support (while the
@@ -1617,6 +1635,7 @@ allocatable counts remain <code>0</code> on EFA-only hosts.</p>
         <li><a href="#gpu-and-rdma-requests">GPU and RDMA requests</a></li>
         <li><a href="#injected-devices">Injected devices</a></li>
         <li><a href="#rdma-quota-limits">RDMA quota limits</a></li>
+        <li><a href="#software-rdma">Software RDMA</a></li>
       </ul>
     </li>
     <li><a href="#selection-policy">Selection policy</a></li>

@@ -121,6 +121,28 @@ their `Pod`s wait `Pending` in kube-scheduler:
 - **Monitor Pending `Pod`s**: Alert on `Pending` `Pod`s owned by `Admitted` `Workload`s rather than
   queue depth alone.
 
+### Software RDMA
+
+Soft-RoCE (`rxe`) runs *RDMA* in the kernel over an ordinary interface, such as a bond or a plain
+NIC. Device Manager records such an interface with `rdma: true`, `rdmaSoftware: true` and a link
+verdict, and sets `feature.gpustack.ai/rdma.software=true` when every usable *RDMA* endpoint on the
+`Node` is software-carried. The device itself is advertised under its own name, such as `rxe0`.
+
+A `Node` can also carry `feature.gpustack.ai/rdma.external=true`: it has an *RDMA* device under
+another owner's allocation, such as the AWS EFA driver's, which GPUStack never allocates. The key
+is independent of `rdma.software`, and a `Node` with such a device beside a software one carries
+both.
+
+A VLAN device cannot carry Soft-RoCE: the kernel's `rxe_newlink` refuses an 8021Q or 8021ad device
+with `rxe creation allowed on top of a real device only`.
+
+Performance is far below a hardware adapter's. To keep a hardware pool off such `Node`s, write a node
+affinity that excludes `feature.gpustack.ai/rdma.software`, or exclude the `rxe` devices with a
+[selection policy](#selection-policy).
+
+`rxe` is discovered this way. `siw` (iWARP) is not: its ports name no interface in sysfs, so a `Node`
+whose only *RDMA* is `siw` carries neither `rdma.capable` nor `rdma.software`.
+
 ## Selection policy
 
 `DevicesRDMASelectionPolicy` (`rdmasel`, cluster-scoped) filters which HCAs and physical ports the
@@ -262,16 +284,17 @@ node labels and the `Devices` NIC inventory:
 kubectl get nodes -l feature.gpustack.ai/rdma.capable=true
 kubectl get devices <node> -o json |
   jq '[.spec.interfaces[] | (., (.virtualFunctions // [])[])]
-      | map(select(.rdma or .link)) | map({name, pciBusId, rdmaDevice, link})'
+      | map(select(.rdma or .link)) | map({name, pciBusId, rdmaDevice, rdmaSoftware, link})'
 ```
 
-- **Healthy (`rdma.capable=true`)**: At least one physical NIC or SR-IOV VF reports `link.state`
-  `OK` or `Unverified` (or `rdma: true` without a link verdict).
-- **Missing (`rdma.capable` absent)**: Every endpoint reports `link.state: Failed` (with port state
-  and `firstSeen`) or has no bound `rdmaDevice`.
+- **Healthy (`rdma.capable=true`)**: At least one physical NIC, SR-IOV VF or software RDMA interface
+  (a bond or NIC with `rdmaSoftware: true`) reports `link.state` `OK` or `Unverified` (or `rdma: true`
+  without a link verdict).
+- **Missing (`rdma.capable` absent)**: Every endpoint that carries an RDMA record reports
+  `link.state: Failed` (with port state and `firstSeen`), or no interface carries one.
 - **Recovery**: Repair physical links, transceivers, or the IB subnet manager on `Failed` ports,
-  verify verbs driver binding when `rdmaDevice` is absent, and run `device-manager preflight` on the
-  host.
+  verify verbs driver binding when a physical NIC has `rdmaDevice` absent, and run
+  `device-manager preflight` on the host.
 
 ## EFA engine images
 
