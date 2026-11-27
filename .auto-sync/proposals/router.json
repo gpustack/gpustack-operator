@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "aligned",
-  "summary": "Promoted gpustack/llm-router:v0.5.0 as the default router image alongside llm-d-router v1.0.0, vllm-router v0.1.17, frozen sglang-gateway gateway-v0.3.1, and sgl-router router-v0.1.0.",
+  "summary": "Promoted gpustack/llm-router:v0.6.0 as the default router image alongside llm-d-router v1.0.0, vllm-router v0.1.17, frozen sglang-gateway gateway-v0.3.1, and sgl-router router-v0.1.0.",
   "versions": {
     "llm-d-router": "v1.0.0",
     "vllm-router": "v0.1.17",

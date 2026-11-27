@@ -1612,7 +1612,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 			name:      "picker defaults to the image that carries every router",
 			md:        routedModelDeployment(),
 			container: "epp",
-			want:      "gpustack/llm-router:v0.5.0",
+			want:      "gpustack/llm-router:v0.6.0",
 			why:       "the default names a release of this project's own build, not a moving upstream tag",
 		},
 		{
@@ -1621,7 +1621,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
 			}),
 			container: "router",
-			want:      "gpustack/llm-router:v0.5.0",
+			want:      "gpustack/llm-router:v0.6.0",
 			why:       "one setting says where the binaries come from; the command picks which one runs",
 		},
 		{
@@ -1670,13 +1670,13 @@ func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSpli
 		// the first enable: every case whose roles are managed carries the term, and the sole
 		// single-member Server, which keeps its existing behavior, does not move at all. They moved
 		// once more when the default router image advanced to v0.4.0, again at v0.5.0, again
-		// when Envoy replaced its catch-all route with the explicit inference allowlist, and
-		// again when multimodal inference routes were added to that allowlist.
-		"a prefill and decode pair": "7b039e9a106a71214fc742bcd197f450cca3d57f98a9bc212ba8ee04a7e9169f",
-		"a sole server role":        "1ec8490c73c2d0517b5812f4be64fa134ba4312bd3afead4cf1c21ef550f3511",
+		// when Envoy replaced its catch-all route with the explicit inference allowlist, again
+		// when multimodal inference routes were added to that allowlist, and again at v0.6.0.
+		"a prefill and decode pair": "c9de2a266627f039f80b633e2a703b9eec031b25ee3de5936a829161a17e9440",
+		"a sole server role":        "335dca43dd6aa3d4e652d39814650353592493e61f55ede8aaffe164e3201482",
 		"a router declaring its own image, policy, replicas and extra arguments": "d16a66e779517dc9c7fb37c75b1b30f5514edc6fbb037dd55ecbb6dd987dccb5",
-		"a role whose command the user took over, so it publishes no events":     "4a8d95d2f122997bab1dd8e49f5d03fc2868d552835e496438e5c49a38a6c8ca",
-		"an sglang engine, whose metrics contract differs":                       "af51a8dd3dfad66334f2120f280cbd7578c2cfc0c0a5a652578b30199ae101cc",
+		"a role whose command the user took over, so it publishes no events":     "0b9c06ae81e7cd0b8245becc0ccfd84817a58a0db82e8b93585b9c5bc0a1a0ab",
+		"an sglang engine, whose metrics contract differs":                       "51109193ed3b61cacd93bfd8b1837b87e4a5ed10bcfc692488fa10539df1c422",
 	}
 
 	soleServerRole := func() *workercore.ModelDeployment {
@@ -3020,7 +3020,7 @@ func TestRenderModelDeploymentRouterObjects_ArgvAllowlistSidecarOptIn(t *testing
 			engineName:    workercore.ModelDeploymentEngineVLLM,
 			binary:        "vllm-router",
 			requireProxy:  false,
-			wantImage:     "gpustack/llm-router:v0.5.0",
+			wantImage:     "gpustack/llm-router:v0.6.0",
 			wantConfigMap: false,
 		},
 		{
@@ -3041,7 +3041,7 @@ func TestRenderModelDeploymentRouterObjects_ArgvAllowlistSidecarOptIn(t *testing
 			engineName:    workercore.ModelDeploymentEngineSGLang,
 			binary:        "sgl-model-gateway",
 			requireProxy:  false,
-			wantImage:     "gpustack/llm-router:v0.5.0",
+			wantImage:     "gpustack/llm-router:v0.6.0",
 			wantConfigMap: false,
 		},
 		{
