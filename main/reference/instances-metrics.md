@@ -543,4 +543,4 @@ it is accepted and never enforced, so the port stays open.
 
 **See also** — [Architecture](../docs/getting-started/architecture/index.md) · [Device
 Discovery](devices-discovery.md) for how the Device Manager samples accelerators ·
-[Internals](https://github.com/gpustack/gpustack-operator/blob/915a76dceb934c1c276c702982df9d71deb9b671/docs/contribute/internals.md) for the Device Manager's subcommands and flags.
+[Internals](https://github.com/gpustack/gpustack-operator/blob/608a1c06f0993b1a39ba5adddf8ed2bbaa7a2768/docs/contribute/internals.md) for the Device Manager's subcommands and flags.

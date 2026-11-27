@@ -1479,6 +1479,33 @@ confirm the image carries the Mooncake store connector:</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n &lt;namespace&gt; <span class="nb">exec</span> &lt;pod-name&gt; -- python3 -c <span class="se">\
 </span></span></span><span class="line"><span class="cl">  <span class="s2">&#34;import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print(&#39;reader present&#39;)&#34;</span></span></span></code></pre></div>
 </div>
+<h3 id="cache-transfer-troubleshooting">Cache transfer troubleshooting</h3>
+<p>A <code>ModelDeployment</code> bound through a <code>KVCachePoolBinding</code> reports on <em><code>status.conditions</code></em> whether its
+engines write to the pool. The verdict judges the keys of <code>save_put</code> and <code>load_get</code> alone: a replica
+fails when every key of every transfer fails. Lookups answer over TCP and stay successful while a
+fabric-only pool refuses every transfer, and vLLM records a fully refused transfer as
+<code>partial_failure</code>, so neither the lookup status nor the transfer status alone decides it.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Expected signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>CacheAttached=False</code> with reason <code>CacheOperationsFailing</code></td>
+					<td>The deployment stays <code>Ready</code> and serves every request. The message names the pool, its transports and, per replica, the transfer operations attempted and how many keys failed.</td>
+					<td>If the message says the engine has no RDMA interface, set <em><code>spec.roles[i].resources.interface</code></em> on the named role and let the replicas roll. Otherwise read the engine logs and the <code>KVCacheBackend</code> member logs for the transport error.</td>
+			</tr>
+			<tr>
+					<td>Admission warning that a role writes to a pool whose every transport is <code>rdma</code>, <code>efa</code> or Ascend A5 Host RoCE and needs a fabric interface</td>
+					<td>The request is admitted. The warning names the role, the pool and <em><code>spec.roles[i].resources.interface</code></em>.</td>
+					<td>Set <em><code>resources.interface</code></em> on the named role before sending traffic. Without it every engine-to-store transfer is refused while the deployment keeps reporting <code>Ready</code>.</td>
+			</tr>
+	</tbody>
+</table>
 <h3 id="tenant-compatibility">Tenant compatibility</h3>
 <p><code>tenantInjected: true</code> confirms only that the webhook wrote <code>tenant_id</code> (vLLM) or
 <code>MOONCAKE_TENANT_ID</code> (SGLang); the engine image must also support tenant arguments:</p>
@@ -1589,6 +1616,7 @@ quotas are inactive (external backends are discovered at reconcile time).</li>
         <li><a href="#pod-injection-configuration">Pod injection configuration</a></li>
         <li><a href="#refused-engine-launch">Refused engine launch</a></li>
         <li><a href="#pod-binding-verification">Pod binding verification</a></li>
+        <li><a href="#cache-transfer-troubleshooting">Cache transfer troubleshooting</a></li>
         <li><a href="#tenant-compatibility">Tenant compatibility</a></li>
       </ul>
     </li>

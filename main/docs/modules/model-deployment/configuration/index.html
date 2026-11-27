@@ -1268,7 +1268,7 @@ admission still applies.</p>
 			</tr>
 			<tr>
 					<td><em><code>resources.interface</code></em></td>
-					<td>Optional. Requests <code>device.gpustack.ai/rdma.shared</code> for <code>1</code>, <code>device.gpustack.ai/rdma</code> for <code>&gt; 1</code>, or <code>vpc.amazonaws.com/efa</code>, per <code>Pod</code>.</td>
+					<td>Optional. Requests <code>device.gpustack.ai/rdma.shared</code> for <code>1</code>, <code>device.gpustack.ai/rdma</code> for <code>&gt; 1</code>, or <code>vpc.amazonaws.com/efa</code>, per <code>Pod</code>. A role that writes to a pool whose every transport is <code>rdma</code>, <code>efa</code> or Ascend A5 Host RoCE needs it, and admission warns when it is unset or <code>0</code> on such a role.</td>
 			</tr>
 	</tbody>
 </table>
