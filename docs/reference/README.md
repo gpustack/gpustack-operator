@@ -30,6 +30,7 @@ tables, raw captures and deterministic simulations; public guides own operator p
 | Check replica PreStop drain and retirement budgets | [Model Deployment Shutdown](model-deployment-shutdown.md) | [Configuration](../modules/model-deployment/configuration.md), [Model Deployment Scaling](../modules/model-deployment/scaling.md) |
 | Check capacity-prior math, normalization and status schemas | [Scaling Internals](model-deployment-scaling-internals.md) | [Model Deployment Scaling](../modules/model-deployment/scaling.md) |
 | Compare scaler algorithms on deterministic synthetic load | [Model Deployment Scaling Simulation](model-deployment-scaling-simulation.md) | [Model Deployment Scaling Benchmark](../modules/model-deployment/scaling-benchmark.md) |
+| Inspect `LocalKernelKey`, FlashInfer schemas, `/ingest/v1/trees`, and pin union | [Model Deployment Forger Internals](model-deployment-forger-internals.md) | [Model Deployment Forger](../modules/model-deployment/forger.md) |
 | Query `Instance` utilization subresource and node gauges | [Instance Metrics Reference](instances-metrics.md) | [GPU Instance Operations](../modules/instances/operations.md) |
 
 ## Exact aliases
@@ -71,6 +72,9 @@ tables, raw captures and deterministic simulations; public guides own operator p
 | `EndpointEligibility`, `NotObserved` | Condition | [Model Deployment Status](model-deployment-status.md#endpointeligibility) |
 | `ElasticResize`, `ScaleRefused`, `WorldUnprovable` | Condition | [Model Deployment Status](model-deployment-status.md#elasticresize) |
 | `RuntimeControlSynced` | Condition | [Model Deployment Status](model-deployment-status.md#runtimecontrolsynced) |
+| `KernelsReady`, `KernelArtifactQuarantined`, `PeerSyncDisabled` | Condition | [Model Deployment Status](model-deployment-status.md#kernelsready) |
+| `forger-binding`, `forger-decision` | Annotation | [Model Deployment Status](model-deployment-status.md#forger-annotations) |
+| `LocalKernelKey`, `dispatch-manifest.json`, `/gpustack/v1/probe`, `/ingest/v1/trees`, `Kind: Kernel` | Forger | [Model Deployment Forger Internals](model-deployment-forger-internals.md#localkernelkey-contract) |
 | `gpustack-engine-sentinel`, `/gpustack/v1/ready`, `gpustack_engine_sentinel.drain` | Runtime | [Model Deployment Shutdown](model-deployment-shutdown.md#drain-window), [Online Runtime Control](../modules/model-deployment/runtime-control.md) |
 | `Withdrawing`, `Draining`, `Settling`, `Aborted` | Lifecycle | [Model Deployment Shutdown](model-deployment-shutdown.md#retirement-protocol) |
 | `ModelDeploymentScalerCapacityPriorCatalog`, `compatibilityFingerprint`, `resolvedCapacityPriors` | Scaling | [Scaling Internals](model-deployment-scaling-internals.md#capacity-prior-catalog) |
@@ -107,6 +111,7 @@ opening paragraph.
 | [Model Deployment Shutdown](model-deployment-shutdown.md) | `contract` | PreStop drain window and replica retirement budgets |
 | [Scaling Internals](model-deployment-scaling-internals.md) | `contract` | Capacity-prior catalog schema, disaggregated math and normalization |
 | [Model Deployment Scaling Simulation](model-deployment-scaling-simulation.md) | `synthetic simulation` | Deterministic local three-algorithm scaler simulation |
+| [Model Deployment Forger Internals](model-deployment-forger-internals.md) | `contract` | `LocalKernelKey`, FlashInfer schemas, `/gpustack/v1/probe`, `/ingest/v1/trees`, `Kind: Kernel`, pin union |
 | [Instance Metrics Reference](instances-metrics.md) | `contract` | `Instance` metrics subresource and node exporter gauges |
 
 ---

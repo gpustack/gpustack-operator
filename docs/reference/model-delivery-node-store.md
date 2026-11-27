@@ -68,7 +68,7 @@ status:  # observed state, maintained by the node plugin
       reason: ""  # Failed: see Failure reasons
       message: ""
       retryTime: null  # Failed: the earliest next attempt
-      source: Hub      # content source; absent on older cache trees
+      source: Hub      # content source (Hub, Peer, or Forge); absent on older cache trees
     - digest: sha256:7a1e...
       state: Downloading
       sizeBytes: 145424101604       # set once the manifest is listed
@@ -178,9 +178,14 @@ spec:
           name: hf-token
 ```
 
-A hand-written `Pod` may mount the same volume; it is held to the same rules. The `CSIDriver` has
-`attachRequired: false`, `podInfoOnMount: true`, an `Ephemeral` entry in *`volumeLifecycleModes`*, and
-`fsGroupPolicy: None`, so the tree keeps the plugin's ownership and is readable by any user.
+A hand-written `Pod` may mount the same volume; it is held to the same rules. `ModelKernelArtifact`
+mounts pass `artifactKind: ModelKernelArtifact` and enforce `Kind: Kernel` marker isolation in
+`authorizeKernelMount` and `authorizeMarkerKind` (refusing cross-class mounts with
+`PermissionDenied`; see [Model Deployment Forger Internals](model-deployment-forger-internals.md#content-class-csi-isolation)).
+
+The `CSIDriver` has `attachRequired: false`, `podInfoOnMount: true`, an `Ephemeral` entry in
+*`volumeLifecycleModes`*, and `fsGroupPolicy: None`, so the tree keeps the plugin's ownership and is
+readable by any user.
 
 ## Mount authorization
 
@@ -278,9 +283,11 @@ five minutes. It removes, oldest *`lastUsedTime`* first and down to the low wate
 It never removes a referenced tree or a partial being written, and it reads references from the
 node's own mounts, never from the API.
 
-A digest listed in *`spec.pinned`* is never a candidate at all; the pins arrive from
-[`ModelPrefetch`](../modules/model-delivery/prefetch.md) retention and survive collection until the pin is withdrawn,
-though it still counts toward the usage the watermarks read.
+A digest listed in *`spec.pinned`* is never a candidate at all; `ModelPrefetchReconciler` writes
+*`spec.pinned`* as the single-writer union of `ModelTransfer` source digests, active/rollback
+`ModelKernelArtifact` digests, and [`ModelPrefetch`](../modules/model-delivery/prefetch.md)
+retention pins (capped at `256` entries per `Node`), and entries survive collection until the pin
+is withdrawn, though they still count toward the usage the watermarks read.
 
 How the watermarks are capped when the cache shares kubelet's filesystem is under [the capacity
 rule](../modules/model-delivery/operations.md#cache-capacity-accounting).

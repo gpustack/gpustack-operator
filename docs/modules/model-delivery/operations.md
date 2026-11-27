@@ -143,9 +143,11 @@ gpustack-operator model-manager --node-name="$(hostname)" --cache-root=/mnt/mode
 
 Collection runs above the high watermark, when a reservation does not fit, and every `5m`. It evicts
 oldest *`lastUsedTime`* entries down to the low watermark while skipping mounted trees and
-`ModelPrefetch` pins (*`spec.pinned`*):
+*`spec.pinned`* entries (the 3-voice union of `ModelTransfer` source digests, active/rollback
+`ModelKernelArtifact` digests, and `ModelPrefetch` retention pins):
 
-- **Published trees**: Eligible `10m` after the last `Pod` unmounts them.
+- **Published trees**: Eligible `10m` after the last `Pod` unmounts them. Both `Model` and
+  `Kernel` (`Source: Forge`) trees obey the same grace window once unpinned.
 - **Stale partials and failures**: Idle partial downloads and disk-absent `Failed` status entries
   expire after `24h`.
 

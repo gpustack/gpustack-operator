@@ -358,6 +358,18 @@ capacity, and the interconnect/KV-pressure crossover.
 
 **Never** — the External DP configuration contract (`external-dp.md` owns that).
 
+## `docs/modules/model-deployment/forger.md`
+
+**Owns** — `ModelDeploymentForger` (`mdf`) and `ModelKernelArtifact` (`mkart`) operator workflow:
+`ObserveOnly` / `Shadow` / `Active` modes, single-GPU non-GEMM scope and exclusions, `External`
+`ForgeSandbox` + `forge-verifier` and `Mock` contracts, `ModelDeploymentScaler` / `runtimeControl`
+coexistence, recreate capacity trade-off and readiness-gated canary rollback/quarantine, and
+upgrade/downgrade steps.
+
+**Never** — canonical `LocalKernelKey` hashing, FlashInfer Trace JSON schemas, `/gpustack/v1/probe`
+wire codes, `/ingest/v1/trees` token verification, or `NodeModelStore.spec.pinned` tier arithmetic
+(`docs/reference/model-deployment-forger-internals.md` owns those off the public site).
+
 ## `docs/modules/model-deployment/routing.md`
 
 **Owns** — which replica each managed router picks and how to switch its policy.
@@ -520,6 +532,10 @@ the seven extracted reference appendices below:
 - `docs/reference/model-deployment-scaling-internals.md` — capacity-prior catalog schema,
   whole-unit disaggregated math, identity normalization, persistence internals, full status schemas
   and local synthetic evaluation bounds extracted from `docs/modules/model-deployment/scaling.md`.
+- `docs/reference/model-deployment-forger-internals.md` — `LocalKernelKey` grammar and hashing,
+  FlashInfer Trace and manifest schemas, `/gpustack/v1/probe` and kernel loader contracts,
+  `/ingest/v1/trees` security chain, store-local `Kind: Kernel` CSI isolation, and 3-voice
+  `NodeModelStore.spec.pinned` union.
 
 **Not** — `docs/reference/commands.md` states what a flag does, not when to reach for the command. The procedure a
 one-shot belongs to lives on its operator page (`docs/modules/devices/preflight.md` for `device-manager
