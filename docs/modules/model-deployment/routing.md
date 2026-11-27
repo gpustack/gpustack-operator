@@ -24,7 +24,7 @@ resilience controls, and disaggregation features:
 | Discovery | `Pod` watcher | `Pod` watcher | `EndpointSlice` watcher | `Pod` watcher |
 | Default policy | Fixed scorer profile (`queue` `2`, `kv` `2`, `prefix` `3`, `max-score-picker`) | `cache_aware` | `power_of_two` (`--chat-routing=reorg`) | `cache_aware` |
 | Policy overrides | None (`--config-file` owned) | `--policy`, `--prefill-policy` | `--policy`, `--decode-policy`, `--dp-rank-policy`, `--decode-dp-rank-policy` | `--policy`, `--prefill-policy` |
-| Real-time KV events | `vLLM` *Server*/*Prefill* (non-*EPD*, single-`Pod` DP) | `kv_aware` (`>= 0.31.0`, hybrid models, *Server*/*Prefill*) | Native `kv-events` (*Server*/*Prefill*) | None |
+| Real-time KV events | `vLLM`, `vLLM-Ascend` *Server*/*Prefill* (non-*EPD*, single-`Pod` DP) | `kv_aware` (`>= 0.31.0`, hybrid models, *Server*/*Prefill*) | Native `kv-events` (*Server*/*Prefill*) | None |
 | *PD* and *EPD* | *PD*/*EPD* with `v1.0.0` sidecar (concurrent *PD* cancel, per-rank EC, `/metrics`) | Native *PD*, post-prefill *Decode* pick, cancellation-safe load, *EPD* consumer `DP > 1` | Native *PD* via selectors; *Prefill* dials `--encoder-urls` | Native `--pd-disaggregation`; *Prefill* dials `--encoder-urls` |
 | *External DP* | Balanced (`prefix-cache-scorer` omitted on *Server*, round-robin tie-break) | Per-rank endpoints (`--policy round_robin`) | `--dp-aware` (*Server* and *PD*; `--dp-rank-policy least_tokens`) | `--dp-aware` (undivided *Server* only) |
 | Fault resilience | `endpoint-health-filter` (`502`/`503` eject on `server`/`prefill`/`decode`, never `encode`) | Built-in circuit breaker | Built-in circuit breaker | Built-in circuit breaker |

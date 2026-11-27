@@ -3473,14 +3473,22 @@ func TestRenderModelDeploymentRouterObjects_LLMDExternalDPAndHealthFilter(t *tes
 			require.NotNil(t, epp, "llm-d-router must render an epp container")
 			assert.Contains(t, epp.Args, "--allow-experimental-plugins=true")
 
-			var parsed map[string]any
+			var parsed struct {
+				Plugins []struct {
+					Type       string         `json:"type"`
+					Parameters map[string]any `json:"parameters"`
+				} `json:"plugins"`
+				SchedulingProfiles []struct {
+					Name    string           `json:"name"`
+					Plugins []map[string]any `json:"plugins"`
+				} `json:"schedulingProfiles"`
+			}
 			require.NoError(t, yaml.Unmarshal([]byte(objects.ConfigMap.Data[modelDeploymentRouterConfigKey]), &parsed))
 
 			var healthFilterParams map[string]any
-			for _, raw := range parsed["plugins"].([]any) {
-				entry := raw.(map[string]any)
-				if entry["type"] == "endpoint-health-filter" {
-					healthFilterParams = entry["parameters"].(map[string]any)
+			for _, entry := range parsed.Plugins {
+				if entry.Type == "endpoint-health-filter" {
+					healthFilterParams = entry.Parameters
 					break
 				}
 			}
@@ -3490,16 +3498,9 @@ func TestRenderModelDeploymentRouterObjects_LLMDExternalDPAndHealthFilter(t *tes
 			assert.Equal(t, []any{float64(502), float64(503)}, healthFilterParams["responseFailureCodes"])
 			assert.Equal(t, float64(50), healthFilterParams["maxEjectionPercent"])
 
-			profilesByName := map[string][]map[string]any{}
-			for _, raw := range parsed["schedulingProfiles"].([]any) {
-				profile := raw.(map[string]any)
-				name := profile["name"].(string)
-				rawPlugins := profile["plugins"].([]any)
-				plugins := make([]map[string]any, 0, len(rawPlugins))
-				for _, p := range rawPlugins {
-					plugins = append(plugins, p.(map[string]any))
-				}
-				profilesByName[name] = plugins
+			profilesByName := make(map[string][]map[string]any, len(parsed.SchedulingProfiles))
+			for _, profile := range parsed.SchedulingProfiles {
+				profilesByName[profile.Name] = profile.Plugins
 			}
 
 			for profileName, want := range tc.wantProfiles {
