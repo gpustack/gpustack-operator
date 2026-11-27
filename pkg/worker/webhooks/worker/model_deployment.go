@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path"
 	"slices"
 	"strings"
 
@@ -873,6 +874,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	warnings := r.warnModelDeploymentStoreRoleWithoutInterface(ctx, nil, md)
 	errs := validateModelDeployment(md, nil)
 	errs = append(errs, r.validateModelDeploymentScalerFence(ctx, nil, md)...)
+	errs = append(errs, r.validateModelDeploymentForgerFence(ctx, nil, md)...)
 	errs = append(errs, r.ValidateModelDeploymentElasticEP(ctx, md, nil)...)
 	errs = append(errs, validateModelDeploymentHostAccess(nil, md,
 		hostAccessAllowed(ctx, settings.InstancePrivilegedAllowed),
@@ -937,6 +939,7 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	// offending role -- would be refused. That is worse than the reconcile failure the rule prevents.
 	errs := validateModelDeployment(md, modelDeploymentRoleNames(oldObj))
 	errs = append(errs, r.validateModelDeploymentScalerFence(ctx, old, md)...)
+	errs = append(errs, r.validateModelDeploymentForgerFence(ctx, old, md)...)
 	errs = append(errs, r.ValidateModelDeploymentElasticEP(ctx, md, old)...)
 	errs = append(errs, validateModelDeploymentHostAccess(old, md,
 		hostAccessAllowed(ctx, settings.InstancePrivilegedAllowed),
@@ -2135,6 +2138,7 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 		// and renders on an unrouted prefiller, and the router-gated walk never runs for one.
 		errs = append(errs, validateModelDeploymentRolePorts(md, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleRuntimeControl(md, role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleKernelArtifactRef(md, role, rolePath)...)
 	}
 
 	return errs
@@ -2382,22 +2386,65 @@ func validateModelDeploymentKVCacheDtype(md *workercore.ModelDeployment, owned b
 	return errs
 }
 
+const (
+	// modelDeploymentKernelMountPath is where the operator mounts verified kernel bundles.
+	modelDeploymentKernelMountPath = "/var/lib/gpustack/kernels"
+
+	// modelDeploymentConfigMapKernelMountForbiddenReason is the admission reason reported when a
+	// role mounts a ConfigMap over or overlapping the kernel mount directory.
+	modelDeploymentConfigMapKernelMountForbiddenReason = "ConfigMapKernelMountForbidden"
+)
+
+// kernelPathsOverlap reports whether two POSIX mount paths are equal or one is an ancestor of the
+// other after cleaning.
+func kernelPathsOverlap(a, b string) bool {
+	a, b = path.Clean(a), path.Clean(b)
+	if a == b {
+		return true
+	}
+	if a == "/" {
+		return strings.HasPrefix(b, "/")
+	}
+	if b == "/" {
+		return strings.HasPrefix(a, "/")
+	}
+	return strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
 // validateModelDeploymentRoleReservedMountPaths refuses a role volume at, inside or around the
-// operator-owned mount paths (artifact weights/cache when spec.model.artifactRef is set, and the
-// read-only engine-sentinel mount path on sentinel-injected roles).
+// operator-owned mount paths (ConfigMap mounts overlapping /var/lib/gpustack/kernels, artifact
+// weights/cache when spec.model.artifactRef is set, kernel artifact mount when
+// spec.roles[].kernelArtifactRef is set, and the read-only engine-sentinel mount path on
+// sentinel-injected roles).
 func validateModelDeploymentRoleReservedMountPaths(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
 	sentinelInjected := workerctrl.ModelDeploymentRoleSupportsEngineSentinel(md, role)
 	for i, av := range role.AdditionalVolumes {
+		mountPathField := rolePath.Child("additionalVolumes").Index(i).Child("mountPath")
+		if av.ConfigMap != nil && kernelPathsOverlap(av.MountPath, modelDeploymentKernelMountPath) {
+			errs = append(errs, field.Forbidden(mountPathField, fmt.Sprintf(
+				"%s: mounting a ConfigMap at %q overlaps %q; binary kernel bundles must be "+
+					"delivered through ModelKernelArtifact rather than ConfigMap",
+				modelDeploymentConfigMapKernelMountForbiddenReason, av.MountPath, modelDeploymentKernelMountPath,
+			)))
+			continue
+		}
+		if role.KernelArtifactRef != nil && kernelPathsOverlap(av.MountPath, modelDeploymentKernelMountPath) {
+			errs = append(errs, field.Invalid(mountPathField, av.MountPath, fmt.Sprintf(
+				"overlaps %q, where the operator mounts the kernel bundle spec.roles[].kernelArtifactRef names",
+				modelDeploymentKernelMountPath,
+			)))
+			continue
+		}
 		if md.Spec.Model.ArtifactRef != nil {
 			matched := false
 			for _, reserved := range []string{workerctrl.ModelDeploymentModelMountPath, workerctrl.ModelDeploymentModelCachePath} {
 				if !pathsOverlap(av.MountPath, reserved) {
 					continue
 				}
-				errs = append(errs, field.Invalid(rolePath.Child("additionalVolumes").Index(i).Child("mountPath"),
+				errs = append(errs, field.Invalid(mountPathField,
 					av.MountPath, fmt.Sprintf(
 						"overlaps %q, where the operator mounts the weights spec.model.artifactRef names", reserved,
 					)))
@@ -2409,7 +2456,7 @@ func validateModelDeploymentRoleReservedMountPaths(
 			}
 		}
 		if sentinelInjected && pathsOverlap(av.MountPath, workerctrl.ModelDeploymentEngineSentinelMountPath) {
-			errs = append(errs, field.Invalid(rolePath.Child("additionalVolumes").Index(i).Child("mountPath"),
+			errs = append(errs, field.Invalid(mountPathField,
 				av.MountPath, fmt.Sprintf(
 					"overlaps %q, where the operator mounts the read-only engine sentinel package",
 					workerctrl.ModelDeploymentEngineSentinelMountPath,
@@ -3702,31 +3749,377 @@ func validateModelDeploymentRoleRuntimeControlScope(
 		return nil
 	}
 
+	return validateModelDeploymentRoleRuntimeControlScopeAtPath(md, role, rolePath.Child("runtimeControl"))
+}
+
+// validateModelDeploymentRoleRuntimeControlScopeAtPath validates the shared managed-role scope
+// checks (managed command, non-Encode, accelerated, vLLM/SGLang, non-SGLang-Ray) at fldPath.
+func validateModelDeploymentRoleRuntimeControlScopeAtPath(
+	md *workercore.ModelDeployment,
+	role *workercore.ModelDeploymentRole,
+	fldPath *field.Path,
+) field.ErrorList {
 	engine := md.Spec.Engine.Name
-	ctrlPath := rolePath.Child("runtimeControl")
 
 	var errs field.ErrorList
 	if len(role.Command) > 0 {
-		errs = append(errs, field.Forbidden(ctrlPath, "not supported on unmanaged roles that specify spec.roles[].command"))
+		errs = append(errs, field.Forbidden(fldPath, "not supported on unmanaged roles that specify spec.roles[].command"))
 	}
 	if workerctrl.ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindEncode {
-		errs = append(errs, field.Forbidden(ctrlPath, "not supported on Encode roles"))
+		errs = append(errs, field.Forbidden(fldPath, "not supported on Encode roles"))
 	}
 	if role.AcceleratorType == "" {
-		errs = append(errs, field.Forbidden(ctrlPath, "requires spec.roles[].acceleratorType; CPU-only roles are not supported"))
+		errs = append(errs, field.Forbidden(fldPath, "requires spec.roles[].acceleratorType; CPU-only roles are not supported"))
 	}
 	if engine != workercore.ModelDeploymentEngineVLLM && engine != workercore.ModelDeploymentEngineSGLang {
-		errs = append(errs, field.Forbidden(ctrlPath, fmt.Sprintf(
+		errs = append(errs, field.Forbidden(fldPath, fmt.Sprintf(
 			"not supported for engine %q; supported engines are vLLM and SGLang", engine,
 		)))
 	}
 	if workerctrl.ModelDeploymentRoleUsesSGLangRay(engine, role) {
-		errs = append(errs, field.Forbidden(ctrlPath, "not supported on SGLang Ray roles"))
+		errs = append(errs, field.Forbidden(fldPath, "not supported on SGLang Ray roles"))
 	}
 	if workerctrl.ModelDeploymentRoleUsesSGLangRustServer(engine, role) {
 		errs = append(errs, field.Forbidden(ctrlPath, "not supported on SGLang Rust server roles"))
 	}
 	return errs
+}
+
+// validateModelDeploymentRoleKernelScope enforces role eligibility for ModelKernelArtifact mounts
+// and ModelDeploymentForger targets: the runtimeControl managed-role scope, plus excluding
+// Elastic EP and requiring gpustack-engine-sentinel support.
+func validateModelDeploymentRoleKernelScope(
+	md *workercore.ModelDeployment,
+	role *workercore.ModelDeploymentRole,
+	fldPath *field.Path,
+) field.ErrorList {
+	errs := validateModelDeploymentRoleRuntimeControlScopeAtPath(md, role, fldPath)
+	if runtimecontrol.RoleHasElasticEP(role) {
+		errs = append(errs, field.Forbidden(fldPath, "not supported on Elastic EP roles"))
+	}
+	if len(errs) == 0 && !workerctrl.ModelDeploymentRoleSupportsEngineSentinel(md, role) {
+		errs = append(errs, field.Forbidden(fldPath, "requires a role supported by gpustack-engine-sentinel"))
+	}
+	return errs
+}
+
+// validateModelDeploymentRoleKernelArtifactRef validates spec.roles[*].kernelArtifactRef.
+func validateModelDeploymentRoleKernelArtifactRef(
+	md *workercore.ModelDeployment,
+	role *workercore.ModelDeploymentRole,
+	rolePath *field.Path,
+) field.ErrorList {
+	if role.KernelArtifactRef == nil {
+		return nil
+	}
+
+	refPath := rolePath.Child("kernelArtifactRef")
+	var errs field.ErrorList
+	if strings.TrimSpace(role.KernelArtifactRef.Name) == "" {
+		errs = append(errs, field.Required(refPath.Child("name"),
+			"must name a ModelKernelArtifact in this namespace"))
+	}
+	errs = append(errs, validateModelDeploymentRoleKernelScope(md, role, refPath)...)
+	return errs
+}
+
+// The single-writer fence rules for ModelDeploymentForger mirror the scaler fence orthogonally:
+// scaler-binding fences spec.roles[*].replicas while forger-binding fences
+// spec.roles[*].kernelArtifactRef.
+const (
+	modelDeploymentForgerFenceRuleKernelArtifact = "the kernelArtifactRef of a bound deployment belongs to the forger that owns it"
+	modelDeploymentForgerFenceRuleRoleSet        = "the roles of a bound deployment are managed by the forger that owns it, " +
+		"so they cannot be changed while a binding holds"
+	modelDeploymentForgerFenceRuleAnnotation = "the forger binding and decision annotations of a bound deployment belong to the forger that owns it"
+	modelDeploymentForgerFenceRuleTerm       = "a forger binding term is never given back"
+	modelDeploymentForgerFenceRuleDecision   = "a kernelArtifactRef that changed under a forger binding carries the decision that changed it"
+	modelDeploymentForgerFenceRuleOrphan     = "the forger that owns this deployment still exists"
+)
+
+// validateModelDeploymentForgerFence enforces single-writer fencing for forger-binding,
+// forger-decision, and spec.roles[*].kernelArtifactRef mutations.
+func (r *ModelDeploymentWebhook) validateModelDeploymentForgerFence(
+	ctx context.Context, old, md *workercore.ModelDeployment,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	kernelRefsChanged := modelDeploymentForgerKernelArtifactRefsChanged(old, md)
+
+	if old == nil {
+		old = &workercore.ModelDeployment{}
+	}
+
+	oldBinding, oldHasBinding, oldErr := modelDeploymentForgerBindingOf(old)
+	newBinding, newHasBinding, newErr := modelDeploymentForgerBindingOf(md)
+	if newErr != nil {
+		return append(errs, field.Invalid(
+			field.NewPath("metadata", "annotations").Key(workercore.ModelDeploymentForgerBindingAnnotationKey),
+			md.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey],
+			"the forger binding of this deployment cannot be read, so nothing may be written under it: "+
+				newErr.Error(),
+		))
+	}
+
+	bindingChanged := modelDeploymentForgerBindingChanged(old, md)
+
+	if r.isOperatorRequest(ctx) {
+		return append(errs, r.validateModelDeploymentForgerOperatorFence(
+			oldBinding, oldHasBinding, newBinding, newHasBinding, bindingChanged,
+			kernelRefsChanged, md,
+		)...)
+	}
+
+	if oldErr != nil {
+		return append(errs, field.Invalid(
+			field.NewPath("metadata", "annotations").Key(workercore.ModelDeploymentForgerBindingAnnotationKey),
+			old.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey],
+			"the forger binding of this deployment cannot be read, so nothing may be written under it: "+
+				oldErr.Error(),
+		))
+	}
+
+	return append(errs, r.validateModelDeploymentForgerUserFence(
+		ctx, oldBinding, oldHasBinding, newHasBinding, kernelRefsChanged, old, md,
+	)...)
+}
+
+func (r *ModelDeploymentWebhook) validateModelDeploymentForgerOperatorFence(
+	oldBinding workercore.ModelDeploymentForgerBinding, oldHasBinding bool,
+	newBinding workercore.ModelDeploymentForgerBinding, newHasBinding bool,
+	bindingChanged, kernelRefsChanged bool, md *workercore.ModelDeployment,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	annotationsPath := field.NewPath("metadata", "annotations")
+
+	if newHasBinding && (!oldHasBinding || bindingChanged) {
+		if newBinding.ForgerName == "" || newBinding.ForgerUID == "" {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentForgerBindingAnnotationKey),
+				md.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey],
+				"a forger binding must name both forgerName and forgerUID",
+			))
+		}
+		if newBinding.Term < 1 {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentForgerBindingAnnotationKey),
+				newBinding.Term,
+				modelDeploymentForgerFenceRuleTerm+": a binding term starts at one",
+			))
+		}
+		if oldHasBinding && newBinding.Term < oldBinding.Term {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentForgerBindingAnnotationKey),
+				newBinding.Term,
+				fmt.Sprintf("%s: the term of this binding is %d, and the one it replaces is %d",
+					modelDeploymentForgerFenceRuleTerm, newBinding.Term, oldBinding.Term),
+			))
+		}
+	}
+
+	if kernelRefsChanged && (oldHasBinding || newHasBinding) {
+		if !newHasBinding {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentForgerBindingAnnotationKey), "",
+				modelDeploymentForgerFenceRuleDecision,
+			))
+			return errs
+		}
+		decision, hasDecision, err := modelDeploymentForgerDecisionOf(md)
+		if err != nil {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentForgerDecisionAnnotationKey),
+				md.Annotations[workercore.ModelDeploymentForgerDecisionAnnotationKey],
+				"the forger decision of this deployment cannot be read: "+err.Error(),
+			))
+			return errs
+		}
+		if !hasDecision {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentForgerDecisionAnnotationKey), "",
+				modelDeploymentForgerFenceRuleDecision,
+			))
+			return errs
+		}
+		if decision.Term != newBinding.Term {
+			errs = append(errs, field.Invalid(
+				annotationsPath.Key(workercore.ModelDeploymentForgerDecisionAnnotationKey),
+				decision.Term,
+				fmt.Sprintf("%s: the decision is written under term %d, and the binding is under term %d",
+					modelDeploymentForgerFenceRuleDecision, decision.Term, newBinding.Term),
+			))
+		}
+	}
+
+	return errs
+}
+
+func (r *ModelDeploymentWebhook) validateModelDeploymentForgerUserFence(
+	ctx context.Context,
+	oldBinding workercore.ModelDeploymentForgerBinding, oldHasBinding bool,
+	newHasBinding, kernelRefsChanged bool,
+	old, md *workercore.ModelDeployment,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	annotationsPath := field.NewPath("metadata", "annotations")
+	bindingKey := annotationsPath.Key(workercore.ModelDeploymentForgerBindingAnnotationKey)
+	decisionKey := annotationsPath.Key(workercore.ModelDeploymentForgerDecisionAnnotationKey)
+
+	bindingChanged := old.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey] !=
+		md.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey]
+	decisionChanged := old.Annotations[workercore.ModelDeploymentForgerDecisionAnnotationKey] !=
+		md.Annotations[workercore.ModelDeploymentForgerDecisionAnnotationKey]
+	decisionRemoved := old.Annotations[workercore.ModelDeploymentForgerDecisionAnnotationKey] != "" &&
+		md.Annotations[workercore.ModelDeploymentForgerDecisionAnnotationKey] == ""
+
+	if !oldHasBinding {
+		if bindingChanged {
+			errs = append(errs, field.Forbidden(bindingKey, modelDeploymentForgerFenceRuleAnnotation))
+		}
+		if decisionChanged && !decisionRemoved {
+			errs = append(errs, field.Forbidden(decisionKey, modelDeploymentForgerFenceRuleAnnotation))
+		}
+		return errs
+	}
+
+	if oldHasBinding && !newHasBinding {
+		if modelDeploymentScalerRoleSetChanged(old, md) {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec", "roles"), modelDeploymentForgerFenceRuleRoleSet,
+			))
+		} else if kernelRefsChanged {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec", "roles"), modelDeploymentForgerFenceRuleKernelArtifact,
+			))
+		}
+		if decisionChanged && !decisionRemoved {
+			errs = append(errs, field.Forbidden(decisionKey, modelDeploymentForgerFenceRuleAnnotation))
+		}
+		if orphan, fErr := r.modelDeploymentForgerBindingIsOrphan(ctx, md.Namespace, oldBinding); !orphan {
+			if fErr != nil {
+				errs = append(errs, fErr)
+			}
+		}
+		return errs
+	}
+
+	if bindingChanged {
+		errs = append(errs, field.Forbidden(bindingKey, modelDeploymentForgerFenceRuleAnnotation))
+	}
+	if decisionChanged {
+		errs = append(errs, field.Forbidden(decisionKey, modelDeploymentForgerFenceRuleAnnotation))
+	}
+	if modelDeploymentScalerRoleSetChanged(old, md) {
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec", "roles"), modelDeploymentForgerFenceRuleRoleSet,
+		))
+	} else if kernelRefsChanged {
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec", "roles"), modelDeploymentForgerFenceRuleKernelArtifact,
+		))
+	}
+
+	return errs
+}
+
+func (r *ModelDeploymentWebhook) modelDeploymentForgerBindingIsOrphan(
+	ctx context.Context, namespace string, binding workercore.ModelDeploymentForgerBinding,
+) (bool, *field.Error) {
+	bindingKey := field.NewPath("metadata", "annotations").Key(workercore.ModelDeploymentForgerBindingAnnotationKey)
+	reader := r.APIReader
+	if reader == nil {
+		return false, field.InternalError(bindingKey,
+			fmt.Errorf("the forger cannot be read, because this handler has no reader"))
+	}
+
+	forger := new(workercore.ModelDeploymentForger)
+	err := reader.Get(ctx, ctrlcli.ObjectKey{Namespace: namespace, Name: binding.ForgerName}, forger)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, field.InternalError(bindingKey,
+			fmt.Errorf("the forger %q could not be read: %w", binding.ForgerName, err))
+	}
+
+	if string(forger.UID) != binding.ForgerUID {
+		return true, nil
+	}
+
+	return false, field.Forbidden(bindingKey,
+		fmt.Sprintf("%s: the forger %q still exists", modelDeploymentForgerFenceRuleOrphan, binding.ForgerName))
+}
+
+func modelDeploymentForgerBindingOf(
+	md *workercore.ModelDeployment,
+) (workercore.ModelDeploymentForgerBinding, bool, error) {
+	raw, ok := md.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey]
+	if !ok || raw == "" {
+		return workercore.ModelDeploymentForgerBinding{}, false, nil
+	}
+
+	binding := workercore.ModelDeploymentForgerBinding{}
+	if err := json.Unmarshal([]byte(raw), &binding); err != nil {
+		return workercore.ModelDeploymentForgerBinding{}, false, fmt.Errorf(
+			"the forger binding annotation is not a binding: %w", err,
+		)
+	}
+
+	return binding, true, nil
+}
+
+func modelDeploymentForgerDecisionOf(
+	md *workercore.ModelDeployment,
+) (workercore.ModelDeploymentForgerDecision, bool, error) {
+	raw, ok := md.Annotations[workercore.ModelDeploymentForgerDecisionAnnotationKey]
+	if !ok || raw == "" {
+		return workercore.ModelDeploymentForgerDecision{}, false, nil
+	}
+
+	decision := workercore.ModelDeploymentForgerDecision{}
+	if err := json.Unmarshal([]byte(raw), &decision); err != nil {
+		return workercore.ModelDeploymentForgerDecision{}, false, fmt.Errorf(
+			"the forger decision annotation is not a decision: %w", err,
+		)
+	}
+
+	return decision, true, nil
+}
+
+func modelDeploymentForgerBindingChanged(old, md *workercore.ModelDeployment) bool {
+	return old.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey] !=
+		md.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey]
+}
+
+func modelDeploymentForgerKernelArtifactRefsChanged(old, md *workercore.ModelDeployment) bool {
+	if old == nil {
+		return false
+	}
+	if len(old.Spec.Roles) != len(md.Spec.Roles) {
+		return true
+	}
+
+	refs := make(map[string]*core.LocalObjectReference, len(old.Spec.Roles))
+	for i := range old.Spec.Roles {
+		refs[old.Spec.Roles[i].Name] = old.Spec.Roles[i].KernelArtifactRef
+	}
+
+	for i := range md.Spec.Roles {
+		was, ok := refs[md.Spec.Roles[i].Name]
+		if !ok {
+			return true
+		}
+		now := md.Spec.Roles[i].KernelArtifactRef
+		if (was == nil) != (now == nil) {
+			return true
+		}
+		if was != nil && was.Name != now.Name {
+			return true
+		}
+	}
+
+	return false
 }
 
 // validateModelDeploymentRoleRuntimeControl enforces role eligibility and engine sentinel env

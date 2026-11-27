@@ -7296,3 +7296,529 @@ func TestModelDeploymentWebhook_StoreInterfaceWarningOnUpdate(t *testing.T) {
 		assert.Len(t, warnings, 1)
 	})
 }
+
+func TestValidateModelDeploymentConfigMapKernelMountForbidden(t *testing.T) {
+	cases := []struct {
+		name       string
+		mountPath  string
+		configMap  bool
+		withModel  bool
+		withKernel bool
+		wantReason string
+		wantErr    bool
+	}{
+		{
+			name:       "exact kernel mount path with ConfigMap is forbidden",
+			mountPath:  "/var/lib/gpustack/kernels",
+			configMap:  true,
+			wantReason: modelDeploymentConfigMapKernelMountForbiddenReason,
+			wantErr:    true,
+		},
+		{
+			name:       "trailing slash kernel mount path with ConfigMap is forbidden",
+			mountPath:  "/var/lib/gpustack/kernels/",
+			configMap:  true,
+			wantReason: modelDeploymentConfigMapKernelMountForbiddenReason,
+			wantErr:    true,
+		},
+		{
+			name:       "unclean parent traversal to kernel mount path with ConfigMap is forbidden",
+			mountPath:  "/var/lib/gpustack/other/../kernels",
+			configMap:  true,
+			wantReason: modelDeploymentConfigMapKernelMountForbiddenReason,
+			wantErr:    true,
+		},
+		{
+			name:       "parent mount path with ConfigMap is forbidden",
+			mountPath:  "/var/lib/gpustack",
+			configMap:  true,
+			withModel:  true,
+			wantReason: modelDeploymentConfigMapKernelMountForbiddenReason,
+			wantErr:    true,
+		},
+		{
+			name:       "root mount path with ConfigMap is forbidden",
+			mountPath:  "/",
+			configMap:  true,
+			wantReason: modelDeploymentConfigMapKernelMountForbiddenReason,
+			wantErr:    true,
+		},
+		{
+			name:       "child mount path under kernels with ConfigMap is forbidden",
+			mountPath:  "/var/lib/gpustack/kernels/foo",
+			configMap:  true,
+			wantReason: modelDeploymentConfigMapKernelMountForbiddenReason,
+			wantErr:    true,
+		},
+		{
+			name:      "sibling directory name with ConfigMap is allowed",
+			mountPath: "/var/lib/gpustack/kernels-other",
+			configMap: true,
+			wantErr:   false,
+		},
+		{
+			name:      "unrelated ConfigMap mount path is allowed",
+			mountPath: "/etc/custom-config",
+			configMap: true,
+			wantErr:   false,
+		},
+		{
+			name:      "non-ConfigMap secret mount at kernels path allowed when kernelArtifactRef unset",
+			mountPath: "/var/lib/gpustack/kernels",
+			configMap: false,
+			wantErr:   false,
+		},
+		{
+			name:       "non-ConfigMap secret mount overlapping kernels path rejected when kernelArtifactRef set",
+			mountPath:  "/var/lib/gpustack/kernels/custom",
+			configMap:  false,
+			withKernel: true,
+			wantReason: "kernelArtifactRef",
+			wantErr:    true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+			if tc.withModel {
+				md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights-art"}
+			}
+			if tc.withKernel {
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			}
+			av := workercore.ModelDeploymentAdditionalVolume{
+				MountPath: tc.mountPath,
+			}
+			if tc.configMap {
+				av.ConfigMap = &core.LocalObjectReference{Name: "bad-kernels"}
+			} else {
+				av.Secret = &core.LocalObjectReference{Name: "some-secret"}
+			}
+			md.Spec.Roles[0].AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{av}
+
+			errs := validateModelDeployment(md, nil)
+			if !tc.wantErr {
+				assert.Empty(t, errs)
+				return
+			}
+			require.NotEmpty(t, errs)
+			assert.Contains(t, errs.ToAggregate().Error(), tc.wantReason)
+		})
+	}
+}
+
+func TestValidateModelDeploymentRoleKernelArtifactRefScope(t *testing.T) {
+	cases := []struct {
+		name      string
+		engine    string
+		mutate    func(*workercore.ModelDeployment)
+		wantField string
+		wantMsg   string
+	}{
+		{
+			name:   "eligible vLLM Server role with kernelArtifactRef",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			},
+		},
+		{
+			name:   "eligible SGLang Server role with kernelArtifactRef",
+			engine: workercore.ModelDeploymentEngineSGLang,
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			},
+		},
+		{
+			name:   "empty kernelArtifactRef name is rejected",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: ""}
+			},
+			wantField: "spec.roles[0].kernelArtifactRef.name",
+		},
+		{
+			name:   "Encode role rejects kernelArtifactRef",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindEncode
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			},
+			wantField: "spec.roles[0].kernelArtifactRef",
+			wantMsg:   "Encode",
+		},
+		{
+			name:   "CPU-only role rejects kernelArtifactRef",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].AcceleratorType = ""
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			},
+			wantField: "spec.roles[0].kernelArtifactRef",
+			wantMsg:   "CPU-only",
+		},
+		{
+			name:   "unmanaged role with command rejects kernelArtifactRef",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Command = []string{"python3", "-m", "custom"}
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			},
+			wantField: "spec.roles[0].kernelArtifactRef",
+			wantMsg:   "unmanaged",
+		},
+		{
+			name:   "Elastic EP role rejects kernelArtifactRef",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].RuntimeControl = &workercore.ModelDeploymentRoleRuntimeControl{
+					Parameters: map[string]string{
+						runtimecontrol.ParamElasticDataParallelWidth: "2",
+					},
+				}
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			},
+			wantField: "spec.roles[0].kernelArtifactRef",
+			wantMsg:   "Elastic EP",
+		},
+		{
+			name:   "SGLang-Ray role rejects kernelArtifactRef",
+			engine: workercore.ModelDeploymentEngineSGLang,
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = []string{"--distributed-executor-backend=ray"}
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			},
+			wantField: "spec.roles[0].kernelArtifactRef",
+			wantMsg:   "SGLang Ray",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := modelDeployment(tc.engine)
+			tc.mutate(md)
+
+			errs := validateModelDeploymentRoleKernelArtifactRef(md, &md.Spec.Roles[0], field.NewPath("spec", "roles").Index(0))
+			if tc.wantField == "" {
+				assert.Empty(t, errs)
+				return
+			}
+			require.NotEmpty(t, errs)
+			fields := make([]string, 0, len(errs))
+			for _, e := range errs {
+				fields = append(fields, e.Field)
+			}
+			assert.Contains(t, fields, tc.wantField)
+			if tc.wantMsg != "" {
+				assert.Contains(t, errs.ToAggregate().Error(), tc.wantMsg)
+			}
+		})
+	}
+}
+
+func forgerBoundModelDeployment() *workercore.ModelDeployment {
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+	md.Annotations = map[string]string{
+		workercore.ModelDeploymentForgerBindingAnnotationKey: `{"forgerName":"qwen-forger","forgerUID":"forger-uid-1","term":1}`,
+	}
+	return md
+}
+
+func modelDeploymentFenceWebhookWithObjects(objs ...ctrlcli.Object) *ModelDeploymentWebhook {
+	builder := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme)
+	if len(objs) > 0 {
+		builder = builder.WithObjects(objs...)
+	}
+	return &ModelDeploymentWebhook{
+		APIReader:      builder.Build(),
+		Namespace:      testFenceNamespace,
+		ServiceAccount: testFenceServiceAccount,
+	}
+}
+
+func TestValidateModelDeploymentForgerFenceAndScalerCoexistence(t *testing.T) {
+	forger := &workercore.ModelDeploymentForger{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen-forger", UID: "forger-uid-1"},
+	}
+	scaler := &workercore.ModelDeploymentScaler{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen-scaler", UID: "uid-1"},
+	}
+
+	cases := []struct {
+		name      string
+		objs      []ctrlcli.Object
+		operator  bool
+		mutate    func(old, md *workercore.ModelDeployment)
+		wantField string
+	}{
+		{
+			name: "user cannot set kernelArtifactRef on a forger-bound deployment",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			},
+			wantField: "spec.roles",
+		},
+		{
+			name: "user cannot clear kernelArtifactRef on a forger-bound deployment",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				old.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+				md.Spec.Roles[0].KernelArtifactRef = nil
+			},
+			wantField: "spec.roles",
+		},
+		{
+			name: "user cannot rename a role on a forger-bound deployment",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Name = "renamed"
+			},
+			wantField: "spec.roles",
+		},
+		{
+			name: "user may edit image and replicas on a forger-only-bound deployment",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Image = "vllm/vllm-openai:v0.9.0"
+				md.Spec.Roles[0].Replicas++
+			},
+		},
+		{
+			name: "user cannot modify forger-binding annotation",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey] = `{"forgerName":"other","forgerUID":"uid-2","term":2}`
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentForgerBindingAnnotationKey + "]",
+		},
+		{
+			name: "user cannot modify forger-decision annotation",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Annotations[workercore.ModelDeploymentForgerDecisionAnnotationKey] = `{"decisionID":"d-1","term":1,"kernelArtifacts":{"server":"mk-1"}}`
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentForgerDecisionAnnotationKey + "]",
+		},
+		{
+			name: "user may remove orphaned forger-binding when forger is deleted",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				delete(md.Annotations, workercore.ModelDeploymentForgerBindingAnnotationKey)
+			},
+		},
+		{
+			name: "user may remove orphaned forger-binding when forger was recreated with new UID",
+			objs: []ctrlcli.Object{
+				&workercore.ModelDeploymentForger{
+					ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen-forger", UID: "forger-uid-new"},
+				},
+			},
+			mutate: func(old, md *workercore.ModelDeployment) {
+				delete(md.Annotations, workercore.ModelDeploymentForgerBindingAnnotationKey)
+			},
+		},
+		{
+			name: "user cannot remove forger-binding while forger still exists",
+			objs: []ctrlcli.Object{forger},
+			mutate: func(old, md *workercore.ModelDeployment) {
+				delete(md.Annotations, workercore.ModelDeploymentForgerBindingAnnotationKey)
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentForgerBindingAnnotationKey + "]",
+		},
+		{
+			name: "user cannot mutate kernelArtifactRef while removing orphaned forger-binding",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				delete(md.Annotations, workercore.ModelDeploymentForgerBindingAnnotationKey)
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			},
+			wantField: "spec.roles",
+		},
+		{
+			name:     "operator may acquire forger-binding",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				old.Annotations = nil
+				md.Annotations = map[string]string{
+					workercore.ModelDeploymentForgerBindingAnnotationKey: `{"forgerName":"qwen-forger","forgerUID":"forger-uid-1","term":1}`,
+				}
+			},
+		},
+		{
+			name:     "operator cannot acquire forger-binding with term below 1",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				old.Annotations = nil
+				md.Annotations = map[string]string{
+					workercore.ModelDeploymentForgerBindingAnnotationKey: `{"forgerName":"qwen-forger","forgerUID":"forger-uid-1","term":0}`,
+				}
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentForgerBindingAnnotationKey + "]",
+		},
+		{
+			name:     "operator cannot regress forger-binding term",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				old.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey] = `{"forgerName":"qwen-forger","forgerUID":"forger-uid-1","term":2}`
+				md.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey] = `{"forgerName":"qwen-forger","forgerUID":"forger-uid-1","term":1}`
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentForgerBindingAnnotationKey + "]",
+		},
+		{
+			name:     "operator cannot acquire forger-binding with missing identity",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				old.Annotations = nil
+				md.Annotations = map[string]string{
+					workercore.ModelDeploymentForgerBindingAnnotationKey: `{"forgerName":"","forgerUID":"forger-uid-1","term":1}`,
+				}
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentForgerBindingAnnotationKey + "]",
+		},
+		{
+			name:     "operator may mutate kernelArtifactRef with matching forger-decision term",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+				md.Annotations[workercore.ModelDeploymentForgerDecisionAnnotationKey] = `{"decisionID":"d-1","term":1,"kernelArtifacts":{"server":"mk-gen-1"}}`
+			},
+		},
+		{
+			name:     "operator cannot mutate kernelArtifactRef without forger-decision",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentForgerDecisionAnnotationKey + "]",
+		},
+		{
+			name:     "operator cannot mutate kernelArtifactRef with mismatched decision term",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+				md.Annotations[workercore.ModelDeploymentForgerDecisionAnnotationKey] = `{"decisionID":"d-1","term":2,"kernelArtifacts":{"server":"mk-gen-1"}}`
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentForgerDecisionAnnotationKey + "]",
+		},
+		{
+			name:     "operator cannot mutate kernelArtifactRef while unbinding in the same write",
+			operator: true,
+			mutate: func(old, md *workercore.ModelDeployment) {
+				delete(md.Annotations, workercore.ModelDeploymentForgerBindingAnnotationKey)
+				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			},
+			wantField: "metadata.annotations[" + workercore.ModelDeploymentForgerBindingAnnotationKey + "]",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			old := forgerBoundModelDeployment()
+			md := forgerBoundModelDeployment()
+			tc.mutate(old, md)
+
+			username := testFenceUser
+			if tc.operator {
+				username = testFenceOperatorUser()
+			}
+
+			w := modelDeploymentFenceWebhookWithObjects(tc.objs...)
+			errs := w.validateModelDeploymentForgerFence(modelDeploymentFenceContext(username), old, md)
+			if tc.wantField == "" {
+				assert.Empty(t, errs)
+				return
+			}
+			require.NotEmpty(t, errs)
+			fields := make([]string, 0, len(errs))
+			for _, e := range errs {
+				fields = append(fields, e.Field)
+			}
+			assert.Contains(t, fields, tc.wantField)
+		})
+	}
+
+	t.Run("user cannot add forger-binding on unbound deployment or create", func(t *testing.T) {
+		old := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+		md.Annotations = map[string]string{
+			workercore.ModelDeploymentForgerBindingAnnotationKey: `{"forgerName":"qwen-forger","forgerUID":"forger-uid-1","term":1}`,
+		}
+		w := modelDeploymentFenceWebhookWithObjects()
+		for _, prior := range []*workercore.ModelDeployment{nil, old} {
+			errs := w.validateModelDeploymentForgerFence(modelDeploymentFenceContext(testFenceUser), prior, md)
+			require.NotEmpty(t, errs)
+			assert.Equal(t,
+				"metadata.annotations["+workercore.ModelDeploymentForgerBindingAnnotationKey+"]",
+				errs[0].Field)
+		}
+	})
+
+	t.Run("operator can repair corrupt old forger-binding while user is refused", func(t *testing.T) {
+		oldCorrupt := forgerBoundModelDeployment()
+		oldCorrupt.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey] = "corrupt-json"
+		w := modelDeploymentFenceWebhookWithObjects()
+
+		errs := w.validateModelDeploymentForgerFence(modelDeploymentFenceContext(testFenceUser), oldCorrupt, oldCorrupt.DeepCopy())
+		require.NotEmpty(t, errs)
+		assert.Equal(t, field.ErrorTypeInvalid, errs[0].Type)
+
+		errs = w.validateModelDeploymentForgerFence(modelDeploymentFenceContext(testFenceOperatorUser()), oldCorrupt, forgerBoundModelDeployment())
+		assert.Empty(t, errs)
+	})
+
+	t.Run("orphan check with nil APIReader returns internal error", func(t *testing.T) {
+		old := forgerBoundModelDeployment()
+		md := forgerBoundModelDeployment()
+		delete(md.Annotations, workercore.ModelDeploymentForgerBindingAnnotationKey)
+
+		w := &ModelDeploymentWebhook{
+			Namespace:      testFenceNamespace,
+			ServiceAccount: testFenceServiceAccount,
+		}
+		errs := w.validateModelDeploymentForgerFence(modelDeploymentFenceContext(testFenceUser), old, md)
+		require.NotEmpty(t, errs)
+		assert.Equal(t, field.ErrorTypeInternal, errs[0].Type)
+	})
+
+	t.Run("orthogonal coexistence with scaler-binding", func(t *testing.T) {
+		dualBound := func() *workercore.ModelDeployment {
+			md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+			md.Annotations = map[string]string{
+				workercore.ModelDeploymentScalerBindingAnnotationKey: `{"scalerName":"qwen-scaler","scalerUID":"uid-1","term":1}`,
+				workercore.ModelDeploymentForgerBindingAnnotationKey: `{"forgerName":"qwen-forger","forgerUID":"forger-uid-1","term":1}`,
+			}
+			return md
+		}
+
+		w := modelDeploymentFenceWebhookWithObjects(scaler, forger)
+		opCtx := modelDeploymentFenceContext(testFenceOperatorUser())
+		userCtx := modelDeploymentFenceContext(testFenceUser)
+
+		// Operator scales replicas with scaler-decision only: both fences pass.
+		old := dualBound()
+		scaled := dualBound()
+		scaled.Spec.Roles[0].Replicas++
+		scaled.Annotations[workercore.ModelDeploymentScalerDecisionAnnotationKey] = `{"decisionID":"s-1","term":1,"vector":{"server":2}}`
+		assert.Empty(t, w.validateModelDeploymentScalerFence(opCtx, old, scaled))
+		assert.Empty(t, w.validateModelDeploymentForgerFence(opCtx, old, scaled))
+
+		// Operator promotes kernelArtifactRef with forger-decision only: both fences pass.
+		promoted := dualBound()
+		promoted.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+		promoted.Annotations[workercore.ModelDeploymentForgerDecisionAnnotationKey] = `{"decisionID":"f-1","term":1,"kernelArtifacts":{"server":"mk-gen-1"}}`
+		assert.Empty(t, w.validateModelDeploymentScalerFence(opCtx, old, promoted))
+		assert.Empty(t, w.validateModelDeploymentForgerFence(opCtx, old, promoted))
+
+		// User edits replicas: scaler fence blocks, forger fence stays orthogonal.
+		userReplicas := dualBound()
+		userReplicas.Spec.Roles[0].Replicas++
+		assert.NotEmpty(t, w.validateModelDeploymentScalerFence(userCtx, old, userReplicas))
+		assert.Empty(t, w.validateModelDeploymentForgerFence(userCtx, old, userReplicas))
+
+		// User edits kernelArtifactRef: forger fence blocks, scaler fence stays orthogonal.
+		userKernel := dualBound()
+		userKernel.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+		assert.Empty(t, w.validateModelDeploymentScalerFence(userCtx, old, userKernel))
+		assert.NotEmpty(t, w.validateModelDeploymentForgerFence(userCtx, old, userKernel))
+
+		// User edits unrelated field (pause): both fences pass.
+		userPause := dualBound()
+		userPause.Spec.Roles[0].Pause = true
+		assert.Empty(t, w.validateModelDeploymentScalerFence(userCtx, old, userPause))
+		assert.Empty(t, w.validateModelDeploymentForgerFence(userCtx, old, userPause))
+	})
+}
