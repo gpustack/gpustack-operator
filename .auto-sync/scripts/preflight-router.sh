@@ -3,11 +3,12 @@
 #
 # Discovers highest stable upstream tags for llm-d/llm-d-router (v*),
 # vllm-project/router (v*), and sgl-project/sglang sgl-router (strictly router-v*),
+# enforces ancestry-gated commit-to-tag graduation for optional *_COMMIT pins,
 # keeps legacy sglang-gateway frozen at its pinned gateway-v0.3.1 tag,
 # stages clones into separate directories under $AUTOSYNC_STAGE_DIR, checks commit
 # 516f1cb ancestry for automatic retirement of 0001-epd-routing.patch, probes
-# multi-arch image manifests via crane, records Base Image build recommendations,
-# and emits Taskpack 2.0 preflight outputs and staged resources.
+# multi-arch image manifests via crane, records Base Image and Sync Image
+# recommendations, and emits Taskpack 2.0 preflight outputs and staged resources.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -61,7 +62,7 @@ import sys
 
 repo_root, stage_dir, fixture_dir, discovery_path, probe_list_path, base_sha = sys.argv[1:7]
 sys.path.insert(0, os.path.join(repo_root, ".auto-sync", "checks"))
-from dockerfile_arg import read_dockerfile_arg
+from dockerfile_arg import has_dockerfile_arg, read_dockerfile_arg
 from setting_image_holds import (
     domain_holds,
     load_setting_image_holds,
@@ -129,7 +130,13 @@ def ls_remote_stable_tags(repo_url: str, ref_glob: str, tag_re: re.Pattern[str],
     return tags[0], tags[:5]
 
 
-def ensure_tag_fetched(dst: str, repo_url: str, tag: str, filter_blobless: bool = False) -> None:
+def ensure_tag_fetched(
+    dst: str,
+    repo_url: str,
+    tag: str,
+    filter_blobless: bool = False,
+    full_history: bool = False,
+) -> None:
     rc = subprocess.run(
         ["git", "-C", dst, "rev-parse", "--verify", "-q", f"refs/tags/{tag}^{{commit}}"],
         stdout=subprocess.DEVNULL,
@@ -137,7 +144,9 @@ def ensure_tag_fetched(dst: str, repo_url: str, tag: str, filter_blobless: bool 
     ).returncode
     if rc == 0:
         return
-    cmd = ["git", "-C", dst, "-c", "protocol.file.allow=always", "fetch", "--depth", "1"]
+    cmd = ["git", "-C", dst, "-c", "protocol.file.allow=always", "fetch"]
+    if not full_history:
+        cmd.extend(["--depth", "1"])
     if filter_blobless:
         cmd.append("--filter=blob:none")
     cmd.extend([repo_url, f"refs/tags/{tag}:refs/tags/{tag}"])
@@ -149,8 +158,17 @@ def sync_full_history_repo(repo_url: str, dst: str, pinned_tag: str, target_tag:
     filter_args = [] if is_local_repo else ["--filter=blob:none"]
     if os.path.isdir(os.path.join(dst, ".git")):
         subprocess.run(["git", "-C", dst, "remote", "set-url", "origin", repo_url], check=True)
+        is_shallow = (
+            subprocess.run(
+                ["git", "-C", dst, "rev-parse", "--is-shallow-repository"],
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            == "true"
+        )
+        unshallow_args = ["--unshallow"] if is_shallow else []
         subprocess.run(
-            ["git", "-C", dst, "-c", "protocol.file.allow=always", "fetch", *filter_args, "--tags", "--force", "--prune", "origin"],
+            ["git", "-C", dst, "-c", "protocol.file.allow=always", "fetch", *filter_args, *unshallow_args, "--tags", "--force", "--prune", "origin"],
             check=True,
         )
     else:
@@ -160,13 +178,97 @@ def sync_full_history_repo(repo_url: str, dst: str, pinned_tag: str, target_tag:
             ["git", "-c", "protocol.file.allow=always", "clone", *filter_args, "--no-single-branch", repo_url, dst],
             check=True,
         )
-    ensure_tag_fetched(dst, repo_url, target_tag, filter_blobless=not is_local_repo)
+    ensure_tag_fetched(dst, repo_url, target_tag, filter_blobless=not is_local_repo, full_history=True)
     if pinned_tag and pinned_tag != target_tag:
         try:
-            ensure_tag_fetched(dst, repo_url, pinned_tag, filter_blobless=not is_local_repo)
+            ensure_tag_fetched(dst, repo_url, pinned_tag, filter_blobless=not is_local_repo, full_history=True)
         except subprocess.CalledProcessError:
             pass
     subprocess.run(["git", "-C", dst, "checkout", "-f", "-q", f"refs/tags/{target_tag}"], check=True)
+
+
+def sync_commit_ancestry_repo(
+    repo_url: str,
+    dst: str,
+    pinned_tag: str,
+    pinned_commit: str,
+    target_tag: str,
+    sparse_subpaths: list[str] | None = None,
+    is_local: bool = False,
+) -> None:
+    is_local_repo = is_local or os.path.isdir(repo_url) or repo_url.startswith("file://")
+    filter_args = [] if is_local_repo else ["--filter=blob:none"]
+    subpaths = [p for p in (sparse_subpaths or []) if p]
+    use_sparse = bool(subpaths) and not is_local_repo
+
+    if os.path.isdir(os.path.join(dst, ".git")):
+        subprocess.run(["git", "-C", dst, "remote", "set-url", "origin", repo_url], check=True)
+        if use_sparse:
+            subprocess.run(["git", "-C", dst, "sparse-checkout", "set", *subpaths], check=True)
+        is_shallow = (
+            subprocess.run(
+                ["git", "-C", dst, "rev-parse", "--is-shallow-repository"],
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            == "true"
+        )
+        unshallow_args = ["--unshallow"] if is_shallow else []
+        subprocess.run(
+            ["git", "-C", dst, "-c", "protocol.file.allow=always", "fetch", *filter_args, *unshallow_args, "--tags", "--force", "--prune", "origin"],
+            check=True,
+        )
+    else:
+        if os.path.exists(dst):
+            shutil.rmtree(dst)
+        cmd = ["git", "-c", "protocol.file.allow=always", "clone", *filter_args, "--no-single-branch"]
+        if use_sparse:
+            cmd.extend(["--sparse", "--no-checkout"])
+        cmd.extend([repo_url, dst])
+        subprocess.run(cmd, check=True)
+        if use_sparse:
+            subprocess.run(["git", "-C", dst, "sparse-checkout", "set", *subpaths], check=True)
+
+    ensure_tag_fetched(dst, repo_url, target_tag, filter_blobless=not is_local_repo, full_history=True)
+    if pinned_tag and pinned_tag != target_tag:
+        try:
+            ensure_tag_fetched(dst, repo_url, pinned_tag, filter_blobless=not is_local_repo, full_history=True)
+        except subprocess.CalledProcessError:
+            pass
+
+    have_commit = (
+        subprocess.run(
+            ["git", "-C", dst, "rev-parse", "--verify", "-q", f"{pinned_commit}^{{commit}}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+    if not have_commit:
+        subprocess.run(
+            ["git", "-C", dst, "-c", "protocol.file.allow=always", "fetch", *filter_args, "origin", pinned_commit],
+            check=True,
+        )
+        have_commit = (
+            subprocess.run(
+                ["git", "-C", dst, "rev-parse", "--verify", "-q", f"{pinned_commit}^{{commit}}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            == 0
+        )
+    if not have_commit:
+        raise SystemExit(f"FAIL: pinned commit {pinned_commit} not found in {repo_url}")
+
+    subprocess.run(["git", "-C", dst, "checkout", "-f", "-q", f"refs/tags/{target_tag}"], check=True)
+    if not is_local_repo:
+        # Hydrate blobs for both pinned_commit and target_tag while online and writable
+        # so offline validate_router.sh git archive calls never hit the network.
+        for ref_to_hydrate in (pinned_commit, f"refs/tags/{target_tag}"):
+            arc_cmd = ["git", "-C", dst, "archive", ref_to_hydrate]
+            if use_sparse:
+                arc_cmd.extend(["--", *subpaths])
+            subprocess.run(arc_cmd, stdout=subprocess.DEVNULL, check=True)
 
 
 def sync_tagged_repo(
@@ -222,11 +324,26 @@ def sync_tagged_repo(
 router_df = read_text(os.path.join(repo_root, "pack/llm-router/Dockerfile"))
 value_go = read_text(os.path.join(repo_root, "pkg/worker/settings/value.go"))
 
+def read_optional_commit(df_txt: str, arg_name: str, label: str) -> str:
+    if not has_dockerfile_arg(df_txt, arg_name):
+        return ""
+    val = read_dockerfile_arg(df_txt, arg_name, label, allow_empty=True).strip()
+    if val and not re.fullmatch(r"[0-9a-fA-F]{7,40}", val):
+        raise SystemExit(f"FAIL: invalid commit SHA in ARG {arg_name}={val!r} in {label}")
+    return val
+
+
 recipe = {
     "llm-d-router": read_dockerfile_arg(router_df, "LLMD_ROUTER_VERSION", "pack/llm-router/Dockerfile"),
     "vllm-router": read_dockerfile_arg(router_df, "VLLM_ROUTER_VERSION", "pack/llm-router/Dockerfile"),
     "sglang-gateway": read_dockerfile_arg(router_df, "SGLANG_GATEWAY_VERSION", "pack/llm-router/Dockerfile"),
     "sgl-router": read_dockerfile_arg(router_df, "SGL_ROUTER_VERSION", "pack/llm-router/Dockerfile"),
+}
+recipe_commits = {
+    "llm-d-router": read_optional_commit(router_df, "LLMD_ROUTER_COMMIT", "pack/llm-router/Dockerfile"),
+    "vllm-router": read_optional_commit(router_df, "VLLM_ROUTER_COMMIT", "pack/llm-router/Dockerfile"),
+    "sglang-gateway": "",
+    "sgl-router": read_optional_commit(router_df, "SGL_ROUTER_COMMIT", "pack/llm-router/Dockerfile"),
 }
 defaults = {
     "router_image": extract_value_go_image(value_go, "ModelDeploymentRouterImage"),
@@ -325,9 +442,29 @@ else:
     up_sgl_router, up_sgl_router_recent = recipe["sgl-router"], [recipe["sgl-router"]]
 
 if llmd_url:
-    sync_tagged_repo(llmd_url, llmd_stage, recipe["llm-d-router"], up_llmd, is_local=llmd_local)
+    if recipe_commits["llm-d-router"]:
+        sync_commit_ancestry_repo(
+            llmd_url,
+            llmd_stage,
+            recipe["llm-d-router"],
+            recipe_commits["llm-d-router"],
+            up_llmd,
+            is_local=llmd_local,
+        )
+    else:
+        sync_tagged_repo(llmd_url, llmd_stage, recipe["llm-d-router"], up_llmd, is_local=llmd_local)
 if vllm_url:
-    sync_full_history_repo(vllm_url, vllm_stage, recipe["vllm-router"], up_vllm)
+    if recipe_commits["vllm-router"]:
+        sync_commit_ancestry_repo(
+            vllm_url,
+            vllm_stage,
+            recipe["vllm-router"],
+            recipe_commits["vllm-router"],
+            up_vllm,
+            is_local=vllm_local,
+        )
+    else:
+        sync_full_history_repo(vllm_url, vllm_stage, recipe["vllm-router"], up_vllm)
 if sglang_gw_url:
     sync_tagged_repo(
         sglang_gw_url,
@@ -338,14 +475,51 @@ if sglang_gw_url:
         is_local=sglang_gw_local,
     )
 if sgl_router_url:
-    sync_tagged_repo(
-        sgl_router_url,
-        sgl_router_stage,
-        recipe["sgl-router"],
-        up_sgl_router,
-        sparse_subpaths=["sgl-router", "rust"],
-        is_local=sgl_router_local,
+    if recipe_commits["sgl-router"]:
+        sync_commit_ancestry_repo(
+            sgl_router_url,
+            sgl_router_stage,
+            recipe["sgl-router"],
+            recipe_commits["sgl-router"],
+            up_sgl_router,
+            sparse_subpaths=["sgl-router", "rust"],
+            is_local=sgl_router_local,
+        )
+    else:
+        sync_tagged_repo(
+            sgl_router_url,
+            sgl_router_stage,
+            recipe["sgl-router"],
+            up_sgl_router,
+            sparse_subpaths=["sgl-router", "rust"],
+            is_local=sgl_router_local,
+        )
+
+# Check commit ancestry for any commit-pinned router against its latest eligible stable tag.
+graduation: dict[str, dict] = {}
+for uid, st_repo, latest_tag in (
+    ("llm-d-router", llmd_stage, up_llmd),
+    ("vllm-router", vllm_stage, up_vllm),
+    ("sgl-router", sgl_router_stage, up_sgl_router),
+):
+    pinned_commit = recipe_commits[uid]
+    if not pinned_commit:
+        continue
+    if not os.path.isdir(os.path.join(st_repo, ".git")):
+        raise SystemExit(f"FAIL: missing staged git repo for commit-pinned {uid}: {st_repo}")
+    anc = subprocess.run(
+        ["git", "-C", st_repo, "merge-base", "--is-ancestor", pinned_commit, f"refs/tags/{latest_tag}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
+    is_anc = anc.returncode == 0
+    graduation[uid] = {
+        "pinned_version": recipe[uid],
+        "pinned_commit": pinned_commit,
+        "latest_tag": latest_tag,
+        "is_ancestor": is_anc,
+        "graduation_status": "ready_to_graduate" if is_anc else "awaiting_tag_containing_commit",
+    }
 
 # Check 516f1cb ancestry in vllm-router for automatic retirement of 0001-epd-routing.patch.
 epd_ref = os.environ.get("AUTOSYNC_ROUTER_EPD_COMMIT", "516f1cb").strip() or "516f1cb"
@@ -561,6 +735,7 @@ for ref in (
     target_proxy_image,
     defaults["sidecar_image"],
     target_sidecar_image,
+    f"gpustack/mirrored-llm-d-router-disagg-sidecar:{recipe['llm-d-router']}",
     f"gpustack/mirrored-llm-d-router-disagg-sidecar:{up_llmd}",
 ):
     if ref and ref not in probe_refs:
@@ -579,6 +754,8 @@ with open(probe_list_path, "w", encoding="utf-8") as f:
 discovery = {
     "base_sha": base_sha,
     "recipe": recipe,
+    "recipe_commits": recipe_commits,
+    "graduation": graduation,
     "defaults": defaults,
     "target_tags": {
         "llm-d-router": up_llmd,
@@ -627,7 +804,7 @@ while IFS= read -r ref; do
 done < "${PROBE_LIST_FILE}"
 
 MANIFESTS_JSON="${STAGE_DIR}/image-manifests.json"
-if [[ -n "${AUTOSYNC_ROUTER_FIXTURE_DIR:-}" && -f "${AUTOSYNC_ROUTER_FIXTURE_DIR}/image-manifests.json" ]]; then
+if [[ -z "${AUTOSYNC_MOCK_MANIFESTS_JSON:-}" && -n "${AUTOSYNC_ROUTER_FIXTURE_DIR:-}" && -f "${AUTOSYNC_ROUTER_FIXTURE_DIR}/image-manifests.json" ]]; then
   AUTOSYNC_MOCK_MANIFESTS_JSON="${AUTOSYNC_ROUTER_FIXTURE_DIR}/image-manifests.json" \
     autosync::preflight::record_image_probes "${MANIFESTS_JSON}" "${PROBE_REFS[@]}"
 else
@@ -640,6 +817,7 @@ PREFLIGHT_REPORT_JSON="${STAGE_DIR}/router-preflight-report.json"
 python3 -B - "${REPO_ROOT}" "${DISCOVERY_JSON}" "${MANIFESTS_JSON}" "${UPSTREAM_RECORDS_JSON}" "${PREFLIGHT_REPORT_JSON}" <<'PY'
 import json
 import os
+import re
 import sys
 
 repo_root, disc_path, man_path, recs_path, rep_path = sys.argv[1:6]
@@ -661,17 +839,49 @@ def is_published(ref: str) -> bool:
     return isinstance(entry, dict) and entry.get("published") is True
 
 
+def parse_v_semver(tag: str) -> tuple[int, ...] | None:
+    m = re.fullmatch(r"v(\d+(?:\.\d+)+)", tag.strip())
+    if not m:
+        return None
+    return tuple(int(seg) for seg in m.group(1).split("."))
+
+
+def extract_image_tag(ref: str) -> str:
+    last_seg = ref.split("/")[-1]
+    if ":" not in last_seg:
+        return ""
+    return ref.rsplit(":", 1)[1].strip()
+
+
 recipe = disc["recipe"]
+recipe_commits = disc.get("recipe_commits") or {}
+graduation = disc.get("graduation") or {}
 defaults = disc["defaults"]
 target_tags = disc["target_tags"]
 recent_tags = disc["recent_tags"]
 targets = disc["targets"]
+held_setting_images = disc.get("held_setting_images") or {}
 
 ROUTER_IDS = ("llm-d-router", "vllm-router", "sglang-gateway", "sgl-router")
-stage_a_drifts = {
-    uid: (False if uid == "sglang-gateway" else target_tags[uid] != recipe[uid])
-    for uid in ROUTER_IDS
-}
+
+
+def format_pinned(uid: str) -> str:
+    ver = recipe[uid]
+    commit = str(recipe_commits.get(uid) or "").strip()
+    return f"{ver}+{commit[:7]}" if commit else ver
+
+
+pinned_versions = {uid: format_pinned(uid) for uid in ROUTER_IDS}
+
+stage_a_drifts = {}
+for uid in ROUTER_IDS:
+    if uid == "sglang-gateway":
+        stage_a_drifts[uid] = False
+    elif recipe_commits.get(uid):
+        grad = graduation.get(uid) or {}
+        stage_a_drifts[uid] = grad.get("graduation_status") == "ready_to_graduate"
+    else:
+        stage_a_drifts[uid] = target_tags[uid] != recipe[uid]
 has_stage_a = any(stage_a_drifts.values())
 
 router_stage_b = (
@@ -688,32 +898,109 @@ sidecar_stage_b = (
 )
 has_stage_b = router_stage_b or proxy_stage_b or sidecar_stage_b
 
+sync_images = []
+if "sidecar" not in held_setting_images:
+    cur_sidecar_tag = extract_image_tag(defaults["sidecar_image"])
+    cur_sidecar_ver = parse_v_semver(cur_sidecar_tag)
+    cand_tags = []
+    for raw_t in (target_tags.get("llm-d-router", ""), recipe.get("llm-d-router", "")):
+        vt = parse_v_semver(raw_t)
+        if vt is not None:
+            cand_tags.append((vt, raw_t.strip()))
+    if cur_sidecar_ver is not None and cand_tags:
+        best_ver, best_tag = max(cand_tags, key=lambda item: item[0])
+        if best_ver > cur_sidecar_ver:
+            dest_ref = f"gpustack/mirrored-llm-d-router-disagg-sidecar:{best_tag}"
+            if not is_published(dest_ref):
+                src_ref = f"ghcr.io/llm-d/llm-d-router-disagg-sidecar:{best_tag}"
+                sync_images.append({
+                    "source": src_ref,
+                    "destination": dest_ref,
+                    "reason": (
+                        f"Stable llm-d-router tag {best_tag} is newer than "
+                        f"ModelDeploymentRoutingSidecarImage ({cur_sidecar_tag}) and "
+                        f"{dest_ref} is missing or not multi-arch on Docker Hub."
+                    ),
+                    "command": f'gh workflow run "Sync Image" -f images="{src_ref}"',
+                })
+
+
+def held_commit_record(uid: str) -> dict:
+    grad = graduation[uid]
+    return {
+        "id": uid,
+        "status": "held_back",
+        "version": pinned_versions[uid],
+        "reason": (
+            f"pinned commit {grad['pinned_commit'][:7]} is not an ancestor of "
+            f"latest stable tag {grad['latest_tag']}; awaiting tag containing commit"
+        ),
+        "metadata": dict(grad),
+        "recentVersions": recent_tags[uid],
+    }
+
+
+def is_held_commit(uid: str) -> bool:
+    grad = graduation.get(uid)
+    return isinstance(grad, dict) and grad.get("graduation_status") == "awaiting_tag_containing_commit"
+
+
 if has_stage_b:
     stage = "tag_promotion"
     image_published = True
     records = []
     for uid in ROUTER_IDS:
         promote = router_stage_b or (uid == "llm-d-router" and (sidecar_stage_b or proxy_stage_b))
-        records.append({
-            "id": uid,
-            "status": "available" if promote else "up_to_date",
-            "version": f"{recipe[uid]}+stage-b" if promote else recipe[uid],
-            **({"currentVersion": recipe[uid]} if promote else {}),
-            "recentVersions": recent_tags[uid],
-        })
+        if promote:
+            rec = {
+                "id": uid,
+                "status": "available",
+                "version": f"{recipe[uid]}+stage-b",
+                "currentVersion": pinned_versions[uid],
+                "recentVersions": recent_tags[uid],
+            }
+            if uid in graduation:
+                rec["metadata"] = dict(graduation[uid])
+            records.append(rec)
+        elif is_held_commit(uid):
+            records.append(held_commit_record(uid))
+        else:
+            records.append({
+                "id": uid,
+                "status": "up_to_date",
+                "version": pinned_versions[uid],
+                "recentVersions": recent_tags[uid],
+            })
 elif has_stage_a:
     stage = "recipe_sync"
     image_published = False
-    records = [
-        {
-            "id": uid,
-            "status": "available" if stage_a_drifts[uid] else "up_to_date",
-            "version": target_tags[uid] if stage_a_drifts[uid] else recipe[uid],
-            **({"currentVersion": recipe[uid]} if stage_a_drifts[uid] else {}),
-            "recentVersions": recent_tags[uid],
-        }
-        for uid in ROUTER_IDS
-    ]
+    records = []
+    for uid in ROUTER_IDS:
+        if stage_a_drifts[uid]:
+            rec = {
+                "id": uid,
+                "status": "available",
+                "version": target_tags[uid],
+                "currentVersion": pinned_versions[uid],
+                "recentVersions": recent_tags[uid],
+            }
+            if uid in graduation:
+                grad = graduation[uid]
+                rec["reason"] = (
+                    f"pinned commit {grad['pinned_commit'][:7]} is an ancestor of "
+                    f"{grad['latest_tag']}; ready to graduate to stable tag"
+                )
+                rec["metadata"] = dict(grad)
+            records.append(rec)
+        elif is_held_commit(uid):
+            records.append(held_commit_record(uid))
+        else:
+            records.append({
+                "id": uid,
+                "status": "up_to_date",
+                "version": pinned_versions[uid],
+                "recentVersions": recent_tags[uid],
+            })
 else:
     stage = "no_change"
     image_published = (
@@ -724,15 +1011,17 @@ else:
         and is_published(defaults["proxy_image"])
         and is_published(defaults["sidecar_image"])
     )
-    records = [
-        {
-            "id": uid,
-            "status": "up_to_date",
-            "version": recipe[uid],
-            "recentVersions": recent_tags[uid],
-        }
-        for uid in ROUTER_IDS
-    ]
+    records = []
+    for uid in ROUTER_IDS:
+        if is_held_commit(uid):
+            records.append(held_commit_record(uid))
+        else:
+            records.append({
+                "id": uid,
+                "status": "up_to_date",
+                "version": pinned_versions[uid],
+                "recentVersions": recent_tags[uid],
+            })
 
 base_image_builds = recommend_for_preflight(
     repo_root, "router", stage, stage_a_drifts, target_tags
@@ -759,13 +1048,16 @@ report = {
         "sidecar": sidecar_stage_b,
     },
     "frozen_upstreams": disc.get("frozen_upstreams") or {},
-    "held_setting_images": disc.get("held_setting_images") or {},
+    "held_setting_images": held_setting_images,
     "recipe": recipe,
+    "recipe_commits": recipe_commits,
+    "graduation": graduation,
     "target_tags": target_tags,
     "recent_tags": recent_tags,
     "defaults": defaults,
     "targets": targets,
     "base_image_builds": base_image_builds,
+    "sync_images": sync_images,
     "rebase": {},
 }
 
@@ -822,6 +1114,9 @@ with open(rep_path, "r", encoding="utf-8") as f:
     rep = json.load(f)
 
 recipe = rep["recipe"]
+recipe_commits = rep.get("recipe_commits") or {}
+stage_a_drifts = rep.get("stage_a_drifts") or {}
+graduation = rep.get("graduation") or {}
 target_tags = rep["target_tags"]
 retire_0001 = bool(rep.get("retire_0001_epd_routing"))
 retire_0004 = bool(rep.get("retire_0004_discovery_readiness"))
@@ -834,7 +1129,7 @@ ROUTER_SPECS = [
 ]
 
 
-def archive_tag(stage_repo: str, tag: str, dst_dir: str, sparse_subpaths: list[str]) -> None:
+def archive_ref(stage_repo: str, git_ref: str, dst_dir: str, sparse_subpaths: list[str]) -> None:
     if os.path.exists(dst_dir):
         shutil.rmtree(dst_dir)
     os.makedirs(dst_dir, exist_ok=True)
@@ -846,23 +1141,23 @@ def archive_tag(stage_repo: str, tag: str, dst_dir: str, sparse_subpaths: list[s
         ).stdout.strip()
         == "true"
     )
-    cmd = ["git", "-C", stage_repo, "archive", f"refs/tags/{tag}"]
+    cmd = ["git", "-C", stage_repo, "archive", git_ref]
     if promisor and sparse_subpaths:
         cmd.extend(["--", *sparse_subpaths])
     arc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if arc.returncode != 0:
-        raise RuntimeError(f"git archive {tag} failed: {arc.stderr.decode('utf-8', 'replace')}")
+        raise RuntimeError(f"git archive {git_ref} failed: {arc.stderr.decode('utf-8', 'replace')}")
     tar_res = subprocess.run(["tar", "-x", "-C", dst_dir], input=arc.stdout, stderr=subprocess.PIPE)
     if tar_res.returncode != 0:
-        raise RuntimeError(f"tar extract {tag} failed: {tar_res.stderr.decode('utf-8', 'replace')}")
+        raise RuntimeError(f"tar extract {git_ref} failed: {tar_res.stderr.decode('utf-8', 'replace')}")
 
 
-def has_tag(stage_repo: str, tag: str) -> bool:
+def has_ref(stage_repo: str, git_ref: str) -> bool:
     if not os.path.isdir(os.path.join(stage_repo, ".git")):
         return False
     return (
         subprocess.run(
-            ["git", "-C", stage_repo, "rev-parse", "--verify", "-q", f"refs/tags/{tag}^{{commit}}"],
+            ["git", "-C", stage_repo, "rev-parse", "--verify", "-q", f"{git_ref}^{{commit}}"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         ).returncode
@@ -900,13 +1195,38 @@ def copy_rel_file(src_root: str, dst_root: str, rel: str) -> bool:
     return True
 
 
-def write_rebased_patch_file(r_repo: str, p: dict, new_sha: str, out_dir: str, old_tag: str, new_tag: str, env: dict) -> str:
+def write_rebased_patch_file(
+    r_repo: str,
+    p: dict,
+    new_sha: str,
+    out_dir: str,
+    old_tag: str,
+    old_commit: str,
+    new_tag: str,
+    env: dict,
+) -> str:
     diff_bytes = subprocess.check_output(
         ["git", "-C", r_repo, "diff", "--full-index", f"{new_sha}^", new_sha],
         env=env,
     )
     hdr = p["header"]
-    if old_tag in hdr:
+    if old_commit and old_commit in hdr:
+        hdr, n_sub = re.subn(
+            rf"(AGAINST:.*?)commit\s+{re.escape(old_commit)}(?:\s*\([^)]*\))?",
+            rf"\g<1>{new_tag}",
+            hdr,
+            count=1,
+            flags=re.DOTALL,
+        )
+        if n_sub == 0:
+            hdr = re.sub(
+                rf"(AGAINST:.*?){re.escape(old_commit)}",
+                rf"\g<1>{new_tag}",
+                hdr,
+                count=1,
+                flags=re.DOTALL,
+            )
+    elif old_tag in hdr:
         hdr = re.sub(
             rf"(AGAINST:.*?){re.escape(old_tag)}",
             rf"\g<1>{new_tag}",
@@ -974,14 +1294,18 @@ rebase_results = {}
 staged_patch_dirs = []
 
 for uid, stage_repo, subdir, sparse_subpaths in ROUTER_SPECS:
-    old_tag = recipe[uid]
-    new_tag = target_tags[uid]
-    if old_tag == new_tag:
+    if not stage_a_drifts.get(uid):
         continue
-    if not (has_tag(stage_repo, old_tag) and has_tag(stage_repo, new_tag)):
+    old_tag = recipe[uid]
+    old_commit = str(recipe_commits.get(uid) or "").strip()
+    new_tag = target_tags[uid]
+    base_ref = old_commit if old_commit else f"refs/tags/{old_tag}"
+    base_label = old_commit if old_commit else old_tag
+    target_ref = f"refs/tags/{new_tag}"
+    if not (has_ref(stage_repo, base_ref) and has_ref(stage_repo, target_ref)):
         rebase_results[uid] = {
             "auto_rebased": False,
-            "reason": "missing recipe or target tag in staged clone",
+            "reason": "missing recipe baseline ref or target tag in staged clone",
             "retired_patches": [],
             "conflicted_files": [],
         }
@@ -1004,8 +1328,8 @@ for uid, stage_repo, subdir, sparse_subpaths in ROUTER_SPECS:
     os.makedirs(r_work, exist_ok=True)
 
     try:
-        archive_tag(stage_repo, old_tag, r_repo, sparse_subpaths)
-        archive_tag(stage_repo, new_tag, r_target, sparse_subpaths)
+        archive_ref(stage_repo, base_ref, r_repo, sparse_subpaths)
+        archive_ref(stage_repo, target_ref, r_target, sparse_subpaths)
     except RuntimeError as exc:
         rebase_results[uid] = {
             "auto_rebased": False,
@@ -1018,7 +1342,7 @@ for uid, stage_repo, subdir, sparse_subpaths in ROUTER_SPECS:
     subprocess.run(["git", "-C", r_repo, "init", "-q", "-b", "base"], check=True, env=git_env)
     subprocess.run(["git", "-C", r_repo, "config", "commit.gpgsign", "false"], check=True, env=git_env)
     subprocess.run(["git", "-C", r_repo, "add", "-A"], check=True, env=git_env)
-    subprocess.run(["git", "-C", r_repo, "commit", "-q", "-m", f"base {old_tag}"], check=True, env=git_env)
+    subprocess.run(["git", "-C", r_repo, "commit", "-q", "-m", f"base {base_label}"], check=True, env=git_env)
 
     applied = []
     base_apply_err = ""
@@ -1029,7 +1353,7 @@ for uid, stage_repo, subdir, sparse_subpaths in ROUTER_SPECS:
         header_txt, touched = split_patch_header_and_files(ptxt)
         ap = subprocess.run(["git", "-C", r_repo, "apply", "--index", pf], capture_output=True, text=True, env=git_env)
         if ap.returncode != 0:
-            base_apply_err = f"baseline patch {pname} failed to apply onto {old_tag}: {ap.stderr.strip()}"
+            base_apply_err = f"baseline patch {pname} failed to apply onto {base_label}: {ap.stderr.strip()}"
             break
         subprocess.run(["git", "-C", r_repo, "commit", "-q", "-m", pname], check=True, env=git_env)
         sha = subprocess.check_output(["git", "-C", r_repo, "rev-parse", "HEAD"], text=True, env=git_env).strip()
@@ -1110,7 +1434,7 @@ for uid, stage_repo, subdir, sparse_subpaths in ROUTER_SPECS:
         out_patch_dir = os.path.join(staged_tree, "pack/llm-router/patches", subdir)
         os.makedirs(out_patch_dir, exist_ok=True)
         exported_paths = [
-            write_rebased_patch_file(r_repo, p, new_sha, out_patch_dir, old_tag, new_tag, git_env)
+            write_rebased_patch_file(r_repo, p, new_sha, out_patch_dir, old_tag, old_commit, new_tag, git_env)
             for p, new_sha in rebased_commits
         ]
 
@@ -1163,7 +1487,7 @@ for uid, stage_repo, subdir, sparse_subpaths in ROUTER_SPECS:
         pre_conf_patch_dir = os.path.join(bundle_work, "rebased-patches", subdir)
         os.makedirs(pre_conf_patch_dir, exist_ok=True)
         for p, new_sha in rebased_commits:
-            write_rebased_patch_file(r_repo, p, new_sha, pre_conf_patch_dir, old_tag, new_tag, git_env)
+            write_rebased_patch_file(r_repo, p, new_sha, pre_conf_patch_dir, old_tag, old_commit, new_tag, git_env)
 
     r_pre_conflict = os.path.join(r_work, "pre-conflict")
     os.makedirs(r_pre_conflict, exist_ok=True)
@@ -1204,6 +1528,50 @@ for uid, stage_repo, subdir, sparse_subpaths in ROUTER_SPECS:
         "retired_patches": retired_names,
         "conflicted_files": conflicted_files,
     }
+
+# Pre-stage pack/llm-router/Dockerfile with graduated *_VERSION=<tag> and *_COMMIT="" pins.
+ARG_MAP = {
+    "llm-d-router": ("LLMD_ROUTER_VERSION", "LLMD_ROUTER_COMMIT"),
+    "vllm-router": ("VLLM_ROUTER_VERSION", "VLLM_ROUTER_COMMIT"),
+    "sgl-router": ("SGL_ROUTER_VERSION", "SGL_ROUTER_COMMIT"),
+}
+graduating_uids = [
+    uid
+    for uid, g in graduation.items()
+    if isinstance(g, dict)
+    and g.get("graduation_status") == "ready_to_graduate"
+    and stage_a_drifts.get(uid)
+]
+if graduating_uids:
+    df_src = os.path.join(repo_root, "pack/llm-router/Dockerfile")
+    with open(df_src, "r", encoding="utf-8") as f:
+        df_txt = f.read()
+    for uid in graduating_uids:
+        ver_arg, commit_arg = ARG_MAP[uid]
+        new_tag = target_tags[uid]
+        df_txt, n_ver = re.subn(
+            rf"^(ARG {re.escape(ver_arg)}=).*$",
+            rf"\g<1>{new_tag}",
+            df_txt,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if n_ver != 1:
+            raise SystemExit(f"FAIL: could not update {ver_arg} in pre-staged Dockerfile")
+        df_txt, n_com = re.subn(
+            rf"^(ARG {re.escape(commit_arg)}=).*$",
+            r'\g<1>""',
+            df_txt,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if n_com != 1:
+            raise SystemExit(f"FAIL: could not clear {commit_arg} in pre-staged Dockerfile")
+    df_dst = os.path.join(staged_tree, "pack/llm-router/Dockerfile")
+    os.makedirs(os.path.dirname(df_dst), exist_ok=True)
+    with open(df_dst, "w", encoding="utf-8") as f:
+        f.write(df_txt)
+    staged_patch_dirs.append("pack/llm-router/Dockerfile")
 
 rep["rebase"] = rebase_results
 with open(rep_path, "w", encoding="utf-8") as f:

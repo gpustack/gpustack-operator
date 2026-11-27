@@ -13,7 +13,12 @@ def has_dockerfile_arg(txt: str, name: str) -> bool:
     return any(pat.match(line) for line in txt.splitlines())
 
 
-def read_dockerfile_arg(txt: str, name: str, label: str = "Dockerfile") -> str:
+def read_dockerfile_arg(
+    txt: str,
+    name: str,
+    label: str = "Dockerfile",
+    allow_empty: bool = False,
+) -> str:
     pat = re.compile(rf"^[ \t]*ARG[ \t]+{re.escape(name)}=(.*)$")
     raw_rhs: str | None = None
     for line in txt.splitlines():
@@ -77,6 +82,12 @@ def read_dockerfile_arg(txt: str, name: str, label: str = "Dockerfile") -> str:
         tokens = list(lex)
     except ValueError as exc:
         raise SystemExit(f"FAIL: malformed ARG {name} in {label}: {exc}") from exc
+    if allow_empty:
+        if len(tokens) == 0:
+            return ""
+        if len(tokens) != 1:
+            raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
+        return tokens[0]
     if len(tokens) != 1 or not tokens[0]:
         raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
     return tokens[0]
@@ -84,13 +95,20 @@ def read_dockerfile_arg(txt: str, name: str, label: str = "Dockerfile") -> str:
 
 def main(argv: list[str]) -> int:
     optional = False
+    allow_empty = False
     args = argv[1:]
-    if args and args[0] == "--optional":
-        optional = True
-        args = args[1:]
+    while args and args[0].startswith("--"):
+        if args[0] == "--optional":
+            optional = True
+            args = args[1:]
+        elif args[0] == "--allow-empty":
+            allow_empty = True
+            args = args[1:]
+        else:
+            break
     if len(args) not in (2, 3):
         raise SystemExit(
-            "usage: dockerfile_arg.py [--optional] <dockerfile_path> <arg_name> [label]"
+            "usage: dockerfile_arg.py [--optional] [--allow-empty] <dockerfile_path> <arg_name> [label]"
         )
     path, name = args[0], args[1]
     label = args[2] if len(args) == 3 else path
@@ -101,7 +119,7 @@ def main(argv: list[str]) -> int:
         raise SystemExit(f"FAIL: cannot read {path}: {exc}") from exc
     if optional and not has_dockerfile_arg(txt, name):
         return 0
-    print(read_dockerfile_arg(txt, name, label))
+    print(read_dockerfile_arg(txt, name, label, allow_empty=allow_empty))
     return 0
 
 

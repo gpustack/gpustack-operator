@@ -253,7 +253,7 @@ if kind != roleKindDecode {
       Acceptance: `pack/llm-router/Dockerfile` declares paired `*_VERSION` and stage-scoped `*_COMMIT` ARGs (`LLMD_ROUTER_COMMIT=3283d440334109fc785d4380355cc0375fc32755`, `VLLM_ROUTER_COMMIT=c132dbc0cfdf5c642c3dca6caa71218f3c3035cb`, `SGL_ROUTER_COMMIT=51c77c89f889050599b6e6e4838a44c3b95d8384`), fetches sparse commits with `--filter=blob:none` for `sgl-router`, stamps `epp` `BuildRef` cleanly with or without commit, and leaves `SGLANG_GATEWAY_VERSION=gateway-v0.3.1` and `pack/llm-router/patches/sglang-gateway/**` untouched; `llm-d/0001` is rebased onto `3283d440...` with `systemone-parser` and `endpoint-health-filter` in `SupportedPlugins` plus `observer_testdata` cases for External DP and `endpoint-health-filter`; `vllm-router/0005` is deleted, `0002` is rebased onto `c132dbc0...` using `std::sync::RwLock<MooncakePrefillTable>` (never held across `.await`), and `0003` is rebased cleanly; `sgl-router/0001` applies cleanly on `51c77c89...`.
       Verify: `git apply --check` on every active patch against its pinned upstream commit SHA, plus upstream `epp` observer Go tests (`./cmd/epp/runner` `TestObserverSupportsRenderedOperatorProfiles` and `./pkg/epp/observer/...`) and `vllm-router` `0002` unit tests.
 
-- [ ] **T2 · `.auto-sync` ancestry-gated commit graduation, `sync_images` alerts, and lockfile/selftest suite (PR 1)**
+- [x] **T2 · `.auto-sync` ancestry-gated commit graduation, `sync_images` alerts, and lockfile/selftest suite (PR 1)**
       Blocked by: T1
       Owns: `.auto-sync/**`, `hack/check/autosync-selftest.sh`
       Gate: review

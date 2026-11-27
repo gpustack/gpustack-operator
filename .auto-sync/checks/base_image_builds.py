@@ -146,12 +146,14 @@ def format_workflow_command(workflow_repo: str, tag: str, target: str = "") -> s
     return " ".join(parts)
 
 
-def _read_arg_safe(df_path: str, arg_name: str, default: str = "") -> str:
+def _read_arg_safe(
+    df_path: str, arg_name: str, default: str = "", allow_empty: bool = False
+) -> str:
     txt = _read_text(df_path)
     if not txt or not has_dockerfile_arg(txt, arg_name):
         return default
     try:
-        return read_dockerfile_arg(txt, arg_name, df_path)
+        return read_dockerfile_arg(txt, arg_name, df_path, allow_empty=allow_empty)
     except SystemExit:
         return default
 
@@ -167,7 +169,7 @@ def _parse_all_dockerfile_args(txt: str) -> dict[str, str]:
         if name in args:
             continue
         try:
-            args[name] = read_dockerfile_arg(line, name)
+            args[name] = read_dockerfile_arg(line, name, allow_empty=True)
         except SystemExit:
             pass
     return args
@@ -263,7 +265,8 @@ def _changed_args_summary(base_df: str, cand_df: str) -> list[str]:
     for k in sorted(set(base_args) | set(cand_args)):
         if base_args.get(k) != cand_args.get(k):
             if k in cand_args:
-                changed.append(f"{k}={cand_args[k]}")
+                val = cand_args[k]
+                changed.append(f'{k}=""' if val == "" else f"{k}={val}")
             else:
                 changed.append(f"{k} removed")
     return changed

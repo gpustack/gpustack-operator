@@ -6,15 +6,19 @@ spec:
   goal:
     candidate: >-
       Synchronize disaggregated inference router recipes and patches (llm-d-router, vllm-router,
-      sgl-router, with legacy sgl-model-gateway frozen at gateway-v0.3.1) in pack/llm-router/ for
-      Stage A, or promote a published multi-arch gpustack/llm-router image tag across settings,
-      tests, and docs for Stage B using preflight-staged resources, update
-      .auto-sync/proposals/router.json (including base_image_builds), and pass all verification
+      sgl-router via paired *_VERSION and ancestry-gated optional *_COMMIT pins, with legacy
+      sgl-model-gateway permanently frozen at gateway-v0.3.1) in pack/llm-router/ for Stage A,
+      graduating commit-pinned routers only to stable release tags that contain their pinned
+      commit, or promote published multi-arch gpustack/llm-router, mirrored-envoy, and
+      mirrored-llm-d-router-disagg-sidecar image tags across settings, tests, and docs for
+      Stage B using preflight-staged resources, update .auto-sync/proposals/router.json
+      (including base_image_builds and sync_images recommendations), and pass all verification
       gates.
     noChange: >-
-      Confirm llm-d-router, vllm-router, sgl-router, frozen sglang-gateway, and the default
-      gpustack/llm-router image tag are already aligned with eligible upstream releases with zero
-      repository modifications.
+      Confirm llm-d-router, vllm-router, sgl-router (including any commit-pinned router held
+      back awaiting a stable release tag containing its pinned commit), frozen sglang-gateway,
+      and the default router, proxy, and sidecar image tags are already aligned with eligible
+      upstream releases with zero repository modifications.
   execution:
     mode: strict
     capabilities:
@@ -100,6 +104,7 @@ spec:
       - versions
       - subscriptions
       - base_image_builds
+      - sync_images
     schemaVersion: 1
   verification:
     localChecks:

@@ -42,7 +42,7 @@ assert_settings_md_only_keys \
   "${AUTOSYNC_CANDIDATE_ROOT}/docs/reference/settings.md" \
   "${ROUTER_SETTING_KEYS}"
 
-# 2. Parse router Dockerfile version pins.
+# 2. Parse router Dockerfile version and optional commit pins.
 CAND_DOCKERFILE="${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/Dockerfile"
 BASE_DOCKERFILE="${BASELINE_DIR}/pack/llm-router/Dockerfile"
 if [[ ! -f "${CAND_DOCKERFILE}" || ! -f "${BASE_DOCKERFILE}" ]]; then
@@ -53,20 +53,33 @@ fi
 extract_df_arg() {
   local df_path="$1"
   local arg_name="$2"
-  python3 - "${df_path}" "${arg_name}" <<'PY'
+  local allow_empty="${3:-false}"
+  local optional="${4:-false}"
+  python3 -B - "${SCRIPT_DIR}" "${df_path}" "${arg_name}" "${allow_empty}" "${optional}" <<'PY'
 import re
 import sys
 
-path, name = sys.argv[1:3]
+checks_dir, path, name, allow_empty_s, optional_s = sys.argv[1:6]
+allow_empty = allow_empty_s == "true"
+optional = optional_s == "true"
+sys.path.insert(0, checks_dir)
+from dockerfile_arg import read_dockerfile_arg
+
 with open(path, "r", encoding="utf-8") as f:
     txt = f.read()
-matches = re.findall(rf'^ARG {re.escape(name)}=(?:"([^"]+)"|([^\s#]+))', txt, re.MULTILINE)
+
+matches = re.findall(rf"^[ \t]*ARG[ \t]+{re.escape(name)}=", txt, re.MULTILINE)
+if len(matches) == 0:
+    if optional:
+        sys.exit(0)
+    print(f"FAIL: expected exactly 1 ARG {name} in {path}, found 0", file=sys.stderr)
+    sys.exit(1)
 if len(matches) != 1:
     print(f"FAIL: expected exactly 1 ARG {name} in {path}, found {len(matches)}", file=sys.stderr)
     sys.exit(1)
-val = (matches[0][0] or matches[0][1]).strip()
-if not val:
-    print(f"FAIL: empty ARG {name} in {path}", file=sys.stderr)
+val = read_dockerfile_arg(txt, name, path, allow_empty=allow_empty).strip()
+if allow_empty and val and not re.fullmatch(r"[0-9a-fA-F]{7,40}", val):
+    print(f"FAIL: invalid commit SHA in ARG {name}={val!r} in {path}", file=sys.stderr)
     sys.exit(1)
 print(val)
 PY
@@ -77,10 +90,24 @@ CAND_VLLM_VER="$(extract_df_arg "${CAND_DOCKERFILE}" "VLLM_ROUTER_VERSION")"
 CAND_SGLANG_VER="$(extract_df_arg "${CAND_DOCKERFILE}" "SGLANG_GATEWAY_VERSION")"
 CAND_SGL_ROUTER_VER="$(extract_df_arg "${CAND_DOCKERFILE}" "SGL_ROUTER_VERSION")"
 
+CAND_LLMD_COMMIT="$(extract_df_arg "${CAND_DOCKERFILE}" "LLMD_ROUTER_COMMIT" "true" "true")"
+CAND_VLLM_COMMIT="$(extract_df_arg "${CAND_DOCKERFILE}" "VLLM_ROUTER_COMMIT" "true" "true")"
+CAND_SGL_ROUTER_COMMIT="$(extract_df_arg "${CAND_DOCKERFILE}" "SGL_ROUTER_COMMIT" "true" "true")"
+
 BASE_LLMD_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "LLMD_ROUTER_VERSION")"
 BASE_VLLM_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "VLLM_ROUTER_VERSION")"
 BASE_SGLANG_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "SGLANG_GATEWAY_VERSION")"
 BASE_SGL_ROUTER_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "SGL_ROUTER_VERSION")"
+
+BASE_LLMD_COMMIT="$(extract_df_arg "${BASE_DOCKERFILE}" "LLMD_ROUTER_COMMIT" "true" "true")"
+BASE_VLLM_COMMIT="$(extract_df_arg "${BASE_DOCKERFILE}" "VLLM_ROUTER_COMMIT" "true" "true")"
+BASE_SGL_ROUTER_COMMIT="$(extract_df_arg "${BASE_DOCKERFILE}" "SGL_ROUTER_COMMIT" "true" "true")"
+
+if grep -Eq '^[[:space:]]*ARG[[:space:]]+SGLANG_GATEWAY_COMMIT=' "${CAND_DOCKERFILE}"; then
+  printf 'FAIL: SGLANG_GATEWAY_COMMIT is forbidden; sglang-gateway is permanently frozen at %s\n' \
+    "gateway-v0.3.1" >&2
+  exit 1
+fi
 
 # 2b. Enforce permanent freeze on legacy sglang-gateway (deleted upstream in PR #50732).
 FROZEN_SGLANG_GATEWAY_VERSION="gateway-v0.3.1"
@@ -134,7 +161,8 @@ if [[ -z "${PREFLIGHT_STAGE}" ]]; then
   printf 'FAIL: empty stage in %s\n' "${PREFLIGHT_REPORT}" >&2
   exit 1
 fi
-if [[ "${RETIRE_0001}" == "false" && ! -f "${EPD_PATCH}" ]]; then
+BASE_EPD_PATCH="${BASELINE_DIR}/pack/llm-router/patches/vllm-router/0001-epd-routing.patch"
+if [[ -f "${BASE_EPD_PATCH}" && "${RETIRE_0001}" == "false" && ! -f "${EPD_PATCH}" ]]; then
   printf 'FAIL: 0001-epd-routing.patch was deleted while retire_0001_epd_routing is false\n' >&2
   exit 1
 fi
@@ -148,6 +176,91 @@ if [[ "${RETIRE_0004}" == "true" && ( -z "${TARGET_VLLM_VER}" || "${CAND_VLLM_VE
     "${TARGET_VLLM_VER:-${CAND_VLLM_VER:-unknown}}" >&2
   exit 1
 fi
+
+# 3b. Anti-downgrade commit graduation gate: auto-sync candidates may never introduce a new
+# *_COMMIT pin, mutate *_VERSION while a pinned commit stays unchanged, or clear/modify a
+# non-empty *_COMMIT without preflight proof that is-ancestor(BASE_COMMIT, CAND_VERSION) == true.
+python3 -B - \
+  "${PREFLIGHT_REPORT}" "${STAGE_DIR}" \
+  "${BASE_LLMD_VER}" "${BASE_LLMD_COMMIT}" "${CAND_LLMD_COMMIT}" "${CAND_LLMD_VER}" \
+  "${BASE_VLLM_VER}" "${BASE_VLLM_COMMIT}" "${CAND_VLLM_COMMIT}" "${CAND_VLLM_VER}" \
+  "${BASE_SGL_ROUTER_VER}" "${BASE_SGL_ROUTER_COMMIT}" "${CAND_SGL_ROUTER_COMMIT}" "${CAND_SGL_ROUTER_VER}" <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+(
+    rep_path,
+    stage_dir,
+    base_llmd_v,
+    base_llmd_c,
+    cand_llmd_c,
+    cand_llmd_v,
+    base_vllm_v,
+    base_vllm_c,
+    cand_vllm_c,
+    cand_vllm_v,
+    base_sgl_v,
+    base_sgl_c,
+    cand_sgl_c,
+    cand_sgl_v,
+) = sys.argv[1:15]
+
+with open(rep_path, "r", encoding="utf-8") as f:
+    rep = json.load(f)
+
+graduation = rep.get("graduation") if isinstance(rep.get("graduation"), dict) else {}
+
+checks = (
+    ("llm-d-router", base_llmd_v, base_llmd_c, cand_llmd_c, cand_llmd_v, os.path.join(stage_dir, "llm-d-router") if stage_dir else ""),
+    ("vllm-router", base_vllm_v, base_vllm_c, cand_vllm_c, cand_vllm_v, os.path.join(stage_dir, "vllm-router") if stage_dir else ""),
+    ("sgl-router", base_sgl_v, base_sgl_c, cand_sgl_c, cand_sgl_v, os.path.join(stage_dir, "sgl-router") if stage_dir else ""),
+)
+
+for uid, base_v, base_c, cand_c, cand_v, stage_repo in checks:
+    if not base_c:
+        if cand_c:
+            raise SystemExit(
+                f"FAIL: {uid} introduced a new pinned commit ({cand_c}) from tag-pinned baseline; "
+                "auto-sync candidates may only graduate existing *_COMMIT pins to empty"
+            )
+        continue
+    if cand_c == base_c:
+        if cand_v != base_v:
+            raise SystemExit(
+                f"FAIL: {uid} modified *_VERSION ({base_v} -> {cand_v}) while pinned commit {base_c} remained unchanged"
+            )
+        continue
+    if cand_c:
+        raise SystemExit(
+            f"FAIL: {uid} modified pinned commit ({base_c} -> {cand_c}); "
+            "only ancestry-proven graduation clearing *_COMMIT to empty onto a stable tag is allowed"
+        )
+    grad = graduation.get(uid)
+    if (
+        not isinstance(grad, dict)
+        or grad.get("pinned_commit") != base_c
+        or grad.get("is_ancestor") is not True
+        or grad.get("graduation_status") != "ready_to_graduate"
+        or grad.get("latest_tag") != cand_v
+    ):
+        raise SystemExit(
+            f"FAIL: anti-downgrade gate rejected clearing {uid} pinned commit {base_c} onto {cand_v} "
+            f"without preflight proof that is-ancestor({base_c}, {cand_v}) == true (report graduation={grad!r})"
+        )
+    if stage_repo and os.path.isdir(os.path.join(stage_repo, ".git")):
+        anc = subprocess.run(
+            ["git", "-C", stage_repo, "merge-base", "--is-ancestor", base_c, f"refs/tags/{cand_v}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if anc.returncode != 0:
+            raise SystemExit(
+                f"FAIL: anti-downgrade gate rejected {uid} graduation to {cand_v}: "
+                f"git merge-base --is-ancestor {base_c} refs/tags/{cand_v} failed in staged repo"
+            )
+PY
 
 # 4. Apply patches cleanly against staged upstream clones and verify struct ObserverRouter.
 apply_staged_patches() {
@@ -254,10 +367,14 @@ apply_staged_patches() {
   fi
 }
 
-apply_staged_patches "llm-d-router" "${STAGE_DIR}/llm-d-router" "${CAND_LLMD_VER}" \
+CAND_LLMD_REF="${CAND_LLMD_COMMIT:-${CAND_LLMD_VER}}"
+CAND_VLLM_REF="${CAND_VLLM_COMMIT:-${CAND_VLLM_VER}}"
+CAND_SGL_ROUTER_REF="${CAND_SGL_ROUTER_COMMIT:-${CAND_SGL_ROUTER_VER}}"
+
+apply_staged_patches "llm-d-router" "${STAGE_DIR}/llm-d-router" "${CAND_LLMD_REF}" \
   "${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/llm-d"
 
-apply_staged_patches "vllm-router" "${STAGE_DIR}/vllm-router" "${CAND_VLLM_VER}" \
+apply_staged_patches "vllm-router" "${STAGE_DIR}/vllm-router" "${CAND_VLLM_REF}" \
   "${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/vllm-router"
 
 SGLANG_GW_STAGE="${STAGE_DIR}/sglang-gateway"
@@ -267,7 +384,7 @@ fi
 apply_staged_patches "sglang-gateway" "${SGLANG_GW_STAGE}" "${CAND_SGLANG_VER}" \
   "${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/sglang-gateway" "sgl-model-gateway"
 
-apply_staged_patches "sgl-router" "${STAGE_DIR}/sgl-router" "${CAND_SGL_ROUTER_VER}" \
+apply_staged_patches "sgl-router" "${STAGE_DIR}/sgl-router" "${CAND_SGL_ROUTER_REF}" \
   "${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/sgl-router" "sgl-router" "rust"
 
 # 5. Detect modified router stages and run targeted docker buildx verification.
@@ -277,7 +394,10 @@ CHANGED_STAGES="$(python3 - \
   "${BASE_LLMD_VER}" "${CAND_LLMD_VER}" \
   "${BASE_VLLM_VER}" "${CAND_VLLM_VER}" \
   "${BASE_SGLANG_VER}" "${CAND_SGLANG_VER}" \
-  "${BASE_SGL_ROUTER_VER}" "${CAND_SGL_ROUTER_VER}" <<'PY'
+  "${BASE_SGL_ROUTER_VER}" "${CAND_SGL_ROUTER_VER}" \
+  "${BASE_LLMD_COMMIT}" "${CAND_LLMD_COMMIT}" \
+  "${BASE_VLLM_COMMIT}" "${CAND_VLLM_COMMIT}" \
+  "${BASE_SGL_ROUTER_COMMIT}" "${CAND_SGL_ROUTER_COMMIT}" <<'PY'
 import os
 import re
 import subprocess
@@ -296,7 +416,13 @@ import sys
     cand_sglang,
     base_sgl_router,
     cand_sgl_router,
-) = sys.argv[1:13]
+    base_llmd_commit,
+    cand_llmd_commit,
+    base_vllm_commit,
+    cand_vllm_commit,
+    base_sgl_router_commit,
+    cand_sgl_router_commit,
+) = sys.argv[1:19]
 
 ALL_BUILDERS = (
     "epp-builder",
@@ -306,13 +432,13 @@ ALL_BUILDERS = (
 )
 stages = set()
 
-if cand_llmd != base_llmd:
+if cand_llmd != base_llmd or cand_llmd_commit != base_llmd_commit:
     stages.add("epp-builder")
-if cand_vllm != base_vllm:
+if cand_vllm != base_vllm or cand_vllm_commit != base_vllm_commit:
     stages.add("vllm-router-builder")
 if cand_sglang != base_sglang:
     stages.add("sglang-gateway-builder")
-if cand_sgl_router != base_sgl_router:
+if cand_sgl_router != base_sgl_router or cand_sgl_router_commit != base_sgl_router_commit:
     stages.add("sgl-router-builder")
 
 patch_map = (
@@ -337,7 +463,12 @@ def split_dockerfile(path: str) -> tuple[list[str], dict[str, list[str]]]:
     sections: dict[str, list[str]] = {}
     cur_name = None
     router_arg_re = re.compile(
-        r"^ARG (?:LLMD_ROUTER_VERSION|VLLM_ROUTER_VERSION|SGLANG_GATEWAY_VERSION|SGL_ROUTER_VERSION)="
+        r"^ARG (?:"
+        r"LLMD_ROUTER_VERSION|LLMD_ROUTER_COMMIT|"
+        r"VLLM_ROUTER_VERSION|VLLM_ROUTER_COMMIT|"
+        r"SGLANG_GATEWAY_VERSION|"
+        r"SGL_ROUTER_VERSION|SGL_ROUTER_COMMIT"
+        r")="
     )
     from_re = re.compile(r"^\s*FROM\s+\S+(?:\s+AS\s+([A-Za-z0-9._-]+))?", re.IGNORECASE)
     with open(path, "r", encoding="utf-8") as f:
@@ -566,19 +697,38 @@ if [[ "${IMAGES_CHANGED}" == "true" || -f "${MANIFESTS_JSON}" ]]; then
   autosync::assert_image_published "${MANIFESTS_JSON}" "${SIDECAR_IMG}"
 fi
 
-# 6b. Proposal schema and version parity (.auto-sync/proposals/router.json).
+# 6b. Proposal schema, version parity, and sync_images validation (.auto-sync/proposals/router.json).
 CAND_PROPOSAL="${AUTOSYNC_CANDIDATE_ROOT}/.auto-sync/proposals/router.json"
-python3 - "${CAND_PROPOSAL}" "${CAND_LLMD_VER}" "${CAND_VLLM_VER}" "${CAND_SGLANG_VER}" "${CAND_SGL_ROUTER_VER}" "${IMAGES_CHANGED}" "${HELD_ROUTER_KEYS}" <<'PY'
+python3 -B - \
+  "${CAND_PROPOSAL}" "${PREFLIGHT_REPORT}" \
+  "${CAND_LLMD_VER}" "${CAND_VLLM_VER}" "${CAND_SGLANG_VER}" "${CAND_SGL_ROUTER_VER}" \
+  "${CAND_LLMD_COMMIT}" "${CAND_VLLM_COMMIT}" "${CAND_SGL_ROUTER_COMMIT}" \
+  "${IMAGES_CHANGED}" "${HELD_ROUTER_KEYS}" <<'PY'
 import json
 import os
+import shlex
 import sys
 
-prop_p, llmd_v, vllm_v, sglang_v, sgl_router_v, images_changed_str, held_keys_csv = sys.argv[1:8]
+(
+    prop_p,
+    rep_p,
+    llmd_v,
+    vllm_v,
+    sglang_v,
+    sgl_router_v,
+    llmd_c,
+    vllm_c,
+    sgl_router_c,
+    images_changed_str,
+    held_keys_csv,
+) = sys.argv[1:12]
 held_keys = {k for k in held_keys_csv.split(",") if k}
 if not os.path.isfile(prop_p):
     raise SystemExit(f"FAIL: missing proposal artifact: {prop_p}")
 with open(prop_p, "r", encoding="utf-8") as f:
     prop = json.load(f)
+with open(rep_p, "r", encoding="utf-8") as f:
+    rep = json.load(f)
 
 if not isinstance(prop, dict) or prop.get("schema_version") != 1:
     raise SystemExit("FAIL: proposals/router.json must have schema_version == 1")
@@ -593,22 +743,93 @@ versions = prop.get("versions")
 if not isinstance(versions, dict):
     raise SystemExit("FAIL: proposals/router.json versions must be a JSON object")
 
+
+def fmt_pinned(ver: str, commit: str) -> str:
+    return f"{ver}+{commit[:7]}" if commit else ver
+
+
 allow_stage_b = (stage == "tag_promotion") or (images_changed_str == "true")
 expected = {
-    "llm-d-router": (llmd_v, not ({"router", "proxy", "sidecar"} <= held_keys)),
-    "vllm-router": (vllm_v, "router" not in held_keys),
-    "sglang-gateway": (sglang_v, "router" not in held_keys),
-    "sgl-router": (sgl_router_v, "router" not in held_keys),
+    "llm-d-router": (llmd_v, fmt_pinned(llmd_v, llmd_c), not ({"router", "proxy", "sidecar"} <= held_keys)),
+    "vllm-router": (vllm_v, fmt_pinned(vllm_v, vllm_c), "router" not in held_keys),
+    "sglang-gateway": (sglang_v, sglang_v, "router" not in held_keys),
+    "sgl-router": (sgl_router_v, fmt_pinned(sgl_router_v, sgl_router_c), "router" not in held_keys),
 }
-for uid, (exp_v, uid_allow_sb) in expected.items():
+for uid, (raw_v, exp_v, uid_allow_sb) in expected.items():
     got = versions.get(uid)
     if not isinstance(got, str) or not got.strip():
         raise SystemExit(f"FAIL: proposals/router.json versions.{uid} must be a non-empty string")
     if got == exp_v:
         continue
-    if allow_stage_b and uid_allow_sb and got == f"{exp_v}+stage-b":
+    if allow_stage_b and uid_allow_sb and got in (f"{raw_v}+stage-b", f"{exp_v}+stage-b"):
         continue
     raise SystemExit(f"FAIL: proposals/router.json versions.{uid} ({got!r}) != pinned ({exp_v!r})")
+
+if "sync_images" not in prop or not isinstance(prop.get("sync_images"), list):
+    raise SystemExit("FAIL: proposals/router.json sync_images must be present as a JSON array")
+
+expected_sync = rep.get("sync_images")
+if expected_sync is None:
+    expected_sync = []
+if not isinstance(expected_sync, list):
+    raise SystemExit(f"FAIL: {rep_p} sync_images must be a JSON array")
+
+
+def validate_sync_command(cmd: str, src: str) -> str | None:
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError as exc:
+        return f"command is not valid shell syntax: {exc}"
+    if len(tokens) < 4 or tokens[:4] != ["gh", "workflow", "run", "Sync Image"]:
+        return f'command must invoke `gh workflow run "Sync Image" ...`, got {cmd!r}'
+    inputs: dict[str, str] = {}
+    i = 4
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in ("-f", "--raw-field", "-F", "--field"):
+            if i + 1 >= len(tokens) or "=" not in tokens[i + 1]:
+                return f"malformed {tok} input in command: {cmd!r}"
+            k, v = tokens[i + 1].split("=", 1)
+            inputs[k] = v
+            i += 2
+            continue
+        i += 1
+    if inputs.get("images") != src:
+        return f"command images input ({inputs.get('images')!r}) != source {src!r}"
+    return None
+
+
+seen_sync_keys: set[tuple[str, str]] = set()
+for idx, item in enumerate(prop["sync_images"]):
+    if not isinstance(item, dict):
+        raise SystemExit(f"FAIL: proposals/router.json sync_images[{idx}] must be a JSON object")
+    src = item.get("source")
+    dst = item.get("destination")
+    reason = item.get("reason")
+    cmd = item.get("command")
+    for field_name, val in (("source", src), ("destination", dst), ("reason", reason), ("command", cmd)):
+        if not isinstance(val, str) or not val.strip():
+            raise SystemExit(
+                f"FAIL: proposals/router.json sync_images[{idx}].{field_name} must be a non-empty string"
+            )
+    err = validate_sync_command(cmd, src.strip())
+    if err:
+        raise SystemExit(f"FAIL: proposals/router.json sync_images[{idx}]: {err}")
+    key = (src.strip(), dst.strip())
+    if key in seen_sync_keys:
+        raise SystemExit(f"FAIL: proposals/router.json sync_images has duplicate entry for {src} -> {dst}")
+    seen_sync_keys.add(key)
+
+expected_sync_keys = {
+    (str(item.get("source") or "").strip(), str(item.get("destination") or "").strip())
+    for item in expected_sync
+    if isinstance(item, dict)
+}
+if seen_sync_keys != expected_sync_keys:
+    raise SystemExit(
+        f"FAIL: proposals/router.json sync_images ({sorted(seen_sync_keys)}) "
+        f"!= preflight report sync_images ({sorted(expected_sync_keys)})"
+    )
 PY
 
 # 6c. Validate Base Image build recommendations whenever pack/llm-router/** changed.
