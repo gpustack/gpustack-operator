@@ -57,7 +57,7 @@ image floors:
 
 | Component | Minimum image | Compatibility notes |
 |---|---|---|
-| Managed routers (`llm-d-router`, `vllm-router`, `sgl-router`) | `gpustack/llm-router >= v0.6.1` | Required by `llm-d-router` for `endpoint-health-filter` and `--allow-experimental-plugins=true`; earlier `v0.6.0` images crash-loop on `epp.yaml`. |
+| Managed routers (`llm-d-router`, `vllm-router`, `sgl-router`) | `gpustack/llm-router >= v0.6.1` | Required for `llm-d-router` [Fault resilience](routing.md#fault-resilience); earlier `v0.6.0` images crash-loop on `epp.yaml`. |
 | `llm-d-router` *Decode* sidecar | `gpustack/mirrored-llm-d-router-disagg-sidecar >= v1.0.0` | Standing `v0.11.0` *Decode* `Pod`s stay compatible on basic *PD*/*EPD* and adopt `v1.0.0` on next trigger. |
 
 ## Engine version resolution

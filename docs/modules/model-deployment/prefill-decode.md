@@ -108,10 +108,9 @@ Admission matches *`spec.router.name`* to *`spec.engine.name`* and rejects cross
   addresses/ports, service-discovery flags, disaggregation flags, `vllm-router`'s `--kv-connector`,
   and `sgl-router`'s `--model-id`, `--chat-routing`, `--no-tokenizer`, and `--dp-aware`.
 - **Fixed east-west flags**: `llm-d-router` fixes `--secure-serving=false` (loopback gRPC inside
-  the `Pod`) and `--metrics-endpoint-auth=false` (in-cluster scrape), and passes
-  `--allow-experimental-plugins=true` for `endpoint-health-filter` (active on `server`, `prefill`,
-  and `decode`; excluded from `encode`). Enforce caller TLS and auth at the north-south cluster
-  gateway.
+  the `Pod`) and `--metrics-endpoint-auth=false` (in-cluster scrape), and enables
+  [Fault resilience](routing.md#fault-resilience) via `--allow-experimental-plugins=true`. Enforce
+  caller TLS and auth at the north-south cluster gateway.
 - **Disaggregation runtime enhancements**: `vllm-router` supports post-prefill *Decode* selection,
   cancellation-safe load accounting, and *EPD* consumer `DP > 1`. `llm-d-router` `v1.0.0` decode
   sidecars add concurrent *PD* failure cancellation, per-rank EC binding, `/metrics`, and

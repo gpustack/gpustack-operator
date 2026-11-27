@@ -396,7 +396,7 @@ func renderLLMD(input Input) (Output, error) {
 			map[string]any{"pluginRef": "queue-scorer", "weight": 2},
 			map[string]any{"pluginRef": "kv-cache-utilization-scorer", "weight": 2},
 			map[string]any{"pluginRef": "max-score-picker"})
-		if kind != roleKindDecode && !(kind == roleKindServer && externalDP[kind]) {
+		if kind != roleKindDecode && (kind != roleKindServer || !externalDP[kind]) {
 			profilePlugins = append(profilePlugins,
 				map[string]any{"pluginRef": "prefix-cache-scorer", "weight": 3})
 		}

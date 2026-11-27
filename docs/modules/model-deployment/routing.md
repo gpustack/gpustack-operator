@@ -29,7 +29,7 @@ resilience controls, and disaggregation features:
 | *External DP* | Balanced (`prefix-cache-scorer` omitted on *Server*, round-robin tie-break) | Per-rank endpoints (`--policy round_robin`) | `--dp-aware` (*Server* and *PD*; `--dp-rank-policy least_tokens`) | `--dp-aware` (undivided *Server* only) |
 | Fault resilience | `endpoint-health-filter` (`502`/`503` eject on `server`/`prefill`/`decode`, never `encode`) | Built-in circuit breaker | Built-in circuit breaker | Built-in circuit breaker |
 | API highlights | `/v1/responses` via `v1.0.0` sidecar | OpenAI-compatible HTTP | Stateless `/v1/responses`, `--cache-media-affinity-ttl-ms` | OpenAI-compatible HTTP |
-| Image floor | `gpustack/llm-router >= v0.6.1`, sidecar `>= v1.0.0` | `gpustack/llm-router >= v0.6.1` | `gpustack/llm-router >= v0.6.1` | Frozen `gateway-v0.3.1` |
+| Image floor | See [Router image floors](engine-versions.md#router-image-floors) | See [Router image floors](engine-versions.md#router-image-floors) | See [Router image floors](engine-versions.md#router-image-floors) | Frozen `gateway-v0.3.1` |
 
 ### Fault resilience
 
