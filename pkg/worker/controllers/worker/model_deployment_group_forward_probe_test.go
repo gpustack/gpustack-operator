@@ -1124,6 +1124,175 @@ func TestGroupForwardMetricSumEdgeCases(t *testing.T) {
 	assert.False(t, ok)
 }
 
+// TestGroupForwardProbePDPairNixlv2RewrittenRequestID pins the llm-d nixlv2 sidecar behavior:
+// connector_nixlv2 overwrites X-Request-Id with a fresh UUID, so vLLM answers with "cmpl-<uuid>"
+// instead of echoing request_id. That reply is accepted only for nixlv2 routing-proxy pairs AND
+// only when prefill Prometheus metrics corroborate that the pair carried the request. Non-nixlv2
+// connectors (such as mooncake) still strictly require exact id binding.
+func TestGroupForwardProbePDPairNixlv2RewrittenRequestID(t *testing.T) {
+	origDelay := modelDeploymentGroupForwardPairMetricsRetryDelay
+	modelDeploymentGroupForwardPairMetricsRetryDelay = 0
+	t.Cleanup(func() {
+		modelDeploymentGroupForwardPairMetricsRetryDelay = origDelay
+	})
+
+	testCases := []struct {
+		name              string
+		kvConnectorArg    string
+		sidecarInInit     bool
+		kvTransferBackend string
+		decodeResponse    string
+		beforePrefill     string
+		afterPrefill      string
+		failPrefill       bool
+		wantState         modelDeploymentGroupForwardState
+		wantRewrittenID   bool
+		wantConfirmed     bool
+		wantInReason      string
+	}{
+		{
+			name:            "nixlv2 native sidecar returning cmpl-uuid with advancing prefill metrics verifies",
+			kvConnectorArg:  "--kv-connector=nixlv2",
+			sidecarInInit:   true,
+			decodeResponse:  `{"id":"cmpl-550e8400-e29b-41d4-a716-446655440000","choices":[{"text":"ok","finish_reason":"length"}]}`,
+			beforePrefill:   "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 0.0\n",
+			afterPrefill:    "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 1.0\n",
+			wantState:       modelDeploymentGroupForwardVerified,
+			wantRewrittenID: true,
+			wantConfirmed:   true,
+			wantInReason:    "prefill metrics advanced during the probe window",
+		},
+		{
+			name:            "nixlv2 classic sidecar container returning cmpl-uuid with advancing prefill metrics verifies",
+			kvConnectorArg:  "--kv-connector=nixlv2",
+			sidecarInInit:   false,
+			decodeResponse:  `{"id":"cmpl-11111111-2222-3333-4444-555555555555","choices":[{"text":"ok","finish_reason":"stop"}]}`,
+			beforePrefill:   "# first request materializes series\n",
+			afterPrefill:    "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 1.0\n",
+			wantState:       modelDeploymentGroupForwardVerified,
+			wantRewrittenID: true,
+			wantConfirmed:   true,
+			wantInReason:    "proxy-rewritten request id",
+		},
+		{
+			name:              "nixlv2 fallback via spec.kvTransfer NIXL when pod fixture omits sidecar container verifies",
+			kvTransferBackend: workercore.ModelDeploymentKVTransferBackendNIXL,
+			decodeResponse:    `{"id":"cmpl-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","choices":[{"text":"ok","finish_reason":"length"}]}`,
+			beforePrefill:     "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 2.0\n",
+			afterPrefill:      "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 3.0\n",
+			wantState:         modelDeploymentGroupForwardVerified,
+			wantRewrittenID:   true,
+			wantConfirmed:     true,
+		},
+		{
+			name:            "nixlv2 returning cmpl-uuid with prefill metrics unavailable holds",
+			kvConnectorArg:  "--kv-connector=nixlv2",
+			sidecarInInit:   true,
+			decodeResponse:  `{"id":"cmpl-550e8400-e29b-41d4-a716-446655440000","choices":[{"text":"ok","finish_reason":"length"}]}`,
+			failPrefill:     true,
+			wantState:       modelDeploymentGroupForwardUnknown,
+			wantRewrittenID: true,
+			wantInReason:    "prefill /metrics was unavailable",
+		},
+		{
+			name:            "nixlv2 returning cmpl-uuid with unchanged prefill request_success_total holds",
+			kvConnectorArg:  "--kv-connector=nixlv2",
+			sidecarInInit:   true,
+			decodeResponse:  `{"id":"cmpl-550e8400-e29b-41d4-a716-446655440000","choices":[{"text":"ok","finish_reason":"length"}]}`,
+			beforePrefill:   "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 1.0\n",
+			afterPrefill:    "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 1.0\n",
+			wantState:       modelDeploymentGroupForwardUnknown,
+			wantRewrittenID: true,
+			wantInReason:    "vllm:request_success_total did not advance",
+		},
+		{
+			name:            "nixlv2 returning cmpl-uuid with empty prefill metrics exposition holds",
+			kvConnectorArg:  "--kv-connector=nixlv2",
+			sidecarInInit:   true,
+			decodeResponse:  `{"id":"cmpl-550e8400-e29b-41d4-a716-446655440000","choices":[{"text":"ok","finish_reason":"length"}]}`,
+			beforePrefill:   "# empty\n",
+			afterPrefill:    "# empty\n",
+			wantState:       modelDeploymentGroupForwardUnknown,
+			wantRewrittenID: true,
+			wantInReason:    "exported no advancing request counter",
+		},
+		{
+			name:           "nixlv2 returning empty-suffix cmpl- id holds as unbound",
+			kvConnectorArg: "--kv-connector=nixlv2",
+			sidecarInInit:  true,
+			decodeResponse: `{"id":"cmpl-","choices":[{"text":"ok","finish_reason":"length"}]}`,
+			beforePrefill:  "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 0.0\n",
+			afterPrefill:   "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 1.0\n",
+			wantState:      modelDeploymentGroupForwardUnknown,
+			wantInReason:   "not bound to this operator's own request",
+		},
+		{
+			name:           "mooncake sidecar returning mismatched cmpl-other still holds as unbound",
+			kvConnectorArg: "--kv-connector=mooncake",
+			sidecarInInit:  true,
+			decodeResponse: `{"id":"cmpl-other-request","choices":[{"text":"ok","finish_reason":"length"}]}`,
+			beforePrefill:  "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 0.0\n",
+			afterPrefill:   "vllm:request_success_total{finished_reason=\"length\",model_name=\"m\"} 1.0\n",
+			wantState:      modelDeploymentGroupForwardUnknown,
+			wantInReason:   "not bound to this operator's own request",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := probePairDeployment(workercore.ModelDeploymentEngineVLLM, 1, 1, workercore.ModelDeploymentRouterLLMD)
+			if tc.kvTransferBackend != "" {
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: tc.kvTransferBackend}
+			}
+			prefill := probePairView("prefill", 0, probePairMember(0, 0, "uid-p", "8998"))
+			decodeMember := probePairEnginePortMember(1, 0, "uid-d", "8200")
+			if tc.kvConnectorArg != "" {
+				sidecar := core.Container{
+					Name: "routing-proxy",
+					Args: []string{"--port=8000", "--model-server-port=8200", tc.kvConnectorArg},
+				}
+				if tc.sidecarInInit {
+					decodeMember.Spec.InitContainers = []core.Container{sidecar}
+				} else {
+					decodeMember.Spec.Containers = []core.Container{sidecar}
+				}
+			}
+			decode := probePairView("decode", 0, decodeMember)
+
+			var postDone atomic.Bool
+			fetch := func(_ context.Context, request modelDeploymentGroupForwardPairRequest) ([]byte, error) {
+				isPrefill := strings.Contains(request.URL, probeMemberIP(0, 0))
+				if request.Method == http.MethodGet {
+					if isPrefill {
+						if tc.failPrefill {
+							return nil, errors.New("connection refused")
+						}
+						if postDone.Load() {
+							return []byte(tc.afterPrefill), nil
+						}
+						return []byte(tc.beforePrefill), nil
+					}
+					return []byte("# no mooncake series\n"), nil
+				}
+				postDone.Store(true)
+				return []byte(tc.decodeResponse), nil
+			}
+
+			got := observeModelDeploymentGroupForwardPair(
+				context.Background(), md, prefill, decode, fetch,
+			)
+
+			assert.Equal(t, tc.wantState, got.Prefill.State)
+			assert.Equal(t, tc.wantState, got.Decode.State)
+			assert.Equal(t, tc.wantRewrittenID, got.Attempt.ProxyRewroteRequestID)
+			assert.Equal(t, tc.wantConfirmed, got.Attempt.PrefillMetricsConfirmed)
+			if tc.wantInReason != "" {
+				assert.Contains(t, got.Decode.Reason, tc.wantInReason)
+			}
+		})
+	}
+}
+
 // TestGroupForwardProbePDPairHoldsOnAnythingItCannotSee is the fail-closed contract of the directed
 // pair probe. Every case is a way the pair can fail to be observed, and every one of them reads
 // Unknown for BOTH roles, because a pair that could not be observed says nothing about which side

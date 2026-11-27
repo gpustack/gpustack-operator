@@ -108,7 +108,7 @@ func TestModelDeploymentImageSettings(t *testing.T) {
 			ModelDeploymentRouterImage,
 			"model-deployment-router-image",
 			"GPUSTACK_MODEL_DEPLOYMENT_ROUTER_IMAGE",
-			"gpustack/llm-router:v0.6.0",
+			"gpustack/llm-router:v0.6.1",
 		},
 		{
 			ModelDeploymentModelExpressServerImage,
@@ -120,7 +120,7 @@ func TestModelDeploymentImageSettings(t *testing.T) {
 			ModelDeploymentRoutingSidecarImage,
 			"model-deployment-routing-sidecar-image",
 			"GPUSTACK_MODEL_DEPLOYMENT_ROUTING_SIDECAR_IMAGE",
-			"gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0",
+			"gpustack/mirrored-llm-d-router-disagg-sidecar:v1.0.0",
 		},
 	}
 	for _, c := range cases {

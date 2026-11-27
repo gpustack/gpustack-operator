@@ -930,6 +930,20 @@ func TestValidateModelDeployment(t *testing.T) {
 			wantMessage: "spec.router.extraArgs[0]",
 		},
 		{
+			name: "router_allow_experimental_plugins_is_owned",
+			md: routedModelDeployment(func(r *workercore.ModelDeploymentRouter) {
+				r.ExtraArgs = []string{"--allow-experimental-plugins"}
+			}),
+			wantMessage: "spec.router.extraArgs[0]",
+		},
+		{
+			name: "router_allow_experimental_plugins_false_is_owned",
+			md: routedModelDeployment(func(r *workercore.ModelDeploymentRouter) {
+				r.ExtraArgs = []string{"--allow-experimental-plugins=false"}
+			}),
+			wantMessage: "spec.router.extraArgs[0]",
+		},
+		{
 			name: "router_extra_args_unowned_key",
 			md: routedModelDeployment(func(r *workercore.ModelDeploymentRouter) {
 				r.ExtraArgs = []string{"--zap-log-level=debug"}

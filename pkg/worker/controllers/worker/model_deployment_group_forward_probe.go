@@ -668,6 +668,9 @@ type modelDeploymentGroupForwardPairAttempt struct {
 	// DecodeMetricsChecked reports whether decode /metrics answered both before and after the
 	// warmup request so zero new decode transfer failures were actually observed.
 	DecodeMetricsChecked bool
+	// ProxyRewroteRequestID reports whether a nixlv2 routing proxy rewrote X-Request-Id so the
+	// completion response carried the sidecar's generated id instead of this operator's request_id.
+	ProxyRewroteRequestID bool
 }
 
 // modelDeploymentGroupForwardPairResult is the outcome of one directed pair probe: one result per
@@ -725,6 +728,10 @@ type modelDeploymentGroupForwardPairReply struct {
 	Unreadable bool
 	// Bound says the answer carries this operator's own request identifier.
 	Bound bool
+	// PrefixedID says the answer's id carries the engine's expected prefix followed by a non-empty
+	// identifier, used only when a nixlv2 routing proxy rewrote X-Request-Id and prefill metrics
+	// corroborate that the pair carried the request.
+	PrefixedID bool
 	// Reason is the finish reason the engine recorded.
 	Reason string
 }
@@ -984,6 +991,12 @@ func observeModelDeploymentGroupForwardPair(
 	var metricsChecked bool
 	prefillMetricsURL := modelDeploymentGroupForwardPairMetricsURL(prefillHead, prefillURL, engine.Path)
 	decodeMetricsURL := modelDeploymentGroupForwardPairMetricsURL(decodeHead, decodeURL, engine.Path)
+	// Upstream llm-d routing-proxy's nixlv2 connector overwrites X-Request-Id with a fresh UUID on
+	// both legs, so vLLM returns "cmpl-<uuid>" instead of echoing the body request_id. Accepting a
+	// rewritten id is restricted to nixlv2 routing-proxy pairs whose engine exports /metrics so
+	// prefill counter advancement is required as corroboration.
+	allowRewrittenID := viaProxy && engine.Metrics &&
+		modelDeploymentGroupForwardPairProxyRewritesRequestID(md, decodeHead)
 
 	for prefillRank := 0; prefillRank < prefillWidth; prefillRank++ {
 		for decodeRank := 0; decodeRank < decodeWidth; decodeRank++ {
@@ -1007,9 +1020,9 @@ func observeModelDeploymentGroupForwardPair(
 				)
 			}
 
-			reply, room, reason := modelDeploymentGroupForwardPairProbe(
+			reply, room, rewrittenID, reason := modelDeploymentGroupForwardPairProbe(
 				probeCtx, md, engine, prefillHead, prefillURL, decodeURL,
-				prefillWidth, prefillRank, decodeRank, viaProxy, fetch,
+				prefillWidth, prefillRank, decodeRank, viaProxy, allowRewrittenID, fetch,
 			)
 			if reason != "" {
 				return modelDeploymentGroupForwardPairHeld(attempt, modelDeploymentGroupForward{
@@ -1017,6 +1030,9 @@ func observeModelDeploymentGroupForwardPair(
 				})
 			}
 			attempt.RequestIDs = append(attempt.RequestIDs, reply)
+			if rewrittenID {
+				attempt.ProxyRewroteRequestID = true
+			}
 			if !viaProxy {
 				// THE ROOM IS RECORDED FOR EVERY HEAD-TO-HEAD PAIR, and a room of zero is a
 				// room like any other. The proxy shape records none, because the proxy picks
@@ -1029,7 +1045,7 @@ func observeModelDeploymentGroupForwardPair(
 					probeCtx, prefillMetricsURL, decodeMetricsURL,
 					beforePrefillMetrics, beforePrefillErr,
 					beforeDecodeMetrics, beforeDecodeErr,
-					fetch,
+					fetch, rewrittenID,
 				)
 				attempt.Mooncake = append(attempt.Mooncake, mooncakeLines...)
 				if verdict.reason != "" {
@@ -1050,12 +1066,12 @@ func observeModelDeploymentGroupForwardPair(
 func modelDeploymentGroupForwardPairProbe(
 	ctx context.Context, md *workercore.ModelDeployment, engine modelDeploymentGroupForwardPairEngine,
 	prefillHead *core.Pod, prefillURL, decodeURL string,
-	prefillWidth, prefillRank, decodeRank int, viaProxy bool,
+	prefillWidth, prefillRank, decodeRank int, viaProxy, allowRewrittenID bool,
 	fetch modelDeploymentGroupForwardPairFetch,
-) (string, int64, string) {
+) (string, int64, bool, string) {
 	nonce, err := modelDeploymentQualifyRandom(modelDeploymentQualifyNonceBytes)
 	if err != nil {
-		return "", 0, "the pair's identifier could not be generated: " + err.Error()
+		return "", 0, false, "the pair's identifier could not be generated: " + err.Error()
 	}
 	requestID := modelDeploymentQualifyRIDPrefix + "pd-" + nonce
 
@@ -1073,51 +1089,56 @@ func modelDeploymentGroupForwardPairProbe(
 	if viaProxy {
 		leg, err := modelDeploymentGroupForwardPairProxyLeg(input, prefillHead)
 		if err != nil {
-			return "", 0, err.Error()
+			return "", 0, false, err.Error()
 		}
 		legs = []modelDeploymentGroupForwardPairLeg{leg}
 	} else {
 		input.BootstrapHost = prefillHead.Status.PodIP
 		port, err := modelDeploymentGroupForwardPairBootstrapPort(prefillHead)
 		if err != nil {
-			return "", 0, err.Error()
+			return "", 0, false, err.Error()
 		}
 		input.BootstrapPort = port
 		input.BootstrapAddress = prefillHead.Status.PodIP + ":" + strconv.Itoa(port)
 		input.BootstrapRoom, err = modelDeploymentGroupForwardPairRoom(prefillWidth, prefillRank)
 		if err != nil {
-			return "", 0, err.Error()
+			return "", 0, false, err.Error()
 		}
 		input.TransferID = "model-transfer-" + requestID
 		legs, err = engine.Heads(input)
 		if err != nil {
-			return "", 0, "the pair's requests could not be rendered: " + err.Error()
+			return "", 0, false, "the pair's requests could not be rendered: " + err.Error()
 		}
 	}
 
+	var rewrittenID bool
 	replies, failures := modelDeploymentGroupForwardPairSend(ctx, legs, fetch, requestID, engine.IDPrefix)
 	for i := range legs {
 		if failures[i] != nil {
-			return "", 0, "the " + legs[i].Name + " leg did not answer within the bound: " +
+			return "", 0, false, "the " + legs[i].Name + " leg did not answer within the bound: " +
 				failures[i].Error() + "; a pair that could not be observed is an absence of " +
 				"evidence, and it is not attributed to one side"
 		}
 		reply := replies[i]
 		if reply.Unreadable {
-			return "", 0, "the " + legs[i].Name + " leg answered, but its answer could not be read " +
+			return "", 0, false, "the " + legs[i].Name + " leg answered, but its answer could not be read " +
 				"as the engine's reply shape, so nothing in it is evidence the pair carried one"
 		}
 		if !reply.Bound {
-			return "", 0, "the " + legs[i].Name + " leg answered, but not bound to this operator's own " +
-				"request, so the answer is not evidence that the pair carried one"
+			if allowRewrittenID && reply.PrefixedID {
+				rewrittenID = true
+			} else {
+				return "", 0, false, "the " + legs[i].Name + " leg answered, but not bound to this operator's own " +
+					"request, so the answer is not evidence that the pair carried one"
+			}
 		}
 		if !modelDeploymentQualifyFinishRan(reply.Reason) {
-			return "", 0, "the " + legs[i].Name + " leg answered, but its finish reason reports " +
+			return "", 0, false, "the " + legs[i].Name + " leg answered, but its finish reason reports " +
 				"the request did not complete, so the answer is not evidence that the pair carried one"
 		}
 	}
 
-	return requestID, input.BootstrapRoom, ""
+	return requestID, input.BootstrapRoom, rewrittenID, ""
 }
 
 const (
@@ -1174,13 +1195,16 @@ type modelDeploymentGroupForwardPairMetricsVerdict struct {
 
 // modelDeploymentGroupForwardPairCheckMetrics scrapes post-probe /metrics and verifies counter
 // deltas against the pre-probe baseline, retrying briefly if asynchronous counter flushes lag the
-// HTTP response. Scrape failures degrade to the bound-completion verdict rather than deadlocking
-// healthy deployments whose metrics port is disabled or unreachable.
+// HTTP response. When requirePrefillMetrics is false, scrape failures degrade to the
+// bound-completion verdict rather than deadlocking healthy deployments whose metrics port is
+// disabled or unreachable; when requirePrefillMetrics is true (proxy-rewritten request id),
+// prefill counter advancement is mandatory.
 func modelDeploymentGroupForwardPairCheckMetrics(
 	ctx context.Context, prefillMetricsURL, decodeMetricsURL string,
 	beforePrefill []byte, beforePrefillErr error,
 	beforeDecode []byte, beforeDecodeErr error,
 	fetch modelDeploymentGroupForwardPairFetch,
+	requirePrefillMetrics bool,
 ) (modelDeploymentGroupForwardPairMetricsVerdict, []string) {
 	var (
 		afterPrefill, afterDecode       []byte
@@ -1204,8 +1228,9 @@ retryLoop:
 		verdict = modelDeploymentGroupForwardPairVerifyMetricsDelta(
 			beforePrefill, afterPrefill, beforePrefillErr == nil && afterPrefillErr == nil,
 			beforeDecode, afterDecode, beforeDecodeErr == nil && afterDecodeErr == nil,
+			requirePrefillMetrics,
 		)
-		if verdict.reason == "" || verdict.failedRecvs {
+		if verdict.reason == "" || verdict.failedRecvs || (requirePrefillMetrics && beforePrefillErr != nil) {
 			break
 		}
 	}
@@ -1252,6 +1277,7 @@ func modelDeploymentGroupForwardPairMooncakeLines(body []byte, half string) []st
 func modelDeploymentGroupForwardPairVerifyMetricsDelta(
 	beforePrefill, afterPrefill []byte, prefillAvailable bool,
 	beforeDecode, afterDecode []byte, decodeAvailable bool,
+	requirePrefillMetrics bool,
 ) modelDeploymentGroupForwardPairMetricsVerdict {
 	verdict := modelDeploymentGroupForwardPairMetricsVerdict{
 		decodeChecked: decodeAvailable,
@@ -1268,6 +1294,10 @@ func modelDeploymentGroupForwardPairVerifyMetricsDelta(
 	}
 
 	if !prefillAvailable {
+		if requirePrefillMetrics {
+			verdict.reason = "the decode routing proxy rewrote the request identifier, and prefill /metrics " +
+				"was unavailable to corroborate that the pair carried the request"
+		}
 		return verdict
 	}
 
@@ -1291,6 +1321,11 @@ func modelDeploymentGroupForwardPairVerifyMetricsDelta(
 			return verdict
 		}
 		verdict.prefillAdvanced = true
+	}
+
+	if requirePrefillMetrics && !verdict.prefillAdvanced {
+		verdict.reason = "the decode routing proxy rewrote the request identifier, and prefill /metrics " +
+			"exported no advancing request counter to corroborate that the pair carried the request"
 	}
 
 	return verdict
@@ -1410,13 +1445,68 @@ func modelDeploymentGroupForwardPairCompletionRead(
 		return modelDeploymentGroupForwardPairReply{Unreadable: true}
 	}
 
-	reply := modelDeploymentGroupForwardPairReply{Bound: response.ID == idPrefix+requestID}
+	suffix, hasPrefix := strings.CutPrefix(response.ID, idPrefix)
+	reply := modelDeploymentGroupForwardPairReply{
+		Bound:      response.ID == idPrefix+requestID,
+		PrefixedID: idPrefix != "" && hasPrefix && strings.TrimSpace(suffix) != "",
+	}
 	if len(response.Choices) == 0 || response.Choices[0].FinishReason == nil {
 		return reply
 	}
 	reply.Reason = *response.Choices[0].FinishReason
 
 	return reply
+}
+
+// modelDeploymentGroupForwardPairProxyRewritesRequestID reports whether a routing-proxy pair uses
+// the nixlv2 connector, which overwrites X-Request-Id with a fresh UUID on both legs. It inspects
+// the standing decode Pod's routing-proxy container args first, falling back to spec.kvTransfer
+// when no routing-proxy container is declared on the Pod fixture.
+func modelDeploymentGroupForwardPairProxyRewritesRequestID(
+	md *workercore.ModelDeployment, decodeHead *core.Pod,
+) bool {
+	if md == nil || md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM {
+		return false
+	}
+	if decodeHead != nil {
+		if connector, found := modelDeploymentRoutingProxyKVConnector(decodeHead); found {
+			return connector == "nixlv2"
+		}
+	}
+	if md.Spec.KVTransfer != nil {
+		return md.Spec.KVTransfer.Backend == workercore.ModelDeploymentKVTransferBackendNIXL ||
+			md.Spec.KVTransfer.Backend == workercore.ModelDeploymentKVTransferBackendHIXL
+	}
+
+	return false
+}
+
+// modelDeploymentRoutingProxyKVConnector reads --kv-connector from a decode Pod's routing-proxy
+// initContainer (native sidecar) or regular container.
+func modelDeploymentRoutingProxyKVConnector(pod *core.Pod) (string, bool) {
+	scan := func(containers []core.Container) (string, bool) {
+		for i := range containers {
+			if containers[i].Name != "routing-proxy" {
+				continue
+			}
+			args := containers[i].Args
+			for j := 0; j < len(args); j++ {
+				if val, ok := strings.CutPrefix(args[j], "--kv-connector="); ok {
+					return val, true
+				}
+				if args[j] == "--kv-connector" && j+1 < len(args) {
+					return args[j+1], true
+				}
+			}
+			return "", false
+		}
+		return "", false
+	}
+	if val, ok := scan(pod.Spec.InitContainers); ok {
+		return val, true
+	}
+
+	return scan(pod.Spec.Containers)
 }
 
 // modelDeploymentGroupForwardPairRequestFields are the fields every leg of a directed pair carries
@@ -1665,9 +1755,15 @@ func modelDeploymentGroupForwardPairVerified(
 	observation := fmt.Sprintf("%d rank pairs completed the warmup request, each bound to its own identifier",
 		pairs)
 	if attempt.Shape == modelDeploymentGroupForwardPairShapeViaRoutingProxy {
-		reason = "the decode group's routing proxy completed the warmup probe while driving the pair " +
-			"with the named prefiller, matching this operator's own request identifier"
-		observation = "the routing proxy completed one warmup request, bound to this operator's own identifier"
+		if attempt.ProxyRewroteRequestID {
+			reason = "the decode group's routing proxy completed the warmup probe while driving the pair " +
+				"with the named prefiller (with proxy-rewritten request id)"
+			observation = "the routing proxy completed one warmup request with proxy-rewritten request id"
+		} else {
+			reason = "the decode group's routing proxy completed the warmup probe while driving the pair " +
+				"with the named prefiller, matching this operator's own request identifier"
+			observation = "the routing proxy completed one warmup request, bound to this operator's own identifier"
+		}
 		if attempt.PrefillMetricsConfirmed {
 			if attempt.DecodeMetricsChecked {
 				reason += ", and prefill metrics advanced during the probe window with zero new decode transfer failures"

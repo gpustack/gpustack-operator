@@ -271,7 +271,8 @@ fi
 
 MD_NAME="$MD_NOBIND"
 if [ "$nobind_ready" = yes ]; then
-  apply_out="$(p1_one_role "    image: docker.io/library/busybox:1.36" \
+  apply_out="$(p1_one_role "    image: docker.io/library/busybox:1.36
+    engineVersion: \"0.32.0\"" \
     | kubectl apply -f - 2>&1 | tr '\n' ' ')"
   if [ -z "$apply_out" ] || { [ -n "${apply_out##*created*}" ] && [ -n "${apply_out##*configured*}" ] &&
     [ -n "${apply_out##*unchanged*}" ]; }; then
@@ -567,15 +568,20 @@ for m in ascend nvidia amd; do
     break
   fi
 done
-SGLANG_IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-unset}}"
+SGLANG_IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-${IT}}}"
+
+VLLM_VER_LINE="$(md_engine_version_line vLLM "$IMAGE")"
+SGLANG_VER_LINE="$(md_engine_version_line SGLang "$IMAGE")"
 
 ENGINE_OK="    name: vLLM
-    image: ${IMAGE}"
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}"
 ENGINE_NO_IMAGE="    name: vLLM"
 ENGINE_EMPTY="    name: vLLM
     image: \"\""
 ENGINE_SGLANG="    name: SGLang
-    image: ${IMAGE}"
+    image: ${IMAGE}${SGLANG_VER_LINE:+
+${SGLANG_VER_LINE}}"
 
 ROLE_PLAIN="  - name: decode
     kind: Decode
@@ -750,6 +756,8 @@ P3_KVCACHE_BLOCK=""
 P3_IT="$IT"
 
 p3_manifest() {
+  local ver_line
+  ver_line="$(md_engine_version_line "${P3_ENGINE:-vLLM}" "$IMAGE")"
   cat <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
@@ -759,7 +767,8 @@ metadata:
 spec:
   engine:
     name: ${P3_ENGINE:-vLLM}
-    image: ${IMAGE}
+    image: ${IMAGE}${ver_line:+
+${ver_line}}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   router:
@@ -1003,7 +1012,8 @@ metadata:
 spec:
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   roles:
@@ -1261,7 +1271,8 @@ spec:
           name: lora-a
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1283,7 +1294,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1308,7 +1320,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1329,7 +1342,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: SGLang
-    image: ${IMAGE}
+    image: ${IMAGE}${SGLANG_VER_LINE:+
+${SGLANG_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1355,7 +1369,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1376,7 +1391,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1400,7 +1416,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1424,7 +1441,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1450,7 +1468,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: SGLang
-    image: ${IMAGE}
+    image: ${IMAGE}${SGLANG_VER_LINE:+
+${SGLANG_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1474,7 +1493,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: SGLang
-    image: ${IMAGE}
+    image: ${IMAGE}${SGLANG_VER_LINE:+
+${SGLANG_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1498,7 +1518,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1522,7 +1543,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   router:
     name: vllm-router
   roles:
@@ -1555,7 +1577,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: SGLang
-    image: ${IMAGE}
+    image: ${IMAGE}${SGLANG_VER_LINE:+
+${SGLANG_VER_LINE}}
   router:
     name: sglang-gateway
   roles:
@@ -1582,7 +1605,7 @@ spec:
           speculative.draftBudgetFraction: "0.5"
 EOF
 
-    # 4. Router isolation forbidden args.
+    # 4. Router isolation forbidden args and router owned args.
     rt_dry_refuse "router isolation rejects --enable-igw in spec.router.extraArgs" "enable-igw" <<EOF
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
@@ -1594,11 +1617,66 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: SGLang
-    image: ${IMAGE}
+    image: ${IMAGE}${SGLANG_VER_LINE:+
+${SGLANG_VER_LINE}}
   router:
     name: sglang-gateway
     extraArgs:
       - --enable-igw
+  roles:
+    - name: server
+      kind: Server
+      replicas: 1
+      acceleratorType: ${RT_AT}
+      resources:
+        accelerator: "1"
+EOF
+
+    rt_dry_refuse "llm-d-router owned args reject --allow-experimental-plugins in spec.router.extraArgs" \
+      '"--allow-experimental-plugins" is set by the operator for router "llm-d-router"' <<EOF
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: ${RUN_PREFIX}-router-exp-flag
+  namespace: ${NS}
+spec:
+  model:
+    name: Qwen/Qwen3-8B
+  engine:
+    name: vLLM
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
+  router:
+    name: llm-d-router
+    extraArgs:
+      - --allow-experimental-plugins
+  roles:
+    - name: server
+      kind: Server
+      replicas: 1
+      acceleratorType: ${RT_AT}
+      resources:
+        accelerator: "1"
+EOF
+
+    rt_dry_refuse "llm-d-router owned args reject --allow-experimental-plugins=false in spec.router.extraArgs" \
+      '"--allow-experimental-plugins" is set by the operator for router "llm-d-router"' <<EOF
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: ${RUN_PREFIX}-router-exp-false
+  namespace: ${NS}
+spec:
+  model:
+    name: Qwen/Qwen3-8B
+  engine:
+    name: vLLM
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
+  router:
+    name: llm-d-router
+    extraArgs:
+      - --allow-experimental-plugins=false
   roles:
     - name: server
       kind: Server
@@ -1620,7 +1698,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1687,7 +1766,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1712,7 +1792,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1737,7 +1818,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: SGLang
-    image: ${IMAGE}
+    image: ${IMAGE}${SGLANG_VER_LINE:+
+${SGLANG_VER_LINE}}
   roles:
     - name: server
       kind: Server
@@ -1762,7 +1844,8 @@ spec:
     name: Qwen/Qwen3-8B
   engine:
     name: vLLM
-    image: ${IMAGE}
+    image: ${IMAGE}${VLLM_VER_LINE:+
+${VLLM_VER_LINE}}
   router:
     name: vllm-router
     requestTimeoutSeconds: 60

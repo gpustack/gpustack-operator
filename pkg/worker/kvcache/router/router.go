@@ -33,6 +33,9 @@ type Role struct {
 	// `src/service_discovery.rs:74-82`). Handing it an expression would silently discard whichever
 	// terms were not equalities, so a renderer is given what it can express in the first place.
 	Selector map[string]string
+
+	// ExternalDP reports whether this role uses external data-parallel ranks across Pods.
+	ExternalDP bool
 }
 
 // Metrics names the model-server metrics consumed by a router.
@@ -149,6 +152,9 @@ type Input struct {
 	// ExtraArgs holds user-supplied router CLI arguments inspected by argv renderers that
 	// adapt default flags such as sgl-router --no-tokenizer.
 	ExtraArgs []string
+
+	// HasUnmanagedRoles reports whether any non-encode role runs with an unmanaged command override.
+	HasUnmanagedRoles bool
 }
 
 // roleKindDecode is the decoder's kind as this package receives it.
@@ -163,6 +169,9 @@ const roleKindDecode = "decode"
 // reason stated on that one: this package compares strings against a convention the API's enum
 // defines, so both kinds are named here rather than imported.
 const roleKindEncode = "encode"
+
+// roleKindServer is the undivided server's kind as this package receives it.
+const roleKindServer = "server"
 
 // llmdMultimodalDecider is the plugin that makes the encoder stage conditional. It activates on a
 // request carrying image, audio or video content and declines a text-only one, which is the whole of
@@ -299,9 +308,11 @@ var renderers = map[string]func(Input) (Output, error){
 func renderLLMD(input Input) (Output, error) {
 	kinds := make(map[string]string, len(input.Roles))
 	selectors := make(map[string]map[string]string, len(input.Roles))
+	externalDP := make(map[string]bool, len(input.Roles))
 	for _, role := range input.Roles {
 		kinds[role.Kind] = role.RoleLabelKey
 		selectors[role.Kind] = role.Selector
+		externalDP[role.Kind] = externalDP[role.Kind] || role.ExternalDP
 	}
 	// Preserve raw role label keys before dropping the SGLang encoder stage so KV event
 	// publisher exclusions still exclude encode Pods if precise KV events are ever enabled.
@@ -326,8 +337,9 @@ func renderLLMD(input Input) (Output, error) {
 	// the same name while only one of them could see the value they share.
 	_, encode := kinds[roleKindEncode]
 
-	plugins := make([]any, 0, len(orderedKinds)+7)
+	plugins := make([]any, 0, len(orderedKinds)+8)
 	profiles := make([]any, 0, len(orderedKinds))
+	hasHealthFilteredKind := false
 	for _, kind := range orderedKinds {
 		filter := kind + "-pods"
 		matchLabels := map[string]string{kinds[kind]: kind}
@@ -378,17 +390,34 @@ func renderLLMD(input Input) (Output, error) {
 			})
 			continue
 		}
+		hasHealthFilteredKind = true
 		profilePlugins = append(profilePlugins,
+			map[string]any{"pluginRef": "endpoint-health-filter"},
 			map[string]any{"pluginRef": "queue-scorer", "weight": 2},
 			map[string]any{"pluginRef": "kv-cache-utilization-scorer", "weight": 2},
 			map[string]any{"pluginRef": "max-score-picker"})
-		if kind != roleKindDecode {
+		if kind != roleKindDecode && (kind != roleKindServer || !externalDP[kind]) {
 			profilePlugins = append(profilePlugins,
 				map[string]any{"pluginRef": "prefix-cache-scorer", "weight": 3})
 		}
 		profiles = append(profiles, map[string]any{
 			"name":    kind,
 			"plugins": profilePlugins,
+		})
+	}
+	if hasHealthFilteredKind {
+		pollFailureThreshold := 3
+		if input.HasUnmanagedRoles {
+			pollFailureThreshold = 0
+		}
+		plugins = append(plugins, map[string]any{
+			"type": "endpoint-health-filter",
+			"parameters": map[string]any{
+				"pollFailureThreshold":     pollFailureThreshold,
+				"responseFailureThreshold": 5,
+				"responseFailureCodes":     []int{502, 503},
+				"maxEjectionPercent":       50,
+			},
 		})
 	}
 

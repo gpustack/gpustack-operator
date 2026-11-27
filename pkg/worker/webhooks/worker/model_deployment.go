@@ -1357,6 +1357,9 @@ func validateModelDeploymentRoleTopology(md *workercore.ModelDeployment) field.E
 // traffic. Both are rendered off, against an upstream default of on, and the rendering states why.
 // Leaving them out of this list would not make them configurable in a useful way -- it would make
 // the boundary a per-object choice, which is the thing being refused.
+//
+// --allow-experimental-plugins is owned because the operator renders endpoint-health-filter, which
+// upstream llm-d-router registers at alpha stability.
 var modelDeploymentRouterOwnedArgs = map[string][]string{
 	workercore.ModelDeploymentRouterLLMD: {
 		"--endpoint-selector",
@@ -1365,6 +1368,7 @@ var modelDeploymentRouterOwnedArgs = map[string][]string{
 		"--secure-serving",
 		"--grpc-health-port",
 		"--metrics-endpoint-auth",
+		"--allow-experimental-plugins",
 	},
 	// THE BIND ADDRESSES AND THE CONNECTOR ARE OWNED FOR THE REASON THEY ARE RENDERED AT ALL: each
 	// of the three overrides an upstream default that fails silently, so a user value winning would
@@ -3718,6 +3722,9 @@ func validateModelDeploymentRoleRuntimeControlScope(
 	}
 	if workerctrl.ModelDeploymentRoleUsesSGLangRay(engine, role) {
 		errs = append(errs, field.Forbidden(ctrlPath, "not supported on SGLang Ray roles"))
+	}
+	if workerctrl.ModelDeploymentRoleUsesSGLangRustServer(engine, role) {
+		errs = append(errs, field.Forbidden(ctrlPath, "not supported on SGLang Rust server roles"))
 	}
 	return errs
 }

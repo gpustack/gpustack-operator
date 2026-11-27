@@ -323,7 +323,7 @@ spec:
         - modeldeployment.gpustack.ai/member-index=0
         command:
         - sgl-model-gateway
-        image: gpustack/llm-router:v0.6.0
+        image: gpustack/llm-router:v0.6.1
         imagePullPolicy: IfNotPresent
         name: router
         ports:

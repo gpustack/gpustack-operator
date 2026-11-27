@@ -116,6 +116,74 @@ func TestRenderModelDeploymentRouterObjects_ExternalDPShapeRendersDPAware(t *tes
 		"the recorded shape declares --attn-dp-size 2 and no --dp-size; the attention width is what the gate reads")
 }
 
+// TestRenderModelDeploymentRouterObjects_SingleRoleSGLangDPAware verifies that undivided SGLang
+// Server roles emit --dp-aware on sgl-router and sglang-gateway whenever a managed role declares
+// --dp-size >= 2 or --attn-dp-size >= 2, and omit it for width 1 or unmanaged roles.
+func TestRenderModelDeploymentRouterObjects_SingleRoleSGLangDPAware(t *testing.T) {
+	testCases := []struct {
+		name        string
+		routerName  string
+		extraArgs   []string
+		command     []string
+		wantDPAware bool
+	}{
+		{
+			name:        "sgl-router single-role --dp-size=2 emits --dp-aware",
+			routerName:  workercore.ModelDeploymentRouterSGL,
+			extraArgs:   []string{"--dp-size=2", "--tp-size=1"},
+			wantDPAware: true,
+		},
+		{
+			name:        "sgl-router single-role --dp-size=1 omits --dp-aware",
+			routerName:  workercore.ModelDeploymentRouterSGL,
+			extraArgs:   []string{"--dp-size=1", "--tp-size=1"},
+			wantDPAware: false,
+		},
+		{
+			name:        "sgl-router single-role without dp flags omits --dp-aware",
+			routerName:  workercore.ModelDeploymentRouterSGL,
+			extraArgs:   []string{"--tp-size=2"},
+			wantDPAware: false,
+		},
+		{
+			name:        "sglang-gateway single-role --dp-size=2 emits --dp-aware",
+			routerName:  workercore.ModelDeploymentRouterSGLang,
+			extraArgs:   []string{"--dp-size", "2"},
+			wantDPAware: true,
+		},
+		{
+			name:        "sgl-router unmanaged role with --dp-size=2 omits --dp-aware",
+			routerName:  workercore.ModelDeploymentRouterSGL,
+			command:     []string{"python", "-m", "sglang.launch_server"},
+			extraArgs:   []string{"--dp-size=2"},
+			wantDPAware: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := twoRoleDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: tc.routerName}
+				md.Spec.Roles = md.Spec.Roles[:1]
+				md.Spec.Roles[0].Name = "server"
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+				md.Spec.Roles[0].Command = tc.command
+				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
+			})
+
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+			require.NoError(t, err)
+			args := routerContainerArgs(objects.Deployment.Spec.Template.Spec.Containers)
+			if tc.wantDPAware {
+				assert.Contains(t, args, "--dp-aware")
+			} else {
+				assert.NotContains(t, args, "--dp-aware")
+			}
+		})
+	}
+}
+
 // TestRenderModelDeploymentRouterObjects_BothSelectorsSelectOnlyThePodsThatAnswer states the set
 // every discovery path names: the members that answer the API, one per replica, at every role size.
 //
@@ -865,7 +933,7 @@ func TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged(t *tes
 		wantSelector = "app.kubernetes.io/name=model-deployment," +
 			"app.kubernetes.io/instance=qwen,modeldeployment.gpustack.ai/member-index=0," +
 			"!modeldeployment.gpustack.ai/router"
-		wantHash = "6fce1f080c753d1bc668fb542a4538c9b9603ff2c9626f8fea657a80eb1ccbe3"
+		wantHash = "55a10191eef54fe0f904d591f6cb4c9bcc9f664e818d79e12b6b34b5cffbe215"
 	)
 	// Decided as well as dormant, because a decided condition is the only thing that could move
 	// this shape and the assertion that it does not is the whole claim.
@@ -1006,7 +1074,7 @@ const (
 	mixedServerCandidateSelector = "app.kubernetes.io/name=model-deployment," +
 		"app.kubernetes.io/instance=qwen,modeldeployment.gpustack.ai/router-candidate=true," +
 		"!modeldeployment.gpustack.ai/router"
-	mixedServerCandidateHash = "586078904f6f3f4e8ed236891744f588b30d7d854c248e8e1f263ff99584e037"
+	mixedServerCandidateHash = "95c8b91298561c02d3cd30a53bd75e2aeb3fab6e6fc27f27e00b2dc1d4acf014"
 )
 
 func TestRenderModelDeploymentRouterObjects_MixedServerRolesRenderTheCandidateUnion(t *testing.T) {
@@ -1612,7 +1680,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 			name:      "picker defaults to the image that carries every router",
 			md:        routedModelDeployment(),
 			container: "epp",
-			want:      "gpustack/llm-router:v0.6.0",
+			want:      "gpustack/llm-router:v0.6.1",
 			why:       "the default names a release of this project's own build, not a moving upstream tag",
 		},
 		{
@@ -1621,7 +1689,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
 			}),
 			container: "router",
-			want:      "gpustack/llm-router:v0.6.0",
+			want:      "gpustack/llm-router:v0.6.1",
 			why:       "one setting says where the binaries come from; the command picks which one runs",
 		},
 		{
@@ -1671,12 +1739,14 @@ func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSpli
 		// single-member Server, which keeps its existing behavior, does not move at all. They moved
 		// once more when the default router image advanced to v0.4.0, again at v0.5.0, again
 		// when Envoy replaced its catch-all route with the explicit inference allowlist, again
-		// when multimodal inference routes were added to that allowlist, and again at v0.6.0.
-		"a prefill and decode pair": "c9de2a266627f039f80b633e2a703b9eec031b25ee3de5936a829161a17e9440",
-		"a sole server role":        "335dca43dd6aa3d4e652d39814650353592493e61f55ede8aaffe164e3201482",
-		"a router declaring its own image, policy, replicas and extra arguments": "d16a66e779517dc9c7fb37c75b1b30f5514edc6fbb037dd55ecbb6dd987dccb5",
-		"a role whose command the user took over, so it publishes no events":     "0b9c06ae81e7cd0b8245becc0ccfd84817a58a0db82e8b93585b9c5bc0a1a0ab",
-		"an sglang engine, whose metrics contract differs":                       "51109193ed3b61cacd93bfd8b1837b87e4a5ed10bcfc692488fa10539df1c422",
+		// when multimodal inference routes were added to that allowlist, again at v0.6.0, and
+		// again at v0.6.1 when endpoint-health-filter and --allow-experimental-plugins=true were
+		// added.
+		"a prefill and decode pair": "f129e8fcf01902ee01727b721473a13e394ca5997f777abdda2bedc2b5531135",
+		"a sole server role":        "22d85dffb749809d0820ff58c15459526b9352e540d752e8575467211ecb8046",
+		"a router declaring its own image, policy, replicas and extra arguments": "b3e7652694ded5bf77c6125e348edc2f7d59789cdde1a592111fa48269e71d50",
+		"a role whose command the user took over, so it publishes no events":     "0a5178f81aa487e0e58ff66491a0a3fbd7f6e323b221409ad508340c41947ed6",
+		"an sglang engine, whose metrics contract differs":                       "a4ccb8b53eae721a288b5ba343c47b667480da6131951cd7a65ba3f975619b90",
 	}
 
 	soleServerRole := func() *workercore.ModelDeployment {
@@ -3020,7 +3090,7 @@ func TestRenderModelDeploymentRouterObjects_ArgvAllowlistSidecarOptIn(t *testing
 			engineName:    workercore.ModelDeploymentEngineVLLM,
 			binary:        "vllm-router",
 			requireProxy:  false,
-			wantImage:     "gpustack/llm-router:v0.6.0",
+			wantImage:     "gpustack/llm-router:v0.6.1",
 			wantConfigMap: false,
 		},
 		{
@@ -3041,7 +3111,7 @@ func TestRenderModelDeploymentRouterObjects_ArgvAllowlistSidecarOptIn(t *testing
 			engineName:    workercore.ModelDeploymentEngineSGLang,
 			binary:        "sgl-model-gateway",
 			requireProxy:  false,
-			wantImage:     "gpustack/llm-router:v0.6.0",
+			wantImage:     "gpustack/llm-router:v0.6.1",
 			wantConfigMap: false,
 		},
 		{
@@ -3226,6 +3296,18 @@ func TestRenderModelDeploymentRouterObjects_AutoAllowlistSidecarOnRuntimeControl
 			wantAllowlist:  false,
 			wantContainers: 1,
 		},
+		{
+			name:       "SGLang Rust server role stays single-container",
+			routerName: workercore.ModelDeploymentRouterSGL,
+			engineName: workercore.ModelDeploymentEngineSGLang,
+			mutateRole: func(role *workercore.ModelDeploymentRole) {
+				role.ReplicaSize = 2
+				role.ExtraArgs = []string{"--attn-dp-size", "2", "--nnodes", "2"}
+				role.Env = []workercore.ModelDeploymentEnvVar{{Name: modelDeploymentSGLangRustServerEnv, Value: "1"}}
+			},
+			wantAllowlist:  false,
+			wantContainers: 1,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -3268,6 +3350,252 @@ func TestRenderModelDeploymentRouterObjects_AutoAllowlistSidecarOnRuntimeControl
 				assert.Equal(t, "router", objects.Deployment.Spec.Template.Spec.Containers[0].Name)
 				assert.Contains(t, objects.Deployment.Spec.Template.Spec.Containers[0].Args, "--host=0.0.0.0")
 				assert.Contains(t, objects.Deployment.Spec.Template.Spec.Containers[0].Args, "--port=8000")
+			}
+		})
+	}
+}
+
+func TestRenderModelDeploymentRouterObjects_LLMDExternalDPAndHealthFilter(t *testing.T) {
+	type profileExpect struct {
+		wantPlugins []map[string]any
+	}
+
+	testCases := []struct {
+		name               string
+		build              func(*testing.T) *workercore.ModelDeployment
+		wantPollThreshold  float64
+		wantProfiles       map[string]profileExpect
+		wantExcludePlugins map[string][]string
+	}{
+		{
+			name: "vllm external dp server omits prefix-cache-scorer with health filter",
+			build: func(_ *testing.T) *workercore.ModelDeployment {
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Roles[0].Name = "server"
+					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+					md.Spec.Roles[0].ReplicaSize = 2
+					md.Spec.Roles[0].ExtraArgs = []string{
+						"--data-parallel-size", "2",
+						"--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)",
+					}
+				})
+				return md
+			},
+			wantPollThreshold: 3,
+			wantProfiles: map[string]profileExpect{
+				"server": {
+					wantPlugins: []map[string]any{
+						{"pluginRef": "server-pods"},
+						{"pluginRef": "endpoint-health-filter"},
+						{"pluginRef": "queue-scorer", "weight": float64(2)},
+						{"pluginRef": "kv-cache-utilization-scorer", "weight": float64(2)},
+						{"pluginRef": "max-score-picker"},
+					},
+				},
+			},
+			wantExcludePlugins: map[string][]string{
+				"server": {"prefix-cache-scorer"},
+			},
+		},
+		{
+			name: "sglang external dp server omits prefix-cache-scorer with health filter",
+			build: func(_ *testing.T) *workercore.ModelDeployment {
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Roles[0].Name = "server"
+					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+					md.Spec.Roles[0].ReplicaSize = 2
+					md.Spec.Roles[0].ExtraArgs = []string{"--attn-dp-size", "2", "--nnodes", "2"}
+					md.Spec.Roles[0].Env = append(md.Spec.Roles[0].Env, workercore.ModelDeploymentEnvVar{
+						Name: modelDeploymentSGLangRustServerEnv, Value: "1",
+					})
+				})
+				return md
+			},
+			wantPollThreshold: 3,
+			wantProfiles: map[string]profileExpect{
+				"server": {
+					wantPlugins: []map[string]any{
+						{"pluginRef": "server-pods"},
+						{"pluginRef": "endpoint-health-filter"},
+						{"pluginRef": "queue-scorer", "weight": float64(2)},
+						{"pluginRef": "kv-cache-utilization-scorer", "weight": float64(2)},
+						{"pluginRef": "max-score-picker"},
+					},
+				},
+			},
+			wantExcludePlugins: map[string][]string{
+				"server": {"prefix-cache-scorer"},
+			},
+		},
+		{
+			name: "managed non-external-dp server retains prefix-cache-scorer",
+			build: func(_ *testing.T) *workercore.ModelDeployment {
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				})
+				return md
+			},
+			wantPollThreshold: 3,
+			wantProfiles: map[string]profileExpect{
+				"server": {
+					wantPlugins: []map[string]any{
+						{"pluginRef": "server-pods"},
+						{"pluginRef": "endpoint-health-filter"},
+						{"pluginRef": "queue-scorer", "weight": float64(2)},
+						{"pluginRef": "kv-cache-utilization-scorer", "weight": float64(2)},
+						{"pluginRef": "max-score-picker"},
+						{"pluginRef": "prefix-cache-scorer", "weight": float64(3)},
+					},
+				},
+			},
+		},
+		{
+			name: "unmanaged takeover role keeps external dp false and sets pollFailureThreshold 0",
+			build: func(_ *testing.T) *workercore.ModelDeployment {
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Roles[0].Name = "server"
+					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+					md.Spec.Roles[0].ReplicaSize = 2
+					md.Spec.Roles[0].Command = []string{"vllm", "serve", "custom-model"}
+					md.Spec.Roles[0].ExtraArgs = []string{
+						"--data-parallel-size", "2",
+						"--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)",
+					}
+				})
+				return md
+			},
+			wantPollThreshold: 0,
+			wantProfiles: map[string]profileExpect{
+				"server": {
+					wantPlugins: []map[string]any{
+						{"pluginRef": "server-pods"},
+						{"pluginRef": "endpoint-health-filter"},
+						{"pluginRef": "queue-scorer", "weight": float64(2)},
+						{"pluginRef": "kv-cache-utilization-scorer", "weight": float64(2)},
+						{"pluginRef": "max-score-picker"},
+						{"pluginRef": "prefix-cache-scorer", "weight": float64(3)},
+					},
+				},
+			},
+		},
+		{
+			name: "unmanaged encode role does not set HasUnmanagedRoles and excludes endpoint-health-filter",
+			build: func(t *testing.T) *workercore.ModelDeployment {
+				md := epdDeployment(t, []workercore.ModelDeploymentRoleKind{
+					workercore.ModelDeploymentRoleKindEncode,
+					workercore.ModelDeploymentRoleKindPrefill,
+					workercore.ModelDeploymentRoleKindDecode,
+				})
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				for i := range md.Spec.Roles {
+					md.Spec.Roles[i].Ports = []workercore.ModelDeploymentPort{{Protocol: core.ProtocolTCP, Port: 8000}}
+					md.Spec.Roles[i].ExtraArgs = nil
+					if md.Spec.Roles[i].Kind == workercore.ModelDeploymentRoleKindEncode {
+						md.Spec.Roles[i].Command = []string{"vllm", "serve", "custom-encoder"}
+					}
+				}
+				return md
+			},
+			wantPollThreshold: 3,
+			wantProfiles: map[string]profileExpect{
+				"encode": {
+					wantPlugins: []map[string]any{
+						{"pluginRef": "encode-pods"},
+					},
+				},
+				"prefill": {
+					wantPlugins: []map[string]any{
+						{"pluginRef": "prefill-pods"},
+						{"pluginRef": "endpoint-health-filter"},
+						{"pluginRef": "queue-scorer", "weight": float64(2)},
+						{"pluginRef": "kv-cache-utilization-scorer", "weight": float64(2)},
+						{"pluginRef": "max-score-picker"},
+						{"pluginRef": "prefix-cache-scorer", "weight": float64(3)},
+					},
+				},
+				"decode": {
+					wantPlugins: []map[string]any{
+						{"pluginRef": "decode-pods"},
+						{"pluginRef": "endpoint-health-filter"},
+						{"pluginRef": "queue-scorer", "weight": float64(2)},
+						{"pluginRef": "kv-cache-utilization-scorer", "weight": float64(2)},
+						{"pluginRef": "max-score-picker"},
+					},
+				},
+			},
+			wantExcludePlugins: map[string][]string{
+				"encode": {"endpoint-health-filter"},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := tc.build(t)
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+			require.NoError(t, err)
+			require.NotNil(t, objects.ConfigMap)
+
+			var epp *core.Container
+			for i := range objects.Deployment.Spec.Template.Spec.Containers {
+				if objects.Deployment.Spec.Template.Spec.Containers[i].Name == "epp" {
+					epp = &objects.Deployment.Spec.Template.Spec.Containers[i]
+					break
+				}
+			}
+			require.NotNil(t, epp, "llm-d-router must render an epp container")
+			assert.Contains(t, epp.Args, "--allow-experimental-plugins=true")
+
+			var parsed struct {
+				Plugins []struct {
+					Type       string         `json:"type"`
+					Parameters map[string]any `json:"parameters"`
+				} `json:"plugins"`
+				SchedulingProfiles []struct {
+					Name    string           `json:"name"`
+					Plugins []map[string]any `json:"plugins"`
+				} `json:"schedulingProfiles"`
+			}
+			require.NoError(t, yaml.Unmarshal([]byte(objects.ConfigMap.Data[modelDeploymentRouterConfigKey]), &parsed))
+
+			var healthFilterParams map[string]any
+			for _, entry := range parsed.Plugins {
+				if entry.Type == "endpoint-health-filter" {
+					healthFilterParams = entry.Parameters
+					break
+				}
+			}
+			require.NotNil(t, healthFilterParams, "endpoint-health-filter plugin must be configured")
+			assert.Equal(t, tc.wantPollThreshold, healthFilterParams["pollFailureThreshold"])
+			assert.Equal(t, float64(5), healthFilterParams["responseFailureThreshold"])
+			assert.Equal(t, []any{float64(502), float64(503)}, healthFilterParams["responseFailureCodes"])
+			assert.Equal(t, float64(50), healthFilterParams["maxEjectionPercent"])
+
+			profilesByName := make(map[string][]map[string]any, len(parsed.SchedulingProfiles))
+			for _, profile := range parsed.SchedulingProfiles {
+				profilesByName[profile.Name] = profile.Plugins
+			}
+
+			for profileName, want := range tc.wantProfiles {
+				require.Contains(t, profilesByName, profileName)
+				assert.Equal(t, want.wantPlugins, profilesByName[profileName],
+					"profile %q plugins mismatch", profileName)
+			}
+			for profileName, excluded := range tc.wantExcludePlugins {
+				require.Contains(t, profilesByName, profileName)
+				for _, pluginRef := range excluded {
+					for _, p := range profilesByName[profileName] {
+						assert.NotEqual(t, pluginRef, p["pluginRef"],
+							"profile %q must exclude %q", profileName, pluginRef)
+					}
+				}
 			}
 		})
 	}

@@ -313,19 +313,25 @@ func renderModelDeploymentRouterObjectsWithProxy(
 	// address: the Service fronts every replica, so a scale changes nothing the router was told
 	// and does not restart it.
 	var encoderURLs []string
+	hasUnmanagedRoles := false
 	for i := range md.Spec.Roles {
-		roleKind := ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i])
+		role := &md.Spec.Roles[i]
+		roleKind := ModelDeploymentEffectiveRoleKind(role)
 		kind, ok := ModelDeploymentRoleUpstreamKind(roleKind)
 		if !ok {
-			return ModelDeploymentRouterObjects{}, fmt.Errorf("unsupported role kind %q", md.Spec.Roles[i].Kind)
+			return ModelDeploymentRouterObjects{}, fmt.Errorf("unsupported role kind %q", role.Kind)
+		}
+		if len(role.Command) > 0 && roleKind != workercore.ModelDeploymentRoleKindEncode {
+			hasUnmanagedRoles = true
 		}
 		roles = append(roles, router.Role{
 			Kind:         kind,
 			RoleLabelKey: modelDeploymentLabelKeyRoleKind,
+			ExternalDP:   len(role.Command) == 0 && modelDeploymentRoleExternalDP(md, role),
 		})
-		ports = append(ports, ModelDeploymentRoleServingPort(md, &md.Spec.Roles[i]))
+		ports = append(ports, ModelDeploymentRoleServingPort(md, role))
 		if roleKind == workercore.ModelDeploymentRoleKindEncode {
-			encoderURLs = append(encoderURLs, modelDeploymentRoleEndpoint(md, &md.Spec.Roles[i]))
+			encoderURLs = append(encoderURLs, modelDeploymentRoleEndpoint(md, role))
 		}
 	}
 	slices.Sort(ports)
@@ -593,25 +599,31 @@ func renderModelDeploymentRouterObjectsWithProxy(
 		DisaggregationThreshold: md.Spec.Router.DisaggregationThresholdTokens,
 		// The handshake follows the transfer backend and the pool hardware the pair runs,
 		// resolved in one place so the router and the engine halves cannot disagree.
-		KVConnector: modelDeploymentVLLMRouterKVConnector(md, manufacturers),
-		ExtraArgs:   md.Spec.Router.ExtraArgs,
+		KVConnector:       modelDeploymentVLLMRouterKVConnector(md, manufacturers),
+		ExtraArgs:         md.Spec.Router.ExtraArgs,
+		HasUnmanagedRoles: hasUnmanagedRoles,
 	}
-	// THE SGLANG EXTERNAL DP SHAPE NAMES ITS WIDTH TO THE GATEWAY. The gateway's --dp-aware fans
-	// its worker registration out per dp member, which is the one-worker-per-member contract the
-	// shape is held to; a width under two renders nothing, and so does every other engine. The
-	// first external role the declaration carries decides the width: a deployment declaring more
-	// than one such role is outside the validated shapes, and the later roles are not read.
-	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang {
-		if md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL &&
-			ModelDeploymentDeclaresBothHalves(md) {
+	// SGLang DP shapes (both --attn-dp-size and --dp-size at width >= 2) name their DP width to
+	// sglang-gateway and sgl-router so the router renders --dp-aware. On disaggregated PD shapes
+	// only sgl-router permits --dp-aware alongside PD selectors; on undivided Server shapes both
+	// sgl-router and sglang-gateway take --dp-aware from the highest managed role DP width.
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang &&
+		(md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL ||
+			md.Spec.Router.Name == workercore.ModelDeploymentRouterSGLang) {
+		isPD := ModelDeploymentDeclaresBothHalves(md)
+		if !isPD || md.Spec.Router.Name == workercore.ModelDeploymentRouterSGL {
 			for i := range md.Spec.Roles {
 				role := &md.Spec.Roles[i]
 				if len(role.Command) > 0 {
 					continue
 				}
 				kind := ModelDeploymentEffectiveRoleKind(role)
-				if kind != workercore.ModelDeploymentRoleKindPrefill &&
+				if isPD &&
+					kind != workercore.ModelDeploymentRoleKindPrefill &&
 					kind != workercore.ModelDeploymentRoleKindDecode {
+					continue
+				}
+				if !isPD && kind == workercore.ModelDeploymentRoleKindEncode {
 					continue
 				}
 				reading, err := scanModelDeploymentParallelism(
@@ -619,7 +631,7 @@ func renderModelDeploymentRouterObjectsWithProxy(
 				)
 				if err != nil {
 					return ModelDeploymentRouterObjects{}, fmt.Errorf(
-						"read the pd dp width the router renders: %w", err,
+						"read the dp width the router renders: %w", err,
 					)
 				}
 				dpWidth := max(reading.declared.AttentionDataParallel, reading.declared.DataParallel)
@@ -629,22 +641,6 @@ func renderModelDeploymentRouterObjectsWithProxy(
 						routerInput.AttentionDataParallelSize = clamped
 					}
 				}
-			}
-		} else {
-			for i := range md.Spec.Roles {
-				if !modelDeploymentRoleExternalDP(md, &md.Spec.Roles[i]) {
-					continue
-				}
-				reading, err := scanModelDeploymentParallelism(
-					md.Spec.Engine.Name, md.Spec.Roles[i].ExtraArgs, md.Spec.Roles[i].Env,
-				)
-				if err != nil {
-					return ModelDeploymentRouterObjects{}, fmt.Errorf(
-						"read the external-dp width the router renders: %w", err,
-					)
-				}
-				routerInput.AttentionDataParallelSize = int32(reading.declared.AttentionDataParallel)
-				break
 			}
 		}
 	}
@@ -968,7 +964,7 @@ func renderModelDeploymentLLMDRouterWorkload(
 			settings.ModelDeploymentRouterImage.ShouldValue(ctx))
 	}
 
-	args := make([]string, 0, 5+len(md.Spec.Router.ExtraArgs))
+	args := make([]string, 0, 7+len(md.Spec.Router.ExtraArgs))
 	// TWO OF THESE TURN OFF A DEFAULT THAT IS ON UPSTREAM, and that is the design rather than an
 	// oversight. The endpoint picker defaults both --secure-serving and --metrics-endpoint-auth to
 	// true, so a reader comparing this list against upstream finds two inversions; without the
@@ -986,6 +982,9 @@ func renderModelDeploymentLLMDRouterWorkload(
 	//
 	// So neither is offered as a field, and both are refused in spec.router.extraArgs: the boundary
 	// has one answer for the whole installation rather than a different one per object.
+	//
+	// --allow-experimental-plugins=true is required because upstream llm-d-router registers
+	// endpoint-health-filter at alpha stability.
 	args = append(args,
 		"--endpoint-selector=$(ENDPOINT_SELECTOR)",
 		"--endpoint-target-ports=$(ENDPOINT_TARGET_PORTS)",
@@ -993,6 +992,7 @@ func renderModelDeploymentLLMDRouterWorkload(
 		"--secure-serving=false",
 		"--grpc-health-port=9003",
 		"--metrics-endpoint-auth=false",
+		"--allow-experimental-plugins=true",
 	)
 	args = append(args, md.Spec.Router.ExtraArgs...)
 

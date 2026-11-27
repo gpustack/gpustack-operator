@@ -93,6 +93,7 @@ UNMANAGED="e2e-c27-unmanaged"
 ROUTED_SERVER="e2e-c27-routed-server"
 DISABLED="e2e-c27-publisher-disabled"
 ROUTER_READY="e2e-c27-router-ready"
+EXTERNAL_DP="e2e-c27-external-dp"
 
 # Phase 3 names.
 EPD_VENDOR="${E2E_C27_VENDOR:-Ascend}"
@@ -184,6 +185,7 @@ case27_teardown() {
     k -n "$OPERATOR_NS" patch pod "$pod" --type=merge -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1 || true
   done
   release_deployment_in "$OPERATOR_NS" "$ROUTER_READY"
+  release_deployment_in "$OPERATOR_NS" "$EXTERNAL_DP"
   epd_teardown_cpu_vendor_fixture "$OPERATOR_NS" "$EPD_NF" "$EPD_SETTLE_ROUNDS" "$SYSTEM_NS" cleanup_epd_deployments || true
   kvi_teardown
   force_delete kvcachepools.worker.gpustack.ai "$DEAD_POOL"
@@ -667,6 +669,62 @@ p2_lifecycle_gone() {
   ! k -n "$TEST_NS" get modeldeployment "$LIFECYCLE" >/dev/null 2>&1 && p2_router_count_is 0
 }
 
+p2_epp_present() {
+  local ns="$1" md="$2" raw=""
+  raw="$(k -n "$ns" get configmap "${md}-router" -o jsonpath='{.data.epp\.yaml}' 2>/dev/null)"
+  [ -n "$raw" ]
+}
+
+p2_epp_json() {
+  local ns="$1" md="$2" raw=""
+  raw="$(k -n "$ns" get configmap "${md}-router" -o jsonpath='{.data.epp\.yaml}' 2>/dev/null)"
+  [ -n "$raw" ] || return 1
+  printf '%s' "$raw" | python3 -c '
+import json, sys, yaml
+d = yaml.safe_load(sys.stdin.read())
+print(json.dumps(d) if d is not None else "{}")
+'
+}
+
+p2_assert_health_filter() {
+  local ns="$1" md="$2" want_poll="$3" label="$4" doc_json="" params="" placement=""
+  if [ "$PICKER_YAML_OK" != yes ]; then
+    record SKIP "$label" "pyyaml is absent in the runner"
+    return 0
+  fi
+  if ! wait_until "$SETTLE" p2_epp_present "$ns" "$md"; then
+    record FAIL "$label" "configmap/${md}-router epp.yaml absent within ${SETTLE}s"
+    return 0
+  fi
+  doc_json="$(p2_epp_json "$ns" "$md")"
+  params="$(printf '%s' "$doc_json" | jq -c '[.plugins[]? | select(.type == "endpoint-health-filter") | .parameters] | first // empty')"
+  if [ -z "$params" ]; then
+    record FAIL "$label" "endpoint-health-filter plugin absent in configmap/${md}-router"
+    return 0
+  fi
+  if ! printf '%s' "$params" | jq -e --argjson poll "$want_poll" '
+      .pollFailureThreshold == $poll
+      and .responseFailureThreshold == 5
+      and .responseFailureCodes == [502, 503]
+      and .maxEjectionPercent == 50
+    ' >/dev/null 2>&1; then
+    record FAIL "$label" "unexpected endpoint-health-filter parameters: ${params}"
+    return 0
+  fi
+  placement="$(printf '%s' "$doc_json" | jq -r '
+    [ .schedulingProfiles[]?
+      | select(.name == "server" or .name == "prefill" or .name == "decode")
+      | select((.plugins[0].pluginRef != (.name + "-pods")) or (.plugins[1].pluginRef != "endpoint-health-filter"))
+      | "\(.name):[\((.plugins // []) | map(.pluginRef) | join(","))]"
+    ] | join(" ")
+  ')"
+  if [ -n "$placement" ]; then
+    record FAIL "$label" "endpoint-health-filter not immediately after role filter: ${placement}"
+  else
+    record PASS "$label" "pollFailureThreshold=${want_poll}, responseFailureThreshold=5, codes=[502,503], maxEjectionPercent=50"
+  fi
+}
+
 if [ "$FIXTURE_OK" = yes ]; then
   p2_pair="$(p2_role prefill Prefill yes)
 $(p2_role decode Decode yes)"
@@ -723,9 +781,13 @@ $(p2_role decode Decode yes)"
   p2_apply_md "$UNMANAGED" yes "$(p2_role prefill Prefill no)
 $(p2_role decode Decode no)" >/dev/null
   p2_assert_cond "$UNMANAGED" Unknown RoleUnmanaged "unmanaged P/D pair reports KVEventsPublishing=Unknown/RoleUnmanaged"
+  p2_assert_health_filter "$TEST_NS" "$UNMANAGED" 0 \
+    "unmanaged role epp.yaml disables active health polling (pollFailureThreshold=0)"
 
   p2_apply_md "$ROUTED_SERVER" yes "$(p2_role server Server yes)" >/dev/null
   p2_assert_cond "$ROUTED_SERVER" True Publishing "routed server reports KVEventsPublishing=True/Publishing"
+  p2_assert_health_filter "$TEST_NS" "$ROUTED_SERVER" 3 \
+    "routed server epp.yaml attaches endpoint-health-filter after server-pods"
 
   k -n "$TEST_NS" delete modeldeployment "$LIFECYCLE" --wait=false >/dev/null
   if wait_until "$SETTLE" p2_lifecycle_gone; then
@@ -779,6 +841,22 @@ for _ in $(seq 1 "$((ROUTER_SETTLE / 3))"); do
   sleep 3
 done
 
+epp_args="$(k -n "$OPERATOR_NS" get deployment "${ROUTER_READY}-router" \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="epp")].args[*]}' 2>/dev/null)"
+case " $epp_args " in
+  *" --allow-experimental-plugins=true "*)
+    record PASS "llm-d-router epp container args include --allow-experimental-plugins=true" \
+      "present on deployment/${ROUTER_READY}-router"
+    ;;
+  *)
+    record FAIL "llm-d-router epp container args include --allow-experimental-plugins=true" \
+      "args=[${epp_args:-none}]"
+    ;;
+esac
+
+p2_assert_health_filter "$OPERATOR_NS" "$ROUTER_READY" 3 \
+  "llm-d-router epp.yaml configures endpoint-health-filter after role filter on prefill/decode"
+
 if [ "$router_ready" != yes ]; then
   waiting="$(k -n "$OPERATOR_NS" get pods -l "modeldeployment.gpustack.ai/router=llm-d-router,app.kubernetes.io/instance=${ROUTER_READY}" \
     -o jsonpath='{range .items[*].status.containerStatuses[*]}{.name}{"="}{.state.waiting.reason}{" "}{end}' 2>/dev/null)"
@@ -803,6 +881,16 @@ else
     rpod="$(k -n "$OPERATOR_NS" get pods \
       -l "modeldeployment.gpustack.ai/router=llm-d-router,app.kubernetes.io/instance=${ROUTER_READY}" \
       -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+    obs_rc=0
+    obs_body="$(k get --raw "/api/v1/namespaces/${OPERATOR_NS}/pods/http:${rpod}:9090/proxy/observer/endpoints" 2>&1)" || obs_rc=$?
+    if [ "$obs_rc" -eq 0 ] && printf '%s' "$obs_body" | jq -e '(.workers | type == "array") and ([.workers[]? | select(.selection.circuit_open == true)] | length == 0)' >/dev/null 2>&1; then
+      obs_count="$(printf '%s' "$obs_body" | jq -r '.workers | length')"
+      record PASS "llm-d-router :9090/observer/endpoints responds 200 with conservative circuit_open=false" \
+        "workers=${obs_count}, circuit_open_true=0"
+    else
+      record FAIL "llm-d-router :9090/observer/endpoints responds 200 with conservative circuit_open=false" \
+        "rc=${obs_rc} body=$(printf '%s' "$obs_body" | tr '\n' ' ' | cut -c1-180)"
+    fi
     envoy_r0="$(k -n "$OPERATOR_NS" get pod "$rpod" -o jsonpath='{.status.containerStatuses[?(@.name=="envoy")].restartCount}' 2>/dev/null)"
     epp_r0="$(k -n "$OPERATOR_NS" get pod "$rpod" -o jsonpath='{.status.containerStatuses[?(@.name=="epp")].restartCount}' 2>/dev/null)"
     stable=yes
@@ -827,6 +915,58 @@ else
 fi
 
 release_deployment_in "$OPERATOR_NS" "$ROUTER_READY"
+
+# Lightweight External DP Server epp.yaml render check (no GPU required).
+k apply -f - >/dev/null <<YAML
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: ${EXTERNAL_DP}
+  namespace: ${OPERATOR_NS}
+spec:
+  engine:
+    name: vLLM
+    image: ${IMAGE}
+    version: "0.19.0"
+  model:
+    name: Qwen/Qwen2.5-0.5B-Instruct
+  router:
+    name: llm-d-router
+    image: ${ROUTER_IMAGE}
+  roles:
+  - name: server
+    kind: Server
+    acceleratorType: ${IT}
+    replicas: 1
+    size: 2
+    image: ${IMAGE}
+    engineVersion: "0.19.0"
+    extraArgs:
+      - --data-parallel-size
+      - "2"
+      - --data-parallel-rank
+      - \$(GPUSTACK_MEMBER_INDEX)
+YAML
+
+if [ "$PICKER_YAML_OK" != yes ]; then
+  record SKIP "external DP server epp.yaml omits prefix-cache-scorer and retains health/load scorers" \
+    "pyyaml is absent in the runner"
+elif ! wait_until "$SETTLE" p2_epp_present "$OPERATOR_NS" "$EXTERNAL_DP"; then
+  record FAIL "external DP server epp.yaml omits prefix-cache-scorer and retains health/load scorers" \
+    "configmap/${EXTERNAL_DP}-router epp.yaml absent within ${SETTLE}s"
+else
+  ext_dp_json="$(p2_epp_json "$OPERATOR_NS" "$EXTERNAL_DP")"
+  ext_dp_refs="$(printf '%s' "$ext_dp_json" | jq -c '[.schedulingProfiles[]? | select(.name == "server") | .plugins[]? | .pluginRef]')"
+  if [ "$ext_dp_refs" = '["server-pods","endpoint-health-filter","queue-scorer","kv-cache-utilization-scorer","max-score-picker"]' ]; then
+    record PASS "external DP server epp.yaml omits prefix-cache-scorer and retains health/load scorers" \
+      "server plugins=${ext_dp_refs}"
+  else
+    record FAIL "external DP server epp.yaml omits prefix-cache-scorer and retains health/load scorers" \
+      "got server plugins=${ext_dp_refs:-none}"
+  fi
+fi
+
+release_deployment_in "$OPERATOR_NS" "$EXTERNAL_DP"
 
 # =================================================================================================
 # PHASE 3: EPD encoder Services, router picker document, and shared-claim filesystem round-trip

@@ -6,11 +6,44 @@ which replicas receive traffic.
 
 ## Contents
 
+- [Router capabilities matrix](#router-capabilities-matrix)
 - [Traffic targets](#traffic-targets)
 - [Default routing policies](#default-routing-policies)
 - [Policy overrides](#policy-overrides)
 - [Endpoint status](#endpoint-status)
 - [Troubleshooting](#troubleshooting)
+
+## Router capabilities matrix
+
+Each managed router pairs with specific serving engines, discovery mechanisms, routing policies,
+resilience controls, and disaggregation features:
+
+| Capability | `llm-d-router` | `vllm-router` | `sgl-router` | `sglang-gateway` (deprecated) |
+|---|---|---|---|---|
+| Engine pairing | `vLLM`, `vLLM-Ascend`, `SGLang` | `vLLM`, `vLLM-Ascend` | `SGLang` | `SGLang` (frozen `gateway-v0.3.1`) |
+| Discovery | `Pod` watcher | `Pod` watcher | `EndpointSlice` watcher | `Pod` watcher |
+| Default policy | Fixed scorer profile (`queue` `2`, `kv` `2`, `prefix` `3`, `max-score-picker`) | `cache_aware` | `power_of_two` (`--chat-routing=reorg`) | `cache_aware` |
+| Policy overrides | None (`--config-file` owned) | `--policy`, `--prefill-policy` | `--policy`, `--decode-policy`, `--dp-rank-policy`, `--decode-dp-rank-policy` | `--policy`, `--prefill-policy` |
+| Real-time KV events | `vLLM`, `vLLM-Ascend` *Server*/*Prefill* (non-*EPD*, single-`Pod` DP) | `kv_aware` (`>= 0.31.0`, hybrid models, *Server*/*Prefill*) | Native `kv-events` (*Server*/*Prefill*) | None |
+| *PD* and *EPD* | *PD*/*EPD* with `v1.0.0` sidecar (concurrent *PD* cancel, per-rank EC, `/metrics`) | Native *PD*, post-prefill *Decode* pick, cancellation-safe load, *EPD* consumer `DP > 1` | Native *PD* via selectors; *Prefill* dials `--encoder-urls` | Native `--pd-disaggregation`; *Prefill* dials `--encoder-urls` |
+| *External DP* | Balanced (`prefix-cache-scorer` omitted on *Server*, round-robin tie-break) | Per-rank endpoints (`--policy round_robin`) | `--dp-aware` (*Server* and *PD*; `--dp-rank-policy least_tokens`) | `--dp-aware` (undivided *Server* only) |
+| Fault resilience | `endpoint-health-filter` (`502`/`503` eject on `server`/`prefill`/`decode`, never `encode`) | Built-in circuit breaker | Built-in circuit breaker | Built-in circuit breaker |
+| API highlights | `/v1/responses` via `v1.0.0` sidecar | OpenAI-compatible HTTP | Stateless `/v1/responses`, `--cache-media-affinity-ttl-ms` | OpenAI-compatible HTTP |
+| Image floor | See [Router image floors](engine-versions.md#router-image-floors) | See [Router image floors](engine-versions.md#router-image-floors) | See [Router image floors](engine-versions.md#router-image-floors) | Frozen `gateway-v0.3.1` |
+
+### Fault resilience
+
+`llm-d-router` activates `endpoint-health-filter` on `server`, `prefill`, and `decode` profiles
+and excludes it from `encode` (encoders do not export metrics to `metrics-data-source`). The
+operator passes `--allow-experimental-plugins=true` so `epp` loads the filter.
+
+- **Ejection bounds**: Ejects endpoints on HTTP `502` and `503` (`responseFailureThreshold: 5`,
+  `maxEjectionPercent: 50`), with `pollFailureThreshold: 3` (`0` when any non-`encode` role is an
+  unmanaged take-over role).
+- **Observer reporting**: `/observer/endpoints` conservatively reports `circuit_open: false` so
+  temporarily ejected `Pod`s are not prematurely marked retired.
+- **Rust routers**: `vllm-router` and `sgl-router` rely on their built-in circuit breakers without
+  `endpoint-health-filter`.
 
 ## Traffic targets
 
@@ -31,14 +64,14 @@ both:
 
 | Mode | `llm-d-router` | `vllm-router` | `sgl-router` | `sglang-gateway` (deprecated) |
 |---|---|---|---|---|
-| Multi-replica *Server* | Fixed scoring profile (`precise-prefix-cache-producer` on vLLM/Ascend; `approx-prefix-cache-producer` on SGLang) | `cache_aware` default; `--policy kv_aware` (`>= 0.31.0`) or `round_robin` | `EndpointSlice` discovery + native SGLang KV events (`kv-events`) | Frozen at `gateway-v0.3.1`; `cache_aware` default or `--policy` |
-| *PD* pair | Token-counted *PD* split, connector docs, and decode sidecar | Native *PD* mode; optional `kv_aware` (`>= 0.31.0`) | Inferred from `--prefill-selector` + `--decode-selector` + KV events | Native `--pd-disaggregation` (never combined with `--dp-aware`) |
-| *EPD* | `encode` profile + decode sidecar transfer | Operator-owned `--epd-config`, no sidecar | Native pair; *Prefill* dials `--encoder-urls` | Native pair; *Prefill* dials `--encoder-urls` |
+| Multi-replica *Server* | Fixed scoring profile (`precise-prefix-cache-producer` on vLLM/Ascend; `approx-prefix-cache-producer` on SGLang) | `cache_aware` default; `--policy kv_aware` (`>= 0.31.0`, hybrid models) or `round_robin` | `EndpointSlice` discovery + native SGLang KV events (`kv-events`) | Frozen at `gateway-v0.3.1`; `cache_aware` default or `--policy` |
+| *PD* pair | Token-counted *PD* split, connector docs, and `v1.0.0` decode sidecar (concurrent *PD* failure cancellation) | Native *PD* mode, post-prefill *Decode* selection; optional `kv_aware` (`>= 0.31.0`) | Inferred from `--prefill-selector` + `--decode-selector` + KV events | Native `--pd-disaggregation` (never combined with `--dp-aware`) |
+| *EPD* | `encode` profile (no health filter) + `v1.0.0` decode sidecar (per-rank EC binding) | Operator-owned `--epd-config` (supports consumer `DP > 1`), no sidecar | Native pair; *Prefill* dials `--encoder-urls` | Native pair; *Prefill* dials `--encoder-urls` |
 | *Elastic EP* | Engine internal load balancing; single endpoint | Same | Same | Same |
-| *External DP* | Admitted, no `--policy` flag; prefer engine router | Per-rank endpoints with `--policy round_robin` | Per-member endpoints with `--dp-aware` (including *PD*) | Per-member endpoints with `--dp-aware` (undivided only) |
+| *External DP* | Balanced *Server* profile (omits `prefix-cache-scorer`, round-robin tie-breaking) | Per-rank endpoints with `--policy round_robin` | Per-member endpoints with `--dp-aware` (including *PD*) | Per-member endpoints with `--dp-aware` (undivided only) |
 
-Where even spread matters (multi-replica *Server* or *External DP*), choose `vllm-router` for vLLM
-or `sgl-router` for SGLang because `llm-d-router` has no policy switch
+For explicit policy control (`round_robin`, `kv_aware`, or `least_tokens`), choose `vllm-router`
+for vLLM or `sgl-router` for SGLang because `llm-d-router` has no policy switch
 ([Fixed scoring profile](#fixed-scoring-profile)). Prefer `sgl-router` over deprecated
 `sglang-gateway` (frozen at `gateway-v0.3.1`) for new SGLang deployments.
 
@@ -108,9 +141,9 @@ media requests through *Encode* first, and routes text-only requests straight to
 | Router | Default | Replica selection |
 |---|---|---|
 | `vllm-router` | `cache_aware` | Longest matching prefix above `--cache-threshold` (`0.3`), else smallest tree; switches to least-loaded when load gap exceeds `--balance-abs-threshold` (`64`) and `--balance-rel-threshold` (`1.5×`) |
-| `sgl-router` | `power_of_two` | Picks the less-loaded of two sampled workers under `--chat-routing=reorg` (override with `--policy cache_aware` or `--policy session_aware`) |
+| `sgl-router` | `power_of_two` | Picks the less-loaded of two sampled workers under `--chat-routing=reorg` (override with `--policy cache_aware` or `--policy session_aware`; `--dp-rank-policy least_tokens` and `--decode-dp-rank-policy` tune *DP* rank selection) |
 | `sglang-gateway` | `cache_aware` | Same algorithm and three defaults |
-| `llm-d-router` | Fixed profile | Highest sum of prefix match (weight `3`, omitted on *Decode*), queue depth (`2`) and KV utilization (`2`) |
+| `llm-d-router` | Fixed profile | Highest sum of prefix match (weight `3`, omitted on *Decode* and managed *External DP* *Server* roles), queue depth (`2`) and KV utilization (`2`), with `max-score-picker` round-robin tie-breaking |
 
 ### Prefix affinity
 
@@ -162,8 +195,8 @@ Admission validates `kv_aware` version requirements on `vllm-router` but does no
 
 | Router | Accepted `--policy` values |
 |---|---|
-| `vllm-router` | `random`, `round_robin`, `cache_aware`, `kv_aware` (`vLLM >= 0.31.0`), `power_of_two`, `consistent_hash`, `rendezvous_hash` |
-| `sgl-router` | `power_of_two` (default), `cache_aware` (omits `--no-tokenizer`), `session_aware` (under `--chat-routing=reorg`, `--decode-policy` accepts `power_of_two` only and `--filter` accepts `overloaded` only) |
+| `vllm-router` | `random`, `round_robin`, `cache_aware`, `kv_aware` (`vLLM >= 0.31.0`, supports hybrid architectures), `power_of_two`, `consistent_hash`, `rendezvous_hash` |
+| `sgl-router` | `power_of_two` (default), `cache_aware` (omits `--no-tokenizer`), `session_aware` (under `--chat-routing=reorg`, `--decode-policy` accepts `power_of_two` only and `--filter` accepts `overloaded` only; supports `--dp-rank-policy least_tokens`, `--decode-dp-rank-policy`, `--cache-media-affinity-ttl-ms`, and rejects legacy `sgl-model-gateway` flags) |
 | `sglang-gateway` (deprecated) | `random`, `round_robin`, `cache_aware`, `power_of_two`, `prefix_hash`, `manual` |
 
 - **`vllm-router` `kv_aware` (`>= 0.31.0`)**: `--policy` on *Server*, or `--policy` /

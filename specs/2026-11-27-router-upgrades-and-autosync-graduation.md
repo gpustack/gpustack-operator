@@ -1,7 +1,6 @@
 # Spec: ModelDeployment Router Upgrades, External DP Balancing, and Auto-Sync Commit Graduation
 
-Status: Building
-Blocked on: PR 1 (`T1`–`T2`) merging to `main` and publishing multi-arch `gpustack/llm-router:v0.6.1` (`T3`) before PR 2 (`T4`–`T7`) lands.
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -260,34 +259,34 @@ if kind != roleKindDecode {
       Acceptance: `dockerfile_arg.py`, `base_image_builds.py`, `preflight-router.sh`, `lib-preflight.sh`, `validate_router.sh`, `router-taskpack.yaml`, `instructions/router.md`, and `proposals/router.json` support optional empty `*_COMMIT=""` without triggering `sglang-gateway-builder`, fetch full commit graphs (`--filter=blob:none`, no `--depth 1`) when `*_COMMIT` is non-empty, enforce `git merge-base --is-ancestor` hold (`held_back` / `awaiting_tag_containing_commit`) vs graduation (`ready_to_graduate`, clearing `*_COMMIT=""` and rebasing from `PINNED_COMMIT`), validate `versions[uid]` (`<ver>+<short7>` when commit-pinned, `<ver>` when tag-pinned), emit `sync_images` recommendations in report, summary (`summary_highlights`), and proposal JSON for eligible unmirrored `mirrored-llm-d-router-disagg-sidecar:<tag>` releases, and regenerate all six `.auto-sync/digests/*.lock.json` lockfiles; `hack/check/autosync-selftest.sh` covers every positive and negative case.
       Verify: `bash hack/check/autosync-selftest.sh && make lint`
 
-- [ ] **T3 · PR 1 merge and `gpustack/llm-router:v0.6.1` multi-arch publication checkpoint**
+- [x] **T3 · PR 1 merge and `gpustack/llm-router:v0.6.1` multi-arch publication checkpoint**
       Blocked by: T1, T2
       Owns: None
       Gate: review
       Acceptance: PR 1 merges cleanly to `main`; `gh workflow run "Base Image" -f repository=llm-router -f tag=v0.6.1` succeeds; Docker Hub manifest for `gpustack/llm-router:v0.6.1` reports both `linux/amd64` and `linux/arm64` digests.
       Verify: `crane manifest docker.io/gpustack/llm-router:v0.6.1 | jq '.manifests[].platform'` (or Docker Hub tag API verifying `amd64` and `arm64`).
 
-- [ ] **T4 · `llm-d-router` External DP balancing and `endpoint-health-filter` renderer (PR 2)**
+- [x] **T4 · `llm-d-router` External DP balancing and `endpoint-health-filter` renderer (PR 2)**
       Blocked by: T3
       Owns: `pkg/worker/kvcache/router/**`
       Gate: review
       Acceptance: `router.Role` gains `ExternalDP bool` and `router.Input` gains `HasUnmanagedRoles bool`; `renderLLMD` combines `ExternalDP` per role kind via logical OR (order-invariant across mixed `Server` roles), omits `prefix-cache-scorer` on External DP `server` profiles (retaining `queue-scorer(2)`, `kv-cache-utilization-scorer(2)`, and `max-score-picker`), renders `endpoint-health-filter` (`pollFailureThreshold: 3`, or `0` when `HasUnmanagedRoles` is true, `responseFailureThreshold: 5`, `responseFailureCodes: [502, 503]`, `maxEjectionPercent: 50`) placed immediately after `<kind>-pods` on `server`, `prefill`, and `decode` profiles only (strictly absent from `encode`), and keeps non-External-DP `server`/`prefill` scoring weights unchanged. All rendered shapes pass `epp --validate-config`.
       Verify: `go test -v -cover ./pkg/worker/kvcache/router/...`
 
-- [ ] **T5 · Default router and sidecar image promotions (PR 2)**
+- [x] **T5 · Default router and sidecar image promotions (PR 2)**
       Blocked by: T3
       Owns: `pkg/worker/settings/**`
       Acceptance: `ModelDeploymentRouterImage` defaults to `gpustack/llm-router:v0.6.1` and `ModelDeploymentRoutingSidecarImage` defaults to `gpustack/mirrored-llm-d-router-disagg-sidecar:v1.0.0` in `pkg/worker/settings/value.go`, with `pkg/worker/settings/value_test.go` updated and passing.
       Verify: `go test -v -cover ./pkg/worker/settings/...`
 
-- [ ] **T6 · Controller wiring, webhook owned-arg guard, golden fixture updates, and standing-Pod currency verification (PR 2)**
+- [x] **T6 · Controller wiring, webhook owned-arg guard, golden fixture updates, and standing-Pod currency verification (PR 2)**
       Blocked by: T4, T5
       Owns: `pkg/worker/controllers/worker/**`, `pkg/worker/webhooks/worker/**`
       Gate: review
       Acceptance: `model_deployment_router.go` sets `ExternalDP: len(role.Command) == 0 && modelDeploymentRoleExternalDP(md, role)`, populates `HasUnmanagedRoles` when any non-`encode` role sets `len(role.Command) > 0`, and renders `--allow-experimental-plugins=true` on `llm-d-router` Pods (with `--allow-experimental-plugins` added to `modelDeploymentRouterOwnedArgs[LLMD]` in `pkg/worker/webhooks/worker/model_deployment.go` and covered by webhook tests); unit and golden tests cover vLLM/SGLang External DP balancing, take-over role safety, `endpoint-health-filter` placement and `encode` exclusion, updated image assertions (`v0.6.1` and `v1.0.0`), re-baselined router/direct-decoder serialized digests (with non-sidecar pod digests untouched), updated `testdata/golden-render/*_dst.yaml`, and green `TestModelDeploymentLegacyRender_GoldenPods` + `TestModelDeploymentLegacyRender_DynamicRenderChangeKeepsPodSpecHash` at `modelDeploymentRenderVersion == 7`.
       Verify: `go test -v ./pkg/worker/controllers/worker/... -run 'TestRenderModelDeployment|TestModelDeploymentLegacyRender|TestModelDeploymentGoldenYAML|TestModelDeploymentRouter' && go test -v ./pkg/worker/webhooks/worker/...`
 
-- [ ] **T7 · Public Hugo site and docs Router Capability Matrix alignment (PR 2)**
+- [x] **T7 · Public Hugo site and docs Router Capability Matrix alignment (PR 2)**
       Blocked by: T6
       Owns: `docs/**`, `site/**`
       Acceptance: `docs/modules/model-deployment/routing.md` carries a complete Router Capabilities Matrix (`llm-d-router`, `vllm-router`, `sgl-router`, deprecated `sglang-gateway`) covering engine pairing, discovery, policies/`extraArgs`, KV events, P/D and E/P/D, External DP, `endpoint-health-filter` & circuit breakers, API extensions (`/v1/responses`), and observer semantics; `external-dp.md`, `prefill-decode.md`, `engine-versions.md` (`gpustack/llm-router >= v0.6.1`, `mirrored-llm-d-router-disagg-sidecar >= v1.0.0`), `docs/reference/model-deployment-parameters.md`, `docs/reference/settings.md`, and `docs/README.md` (`#module-map` Model Deployment entry registering this spec) are synchronized under the three-zone docs contract with zero `reference/` links from public site pages.

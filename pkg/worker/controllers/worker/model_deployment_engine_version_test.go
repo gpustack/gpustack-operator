@@ -856,12 +856,31 @@ func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
 			Verbs:     []string{"get", "list", "watch"},
 		}}, roleObj.Rules)
 
-		// Verify Router Objects (Envoy loopback sidecar, :9091 observer probe, :9090 metrics listener, --dp-aware, --no-tokenizer, EndpointSlice selector).
-		// sgl-router discovers per-Pod ZMQ ports via /server_info rather than Service-level kvEvents ports.
-		routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+		// Verify Router Objects: Rust-server External DP skips engine-sentinel so sgl-router runs
+		// single-container on :8000 without Envoy while still carrying --dp-aware, --no-tokenizer,
+		// and EndpointSlice role-kind=server selection.
+		rustRouterObjs, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 		require.NoError(t, err)
-		assert.Nil(t, routerObjs.Contract.Roles[0].KVEvents,
+		assert.Nil(t, rustRouterObjs.Contract.Roles[0].KVEvents,
 			"sgl-router role Services omit ZMQ ports so status.router.roles[].kvEvents must not advertise unreachable Service endpoints")
+		assert.Equal(t, "8000", rustRouterObjs.Deployment.Spec.Template.Annotations["prometheus.io/port"])
+		require.Len(t, rustRouterObjs.Deployment.Spec.Template.Spec.Containers, 1)
+		rustRouterCtr := rustRouterObjs.Deployment.Spec.Template.Spec.Containers[0]
+		assert.Equal(t, []string{"sgl-router"}, rustRouterCtr.Command)
+		assert.Contains(t, rustRouterCtr.Args, "--dp-aware")
+		assert.Contains(t, rustRouterCtr.Args, "--no-tokenizer")
+		assert.Contains(t, rustRouterCtr.Args, modelDeploymentLabelKeyRoleKind+"=server")
+
+		// Verify Python SGLang DP (--dp-size 2 without SGLANG_RUST_SERVER) injects engine-sentinel
+		// and wraps sgl-router in the Envoy loopback sidecar (:9091 observer probe, :9090 metrics
+		// listener, --dp-aware, --no-tokenizer, EndpointSlice selector).
+		mdPython := md.DeepCopy()
+		mdPython.Spec.Roles[0].Env = nil
+		mdPython.Spec.Roles[0].ReplicaSize = 1
+		mdPython.Spec.Roles[0].ExtraArgs = []string{"--dp-size", "2"}
+		routerObjs, err := renderModelDeploymentRouterObjects(context.Background(), mdPython, nil, false)
+		require.NoError(t, err)
+		assert.Nil(t, routerObjs.Contract.Roles[0].KVEvents)
 
 		podTpl := routerObjs.Deployment.Spec.Template
 		assert.Equal(t, "9090", podTpl.Annotations["prometheus.io/port"])
@@ -897,7 +916,7 @@ func TestModelDeploymentSGLRouter_EndToEndWiringAndReconcile(t *testing.T) {
 		assert.Equal(t, 403, simulateEnvoyRoute(t, metricsHCM, "GET", "/v1/models").Status)
 
 		// Verify non-proxy single-container sgl-router advertises port 8000 and omits --no-tokenizer when cache_aware is in extraArgs.
-		mdNoProxy := md.DeepCopy()
+		mdNoProxy := mdPython.DeepCopy()
 		mdNoProxy.Spec.Router.ExtraArgs = []string{"--policy=cache_aware"}
 		noProxyObjs, err := renderModelDeploymentRouterObjectsWithProxy(context.Background(), mdNoProxy, nil, false, false)
 		require.NoError(t, err)

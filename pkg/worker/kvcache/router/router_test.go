@@ -1,6 +1,7 @@
 package router
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -744,6 +745,214 @@ func TestRenderLLMD_WithoutACandidateLabelTheEligibilityTermStaysPerKind(t *test
 			for name, matchLabels := range filters {
 				assert.NotContains(t, matchLabels, llmdTestCandidateLabel,
 					"the %s filter names no candidate term without a candidate label", name)
+			}
+		})
+	}
+}
+
+func TestRenderLLMD_ExternalDPBalancing(t *testing.T) {
+	type profilePlugin struct {
+		ref    string
+		weight *int
+	}
+	intPtr := func(v int) *int { return &v }
+	wantBalancedServer := []profilePlugin{
+		{ref: "server-pods"},
+		{ref: "endpoint-health-filter"},
+		{ref: "queue-scorer", weight: intPtr(2)},
+		{ref: "kv-cache-utilization-scorer", weight: intPtr(2)},
+		{ref: "max-score-picker"},
+	}
+	wantPrefixServer := append(slices.Clone(wantBalancedServer),
+		profilePlugin{ref: "prefix-cache-scorer", weight: intPtr(3)})
+
+	testCases := []struct {
+		name        string
+		roles       []Role
+		profileName string
+		want        []profilePlugin
+	}{
+		{
+			name: "non-external-dp server retains prefix-cache-scorer",
+			roles: []Role{
+				{Kind: "server", RoleLabelKey: llmdTestRoleKindLabel},
+			},
+			profileName: "server",
+			want:        wantPrefixServer,
+		},
+		{
+			name: "external-dp server omits prefix-cache-scorer",
+			roles: []Role{
+				{Kind: "server", RoleLabelKey: llmdTestRoleKindLabel, ExternalDP: true},
+			},
+			profileName: "server",
+			want:        wantBalancedServer,
+		},
+		{
+			name: "mixed server roles false then true omits prefix-cache-scorer",
+			roles: []Role{
+				{Kind: "server", RoleLabelKey: llmdTestRoleKindLabel, ExternalDP: false},
+				{Kind: "server", RoleLabelKey: llmdTestRoleKindLabel, ExternalDP: true},
+			},
+			profileName: "server",
+			want:        wantBalancedServer,
+		},
+		{
+			name: "mixed server roles true then false omits prefix-cache-scorer",
+			roles: []Role{
+				{Kind: "server", RoleLabelKey: llmdTestRoleKindLabel, ExternalDP: true},
+				{Kind: "server", RoleLabelKey: llmdTestRoleKindLabel, ExternalDP: false},
+			},
+			profileName: "server",
+			want:        wantBalancedServer,
+		},
+		{
+			name: "prefill with external-dp still retains prefix-cache-scorer",
+			roles: []Role{
+				{Kind: "prefill", RoleLabelKey: llmdTestRoleKindLabel, ExternalDP: true},
+				{Kind: "decode", RoleLabelKey: llmdTestRoleKindLabel},
+			},
+			profileName: "prefill",
+			want: []profilePlugin{
+				{ref: "prefill-pods"},
+				{ref: "endpoint-health-filter"},
+				{ref: "queue-scorer", weight: intPtr(2)},
+				{ref: "kv-cache-utilization-scorer", weight: intPtr(2)},
+				{ref: "max-score-picker"},
+				{ref: "prefix-cache-scorer", weight: intPtr(3)},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			output, err := Render(LLMD, Input{Roles: tc.roles})
+			require.NoError(t, err)
+			doc := parseLLMDDocument(t, output.Document)
+
+			var got []profilePlugin
+			found := false
+			for _, profile := range doc.SchedulingProfiles {
+				if profile.Name != tc.profileName {
+					continue
+				}
+				found = true
+				for _, p := range profile.Plugins {
+					got = append(got, profilePlugin{ref: p.PluginRef, weight: p.Weight})
+				}
+			}
+			require.True(t, found, "profile %q must exist", tc.profileName)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("mixed server role order yields byte-identical document", func(t *testing.T) {
+		first, err := Render(LLMD, Input{Roles: []Role{
+			{Kind: "server", RoleLabelKey: llmdTestRoleKindLabel, ExternalDP: false},
+			{Kind: "server", RoleLabelKey: llmdTestRoleKindLabel, ExternalDP: true},
+		}})
+		require.NoError(t, err)
+		second, err := Render(LLMD, Input{Roles: []Role{
+			{Kind: "server", RoleLabelKey: llmdTestRoleKindLabel, ExternalDP: true},
+			{Kind: "server", RoleLabelKey: llmdTestRoleKindLabel, ExternalDP: false},
+		}})
+		require.NoError(t, err)
+		assert.Equal(t, first.Document, second.Document)
+	})
+}
+
+func TestRenderLLMD_EndpointHealthFilter(t *testing.T) {
+	testCases := []struct {
+		name                 string
+		input                Input
+		wantPlugin           bool
+		wantPollThreshold    float64
+		wantFilteredProfiles []string
+		wantUnfiltered       []string
+	}{
+		{
+			name: "managed server attaches filter immediately after server-pods",
+			input: Input{
+				Roles: []Role{{Kind: "server", RoleLabelKey: llmdTestRoleKindLabel}},
+			},
+			wantPlugin:           true,
+			wantPollThreshold:    3,
+			wantFilteredProfiles: []string{"server"},
+		},
+		{
+			name: "unmanaged server sets pollFailureThreshold to 0",
+			input: Input{
+				Roles:             []Role{{Kind: "server", RoleLabelKey: llmdTestRoleKindLabel}},
+				HasUnmanagedRoles: true,
+			},
+			wantPlugin:           true,
+			wantPollThreshold:    0,
+			wantFilteredProfiles: []string{"server"},
+		},
+		{
+			name: "pd attaches filter to prefill and decode",
+			input: Input{
+				Roles: []Role{
+					{Kind: "prefill", RoleLabelKey: llmdTestRoleKindLabel},
+					{Kind: "decode", RoleLabelKey: llmdTestRoleKindLabel},
+				},
+			},
+			wantPlugin:           true,
+			wantPollThreshold:    3,
+			wantFilteredProfiles: []string{"decode", "prefill"},
+		},
+		{
+			name:                 "epd attaches filter to prefill and decode and excludes encode",
+			input:                epdInput(),
+			wantPlugin:           true,
+			wantPollThreshold:    3,
+			wantFilteredProfiles: []string{"decode", "prefill"},
+			wantUnfiltered:       []string{"encode"},
+		},
+		{
+			name: "encode only omits endpoint-health-filter plugin",
+			input: Input{
+				Roles: []Role{{Kind: "encode", RoleLabelKey: llmdTestRoleKindLabel}},
+			},
+			wantPlugin:     false,
+			wantUnfiltered: []string{"encode"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			output, err := Render(LLMD, tc.input)
+			require.NoError(t, err)
+			doc := parseLLMDDocument(t, output.Document)
+
+			healthPlugins := 0
+			for _, plugin := range doc.Plugins {
+				if plugin.Type != "endpoint-health-filter" {
+					continue
+				}
+				healthPlugins++
+				assert.Equal(t, tc.wantPollThreshold, plugin.Parameters["pollFailureThreshold"])
+				assert.Equal(t, float64(5), plugin.Parameters["responseFailureThreshold"])
+				assert.Equal(t, []any{float64(502), float64(503)}, plugin.Parameters["responseFailureCodes"])
+				assert.Equal(t, float64(50), plugin.Parameters["maxEjectionPercent"])
+			}
+			if tc.wantPlugin {
+				assert.Equal(t, 1, healthPlugins, "endpoint-health-filter plugin must be rendered once")
+			} else {
+				assert.Zero(t, healthPlugins, "endpoint-health-filter plugin must be omitted")
+			}
+
+			for _, profile := range tc.wantFilteredProfiles {
+				refs := doc.profileRefs(t, profile)
+				require.GreaterOrEqual(t, len(refs), 2, "profile %q must have stage filter and health filter", profile)
+				assert.Equal(t, profile+"-pods", refs[0])
+				assert.Equal(t, "endpoint-health-filter", refs[1],
+					"endpoint-health-filter must appear immediately after %s-pods", profile)
+			}
+			for _, profile := range tc.wantUnfiltered {
+				refs := doc.profileRefs(t, profile)
+				assert.NotContains(t, refs, "endpoint-health-filter",
+					"profile %q must not attach endpoint-health-filter", profile)
 			}
 		})
 	}
