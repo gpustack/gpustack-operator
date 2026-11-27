@@ -116,7 +116,7 @@ func (s *ResourceServer) ListAndWatch(_ *Empty, srv grpc.ServerStreamingServer[L
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case livePodUIDs := <-notifier:
+		case <-notifier:
 			resp, err := s.getListAndWatchResponse(ctx)
 			if err != nil {
 				s.Logger.Error(err, "get list and watch response on update")
@@ -128,7 +128,11 @@ func (s *ResourceServer) ListAndWatch(_ *Empty, srv grpc.ServerStreamingServer[L
 			}
 			s.Logger.Info("sent list and watch response")
 			if gc != nil {
-				gc.reconcile(livePodUIDs)
+				// The wake carries no set; read the newest one. A wake sent before any Reconcile
+				// stored one has nothing to sweep, and skipping it keeps a nil set from the GC.
+				if live, ok := s.Reconciler.livePodUIDs(); ok {
+					gc.reconcile(live)
+				}
 			}
 		}
 	}
