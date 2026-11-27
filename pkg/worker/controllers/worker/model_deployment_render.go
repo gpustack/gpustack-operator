@@ -400,6 +400,11 @@ type ModelDeploymentRenderInput struct {
 	// deployments fronted by a managed router until the router Deployment converges to the
 	// inference allowlist. Nil defaults to true.
 	EngineSentinelEnabled *bool
+
+	// KernelArtifact is how the kernel bundle spec.roles[].kernelArtifactRef names reaches the
+	// serving container, resolved by the reconciler. Nil renders the role identically to before
+	// kernelArtifactRef existed.
+	KernelArtifact *ModelDeploymentKernelRender
 }
 
 // modelDeploymentSelectorLabels is what fronts a role's replicas: the identity of the deployment and
@@ -590,6 +595,11 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		vols = append(vols, artifactVols...)
 		mounts = append(mounts, artifactMounts...)
 	}
+	if in.KernelArtifact != nil {
+		kernelVols, kernelMounts := in.KernelArtifact.volumes(takeOver)
+		vols = append(vols, kernelVols...)
+		mounts = append(mounts, kernelMounts...)
+	}
 	// compileCacheSubPath is the role's compilation identity, hoisted so the ModelExpress
 	// delivery can read the same digest a mount was skipped for.
 	var compileCacheSubPath string
@@ -611,10 +621,11 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			if in.AcceleratorType != nil {
 				compileCacheSubPath, err = BuildModelDeploymentCompileCacheSubPath(
 					ModelDeploymentCompileCacheInput{
-						Deployment:      md,
-						Role:            role,
-						AcceleratorType: in.AcceleratorType,
-						Artifact:        artifact,
+						Deployment:           md,
+						Role:                 role,
+						AcceleratorType:      in.AcceleratorType,
+						Artifact:             artifact,
+						KernelManifestDigest: in.KernelArtifact.compileCacheDigest(),
 					},
 				)
 				if err != nil {
@@ -647,10 +658,11 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		if compileCacheSubPath == "" && in.AcceleratorType != nil {
 			compileCacheSubPath, err = BuildModelDeploymentCompileCacheSubPath(
 				ModelDeploymentCompileCacheInput{
-					Deployment:      md,
-					Role:            role,
-					AcceleratorType: in.AcceleratorType,
-					Artifact:        artifact,
+					Deployment:           md,
+					Role:                 role,
+					AcceleratorType:      in.AcceleratorType,
+					Artifact:             artifact,
+					KernelManifestDigest: in.KernelArtifact.compileCacheDigest(),
 				},
 			)
 			if err != nil {
@@ -739,6 +751,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	if sentinelConfigured {
 		applyModelDeploymentEngineSentinelToContainer(&mainC, md.Spec.Engine.Name, sentinelActive)
 	}
+	applyModelDeploymentKernelArtifactToContainer(&mainC, in.KernelArtifact, takeOver)
 	if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
 		if in.InterfaceResource == "" {
 			return nil, fmt.Errorf("role %q requests interfaces without a fabric resource", role.Name)
@@ -2305,23 +2318,44 @@ func modelDeploymentBindingHash(
 		}
 	}
 
+	var kernelArtifactRef *core.LocalObjectReference
+	var kernelManifestDigest string
+	var kernelArtifact *ModelDeploymentKernelRender
+	if !takeOver && (in.Role.KernelArtifactRef != nil || in.KernelArtifact != nil) {
+		if in.Role.KernelArtifactRef != nil {
+			kernelArtifactRef = in.Role.KernelArtifactRef.DeepCopy()
+		}
+		if in.KernelArtifact != nil {
+			ka := *in.KernelArtifact
+			ka.DispatchManifestDigest = ""
+			kernelArtifact = &ka
+			kernelManifestDigest = in.KernelArtifact.compileCacheDigest()
+		}
+	}
+
 	hashSubject := func(conn *modelDeploymentConnectorBinding) string {
 		subject := struct {
-			AcceleratorType   modelDeploymentAcceleratorTypeHashInput `json:"acceleratorType"`
-			RuntimeClassName  string                                  `json:"runtimeClassName,omitempty"`
-			InterfaceResource core.ResourceName                       `json:"interfaceResource,omitempty"`
-			Artifact          *ModelDeploymentArtifactRender          `json:"artifact,omitempty"`
-			Connector         *modelDeploymentConnectorBinding        `json:"connector,omitempty"`
-			RawConnector      *ModelDeploymentConnectorRender         `json:"rawConnector,omitempty"`
-			ECConnector       string                                  `json:"ecConnector,omitempty"`
+			AcceleratorType      modelDeploymentAcceleratorTypeHashInput `json:"acceleratorType"`
+			RuntimeClassName     string                                  `json:"runtimeClassName,omitempty"`
+			InterfaceResource    core.ResourceName                       `json:"interfaceResource,omitempty"`
+			Artifact             *ModelDeploymentArtifactRender          `json:"artifact,omitempty"`
+			KernelArtifactRef    *core.LocalObjectReference              `json:"kernelArtifactRef,omitempty"`
+			KernelManifestDigest string                                  `json:"kernelManifestDigest,omitempty"`
+			KernelArtifact       *ModelDeploymentKernelRender            `json:"kernelArtifact,omitempty"`
+			Connector            *modelDeploymentConnectorBinding        `json:"connector,omitempty"`
+			RawConnector         *ModelDeploymentConnectorRender         `json:"rawConnector,omitempty"`
+			ECConnector          string                                  `json:"ecConnector,omitempty"`
 		}{
-			AcceleratorType:   accType,
-			RuntimeClassName:  in.RuntimeClassName,
-			InterfaceResource: in.InterfaceResource,
-			Artifact:          artifact,
-			Connector:         conn,
-			RawConnector:      rawConnector,
-			ECConnector:       ecConnector,
+			AcceleratorType:      accType,
+			RuntimeClassName:     in.RuntimeClassName,
+			InterfaceResource:    in.InterfaceResource,
+			Artifact:             artifact,
+			KernelArtifactRef:    kernelArtifactRef,
+			KernelManifestDigest: kernelManifestDigest,
+			KernelArtifact:       kernelArtifact,
+			Connector:            conn,
+			RawConnector:         rawConnector,
+			ECConnector:          ecConnector,
 		}
 
 		encoded, err := json.Marshal(subject)

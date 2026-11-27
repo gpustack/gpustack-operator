@@ -74,6 +74,14 @@ type modelDeploymentReplacementSlot struct {
 	// CurrentMemberUIDs and CurrentWorkloadUID retain creation observations through member loss.
 	CurrentMemberUIDs  []types.UID `json:"currentMemberUIDs,omitempty"`
 	CurrentWorkloadUID types.UID   `json:"currentWorkloadUID,omitempty"`
+
+	// RequireReadiness holds the replacement slot until every replacement member is Pod Ready and
+	// confirms the expected kernel dispatch manifest on sentinel /gpustack/v1/runtime_config.
+	RequireReadiness bool `json:"requireReadiness,omitempty"`
+
+	// DispatchManifestDigest is the expected SHA-256 digest of dispatch-manifest.json on sentinel
+	// /gpustack/v1/runtime_config when rolling onto a forged or hub-imported kernel bundle.
+	DispatchManifestDigest string `json:"dispatchManifestDigest,omitempty"`
 }
 
 // modelDeploymentReplacementSlots is every role's slot, keyed by role name.
@@ -625,6 +633,11 @@ func (r *ModelDeploymentReconciler) replacementAdmitted(
 				return false, fmt.Sprintf("member %s is not scheduled yet", member.Name), nil
 			}
 		}
+		if slot.RequireReadiness {
+			if whyReady := r.verifyCanaryReplacementKernels(ctx, md, slot, standing); whyReady != "" {
+				return false, whyReady, nil
+			}
+		}
 
 		return true, "", nil
 	}
@@ -639,6 +652,12 @@ func (r *ModelDeploymentReconciler) replacementAdmitted(
 
 	if reason := replacementAdmissionHolds(wl, standing, want); reason != "" {
 		return false, reason, nil
+	}
+
+	if slot.RequireReadiness {
+		if whyReady := r.verifyCanaryReplacementKernels(ctx, md, slot, standing); whyReady != "" {
+			return false, whyReady, nil
+		}
 	}
 
 	return true, "", nil
@@ -1172,10 +1191,13 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 			broken = true
 		}
 		if broken || replacementSupersededWithLegacySets(slot, want, legacyHashSets) {
+			reqReady, dispatchDigest := r.replacementKernelGateOnSupersede(ctx, md, slot, standing, want)
 			next := modelDeploymentReplacementSlot{
 				Role: slot.Role, Ordinal: slot.Ordinal, Phase: modelDeploymentReplacementCleanup,
-				MemberUIDs:  sets.List(present.Union(sets.New(slot.CurrentMemberUIDs...))),
-				WorkloadUID: slot.CurrentWorkloadUID,
+				MemberUIDs:             sets.List(present.Union(sets.New(slot.CurrentMemberUIDs...))),
+				WorkloadUID:            slot.CurrentWorkloadUID,
+				RequireReadiness:       reqReady,
+				DispatchManifestDigest: dispatchDigest,
 			}
 			if ownsCurrent {
 				next.WorkloadUID = wl.UID
@@ -1223,10 +1245,12 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 		// compared against.
 		if slot.Phase == modelDeploymentReplacementCleanup || len(slot.MemberHashes) == 0 {
 			progress.slot = modelDeploymentReplacementSlot{
-				Role:         slot.Role,
-				Ordinal:      slot.Ordinal,
-				Phase:        modelDeploymentReplacementWaitingForAdmission,
-				MemberHashes: replacementRenderHashes(want),
+				Role:                   slot.Role,
+				Ordinal:                slot.Ordinal,
+				Phase:                  modelDeploymentReplacementWaitingForAdmission,
+				MemberHashes:           replacementRenderHashes(want),
+				RequireReadiness:       slot.RequireReadiness,
+				DispatchManifestDigest: slot.DispatchManifestDigest,
 			}
 			if err = r.advanceReplacementSlot(ctx, md, progress.slot); err != nil {
 				return progress, err
@@ -1244,6 +1268,9 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 		progress.cleared = true
 
 		return progress, nil
+	}
+	if slot.RequireReadiness {
+		progress.requeue = true
 	}
 	logger.V(3).Info("waiting for the replacement to be admitted",
 		"slot", replacementDescription(slot), "because", reason)
