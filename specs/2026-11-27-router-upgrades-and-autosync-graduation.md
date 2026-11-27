@@ -1,7 +1,6 @@
 # Spec: ModelDeployment Router Upgrades, External DP Balancing, and Auto-Sync Commit Graduation
 
-Status: Building
-Blocked on: PR 2 (`T7` public site and documentation alignment) remaining before marking `Shipped`.
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -287,7 +286,7 @@ if kind != roleKindDecode {
       Acceptance: `model_deployment_router.go` sets `ExternalDP: len(role.Command) == 0 && modelDeploymentRoleExternalDP(md, role)`, populates `HasUnmanagedRoles` when any non-`encode` role sets `len(role.Command) > 0`, and renders `--allow-experimental-plugins=true` on `llm-d-router` Pods (with `--allow-experimental-plugins` added to `modelDeploymentRouterOwnedArgs[LLMD]` in `pkg/worker/webhooks/worker/model_deployment.go` and covered by webhook tests); unit and golden tests cover vLLM/SGLang External DP balancing, take-over role safety, `endpoint-health-filter` placement and `encode` exclusion, updated image assertions (`v0.6.1` and `v1.0.0`), re-baselined router/direct-decoder serialized digests (with non-sidecar pod digests untouched), updated `testdata/golden-render/*_dst.yaml`, and green `TestModelDeploymentLegacyRender_GoldenPods` + `TestModelDeploymentLegacyRender_DynamicRenderChangeKeepsPodSpecHash` at `modelDeploymentRenderVersion == 7`.
       Verify: `go test -v ./pkg/worker/controllers/worker/... -run 'TestRenderModelDeployment|TestModelDeploymentLegacyRender|TestModelDeploymentGoldenYAML|TestModelDeploymentRouter' && go test -v ./pkg/worker/webhooks/worker/...`
 
-- [ ] **T7 · Public Hugo site and docs Router Capability Matrix alignment (PR 2)**
+- [x] **T7 · Public Hugo site and docs Router Capability Matrix alignment (PR 2)**
       Blocked by: T6
       Owns: `docs/**`, `site/**`
       Acceptance: `docs/modules/model-deployment/routing.md` carries a complete Router Capabilities Matrix (`llm-d-router`, `vllm-router`, `sgl-router`, deprecated `sglang-gateway`) covering engine pairing, discovery, policies/`extraArgs`, KV events, P/D and E/P/D, External DP, `endpoint-health-filter` & circuit breakers, API extensions (`/v1/responses`), and observer semantics; `external-dp.md`, `prefill-decode.md`, `engine-versions.md` (`gpustack/llm-router >= v0.6.1`, `mirrored-llm-d-router-disagg-sidecar >= v1.0.0`), `docs/reference/model-deployment-parameters.md`, `docs/reference/settings.md`, and `docs/README.md` (`#module-map` Model Deployment entry registering this spec) are synchronized under the three-zone docs contract with zero `reference/` links from public site pages.
