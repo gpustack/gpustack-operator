@@ -23,10 +23,10 @@ const (
 	testKernelManifestDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	testKernelDispatchDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	testKernelCommitSHA      = "0123456789abcdef0123456789abcdef01234567"
-	testKernelValidKeyVLLM   = "vllm/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef"
-	testKernelValidKeyVLLM2  = "vllm/0.8.5/nvidia/sm_90a/rope_kv_append/fedcba9876543210"
-	testKernelValidKeySGLang = "sglang/0.4.6/amd/gfx942/rmsnorm/0123456789abcdef"
-	testKernelValidKeyAscend = "vllm/0.8.5/ascend/910b/moe_router_topk/0123456789abcdef"
+	testKernelValidKeyVLLM   = "vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef"
+	testKernelValidKeyVLLM2  = "vllm/0.8/nvidia/sm_90a/rope_kv_append/fedcba9876543210"
+	testKernelValidKeySGLang = "sglang/0.4/amd/gfx942/rmsnorm/0123456789abcdef"
+	testKernelValidKeyAscend = "vllm/0.8/ascend/910b/moe_router_topk/0123456789abcdef"
 	testKernelTenantUsername = "system:serviceaccount:team-a:default"
 )
 
@@ -58,7 +58,7 @@ func newTestKernelArtifactNodeStore(mutate ...func(*workercore.ModelKernelArtifa
 			},
 			Compatibility: workercore.ModelKernelArtifactCompatibility{
 				Engine:        workercore.ModelDeploymentEngineVLLM,
-				EngineVersion: "0.8.5",
+				EngineVersion: "0.8",
 				Manufacturer:  "nvidia",
 				Architecture:  "sm_90a",
 				KernelKeys:    []string{testKernelValidKeyVLLM},
@@ -83,7 +83,7 @@ func newTestKernelArtifactHub(mutate ...func(*workercore.ModelKernelArtifact)) *
 			},
 			Compatibility: workercore.ModelKernelArtifactCompatibility{
 				Engine:        workercore.ModelDeploymentEngineVLLM,
-				EngineVersion: "0.8.5",
+				EngineVersion: "0.8",
 				Manufacturer:  "nvidia",
 				Architecture:  "sm_90a",
 				KernelKeys:    []string{testKernelValidKeyVLLM},
@@ -107,7 +107,7 @@ func newTestKernelArtifactImage(mutate ...func(*workercore.ModelKernelArtifact))
 			},
 			Compatibility: workercore.ModelKernelArtifactCompatibility{
 				Engine:        workercore.ModelDeploymentEngineVLLM,
-				EngineVersion: "0.8.5",
+				EngineVersion: "0.8",
 				Manufacturer:  "nvidia",
 				Architecture:  "sm_90a",
 				KernelKeys:    []string{testKernelValidKeyVLLM},
@@ -362,7 +362,7 @@ func TestModelKernelArtifactWebhookValidateCreate(t *testing.T) {
 			in: newTestKernelArtifactHub(func(m *workercore.ModelKernelArtifact) {
 				m.Spec.Compatibility = workercore.ModelKernelArtifactCompatibility{
 					Engine:        workercore.ModelDeploymentEngineSGLang,
-					EngineVersion: "0.4.6",
+					EngineVersion: "0.4",
 					Manufacturer:  "amd",
 					Architecture:  "gfx942",
 					KernelKeys:    []string{testKernelValidKeySGLang},
@@ -375,7 +375,7 @@ func TestModelKernelArtifactWebhookValidateCreate(t *testing.T) {
 			in: newTestKernelArtifactHub(func(m *workercore.ModelKernelArtifact) {
 				m.Spec.Compatibility = workercore.ModelKernelArtifactCompatibility{
 					Engine:        workercore.ModelDeploymentEngineVLLM,
-					EngineVersion: "0.8.5",
+					EngineVersion: "0.8",
 					Manufacturer:  "ascend",
 					Architecture:  "910b",
 					KernelKeys:    []string{testKernelValidKeyAscend},
@@ -397,6 +397,14 @@ func TestModelKernelArtifactWebhookValidateCreate(t *testing.T) {
 				m.Spec.Compatibility.Engine = "TensorRT-LLM"
 			}),
 			wantField: "spec.compatibility.engine",
+		},
+		{
+			name: "compatibility rejects unnormalized patch engineVersion",
+			ctx:  createAdmissionContext(testKernelTenantUsername),
+			in: newTestKernelArtifactHub(func(m *workercore.ModelKernelArtifact) {
+				m.Spec.Compatibility.EngineVersion = "0.8.5"
+			}),
+			wantField: "spec.compatibility.engineVersion",
 		},
 		{
 			name: "compatibility rejects unnormalized engineVersion with build suffix",
@@ -468,7 +476,7 @@ func TestModelKernelArtifactWebhookValidateCreate(t *testing.T) {
 			in: newTestKernelArtifactHub(func(m *workercore.ModelKernelArtifact) {
 				keys := make([]string, 129)
 				for i := range keys {
-					keys[i] = fmt.Sprintf("vllm/0.8.5/nvidia/sm_90a/rmsnorm/%016x", i)
+					keys[i] = fmt.Sprintf("vllm/0.8/nvidia/sm_90a/rmsnorm/%016x", i)
 				}
 				m.Spec.Compatibility.KernelKeys = keys
 			}),
@@ -486,7 +494,7 @@ func TestModelKernelArtifactWebhookValidateCreate(t *testing.T) {
 			name: "compatibility rejects dense GEMM kernelKey",
 			ctx:  createAdmissionContext(testKernelTenantUsername),
 			in: newTestKernelArtifactHub(func(m *workercore.ModelKernelArtifact) {
-				m.Spec.Compatibility.KernelKeys = []string{"vllm/0.8.5/nvidia/sm_90a/gemm/0123456789abcdef"}
+				m.Spec.Compatibility.KernelKeys = []string{"vllm/0.8/nvidia/sm_90a/gemm/0123456789abcdef"}
 			}),
 			wantField:   "spec.compatibility.kernelKeys[0]",
 			wantMessage: "excluded",
@@ -495,7 +503,7 @@ func TestModelKernelArtifactWebhookValidateCreate(t *testing.T) {
 			name: "compatibility rejects block-scaled GEMM kernelKey",
 			ctx:  createAdmissionContext(testKernelTenantUsername),
 			in: newTestKernelArtifactHub(func(m *workercore.ModelKernelArtifact) {
-				m.Spec.Compatibility.KernelKeys = []string{"vllm/0.8.5/nvidia/sm_90a/nvfp4_gemm/0123456789abcdef"}
+				m.Spec.Compatibility.KernelKeys = []string{"vllm/0.8/nvidia/sm_90a/nvfp4_gemm/0123456789abcdef"}
 			}),
 			wantField:   "spec.compatibility.kernelKeys[0]",
 			wantMessage: "excluded",
@@ -504,7 +512,7 @@ func TestModelKernelArtifactWebhookValidateCreate(t *testing.T) {
 			name: "compatibility rejects collective kernelKey",
 			ctx:  createAdmissionContext(testKernelTenantUsername),
 			in: newTestKernelArtifactHub(func(m *workercore.ModelKernelArtifact) {
-				m.Spec.Compatibility.KernelKeys = []string{"vllm/0.8.5/nvidia/sm_90a/all_reduce/0123456789abcdef"}
+				m.Spec.Compatibility.KernelKeys = []string{"vllm/0.8/nvidia/sm_90a/all_reduce/0123456789abcdef"}
 			}),
 			wantField:   "spec.compatibility.kernelKeys[0]",
 			wantMessage: "excluded",
@@ -513,7 +521,7 @@ func TestModelKernelArtifactWebhookValidateCreate(t *testing.T) {
 			name: "compatibility rejects key mismatched with engine",
 			ctx:  createAdmissionContext(testKernelTenantUsername),
 			in: newTestKernelArtifactHub(func(m *workercore.ModelKernelArtifact) {
-				m.Spec.Compatibility.KernelKeys = []string{"sglang/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef"}
+				m.Spec.Compatibility.KernelKeys = []string{"sglang/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef"}
 			}),
 			wantField:   "spec.compatibility.kernelKeys[0]",
 			wantMessage: "engine mismatch",
@@ -522,7 +530,7 @@ func TestModelKernelArtifactWebhookValidateCreate(t *testing.T) {
 			name: "compatibility rejects key mismatched with engineVersion",
 			ctx:  createAdmissionContext(testKernelTenantUsername),
 			in: newTestKernelArtifactHub(func(m *workercore.ModelKernelArtifact) {
-				m.Spec.Compatibility.KernelKeys = []string{"vllm/0.9.0/nvidia/sm_90a/rmsnorm/0123456789abcdef"}
+				m.Spec.Compatibility.KernelKeys = []string{"vllm/0.9/nvidia/sm_90a/rmsnorm/0123456789abcdef"}
 			}),
 			wantField:   "spec.compatibility.kernelKeys[0]",
 			wantMessage: "engineVersion mismatch",
@@ -531,7 +539,7 @@ func TestModelKernelArtifactWebhookValidateCreate(t *testing.T) {
 			name: "compatibility rejects key mismatched with manufacturer",
 			ctx:  createAdmissionContext(testKernelTenantUsername),
 			in: newTestKernelArtifactHub(func(m *workercore.ModelKernelArtifact) {
-				m.Spec.Compatibility.KernelKeys = []string{"vllm/0.8.5/amd/gfx942/rmsnorm/0123456789abcdef"}
+				m.Spec.Compatibility.KernelKeys = []string{"vllm/0.8/amd/gfx942/rmsnorm/0123456789abcdef"}
 			}),
 			wantField:   "spec.compatibility.kernelKeys[0]",
 			wantMessage: "manufacturer mismatch",
@@ -540,7 +548,7 @@ func TestModelKernelArtifactWebhookValidateCreate(t *testing.T) {
 			name: "compatibility rejects key mismatched with architecture",
 			ctx:  createAdmissionContext(testKernelTenantUsername),
 			in: newTestKernelArtifactHub(func(m *workercore.ModelKernelArtifact) {
-				m.Spec.Compatibility.KernelKeys = []string{"vllm/0.8.5/nvidia/sm_80/rmsnorm/0123456789abcdef"}
+				m.Spec.Compatibility.KernelKeys = []string{"vllm/0.8/nvidia/sm_80/rmsnorm/0123456789abcdef"}
 			}),
 			wantField:   "spec.compatibility.kernelKeys[0]",
 			wantMessage: "arch mismatch",

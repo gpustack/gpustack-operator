@@ -1,4 +1,4 @@
-package forger
+package modelforger
 
 import (
 	"bytes"
@@ -22,9 +22,9 @@ import (
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/modelkernelkey"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/json"
-	"gpustack.ai/gpustack/pkg/worker/kernelkey"
 )
 
 const (
@@ -61,7 +61,7 @@ const (
 	MaxInputConfigMapBytes = 512 << 10
 	// DefaultSandboxTimeoutSeconds is the default ActiveDeadlineSeconds for ForgeSandbox Pods.
 	DefaultSandboxTimeoutSeconds int64 = 1800
-	// DefaultHoldMaxDuration is the default maximum hold window for gpustack-operator forge-hold.
+	// DefaultHoldMaxDuration is the default maximum hold window for gpustack-operator model-forger hold.
 	DefaultHoldMaxDuration = 10 * time.Minute
 
 	// SandboxLabelName identifies ForgeSandbox Pods and ConfigMaps.
@@ -316,7 +316,7 @@ type SandboxPodSpec struct {
 	AcceleratorType         *workercore.InstanceType
 	Manufacturer            string
 	AcceleratorResourceName core.ResourceName
-	Hardware                kernelkey.NodeHardware
+	Hardware                modelkernelkey.NodeHardware
 	ExtraNodeSelector       map[string]string
 	OperatorImage           string
 	EngineImage             string
@@ -444,7 +444,7 @@ func BuildSandboxPod(spec SandboxPodSpec) (*core.Pod, error) {
 				Name:            RunnerContainerName,
 				Image:           operatorImage,
 				Command:         []string{"gpustack-operator"},
-				Args:            []string{"forge-mock", "--input-dir", InputMountPath, "--output-dir", OutputMountPath},
+				Args:            []string{"model-forger", "mock", "--input-dir", InputMountPath, "--output-dir", OutputMountPath},
 				Resources:       *gpuResources.DeepCopy(),
 				SecurityContext: restrictedContainerSecurityContext(),
 				VolumeMounts: []core.VolumeMount{
@@ -456,7 +456,7 @@ func BuildSandboxPod(spec SandboxPodSpec) (*core.Pod, error) {
 				Name:            VerifierContainerName,
 				Image:           operatorImage,
 				Command:         []string{"gpustack-operator"},
-				Args:            append([]string{"forge-verify"}, verifierArgs(reportPath, spec.Thresholds)...),
+				Args:            append([]string{"model-forger", "verify"}, verifierArgs(reportPath, spec.Thresholds)...),
 				Resources:       *gpuResources.DeepCopy(),
 				SecurityContext: restrictedContainerSecurityContext(),
 				VolumeMounts: []core.VolumeMount{
@@ -537,7 +537,7 @@ func BuildSandboxPod(spec SandboxPodSpec) (*core.Pod, error) {
 		Name:            HoldContainerName,
 		Image:           operatorImage,
 		Command:         []string{"gpustack-operator"},
-		Args:            []string{"forge-hold", "--max-duration", holdDuration.String()},
+		Args:            []string{"model-forger", "hold", "--max-duration", holdDuration.String()},
 		SecurityContext: restrictedContainerSecurityContext(),
 	}
 
@@ -656,7 +656,7 @@ func resolveSandboxManufacturer(spec SandboxPodSpec) (string, error) {
 	if rawManu == "" {
 		rawManu = strings.TrimSpace(spec.Hardware.Manufacturer)
 	}
-	normManu, err := kernelkey.NormalizeManufacturer(rawManu)
+	normManu, err := modelkernelkey.NormalizeManufacturer(rawManu)
 	if err != nil {
 		return "", fmt.Errorf("resolve accelerator manufacturer: %w", err)
 	}

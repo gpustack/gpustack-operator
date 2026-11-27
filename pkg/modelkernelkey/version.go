@@ -1,4 +1,4 @@
-package kernelkey
+package modelkernelkey
 
 import (
 	"fmt"
@@ -20,12 +20,11 @@ var (
 	gitDescribeSuffixPattern = regexp.MustCompile(`(?:-\d+)?[-.](?:g|git)[0-9a-fA-F]{6,}(?:[-.].*)?$`)
 	dirtySuffixPattern       = regexp.MustCompile(`[-.]dirty$`)
 
-	// normalizedVersionPattern accepts major.minor(.patch(.micro)) followed by optional
-	// PEP 440 or SemVer pre-release/post-release tags, without slashes or whitespace.
+	// normalizedVersionPattern extracts major.minor and any PEP 440 or SemVer pre-release tag
+	// while dropping patch, micro, and post-release segments.
 	normalizedVersionPattern = regexp.MustCompile(
-		`^(\d+)\.(\d+)(?:\.(\d+)(?:\.(\d+))?)?(?:(?:\.?[ab]|(?:\.?|-)(?:rc|alpha|beta|post|dev))\d*(?:\.\d+)*)?$`,
+		`^(\d+)\.(\d+)(?:\.\d+(?:\.\d+)?)?(?:(?:\.?|-)post\d+(?:\.\d+)*)?((?:(?:\.?[ab]|(?:\.?|-)(?:rc|alpha|beta|dev))\d*(?:\.\d+)*)?)$`,
 	)
-	bareMajorMinorPattern = regexp.MustCompile(`^(\d+)\.(\d+)$`)
 )
 
 // NormalizeEngine converts an inference engine name (such as "vLLM" or "SGLang")
@@ -43,9 +42,9 @@ func NormalizeEngine(engine string) (string, error) {
 	}
 }
 
-// NormalizeEngineVersion strips build metadata (+cu128, +rocm6.3, +g...) and
-// git commit suffixes while preserving major.minor.patch and pre-release tags.
-// Two-part versions such as "0.34" are padded to "0.34.0".
+// NormalizeEngineVersion strips build metadata (+cu128, +rocm6.3, +g...), git commit suffixes,
+// and patch/micro/post-release numbers so releases in the same major.minor line share one
+// canonical key while pre-release tags remain isolated.
 func NormalizeEngineVersion(version string) (string, error) {
 	v := strings.TrimSpace(version)
 	if v == "" {
@@ -65,13 +64,10 @@ func NormalizeEngineVersion(version string) (string, error) {
 	v = gitDescribeSuffixPattern.ReplaceAllString(v, "")
 	v = dirtySuffixPattern.ReplaceAllString(v, "")
 
-	if bareMajorMinorPattern.MatchString(v) {
-		v += ".0"
-	}
-
-	if !normalizedVersionPattern.MatchString(v) {
+	m := normalizedVersionPattern.FindStringSubmatch(v)
+	if m == nil {
 		return "", fmt.Errorf("invalid engineVersion %q", version)
 	}
 
-	return v, nil
+	return m[1] + "." + m[2] + m[3], nil
 }

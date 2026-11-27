@@ -1,4 +1,4 @@
-package kernelkey
+package modelkernelkey
 
 import (
 	"math"
@@ -45,7 +45,7 @@ func TestBuildParseFormatRoundTripAndHashing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Format() unexpected error: %v", err)
 	}
-	wantPrefix := "vllm/0.34.0/nvidia/sm_90a/rmsnorm/"
+	wantPrefix := "vllm/0.34/nvidia/sm_90a/rmsnorm/"
 	if formatted != wantPrefix+k1.SignatureHash16 {
 		t.Fatalf("Format() = %q, want prefix %q + hash", formatted, wantPrefix)
 	}
@@ -191,28 +191,107 @@ func TestBuildParseFormatRoundTripAndHashing(t *testing.T) {
 	})
 }
 
+func TestPatchVersionSharingAndMinorOrPrereleaseIsolation(t *testing.T) {
+	specFor := func(ver string) BuildSpec {
+		return BuildSpec{
+			Engine:        "vLLM",
+			EngineVersion: ver,
+			Manufacturer:  "nvidia",
+			Arch:          "sm_90a",
+			OpFamily:      OpFamilyRMSNorm,
+			ConstAxes:     map[string]int64{"hidden_size": 4096},
+			InputDtypes:   []string{"bfloat16"},
+			OutputDtypes:  []string{"bfloat16"},
+		}
+	}
+
+	k085, err := Build(specFor("0.8.5"))
+	if err != nil {
+		t.Fatalf("Build(0.8.5) error: %v", err)
+	}
+	k086, err := Build(specFor("0.8.6"))
+	if err != nil {
+		t.Fatalf("Build(0.8.6) error: %v", err)
+	}
+	if k085.String() != k086.String() {
+		t.Fatalf("0.8.5 key %q != 0.8.6 key %q", k085.String(), k086.String())
+	}
+	if k085.EngineVersion != "0.8" {
+		t.Fatalf("0.8.5 EngineVersion = %q, want 0.8", k085.EngineVersion)
+	}
+
+	parsed08, err := Parse(k085.String())
+	if err != nil {
+		t.Fatalf("Parse(%q) error: %v", k085.String(), err)
+	}
+	for _, targetVer := range []string{"0.8", "0.8.5", "0.8.6", "v0.8.6+cu128"} {
+		target := CompatibilityTarget{
+			Engine:        "vLLM",
+			EngineVersion: targetVer,
+			Manufacturer:  "nvidia",
+			Arch:          "sm_90a",
+		}
+		if err := MatchCompatibility(parsed08, target); err != nil {
+			t.Fatalf("MatchCompatibility(%q, %q) unexpected error: %v", parsed08.String(), targetVer, err)
+		}
+	}
+
+	k090, err := Build(specFor("0.9.0"))
+	if err != nil {
+		t.Fatalf("Build(0.9.0) error: %v", err)
+	}
+	if k090.String() == k085.String() {
+		t.Fatalf("minor bump 0.9.0 collided with 0.8.5: %q", k090.String())
+	}
+	if err := MatchCompatibility(parsed08, CompatibilityTarget{
+		Engine: "vLLM", EngineVersion: "0.9.0", Manufacturer: "nvidia", Arch: "sm_90a",
+	}); err == nil {
+		t.Fatal("expected 0.8.5 key not to match 0.9.0 target")
+	}
+
+	k090rc1, err := Build(specFor("0.9.0rc1"))
+	if err != nil {
+		t.Fatalf("Build(0.9.0rc1) error: %v", err)
+	}
+	if k090rc1.String() == k090.String() {
+		t.Fatalf("pre-release 0.9.0rc1 collided with 0.9.0: %q", k090rc1.String())
+	}
+	if err := MatchCompatibility(k090, CompatibilityTarget{
+		Engine: "vLLM", EngineVersion: "0.9.0rc1", Manufacturer: "nvidia", Arch: "sm_90a",
+	}); err == nil {
+		t.Fatal("expected 0.9.0 key not to match 0.9.0rc1 target")
+	}
+	if err := MatchCompatibility(k090rc1, CompatibilityTarget{
+		Engine: "vLLM", EngineVersion: "0.9.0", Manufacturer: "nvidia", Arch: "sm_90a",
+	}); err == nil {
+		t.Fatal("expected 0.9.0rc1 key not to match 0.9.0 target")
+	}
+}
+
 func TestParseAndValidateErrors(t *testing.T) {
 	cases := []struct {
 		name    string
 		raw     string
 		wantErr bool
 	}{
-		{name: "valid canonical nvidia", raw: "vllm/0.34.0/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
-		{name: "valid canonical amd", raw: "sglang/0.5.15/amd/gfx942/paged_attention/fedcba9876543210"},
-		{name: "valid canonical ascend", raw: "vllm/0.32.0/ascend/910b/mla_local/0011223344556677"},
+		{name: "valid canonical nvidia", raw: "vllm/0.34/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
+		{name: "valid canonical amd", raw: "sglang/0.5/amd/gfx942/paged_attention/fedcba9876543210"},
+		{name: "valid canonical ascend", raw: "vllm/0.32/ascend/910b/mla_local/0011223344556677"},
+		{name: "valid canonical prerelease", raw: "vllm/0.9rc1/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
 		{name: "empty key", raw: "", wantErr: true},
-		{name: "too few segments", raw: "vllm/0.34.0/nvidia/sm_90a/rmsnorm", wantErr: true},
-		{name: "too many segments", raw: "vllm/0.34.0/nvidia/sm_90a/rmsnorm/0123456789abcdef/extra", wantErr: true},
-		{name: "non-canonical engine casing", raw: "vLLM/0.34.0/nvidia/sm_90a/rmsnorm/0123456789abcdef", wantErr: true},
-		{name: "unnormalized engineVersion build suffix", raw: "vllm/0.34.0+cu128/nvidia/sm_90a/rmsnorm/0123456789abcdef", wantErr: true},
-		{name: "unknown manufacturer", raw: "vllm/0.34.0/unknown/sm_90a/rmsnorm/0123456789abcdef", wantErr: true},
-		{name: "unnormalized nvidia arch", raw: "vllm/0.34.0/nvidia/9.0/rmsnorm/0123456789abcdef", wantErr: true},
-		{name: "rejected dense gemm", raw: "vllm/0.34.0/nvidia/sm_90a/gemm/0123456789abcdef", wantErr: true},
-		{name: "rejected block-scaled gemm", raw: "vllm/0.34.0/nvidia/sm_90a/nvfp4_gemm/0123456789abcdef", wantErr: true},
-		{name: "rejected collective", raw: "vllm/0.34.0/nvidia/sm_90a/all_reduce/0123456789abcdef", wantErr: true},
-		{name: "uppercase hex in signatureHash16", raw: "vllm/0.34.0/nvidia/sm_90a/rmsnorm/0123456789ABCDEF", wantErr: true},
-		{name: "short signatureHash16", raw: "vllm/0.34.0/nvidia/sm_90a/rmsnorm/01234567", wantErr: true},
-		{name: "non-hex signatureHash16", raw: "vllm/0.34.0/nvidia/sm_90a/rmsnorm/0123456789abcdeg", wantErr: true},
+		{name: "too few segments", raw: "vllm/0.34/nvidia/sm_90a/rmsnorm", wantErr: true},
+		{name: "too many segments", raw: "vllm/0.34/nvidia/sm_90a/rmsnorm/0123456789abcdef/extra", wantErr: true},
+		{name: "non-canonical engine casing", raw: "vLLM/0.34/nvidia/sm_90a/rmsnorm/0123456789abcdef", wantErr: true},
+		{name: "unnormalized patch engineVersion", raw: "vllm/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef", wantErr: true},
+		{name: "unnormalized engineVersion build suffix", raw: "vllm/0.34+cu128/nvidia/sm_90a/rmsnorm/0123456789abcdef", wantErr: true},
+		{name: "unknown manufacturer", raw: "vllm/0.34/unknown/sm_90a/rmsnorm/0123456789abcdef", wantErr: true},
+		{name: "unnormalized nvidia arch", raw: "vllm/0.34/nvidia/9.0/rmsnorm/0123456789abcdef", wantErr: true},
+		{name: "rejected dense gemm", raw: "vllm/0.34/nvidia/sm_90a/gemm/0123456789abcdef", wantErr: true},
+		{name: "rejected block-scaled gemm", raw: "vllm/0.34/nvidia/sm_90a/nvfp4_gemm/0123456789abcdef", wantErr: true},
+		{name: "rejected collective", raw: "vllm/0.34/nvidia/sm_90a/all_reduce/0123456789abcdef", wantErr: true},
+		{name: "uppercase hex in signatureHash16", raw: "vllm/0.34/nvidia/sm_90a/rmsnorm/0123456789ABCDEF", wantErr: true},
+		{name: "short signatureHash16", raw: "vllm/0.34/nvidia/sm_90a/rmsnorm/01234567", wantErr: true},
+		{name: "non-hex signatureHash16", raw: "vllm/0.34/nvidia/sm_90a/rmsnorm/0123456789abcdeg", wantErr: true},
 	}
 
 	for _, tc := range cases {
@@ -259,6 +338,15 @@ func TestMatchCompatibility(t *testing.T) {
 			},
 		},
 		{
+			name: "patch release in same major.minor matches",
+			target: CompatibilityTarget{
+				Engine:        "vllm",
+				EngineVersion: "0.34.2",
+				Manufacturer:  "nvidia",
+				Arch:          "sm_90a",
+			},
+		},
+		{
 			name: "nvidia comcap 9.0 matches sm_90a",
 			target: CompatibilityTarget{
 				Engine:        "vllm",
@@ -278,7 +366,7 @@ func TestMatchCompatibility(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "engineVersion mismatch",
+			name: "engineVersion minor mismatch",
 			target: CompatibilityTarget{
 				Engine:        "vLLM",
 				EngineVersion: "0.35.0",
@@ -422,7 +510,8 @@ func TestBuildAndValidateEdgeErrors(t *testing.T) {
 		mutate func(*LocalKernelKey)
 	}{
 		{name: "non-canonical engine", mutate: func(k *LocalKernelKey) { k.Engine = "vLLM" }},
-		{name: "non-canonical version", mutate: func(k *LocalKernelKey) { k.EngineVersion = "0.34.0+cu128" }},
+		{name: "non-canonical patch version", mutate: func(k *LocalKernelKey) { k.EngineVersion = "0.34.0" }},
+		{name: "non-canonical version metadata", mutate: func(k *LocalKernelKey) { k.EngineVersion = "0.34+cu128" }},
 		{name: "non-canonical manufacturer", mutate: func(k *LocalKernelKey) { k.Manufacturer = "NVIDIA" }},
 		{name: "non-canonical arch", mutate: func(k *LocalKernelKey) { k.Arch = "9.0" }},
 		{name: "empty constAxis name", mutate: func(k *LocalKernelKey) { k.ConstAxes = map[string]int64{" ": 1} }},

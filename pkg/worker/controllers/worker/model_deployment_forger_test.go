@@ -55,17 +55,17 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/manager"
+	"gpustack.ai/gpustack/pkg/modelforger"
+	"gpustack.ai/gpustack/pkg/modelkernelkey"
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/nodefeature"
-	"gpustack.ai/gpustack/pkg/worker/forger"
-	"gpustack.ai/gpustack/pkg/worker/kernelkey"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 func buildTestKernelKey(t *testing.T, opFamily string, hiddenSize int64) string {
 	t.Helper()
-	key, err := kernelkey.Build(kernelkey.BuildSpec{
+	key, err := modelkernelkey.Build(modelkernelkey.BuildSpec{
 		Engine:        "vLLM",
 		EngineVersion: "0.19.0",
 		Manufacturer:  nodefeature.ManufacturerNVIDIA,
@@ -328,7 +328,7 @@ func newMockSentinelServer(t *testing.T, key1 string) *mockSentinelServer {
 		RunningReqs: 4,
 		WaitingReqs: 0,
 		ProbePayload: &runtimecontrol.ProbePayload{
-			SchemaVersion: forger.FlashInferTraceSchemaVersion,
+			SchemaVersion: modelforger.FlashInferTraceSchemaVersion,
 			Engine:        "vLLM",
 			EngineVersion: "0.19.0",
 			Manufacturer:  nodefeature.ManufacturerNVIDIA,
@@ -336,7 +336,7 @@ func newMockSentinelServer(t *testing.T, key1 string) *mockSentinelServer {
 			Definitions: []runtimecontrol.ProbeDefinition{
 				{
 					Name:           "rmsnorm_h4096",
-					OpType:         kernelkey.OpFamilyRMSNorm,
+					OpType:         modelkernelkey.OpFamilyRMSNorm,
 					LocalKernelKey: key1,
 					Axes: map[string]runtimecontrol.ProbeAxisSpec{
 						"num_tokens":  {Type: "var"},
@@ -366,13 +366,13 @@ func newMockSentinelServer(t *testing.T, key1 string) *mockSentinelServer {
 			Bottlenecks: []runtimecontrol.ProbeBottleneck{
 				{
 					LocalKernelKey:      key1,
-					OpFamily:            kernelkey.OpFamilyRMSNorm,
+					OpFamily:            modelkernelkey.OpFamilyRMSNorm,
 					GPUTimeUs:           680.0,
 					GPUTimeSharePercent: 18.5,
 					CallCount:           16,
 				},
 				{
-					LocalKernelKey:      "vllm/0.19.0/nvidia/sm_90a/gemm/0123456789abcdef",
+					LocalKernelKey:      "vllm/0.19/nvidia/sm_90a/gemm/0123456789abcdef",
 					OpFamily:            "gemm",
 					GPUTimeUs:           2400.0,
 					GPUTimeSharePercent: 65.0,
@@ -537,7 +537,7 @@ func (ms *mockSentinelServer) SetProbeSingleKey(key, opFamily, defName string) {
 	defer ms.mu.Unlock()
 	hidden := int64(4096)
 	ms.ProbePayload = &runtimecontrol.ProbePayload{
-		SchemaVersion: forger.FlashInferTraceSchemaVersion,
+		SchemaVersion: modelforger.FlashInferTraceSchemaVersion,
 		Engine:        "vLLM",
 		EngineVersion: "0.19.0",
 		Manufacturer:  nodefeature.ManufacturerNVIDIA,
@@ -724,8 +724,8 @@ func TestModelDeploymentForger_BindingAndModeLifecycle(t *testing.T) {
 				Namespace: mdf.Namespace,
 				Name:      "qwen-decode-forger-decode-gen-1-input",
 				Labels: map[string]string{
-					forger.SandboxLabelName:     "model-deployment-forger",
-					forger.SandboxLabelInstance: mdf.Name,
+					modelforger.SandboxLabelName:     "model-deployment-forger",
+					modelforger.SandboxLabelInstance: mdf.Name,
 				},
 			},
 		}
@@ -735,8 +735,8 @@ func TestModelDeploymentForger_BindingAndModeLifecycle(t *testing.T) {
 				Name:      "qwen-decode-forger-decode-gen-1-sandbox",
 				UID:       "sb-pod-uid-1",
 				Labels: map[string]string{
-					forger.SandboxLabelName:     "model-deployment-forger",
-					forger.SandboxLabelInstance: mdf.Name,
+					modelforger.SandboxLabelName:     "model-deployment-forger",
+					modelforger.SandboxLabelInstance: mdf.Name,
 				},
 			},
 		}
@@ -988,7 +988,7 @@ func TestModelDeploymentForger_RuntimeHoldsAndBlockedConditions(t *testing.T) {
 }
 
 func TestModelDeploymentForger_ObserveOnlyShadowAndSkipModes(t *testing.T) {
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
 	sentinel := newMockSentinelServer(t, key1)
 	now := time.Date(2026, 11, 27, 13, 0, 0, 0, time.UTC)
 	curNow := now
@@ -1056,7 +1056,7 @@ func TestModelDeploymentForger_ObserveOnlyShadowAndSkipModes(t *testing.T) {
 		assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseIdle, rs.Phase)
 		require.Len(t, rs.ObservedBottlenecks, 1, "dense GEMM bottleneck must be filtered out")
 		assert.Equal(t, key1, rs.ObservedBottlenecks[0].LocalKernelKey)
-		assert.Equal(t, kernelkey.OpFamilyRMSNorm, rs.ObservedBottlenecks[0].OpFamily)
+		assert.Equal(t, modelkernelkey.OpFamilyRMSNorm, rs.ObservedBottlenecks[0].OpFamily)
 
 		// Verify zero ForgeSandbox Pods or ConfigMaps were created and ModelDeployment was not mutated.
 		var allPods core.PodList
@@ -1147,9 +1147,9 @@ func TestModelDeploymentForger_ObserveOnlyShadowAndSkipModes(t *testing.T) {
 		mmPort, err := strconv.Atoi(mmPortStr)
 		require.NoError(t, err)
 
-		ingestCli, err := forger.NewIngestClient(
-			forger.WithIngestTokenFile(tokenFile),
-			forger.WithIngestInsecureSkipVerify(true),
+		ingestCli, err := modelforger.NewIngestClient(
+			modelforger.WithIngestTokenFile(tokenFile),
+			modelforger.WithIngestInsecureSkipVerify(true),
 		)
 		require.NoError(t, err)
 
@@ -1192,8 +1192,8 @@ func TestModelDeploymentForger_ObserveOnlyShadowAndSkipModes(t *testing.T) {
 		require.NoError(t, cli.Get(context.Background(), sbPodKey, &sbPod))
 		sbPod.Status.Phase = core.PodPending
 		sbPod.Status.InitContainerStatuses = []core.ContainerStatus{
-			{Name: forger.RunnerContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
-			{Name: forger.VerifierContainerName, State: core.ContainerState{Running: &core.ContainerStateRunning{}}},
+			{Name: modelforger.RunnerContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
+			{Name: modelforger.VerifierContainerName, State: core.ContainerState{Running: &core.ContainerStateRunning{}}},
 		}
 		require.NoError(t, cli.Status().Update(context.Background(), &sbPod))
 
@@ -1271,7 +1271,7 @@ func TestModelDeploymentForger_SandboxAndPublishFailures(t *testing.T) {
 				p.Spec.NodeName = "node-0"
 				p.Status.Phase = core.PodFailed
 				p.Status.InitContainerStatuses = []core.ContainerStatus{{
-					Name:  forger.RunnerContainerName,
+					Name:  modelforger.RunnerContainerName,
 					State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 1, Message: "synth crash"}},
 				}}
 			},
@@ -1283,8 +1283,8 @@ func TestModelDeploymentForger_SandboxAndPublishFailures(t *testing.T) {
 				p.Spec.NodeName = "node-0"
 				p.Status.Phase = core.PodFailed
 				p.Status.InitContainerStatuses = []core.ContainerStatus{
-					{Name: forger.RunnerContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
-					{Name: forger.VerifierContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 2, Message: "atol exceeded"}}},
+					{Name: modelforger.RunnerContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
+					{Name: modelforger.VerifierContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 2, Message: "atol exceeded"}}},
 				}
 			},
 			wantReason: "VerificationFailed",
@@ -1295,8 +1295,8 @@ func TestModelDeploymentForger_SandboxAndPublishFailures(t *testing.T) {
 				p.Spec.NodeName = "node-0"
 				p.Status.Phase = core.PodRunning
 				p.Status.InitContainerStatuses = []core.ContainerStatus{
-					{Name: forger.RunnerContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
-					{Name: forger.VerifierContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
+					{Name: modelforger.RunnerContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
+					{Name: modelforger.VerifierContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
 				}
 			},
 			ingestCode: http.StatusUnprocessableEntity,
@@ -1334,17 +1334,17 @@ func TestModelDeploymentForger_SandboxAndPublishFailures(t *testing.T) {
 				})
 				extra = append(extra, mka)
 			} else {
-				cm, _, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
+				cm, _, err := modelforger.BuildInputConfigMap(modelforger.InputConfigMapSpec{
 					Forger:     mdf,
 					Name:       "qwen-decode-forger-decode-gen-1-input",
 					RoleName:   "decode",
 					Generation: 1,
-					Request: forger.ForgeRequest{
+					Request: modelforger.ForgeRequest{
 						Engine:           "vLLM",
 						EngineVersion:    "0.19.0",
 						Manufacturer:     nodefeature.ManufacturerNVIDIA,
 						Architecture:     "sm_90a",
-						TargetKernelKeys: []string{buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)},
+						TargetKernelKeys: []string{buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)},
 						MinSpeedupRatio:  1.05,
 						Atol:             1e-2,
 						Rtol:             1e-2,
@@ -1392,7 +1392,7 @@ func TestModelDeploymentForger_SandboxAndPublishFailures(t *testing.T) {
 				defer mmSrv.Close()
 				h, pStr, _ := net.SplitHostPort(strings.TrimPrefix(mmSrv.URL, "https://"))
 				pInt, _ := strconv.Atoi(pStr)
-				ic, err := forger.NewIngestClient(forger.WithIngestTokenFile(tokenFile), forger.WithIngestInsecureSkipVerify(true))
+				ic, err := modelforger.NewIngestClient(modelforger.WithIngestTokenFile(tokenFile), modelforger.WithIngestInsecureSkipVerify(true))
 				require.NoError(t, err)
 				r.IngestClient = ic
 				r.ResolveSeedEndpoint = func(context.Context, string) (string, int, error) { return h, pInt, nil }
@@ -1416,9 +1416,9 @@ func TestModelDeploymentForger_SandboxAndPublishFailures(t *testing.T) {
 }
 
 func TestModelDeploymentForger_MultiControllerClosedLoopIntegration(t *testing.T) {
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
-	key2 := buildTestKernelKey(t, kernelkey.OpFamilyRopeKVAppend, 4096)
-	key3 := buildTestKernelKey(t, kernelkey.OpFamilyActivationQuant, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
+	key2 := buildTestKernelKey(t, modelkernelkey.OpFamilyRopeKVAppend, 4096)
+	key3 := buildTestKernelKey(t, modelkernelkey.OpFamilyActivationQuant, 4096)
 
 	sentinel := newMockSentinelServer(t, key1)
 	curNow := time.Date(2026, 11, 27, 15, 0, 0, 0, time.UTC)
@@ -1543,9 +1543,9 @@ func TestModelDeploymentForger_MultiControllerClosedLoopIntegration(t *testing.T
 
 	cli = newForgerTestFakeClient(node0, node1, nms0, nms1, mmPod, md, mdf, scaler)
 
-	ingestCli, err := forger.NewIngestClient(
-		forger.WithIngestTokenFile(tokenFile),
-		forger.WithIngestInsecureSkipVerify(true),
+	ingestCli, err := modelforger.NewIngestClient(
+		modelforger.WithIngestTokenFile(tokenFile),
+		modelforger.WithIngestInsecureSkipVerify(true),
 	)
 	require.NoError(t, err)
 
@@ -1679,8 +1679,8 @@ func TestModelDeploymentForger_MultiControllerClosedLoopIntegration(t *testing.T
 		require.NoError(t, cli.Get(context.Background(), sbKey, &sbPod))
 		sbPod.Status.Phase = core.PodRunning
 		sbPod.Status.InitContainerStatuses = []core.ContainerStatus{
-			{Name: forger.RunnerContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
-			{Name: forger.VerifierContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
+			{Name: modelforger.RunnerContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
+			{Name: modelforger.VerifierContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
 		}
 		require.NoError(t, cli.Status().Update(context.Background(), &sbPod))
 	}
@@ -1772,7 +1772,7 @@ func TestModelDeploymentForger_MultiControllerClosedLoopIntegration(t *testing.T
 	// Step B: Advance clock past cooldown, forge gen-2, verify previousKernelArtifact pin protection during rollout,
 	// then verify gen-1 pruning & unpinning once gen-2 converges (maxRetainedGenerations == 1).
 	curNow = curNow.Add(700 * time.Second)
-	sentinel.SetProbeSingleKey(key2, kernelkey.OpFamilyRopeKVAppend, "rope_kv_append_h4096")
+	sentinel.SetProbeSingleKey(key2, modelkernelkey.OpFamilyRopeKVAppend, "rope_kv_append_h4096")
 
 	for range 2 {
 		_, err = forgerRec.Reconcile(context.Background(), mdfReq)
@@ -1839,7 +1839,7 @@ func TestModelDeploymentForger_MultiControllerClosedLoopIntegration(t *testing.T
 
 	// Step C: Forge gen-3, simulate canary reporting unsupported_kernel_artifact -> auto-rollback to gen-2 + persistent quarantine!
 	curNow = curNow.Add(700 * time.Second)
-	sentinel.SetProbeSingleKey(key3, kernelkey.OpFamilyActivationQuant, "act_quant_h4096")
+	sentinel.SetProbeSingleKey(key3, modelkernelkey.OpFamilyActivationQuant, "act_quant_h4096")
 
 	for range 2 {
 		_, err = forgerRec.Reconcile(context.Background(), mdfReq)
@@ -1924,7 +1924,7 @@ func TestModelDeploymentForger_MultiControllerClosedLoopIntegration(t *testing.T
 }
 
 func TestModelDeploymentForger_RolloutTimeoutRollbackToNilStockAndRestartRecovery(t *testing.T) {
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
 	sentinel := newMockSentinelServer(t, key1)
 	curNow := time.Date(2026, 11, 27, 16, 0, 0, 0, time.UTC)
 
@@ -2196,8 +2196,8 @@ func TestModelDeploymentForger_PredicatesAndWatchMappers(t *testing.T) {
 			Namespace: "team-a",
 			Name:      "sb-pod",
 			Labels: map[string]string{
-				forger.SandboxLabelName:     "model-deployment-forger",
-				forger.SandboxLabelInstance: baseMDF.Name,
+				modelforger.SandboxLabelName:     "model-deployment-forger",
+				modelforger.SandboxLabelInstance: baseMDF.Name,
 			},
 		},
 	}
@@ -2222,8 +2222,8 @@ func TestModelDeploymentForger_PredicatesAndWatchMappers(t *testing.T) {
 			Namespace: "team-a",
 			Name:      "wl-sb",
 			Labels: map[string]string{
-				forger.SandboxLabelName:     "model-deployment-forger",
-				forger.SandboxLabelInstance: baseMDF.Name,
+				modelforger.SandboxLabelName:     "model-deployment-forger",
+				modelforger.SandboxLabelInstance: baseMDF.Name,
 			},
 		},
 	}
@@ -2283,7 +2283,7 @@ func TestModelDeploymentForger_PredicatesAndWatchMappers(t *testing.T) {
 }
 
 func TestModelDeploymentForger_ProbingEdgeCases(t *testing.T) {
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
 	now := time.Date(2026, 11, 27, 18, 0, 0, 0, time.UTC)
 
 	makeReadyEnv := func(t *testing.T, mdMutate func(*workercore.ModelDeployment), mdfMutate func(*workercore.ModelDeploymentForger)) (ctrlcli.Client, *workercore.ModelDeployment, *workercore.ModelDeploymentForger, *core.Pod) {
@@ -2424,14 +2424,14 @@ func TestModelDeploymentForger_ProbingEdgeCases(t *testing.T) {
 					State:  runtimecontrol.ProbeStateCompleted,
 					BootID: "b1",
 					Payload: &runtimecontrol.ProbePayload{
-						SchemaVersion: forger.FlashInferTraceSchemaVersion,
+						SchemaVersion: modelforger.FlashInferTraceSchemaVersion,
 						Engine:        "vLLM",
 						EngineVersion: "0.19.0",
 						Manufacturer:  nodefeature.ManufacturerNVIDIA,
 						Architecture:  "sm_90a",
 						Bottlenecks: []runtimecontrol.ProbeBottleneck{{
 							LocalKernelKey:      key1,
-							OpFamily:            kernelkey.OpFamilyRMSNorm,
+							OpFamily:            modelkernelkey.OpFamilyRMSNorm,
 							GPUTimeUs:           300,
 							GPUTimeSharePercent: 20,
 							CallCount:           10,
@@ -2484,7 +2484,7 @@ func TestModelDeploymentForger_ProbingEdgeCases(t *testing.T) {
 }
 
 func TestModelDeploymentForger_SandboxAndPromotingEdgeCases(t *testing.T) {
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
 	now := time.Date(2026, 11, 27, 19, 0, 0, 0, time.UTC)
 
 	t.Run("Sandbox transitions Forging to Verifying and handles Timeout, Lost, UIDMismatch, and PodFailed", func(t *testing.T) {
@@ -2552,7 +2552,7 @@ func TestModelDeploymentForger_SandboxAndPromotingEdgeCases(t *testing.T) {
 				}
 				if tc.runnerExitZero {
 					pod.Status.InitContainerStatuses = []core.ContainerStatus{{
-						Name:  forger.RunnerContainerName,
+						Name:  modelforger.RunnerContainerName,
 						State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}},
 					}}
 				}
@@ -2767,8 +2767,8 @@ func TestModelDeploymentForger_DefaultsResolversAndHistoryBounds(t *testing.T) {
 		Spec: workercore.ModelDeploymentForgerSpec{Probe: workercore.ModelDeploymentForgerProbeSpec{MinActiveRequests: -1}},
 	}))
 	assert.Equal(t, forgerDefaultMaxKernels, effectiveMaxKernelsPerGeneration(nil))
-	assert.Equal(t, forger.DefaultMinSpeedupRatio, effectiveMinSpeedupRatio(nil))
-	assert.Equal(t, forger.DefaultMinSpeedupRatio, effectiveMinSpeedupRatio(&workercore.ModelDeploymentForgerRoleSpec{MinSpeedupRatio: "bad"}))
+	assert.Equal(t, modelforger.DefaultMinSpeedupRatio, effectiveMinSpeedupRatio(nil))
+	assert.Equal(t, modelforger.DefaultMinSpeedupRatio, effectiveMinSpeedupRatio(&workercore.ModelDeploymentForgerRoleSpec{MinSpeedupRatio: "bad"}))
 	assert.Equal(t, int64(forgerDefaultSandboxTimeoutSeconds), effectiveSandboxTimeoutSeconds(nil))
 	assert.Equal(t, int64(900), effectiveSandboxTimeoutSeconds(&workercore.ModelDeploymentForger{
 		Spec: workercore.ModelDeploymentForgerSpec{
@@ -2886,7 +2886,7 @@ func (s *stubIngestClient) IngestTree(
 }
 
 func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T) {
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
 	now := time.Date(2026, 11, 27, 20, 0, 0, 0, time.UTC)
 
 	t.Run("Oversized >512KiB sandbox input fails cleanly and pre-existing tenant ConfigMap/Pod cannot hijack activeSandbox", func(t *testing.T) {
@@ -2930,14 +2930,14 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 		hugeRef := "def run(x, weight):\n    # " + strings.Repeat("A", 600*1024) + "\n    return x\n"
 		hidden := int64(4096)
 		oversizedPayload := &runtimecontrol.ProbePayload{
-			SchemaVersion: forger.FlashInferTraceSchemaVersion,
+			SchemaVersion: modelforger.FlashInferTraceSchemaVersion,
 			Engine:        "vLLM",
 			EngineVersion: "0.19.0",
 			Manufacturer:  nodefeature.ManufacturerNVIDIA,
 			Architecture:  "sm_90a",
 			Definitions: []runtimecontrol.ProbeDefinition{{
 				Name:           "huge_def",
-				OpType:         kernelkey.OpFamilyRMSNorm,
+				OpType:         modelkernelkey.OpFamilyRMSNorm,
 				LocalKernelKey: key1,
 				Axes:           map[string]runtimecontrol.ProbeAxisSpec{"num_tokens": {Type: "var"}, "hidden_size": {Type: "const", Value: &hidden}},
 				Inputs:         map[string]runtimecontrol.ProbeTensorSpec{"x": {Shape: []string{"num_tokens", "hidden_size"}, Dtype: "bfloat16"}, "weight": {Shape: []string{"hidden_size"}, Dtype: "bfloat16"}},
@@ -2946,7 +2946,7 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 			}},
 			Bottlenecks: []runtimecontrol.ProbeBottleneck{{
 				LocalKernelKey:      key1,
-				OpFamily:            kernelkey.OpFamilyRMSNorm,
+				OpFamily:            modelkernelkey.OpFamilyRMSNorm,
 				GPUTimeUs:           100,
 				GPUTimeSharePercent: 25,
 				CallCount:           4,
@@ -2995,14 +2995,14 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 		require.NoError(t, cli.Create(context.Background(), tenantPod))
 
 		validPayload := &runtimecontrol.ProbePayload{
-			SchemaVersion: forger.FlashInferTraceSchemaVersion,
+			SchemaVersion: modelforger.FlashInferTraceSchemaVersion,
 			Engine:        "vLLM",
 			EngineVersion: "0.19.0",
 			Manufacturer:  nodefeature.ManufacturerNVIDIA,
 			Architecture:  "sm_90a",
 			Bottlenecks: []runtimecontrol.ProbeBottleneck{{
 				LocalKernelKey:      key1,
-				OpFamily:            kernelkey.OpFamilyRMSNorm,
+				OpFamily:            modelkernelkey.OpFamilyRMSNorm,
 				GPUTimeUs:           100,
 				GPUTimeSharePercent: 25,
 				CallCount:           4,
@@ -3170,14 +3170,14 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 		markServingPodReadyEligible(t, cli, p0, "node-0", "10.0.0.10", 8000)
 
 		payload := &runtimecontrol.ProbePayload{
-			SchemaVersion: forger.FlashInferTraceSchemaVersion,
+			SchemaVersion: modelforger.FlashInferTraceSchemaVersion,
 			Engine:        "vLLM",
 			EngineVersion: "0.19.0",
 			Manufacturer:  nodefeature.ManufacturerNVIDIA,
 			Architecture:  "sm_90a",
 			Bottlenecks: []runtimecontrol.ProbeBottleneck{{
 				LocalKernelKey:      key1,
-				OpFamily:            kernelkey.OpFamilyRMSNorm,
+				OpFamily:            modelkernelkey.OpFamilyRMSNorm,
 				GPUTimeUs:           100,
 				GPUTimeSharePercent: 30,
 				CallCount:           4,
@@ -3283,13 +3283,13 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 		assert.Equal(t, "InvalidSandboxInput", findForgerRoleStatus(&got, "decode").Generations[0].Reason)
 
 		// Publishing transient ingest error keeps ActiveSandbox intact and retries.
-		validCM, _, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
+		validCM, _, err := modelforger.BuildInputConfigMap(modelforger.InputConfigMapSpec{
 			Forger:     &got,
 			Name:       "valid-pub-cm",
 			RoleName:   "decode",
 			Generation: 2,
-			Request: forger.ForgeRequest{
-				SchemaVersion:    forger.ForgeRequestSchemaVersion,
+			Request: modelforger.ForgeRequest{
+				SchemaVersion:    modelforger.ForgeRequestSchemaVersion,
 				Engine:           "vLLM",
 				EngineVersion:    "0.19.0",
 				Manufacturer:     nodefeature.ManufacturerNVIDIA,
@@ -3601,9 +3601,9 @@ func TestModelDeploymentForger_SetupBindingRecoveryAndHoldDetails(t *testing.T) 
 }
 
 func TestModelDeploymentForger_PublishingKernelKeysValidation(t *testing.T) {
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
-	key2 := buildTestKernelKey(t, kernelkey.OpFamilyRopeKVAppend, 4096)
-	foreignKey := buildTestKernelKey(t, kernelkey.OpFamilyActivationQuant, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
+	key2 := buildTestKernelKey(t, modelkernelkey.OpFamilyRopeKVAppend, 4096)
+	foreignKey := buildTestKernelKey(t, modelkernelkey.OpFamilyActivationQuant, 4096)
 	now := time.Date(2026, 11, 27, 22, 0, 0, 0, time.UTC)
 
 	cases := []struct {
@@ -3640,13 +3640,13 @@ func TestModelDeploymentForger_PublishingKernelKeysValidation(t *testing.T) {
 				f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
 			})
 
-			cm, _, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
+			cm, _, err := modelforger.BuildInputConfigMap(modelforger.InputConfigMapSpec{
 				Forger:     mdf,
 				Name:       "qwen-decode-forger-decode-gen-1-aabbccdd-input",
 				RoleName:   "decode",
 				Generation: 1,
-				Request: forger.ForgeRequest{
-					SchemaVersion:    forger.ForgeRequestSchemaVersion,
+				Request: modelforger.ForgeRequest{
+					SchemaVersion:    modelforger.ForgeRequestSchemaVersion,
 					Engine:           "vLLM",
 					EngineVersion:    "0.19.0",
 					Manufacturer:     nodefeature.ManufacturerNVIDIA,
@@ -3735,18 +3735,18 @@ func TestModelDeploymentForger_PublishingKernelKeysValidation(t *testing.T) {
 }
 
 func TestModelDeploymentForger_SandboxStatusFailureCleanupAndOrphanSweep(t *testing.T) {
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
 	now := time.Date(2026, 11, 27, 22, 30, 0, 0, time.UTC)
 
 	payload := &runtimecontrol.ProbePayload{
-		SchemaVersion: forger.FlashInferTraceSchemaVersion,
+		SchemaVersion: modelforger.FlashInferTraceSchemaVersion,
 		Engine:        "vLLM",
 		EngineVersion: "0.19.0",
 		Manufacturer:  nodefeature.ManufacturerNVIDIA,
 		Architecture:  "sm_90a",
 		Bottlenecks: []runtimecontrol.ProbeBottleneck{{
 			LocalKernelKey:      key1,
-			OpFamily:            kernelkey.OpFamilyRMSNorm,
+			OpFamily:            modelkernelkey.OpFamilyRMSNorm,
 			GPUTimeUs:           200,
 			GPUTimeSharePercent: 25,
 			CallCount:           8,
@@ -3826,14 +3826,14 @@ func TestModelDeploymentForger_SandboxStatusFailureCleanupAndOrphanSweep(t *test
 				var sbPods core.PodList
 				require.NoError(t, cli.List(context.Background(), &sbPods,
 					ctrlcli.InNamespace(md.Namespace),
-					ctrlcli.MatchingLabels{forger.SandboxLabelRole: "decode"},
+					ctrlcli.MatchingLabels{modelforger.SandboxLabelRole: "decode"},
 				))
 				assert.Empty(t, sbPods.Items, "failed status update on sandbox launch must delete newly created ForgeSandbox Pod")
 
 				var sbCMs core.ConfigMapList
 				require.NoError(t, cli.List(context.Background(), &sbCMs,
 					ctrlcli.InNamespace(md.Namespace),
-					ctrlcli.MatchingLabels{forger.SandboxLabelRole: "decode"},
+					ctrlcli.MatchingLabels{modelforger.SandboxLabelRole: "decode"},
 				))
 				assert.Empty(t, sbCMs.Items, "failed status update on sandbox launch must delete newly created input ConfigMap")
 			})
@@ -3880,7 +3880,7 @@ func TestModelDeploymentForger_SandboxStatusFailureCleanupAndOrphanSweep(t *test
 			ObjectMeta: meta.ObjectMeta{
 				Namespace:       mdf.Namespace,
 				Name:            "qwen-decode-forger-decode-gen-1-orphan-sandbox",
-				Labels:          map[string]string{forger.SandboxLabelName: "model-deployment-forger", forger.SandboxLabelRole: "decode"},
+				Labels:          map[string]string{modelforger.SandboxLabelName: "model-deployment-forger", modelforger.SandboxLabelRole: "decode"},
 				OwnerReferences: orphanOwner,
 			},
 		}
@@ -3888,7 +3888,7 @@ func TestModelDeploymentForger_SandboxStatusFailureCleanupAndOrphanSweep(t *test
 			ObjectMeta: meta.ObjectMeta{
 				Namespace:       mdf.Namespace,
 				Name:            "qwen-decode-forger-decode-gen-1-orphan-input",
-				Labels:          map[string]string{forger.SandboxLabelName: "model-deployment-forger", forger.SandboxLabelRole: "decode"},
+				Labels:          map[string]string{modelforger.SandboxLabelName: "model-deployment-forger", modelforger.SandboxLabelRole: "decode"},
 				OwnerReferences: orphanOwner,
 			},
 		}
@@ -3896,7 +3896,7 @@ func TestModelDeploymentForger_SandboxStatusFailureCleanupAndOrphanSweep(t *test
 			ObjectMeta: meta.ObjectMeta{
 				Namespace:       mdf.Namespace,
 				Name:            "other-forger-decode-gen-1-sandbox",
-				Labels:          map[string]string{forger.SandboxLabelName: "model-deployment-forger", forger.SandboxLabelRole: "decode"},
+				Labels:          map[string]string{modelforger.SandboxLabelName: "model-deployment-forger", modelforger.SandboxLabelRole: "decode"},
 				OwnerReferences: foreignOwner,
 			},
 		}
@@ -3964,7 +3964,7 @@ func TestModelDeploymentForger_SandboxStatusFailureCleanupAndOrphanSweep(t *test
 }
 
 func TestModelDeploymentForger_ForeignKernelArtifactNeverAdopted(t *testing.T) {
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
 	now := time.Date(2026, 11, 27, 23, 0, 0, 0, time.UTC)
 
 	newForeignHFArtifact := func(name, ns string) *workercore.ModelKernelArtifact {
@@ -3985,7 +3985,7 @@ func TestModelDeploymentForger_ForeignKernelArtifactNeverAdopted(t *testing.T) {
 				},
 				Compatibility: workercore.ModelKernelArtifactCompatibility{
 					Engine:        "vLLM",
-					EngineVersion: "0.19.0",
+					EngineVersion: "0.19",
 					Manufacturer:  nodefeature.ManufacturerNVIDIA,
 					Architecture:  "sm_90a",
 					KernelKeys:    []string{key1},
@@ -4034,14 +4034,14 @@ func TestModelDeploymentForger_ForeignKernelArtifactNeverAdopted(t *testing.T) {
 		markServingPodReadyEligible(t, cli, p0, "node-0", "10.0.0.10", 8000)
 
 		payload := &runtimecontrol.ProbePayload{
-			SchemaVersion: forger.FlashInferTraceSchemaVersion,
+			SchemaVersion: modelforger.FlashInferTraceSchemaVersion,
 			Engine:        "vLLM",
 			EngineVersion: "0.19.0",
 			Manufacturer:  nodefeature.ManufacturerNVIDIA,
 			Architecture:  "sm_90a",
 			Bottlenecks: []runtimecontrol.ProbeBottleneck{{
 				LocalKernelKey:      key1,
-				OpFamily:            kernelkey.OpFamilyRMSNorm,
+				OpFamily:            modelkernelkey.OpFamilyRMSNorm,
 				GPUTimeUs:           180,
 				GPUTimeSharePercent: 28,
 				CallCount:           6,
@@ -4092,8 +4092,8 @@ func TestModelDeploymentForger_ForeignKernelArtifactNeverAdopted(t *testing.T) {
 		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(&sbPod), &sbPod))
 		sbPod.Status.Phase = core.PodRunning
 		sbPod.Status.InitContainerStatuses = []core.ContainerStatus{
-			{Name: forger.RunnerContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
-			{Name: forger.VerifierContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
+			{Name: modelforger.RunnerContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
+			{Name: modelforger.VerifierContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
 		}
 		require.NoError(t, cli.Status().Update(context.Background(), &sbPod))
 
@@ -4122,13 +4122,13 @@ func TestModelDeploymentForger_ForeignKernelArtifactNeverAdopted(t *testing.T) {
 			f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
 		})
 
-		cm, _, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
+		cm, _, err := modelforger.BuildInputConfigMap(modelforger.InputConfigMapSpec{
 			Forger:     mdf,
 			Name:       "qwen-decode-forger-decode-gen-1-11223344-input",
 			RoleName:   "decode",
 			Generation: 1,
-			Request: forger.ForgeRequest{
-				SchemaVersion:    forger.ForgeRequestSchemaVersion,
+			Request: modelforger.ForgeRequest{
+				SchemaVersion:    modelforger.ForgeRequestSchemaVersion,
 				Engine:           "vLLM",
 				EngineVersion:    "0.19.0",
 				Manufacturer:     nodefeature.ManufacturerNVIDIA,
@@ -4436,18 +4436,18 @@ func TestModelDeploymentForger_UncommittedCanaryRollbackOnExitAndRecovery(t *tes
 }
 
 func TestModelDeploymentForger_QuarantineScopedByForgerRoleAndRunner(t *testing.T) {
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
 	now := time.Date(2026, 11, 27, 23, 30, 0, 0, time.UTC)
 
 	payload := &runtimecontrol.ProbePayload{
-		SchemaVersion: forger.FlashInferTraceSchemaVersion,
+		SchemaVersion: modelforger.FlashInferTraceSchemaVersion,
 		Engine:        "vLLM",
 		EngineVersion: "0.19.0",
 		Manufacturer:  nodefeature.ManufacturerNVIDIA,
 		Architecture:  "sm_90a",
 		Bottlenecks: []runtimecontrol.ProbeBottleneck{{
 			LocalKernelKey:      key1,
-			OpFamily:            kernelkey.OpFamilyRMSNorm,
+			OpFamily:            modelkernelkey.OpFamilyRMSNorm,
 			GPUTimeUs:           240,
 			GPUTimeSharePercent: 25,
 			CallCount:           8,
@@ -4484,9 +4484,9 @@ func TestModelDeploymentForger_QuarantineScopedByForgerRoleAndRunner(t *testing.
 
 		quarantinedOtherForger := newNodeStoreKernelArtifact("qwen-a-forger-decode-gen-1", mdB.Namespace, "1", "2", func(k *workercore.ModelKernelArtifact) {
 			k.Labels = map[string]string{
-				forger.SandboxLabelName:     "model-deployment-forger",
-				forger.SandboxLabelInstance: "qwen-a-forger",
-				forger.SandboxLabelRole:     "decode",
+				modelforger.SandboxLabelName:     "model-deployment-forger",
+				modelforger.SandboxLabelInstance: "qwen-a-forger",
+				modelforger.SandboxLabelRole:     "decode",
 			}
 			k.Spec.Compatibility.KernelKeys = []string{key1}
 			k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
@@ -4498,9 +4498,9 @@ func TestModelDeploymentForger_QuarantineScopedByForgerRoleAndRunner(t *testing.
 		})
 		quarantinedSiblingRole := newNodeStoreKernelArtifact("qwen-b-forger-prefill-gen-1", mdB.Namespace, "3", "4", func(k *workercore.ModelKernelArtifact) {
 			k.Labels = map[string]string{
-				forger.SandboxLabelName:     "model-deployment-forger",
-				forger.SandboxLabelInstance: mdfB.Name,
-				forger.SandboxLabelRole:     "prefill",
+				modelforger.SandboxLabelName:     "model-deployment-forger",
+				modelforger.SandboxLabelInstance: mdfB.Name,
+				modelforger.SandboxLabelRole:     "prefill",
 			}
 			k.Spec.Compatibility.KernelKeys = []string{key1}
 			k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
@@ -4588,13 +4588,13 @@ func TestModelDeploymentForger_QuarantineScopedByForgerRoleAndRunner(t *testing.
 				Image: "registry.local/forge-runner:v1",
 			}
 		})
-		cm, _, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
+		cm, _, err := modelforger.BuildInputConfigMap(modelforger.InputConfigMapSpec{
 			Forger:     mdf,
 			Name:       "qwen-decode-forger-decode-gen-1-aaaa1111-input",
 			RoleName:   "decode",
 			Generation: 1,
-			Request: forger.ForgeRequest{
-				SchemaVersion:    forger.ForgeRequestSchemaVersion,
+			Request: modelforger.ForgeRequest{
+				SchemaVersion:    modelforger.ForgeRequestSchemaVersion,
 				Engine:           "vLLM",
 				EngineVersion:    "0.19.0",
 				Manufacturer:     nodefeature.ManufacturerNVIDIA,
@@ -4721,7 +4721,7 @@ func TestModelDeploymentForger_QuarantineScopedByForgerRoleAndRunner(t *testing.
 }
 
 func TestModelDeploymentForger_MultiRolePromotionDeadlines(t *testing.T) {
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
 	t0 := time.Date(2026, 11, 27, 23, 45, 0, 0, time.UTC)
 
 	newTwoRoleDeployment := func() *workercore.ModelDeployment {
@@ -4944,14 +4944,14 @@ func TestModelDeploymentForger_MultiRolePromotionDeadlines(t *testing.T) {
 }
 
 func TestModelDeploymentForger_SafeLabelsAndPromotionAdmissionRejection(t *testing.T) {
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
 	now := time.Date(2026, 11, 27, 23, 55, 0, 0, time.UTC)
 
 	t.Run("SafeLabelValue is used consistently across artifact labels, sandbox selectors, and pod watch mapping", func(t *testing.T) {
 		longForgerName := "qwen-extremely-long-model-deployment-forger-instance-name-over-sixtythree"
 		rawRoleName := "prefill/v1"
-		safeForger := forger.SafeLabelValue(longForgerName)
-		safeRole := forger.SafeLabelValue(rawRoleName)
+		safeForger := modelforger.SafeLabelValue(longForgerName)
+		safeRole := modelforger.SafeLabelValue(rawRoleName)
 		require.NotEqual(t, longForgerName, safeForger)
 		require.NotEqual(t, rawRoleName, safeRole)
 
@@ -4969,13 +4969,13 @@ func TestModelDeploymentForger_SafeLabelsAndPromotionAdmissionRejection(t *testi
 			}
 		})
 
-		cm, items, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
+		cm, items, err := modelforger.BuildInputConfigMap(modelforger.InputConfigMapSpec{
 			Forger:     mdf,
 			Name:       "safe-label-gen-1-input",
 			RoleName:   rawRoleName,
 			Generation: 1,
-			Request: forger.ForgeRequest{
-				SchemaVersion:    forger.ForgeRequestSchemaVersion,
+			Request: modelforger.ForgeRequest{
+				SchemaVersion:    modelforger.ForgeRequestSchemaVersion,
 				Engine:           "vLLM",
 				EngineVersion:    "0.19.0",
 				Manufacturer:     nodefeature.ManufacturerNVIDIA,
@@ -4988,12 +4988,12 @@ func TestModelDeploymentForger_SafeLabelsAndPromotionAdmissionRejection(t *testi
 		})
 		require.NoError(t, err)
 
-		hw := kernelkey.NodeHardware{
+		hw := modelkernelkey.NodeHardware{
 			Manufacturer:   nodefeature.ManufacturerNVIDIA,
 			Arch:           "sm_90a",
 			SelectorLabels: map[string]string{"gpu": "h20"},
 		}
-		sbPod, err := forger.BuildSandboxPod(forger.SandboxPodSpec{
+		sbPod, err := modelforger.BuildSandboxPod(modelforger.SandboxPodSpec{
 			Forger:              mdf,
 			Name:                "safe-label-gen-1-sandbox",
 			RoleName:            rawRoleName,
@@ -5067,10 +5067,10 @@ func TestModelDeploymentForger_SafeLabelsAndPromotionAdmissionRejection(t *testi
 		artName := forgerArtifactName(mdf.Name, rawRoleName, 1)
 		var gotMKA workercore.ModelKernelArtifact
 		require.NoError(t, cli.Get(context.Background(), types.NamespacedName{Namespace: mdf.Namespace, Name: artName}, &gotMKA))
-		assert.Equal(t, safeForger, gotMKA.Labels[forger.SandboxLabelInstance])
-		assert.Equal(t, safeRole, gotMKA.Labels[forger.SandboxLabelRole])
-		assert.Empty(t, kvalidation.IsValidLabelValue(gotMKA.Labels[forger.SandboxLabelInstance]))
-		assert.Empty(t, kvalidation.IsValidLabelValue(gotMKA.Labels[forger.SandboxLabelRole]))
+		assert.Equal(t, safeForger, gotMKA.Labels[modelforger.SandboxLabelInstance])
+		assert.Equal(t, safeRole, gotMKA.Labels[modelforger.SandboxLabelRole])
+		assert.Empty(t, kvalidation.IsValidLabelValue(gotMKA.Labels[modelforger.SandboxLabelInstance]))
+		assert.Empty(t, kvalidation.IsValidLabelValue(gotMKA.Labels[modelforger.SandboxLabelRole]))
 
 		// Idle sweeps orphan sandbox Pod and ConfigMap matching SafeLabelValue(roleName).
 		var liveMDF workercore.ModelDeploymentForger
@@ -5089,8 +5089,8 @@ func TestModelDeploymentForger_SafeLabelsAndPromotionAdmissionRejection(t *testi
 				Namespace: mdf.Namespace,
 				Name:      "safe-label-suspend-sandbox",
 				Labels: map[string]string{
-					forger.SandboxLabelName:     "model-deployment-forger",
-					forger.SandboxLabelInstance: safeForger,
+					modelforger.SandboxLabelName:     "model-deployment-forger",
+					modelforger.SandboxLabelInstance: safeForger,
 				},
 			},
 		}
@@ -5568,9 +5568,9 @@ func TestModelDeploymentForger_RemovedRoleRollsBackCanaryAndCleansSandbox(t *tes
 					UID:             "uid-prefill-sb",
 					OwnerReferences: []meta.OwnerReference{ownerRef},
 					Labels: map[string]string{
-						forger.SandboxLabelName:     "model-deployment-forger",
-						forger.SandboxLabelInstance: mdf.Name,
-						forger.SandboxLabelRole:     "prefill",
+						modelforger.SandboxLabelName:     "model-deployment-forger",
+						modelforger.SandboxLabelInstance: mdf.Name,
+						modelforger.SandboxLabelRole:     "prefill",
 					},
 				},
 			}
@@ -5581,9 +5581,9 @@ func TestModelDeploymentForger_RemovedRoleRollsBackCanaryAndCleansSandbox(t *tes
 					UID:             "uid-prefill-orphan",
 					OwnerReferences: []meta.OwnerReference{ownerRef},
 					Labels: map[string]string{
-						forger.SandboxLabelName:     "model-deployment-forger",
-						forger.SandboxLabelInstance: mdf.Name,
-						forger.SandboxLabelRole:     "prefill",
+						modelforger.SandboxLabelName:     "model-deployment-forger",
+						modelforger.SandboxLabelInstance: mdf.Name,
+						modelforger.SandboxLabelRole:     "prefill",
 					},
 				},
 			}
@@ -5593,9 +5593,9 @@ func TestModelDeploymentForger_RemovedRoleRollsBackCanaryAndCleansSandbox(t *tes
 					Name:            prefillCMName,
 					OwnerReferences: []meta.OwnerReference{ownerRef},
 					Labels: map[string]string{
-						forger.SandboxLabelName:     "model-deployment-forger",
-						forger.SandboxLabelInstance: mdf.Name,
-						forger.SandboxLabelRole:     "prefill",
+						modelforger.SandboxLabelName:     "model-deployment-forger",
+						modelforger.SandboxLabelInstance: mdf.Name,
+						modelforger.SandboxLabelRole:     "prefill",
 					},
 				},
 			}
@@ -5606,9 +5606,9 @@ func TestModelDeploymentForger_RemovedRoleRollsBackCanaryAndCleansSandbox(t *tes
 					UID:             "uid-decode-sb",
 					OwnerReferences: []meta.OwnerReference{ownerRef},
 					Labels: map[string]string{
-						forger.SandboxLabelName:     "model-deployment-forger",
-						forger.SandboxLabelInstance: mdf.Name,
-						forger.SandboxLabelRole:     "decode",
+						modelforger.SandboxLabelName:     "model-deployment-forger",
+						modelforger.SandboxLabelInstance: mdf.Name,
+						modelforger.SandboxLabelRole:     "decode",
 					},
 				},
 			}
@@ -5618,9 +5618,9 @@ func TestModelDeploymentForger_RemovedRoleRollsBackCanaryAndCleansSandbox(t *tes
 					Name:            decodeCMName,
 					OwnerReferences: []meta.OwnerReference{ownerRef},
 					Labels: map[string]string{
-						forger.SandboxLabelName:     "model-deployment-forger",
-						forger.SandboxLabelInstance: mdf.Name,
-						forger.SandboxLabelRole:     "decode",
+						modelforger.SandboxLabelName:     "model-deployment-forger",
+						modelforger.SandboxLabelInstance: mdf.Name,
+						modelforger.SandboxLabelRole:     "decode",
 					},
 				},
 			}
@@ -5696,7 +5696,7 @@ func TestModelDeploymentForger_RemovedRoleRollsBackCanaryAndCleansSandbox(t *tes
 
 func TestModelDeploymentForger_LaunchForgeSandboxPodSpecRendering(t *testing.T) {
 	now := time.Date(2026, 11, 27, 18, 0, 0, 0, time.UTC)
-	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
 	ms := newMockSentinelServer(t, key1)
 	payload := ms.ProbePayload
 
@@ -5898,8 +5898,8 @@ func TestModelDeploymentForger_LaunchForgeSandboxPodSpecRendering(t *testing.T) 
 			assert.Equal(t, int64(900), *sbPod.Spec.ActiveDeadlineSeconds)
 			assert.Equal(t, tc.wantPullSecrets, sbPod.Spec.ImagePullSecrets)
 
-			runnerCtr := findInitContainer(t, &sbPod, forger.RunnerContainerName)
-			verifierCtr := findInitContainer(t, &sbPod, forger.VerifierContainerName)
+			runnerCtr := findInitContainer(t, &sbPod, modelforger.RunnerContainerName)
+			verifierCtr := findInitContainer(t, &sbPod, modelforger.VerifierContainerName)
 
 			assert.Equal(t, "registry.local/forge-runner:v1", runnerCtr.Image)
 			assert.Equal(t, []string{"/usr/local/bin/forge-runner"}, runnerCtr.Command)
@@ -5918,8 +5918,8 @@ func TestModelDeploymentForger_LaunchForgeSandboxPodSpecRendering(t *testing.T) 
 			require.NotNil(t, envByName["FORGE_API_KEY"].ValueFrom.SecretKeyRef)
 			assert.Equal(t, "runner-secret", envByName["FORGE_API_KEY"].ValueFrom.SecretKeyRef.Name)
 			assert.Equal(t, "api-key", envByName["FORGE_API_KEY"].ValueFrom.SecretKeyRef.Key)
-			assert.Equal(t, forger.InputMountPath, envByName["GPUSTACK_FORGE_INPUT_DIR"].Value)
-			assert.Equal(t, forger.OutputMountPath, envByName["GPUSTACK_FORGE_OUTPUT_DIR"].Value)
+			assert.Equal(t, modelforger.InputMountPath, envByName["GPUSTACK_FORGE_INPUT_DIR"].Value)
+			assert.Equal(t, modelforger.OutputMountPath, envByName["GPUSTACK_FORGE_OUTPUT_DIR"].Value)
 
 			for _, ctr := range []core.Container{runnerCtr, verifierCtr} {
 				for resName, wantQty := range tc.wantResourceRequests {
@@ -6007,7 +6007,7 @@ func TestModelDeploymentForger_RunnerFingerprintQuarantineReforge(t *testing.T) 
 
 	t.Run("updating runner.image or runner.args re-forges previously quarantined keys cleanly", func(t *testing.T) {
 		now := time.Date(2026, 11, 27, 19, 0, 0, 0, time.UTC)
-		key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+		key1 := buildTestKernelKey(t, modelkernelkey.OpFamilyRMSNorm, 4096)
 		ms := newMockSentinelServer(t, key1)
 		payload := ms.ProbePayload
 
@@ -6063,10 +6063,10 @@ func TestModelDeploymentForger_RunnerFingerprintQuarantineReforge(t *testing.T) 
 
 				quarantinedMKA := newNodeStoreKernelArtifact("qwen-decode-forger-decode-gen-1", md.Namespace, "1", "2", func(k *workercore.ModelKernelArtifact) {
 					k.Labels = map[string]string{
-						forger.SandboxLabelName:       "model-deployment-forger",
-						forger.SandboxLabelInstance:   mdf.Name,
-						forger.SandboxLabelRole:       "decode",
-						forger.SandboxLabelGeneration: "1",
+						modelforger.SandboxLabelName:       "model-deployment-forger",
+						modelforger.SandboxLabelInstance:   mdf.Name,
+						modelforger.SandboxLabelRole:       "decode",
+						modelforger.SandboxLabelGeneration: "1",
 					}
 					k.Annotations = map[string]string{
 						forgerRunnerFingerprintAnnotationKey: initialFP,
@@ -6134,4 +6134,152 @@ func TestModelDeploymentForger_RunnerFingerprintQuarantineReforge(t *testing.T) 
 			})
 		}
 	})
+}
+
+func TestModelDeploymentForger_PatchUpgradeReusesArtifactWhileMinorUpgradeReforges(t *testing.T) {
+	now := time.Date(2026, 11, 27, 23, 55, 0, 0, time.UTC)
+
+	buildKey := func(ver string) string {
+		k, err := modelkernelkey.Build(modelkernelkey.BuildSpec{
+			Engine:        "vLLM",
+			EngineVersion: ver,
+			Manufacturer:  nodefeature.ManufacturerNVIDIA,
+			Arch:          "sm_90a",
+			OpFamily:      modelkernelkey.OpFamilyRMSNorm,
+			ConstAxes:     map[string]int64{"hidden_size": 4096},
+			InputDtypes:   []string{"bfloat16", "bfloat16"},
+			OutputDtypes:  []string{"bfloat16"},
+		})
+		require.NoError(t, err)
+		return k.String()
+	}
+
+	key085 := buildKey("0.8.5")
+	key086 := buildKey("0.8.6")
+	require.Equal(t, key085, key086)
+
+	cases := []struct {
+		name              string
+		deploymentVersion string
+		probeKey          string
+		wantPhase         workercore.ModelDeploymentForgerRolePhase
+		wantActiveSandbox bool
+		wantOutcome       workercore.ModelDeploymentForgerGenerationOutcome
+	}{
+		{
+			name:              "patch upgrade 0.8.5 to 0.8.6 reuses covered vllm/0.8 artifact",
+			deploymentVersion: "0.8.6",
+			probeKey:          key086,
+			wantPhase:         workercore.ModelDeploymentForgerRolePhaseIdle,
+			wantActiveSandbox: false,
+			wantOutcome:       workercore.ModelDeploymentForgerGenerationOutcomeSkipped,
+		},
+		{
+			name:              "minor upgrade 0.8.5 to 0.9.0 triggers new ForgeSandbox",
+			deploymentVersion: "0.9.0",
+			probeKey:          buildKey("0.9.0"),
+			wantPhase:         workercore.ModelDeploymentForgerRolePhaseForging,
+			wantActiveSandbox: true,
+		},
+		{
+			name:              "pre-release 0.8.6rc1 does not match release vllm/0.8 artifact",
+			deploymentVersion: "0.8.6rc1",
+			probeKey:          buildKey("0.8.6rc1"),
+			wantPhase:         workercore.ModelDeploymentForgerRolePhaseForging,
+			wantActiveSandbox: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			node0 := newForgerTestNode("node-0")
+			mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+				f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+				f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
+				f.Spec.Probe.MinActiveRequests = 0
+			})
+			coveredMKA := newNodeStoreKernelArtifact("qwen-decode-forger-decode-gen-1", "team-a", "1", "2", func(k *workercore.ModelKernelArtifact) {
+				k.Labels = map[string]string{
+					modelforger.SandboxLabelName:       "model-deployment-forger",
+					modelforger.SandboxLabelInstance:   mdf.Name,
+					modelforger.SandboxLabelRole:       "decode",
+					modelforger.SandboxLabelGeneration: "1",
+				}
+				k.Spec.Compatibility.EngineVersion = "0.8"
+				k.Spec.Compatibility.KernelKeys = []string{key085}
+				k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+					Name: mdf.Name,
+					UID:  string(mdf.UID),
+				}
+			})
+			md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+				d.Spec.Engine.Version = tc.deploymentVersion
+				d.Spec.Engine.Image = "vllm/vllm-openai:v" + tc.deploymentVersion
+				d.Spec.Roles[0].Image = "vllm/vllm-openai:v" + tc.deploymentVersion
+				d.Spec.Roles[0].Replicas = 1
+				d.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: coveredMKA.Name}
+			})
+			leaderPod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Namespace: md.Namespace,
+					Name:      "qwen-pd-decode-0",
+					UID:       "leader-patch-uid",
+					Labels: map[string]string{
+						modelDeploymentLabelKeyName:        modelDeploymentLabelValueName,
+						modelDeploymentLabelKeyInstance:    md.Name,
+						modelDeploymentLabelKeyComponent:   "decode",
+						modelDeploymentReplicaOrdinalLabel: "0",
+					},
+				},
+				Spec: core.PodSpec{NodeName: "node-0", Containers: []core.Container{{Name: modelDeploymentMainContainerName}}},
+			}
+
+			cli := newForgerTestFakeClient(node0, md, mdf, coveredMKA, leaderPod)
+			markServingPodReadyEligible(t, cli, leaderPod, "node-0", "10.0.0.10", 8000)
+
+			payload := &runtimecontrol.ProbePayload{
+				SchemaVersion: modelforger.FlashInferTraceSchemaVersion,
+				Engine:        "vLLM",
+				EngineVersion: tc.deploymentVersion,
+				Manufacturer:  nodefeature.ManufacturerNVIDIA,
+				Architecture:  "sm_90a",
+				Bottlenecks: []runtimecontrol.ProbeBottleneck{{
+					LocalKernelKey:      tc.probeKey,
+					OpFamily:            modelkernelkey.OpFamilyRMSNorm,
+					GPUTimeUs:           180,
+					GPUTimeSharePercent: 25,
+					CallCount:           8,
+				}},
+			}
+			r := &ModelDeploymentForgerReconciler{
+				Client:        cli,
+				APIReader:     cli,
+				Recorder:      ctrlrecord.NewFakeRecorder(32),
+				Now:           func() time.Time { return now },
+				OperatorImage: "gpustack/gpustack-operator:test",
+				ProbeClient: &stubProbeClient{
+					readyResp: &runtimecontrol.ReadyResponse{Ready: true, BootID: "b1"},
+					startResp: &runtimecontrol.ProbeResponse{State: runtimecontrol.ProbeStateCompleted, BootID: "b1", Payload: payload},
+				},
+			}
+
+			req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+			_, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+
+			var gotMDF workercore.ModelDeploymentForger
+			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &gotMDF))
+			rs := findForgerRoleStatus(&gotMDF, "decode")
+			require.NotNil(t, rs)
+			assert.Equal(t, tc.wantPhase, rs.Phase)
+			if tc.wantActiveSandbox {
+				require.NotNil(t, rs.ActiveSandbox)
+				assert.Equal(t, int64(2), rs.ActiveGeneration)
+			} else {
+				assert.Nil(t, rs.ActiveSandbox)
+				require.Len(t, rs.Generations, 1)
+				assert.Equal(t, tc.wantOutcome, rs.Generations[0].Outcome)
+			}
+		})
+	}
 }

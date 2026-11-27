@@ -1,4 +1,4 @@
-package forger
+package modelforger
 
 import (
 	"context"

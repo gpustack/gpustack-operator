@@ -1,4 +1,4 @@
-package forger
+package modelforger
 
 import (
 	"context"
@@ -9,16 +9,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"gpustack.ai/gpustack/pkg/modelkernelkey"
 	"gpustack.ai/gpustack/pkg/utils/json"
-	"gpustack.ai/gpustack/pkg/worker/kernelkey"
 )
 
 func setupMockInputDir(t *testing.T) (string, string) {
 	t.Helper()
 
 	inputDir := filepath.Join(t.TempDir(), "input")
-	rmsKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
-	ropeKey := sampleValidKernelKey(t, kernelkey.OpFamilyRopeKVAppend)
+	rmsKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRMSNorm)
+	ropeKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRopeKVAppend)
 	hidden := int64(4096)
 
 	req := ForgeRequest{
@@ -35,7 +35,7 @@ func setupMockInputDir(t *testing.T) (string, string) {
 	}
 	def := Definition{
 		Name:           "rmsnorm_hidden4096",
-		OpType:         kernelkey.OpFamilyRMSNorm,
+		OpType:         modelkernelkey.OpFamilyRMSNorm,
 		LocalKernelKey: rmsKey,
 		Axes: map[string]AxisSpec{
 			"hidden_size": {Type: "const", Value: &hidden},
@@ -85,13 +85,16 @@ func TestForgeMockAndVerify_EndToEndPipeline(t *testing.T) {
 	outputDir := filepath.Join(t.TempDir(), "output")
 	reportPath := filepath.Join(t.TempDir(), "verified", VerificationReportFileName)
 
-	// Run forge-mock via Cobra command to test CLI flag wiring too.
-	mockCmd := NewForgeMockCommand()
-	mockCmd.SetArgs([]string{
+	// Run model-forger mock via top-level Cobra command to test CLI subcommand and flag wiring.
+	rootMockCmd := NewCommand()
+	require.Equal(t, "model-forger", rootMockCmd.Use)
+	require.True(t, rootMockCmd.Hidden)
+	rootMockCmd.SetArgs([]string{
+		"mock",
 		"--input-dir", inputDir,
 		"--output-dir", outputDir,
 	})
-	require.NoError(t, mockCmd.Execute())
+	require.NoError(t, rootMockCmd.Execute())
 
 	// Confirm deterministic rmsnorm_mock_v1 artifacts were generated.
 	require.FileExists(t, filepath.Join(outputDir, "kernels", "rmsnorm_mock_v1", "kernel.py"))
@@ -99,14 +102,15 @@ func TestForgeMockAndVerify_EndToEndPipeline(t *testing.T) {
 	require.FileExists(t, filepath.Join(outputDir, "traces", "rmsnorm_mock_v1.json"))
 	require.FileExists(t, filepath.Join(outputDir, DispatchManifestFileName))
 
-	// Run forge-verify via Cobra command.
-	verifyCmd := NewForgeVerifyCommand()
-	verifyCmd.SetArgs([]string{
+	// Run model-forger verify via top-level Cobra command.
+	rootVerifyCmd := NewCommand()
+	rootVerifyCmd.SetArgs([]string{
+		"verify",
 		"--input-dir", inputDir,
 		"--output-dir", outputDir,
 		"--report-path", reportPath,
 	})
-	require.NoError(t, verifyCmd.Execute())
+	require.NoError(t, rootVerifyCmd.Execute())
 
 	// Parse and validate emitted verification-report.json.
 	reportRaw, err := os.ReadFile(reportPath)
@@ -251,27 +255,27 @@ func TestForgeHold_ExitsOnSignalOrDeadline(t *testing.T) {
 	require.NoError(t, RunForgeHold(context.Background(), 20*time.Millisecond))
 	require.GreaterOrEqual(t, time.Since(start), 15*time.Millisecond)
 
-	// Exits cleanly on context cancellation via cobra command.
+	// Exits cleanly on context cancellation via top-level cobra command.
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(15 * time.Millisecond)
 		cancel()
 	}()
-	cmd := NewForgeHoldCommand()
-	cmd.SetArgs([]string{"--max-duration", "10s"})
+	cmd := NewCommand()
+	cmd.SetArgs([]string{"hold", "--max-duration", "10s"})
 	require.NoError(t, cmd.ExecuteContext(ctx))
 }
 
 func TestForgeMockAndVerify_MinimalInputAndFailureModes(t *testing.T) {
 	t.Parallel()
 
-	// forge-mock with only forge-request.json (no definitions/ or workloads/ dirs) and non-rmsnorm key.
+	// model-forger mock with only forge-request.json (no definitions/ or workloads/ dirs) and non-rmsnorm key.
 	inputDir := filepath.Join(t.TempDir(), "minimal-in")
 	outputDir := filepath.Join(t.TempDir(), "minimal-out")
 	reportPath := filepath.Join(t.TempDir(), "verified", VerificationReportFileName)
 	require.NoError(t, os.MkdirAll(inputDir, 0o750))
 
-	ropeKey := sampleValidKernelKey(t, kernelkey.OpFamilyRopeKVAppend)
+	ropeKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRopeKVAppend)
 	req := ForgeRequest{
 		SchemaVersion:    ForgeRequestSchemaVersion,
 		Engine:           "vLLM",
@@ -305,7 +309,7 @@ func TestForgeMockAndVerify_MinimalInputAndFailureModes(t *testing.T) {
 	})
 	require.NoError(t, verifyCmd.Execute())
 
-	// Validation error branches for forge-mock.
+	// Validation error branches for model-forger mock.
 	require.Error(t, RunForgeMock(ForgeMockOptions{}))
 	require.Error(t, RunForgeMock(ForgeMockOptions{InputDir: inputDir}))
 	require.Error(t, RunForgeMock(ForgeMockOptions{InputDir: inputDir, OutputDir: outputDir, SpeedupFactor: -1}))
@@ -354,7 +358,7 @@ func TestForgeMockAndVerify_MinimalInputAndFailureModes(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, StatusFailed, rep.OverallStatus)
 
-	// Entry-level rejection cases in forge-verify: bad localKernelKey, incompatible key, empty entrypoint,
+	// Entry-level rejection cases in model-forger verify: bad localKernelKey, incompatible key, empty entrypoint,
 	// missing solution file, malformed solution JSON, missing trace file, and malformed trace JSON.
 	badEntries := []struct {
 		name  string
@@ -367,7 +371,7 @@ func TestForgeMockAndVerify_MinimalInputAndFailureModes(t *testing.T) {
 		},
 		{
 			name:  "incompatible arch localKernelKey",
-			entry: DispatchManifestEntry{LocalKernelKey: "vllm/0.8.5/nvidia/sm_80/rmsnorm/0123456789abcdef", Entrypoint: "run"},
+			entry: DispatchManifestEntry{LocalKernelKey: "vllm/0.8/nvidia/sm_80/rmsnorm/0123456789abcdef", Entrypoint: "run"},
 		},
 		{
 			name:  "empty entrypoint",
@@ -513,8 +517,8 @@ func writeCandidateEntryFiles(
 func TestForgeVerify_MultiEntryManifestRequiresAllPass(t *testing.T) {
 	t.Parallel()
 
-	rmsKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
-	ropeKey := sampleValidKernelKey(t, kernelkey.OpFamilyRopeKVAppend)
+	rmsKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRMSNorm)
+	ropeKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRopeKVAppend)
 
 	cases := []struct {
 		name        string
@@ -616,9 +620,9 @@ func TestForgeVerify_MultiEntryManifestRequiresAllPass(t *testing.T) {
 func TestForgeVerify_BindsTargetKernelKeysDefinitionsAndCompatibility(t *testing.T) {
 	t.Parallel()
 
-	rmsKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
-	lnKey := sampleValidKernelKey(t, kernelkey.OpFamilyLayerNorm)
-	ropeKey := sampleValidKernelKey(t, kernelkey.OpFamilyRopeKVAppend)
+	rmsKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRMSNorm)
+	lnKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyLayerNorm)
+	ropeKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRopeKVAppend)
 	hidden := int64(4096)
 
 	writeRequestAndDefs := func(t *testing.T, targetKeys []string, arch string) string {
@@ -643,7 +647,7 @@ func TestForgeVerify_BindsTargetKernelKeysDefinitionsAndCompatibility(t *testing
 
 		rmsDef := Definition{
 			Name:           "rmsnorm_d4096",
-			OpType:         kernelkey.OpFamilyRMSNorm,
+			OpType:         modelkernelkey.OpFamilyRMSNorm,
 			LocalKernelKey: rmsKey,
 			Axes: map[string]AxisSpec{
 				"hidden_size": {Type: "const", Value: &hidden},
@@ -664,7 +668,7 @@ func TestForgeVerify_BindsTargetKernelKeysDefinitionsAndCompatibility(t *testing
 
 		mismatchedOpDef := Definition{
 			Name:           "wrong_op_def",
-			OpType:         kernelkey.OpFamilyRMSNorm,
+			OpType:         modelkernelkey.OpFamilyRMSNorm,
 			LocalKernelKey: lnKey,
 			Axes: map[string]AxisSpec{
 				"hidden_size": {Type: "const", Value: &hidden},
@@ -814,12 +818,12 @@ func TestForgeMock_EmitsFamilyAppropriateSignaturesAndMockMetadata(t *testing.T)
 		opFamily      string
 		wantSigSubstr string
 	}{
-		{opFamily: kernelkey.OpFamilyRMSNorm, wantSigSubstr: "def run(x, weight=None, eps=1e-6):"},
-		{opFamily: kernelkey.OpFamilyLayerNorm, wantSigSubstr: "def run(x, weight=None, bias=None, eps=1e-5):"},
-		{opFamily: kernelkey.OpFamilyActivationQuant, wantSigSubstr: "def run(x):"},
-		{opFamily: kernelkey.OpFamilyRopeKVAppend, wantSigSubstr: "def run(q, k, cos, sin):"},
-		{opFamily: kernelkey.OpFamilyMoERouterTopK, wantSigSubstr: "def run(logits, top_k=2):"},
-		{opFamily: kernelkey.OpFamilyPagedAttention, wantSigSubstr: "def run(q, k_cache, v_cache):"},
+		{opFamily: modelkernelkey.OpFamilyRMSNorm, wantSigSubstr: "def run(x, weight=None, eps=1e-6):"},
+		{opFamily: modelkernelkey.OpFamilyLayerNorm, wantSigSubstr: "def run(x, weight=None, bias=None, eps=1e-5):"},
+		{opFamily: modelkernelkey.OpFamilyActivationQuant, wantSigSubstr: "def run(x):"},
+		{opFamily: modelkernelkey.OpFamilyRopeKVAppend, wantSigSubstr: "def run(q, k, cos, sin):"},
+		{opFamily: modelkernelkey.OpFamilyMoERouterTopK, wantSigSubstr: "def run(logits, top_k=2):"},
+		{opFamily: modelkernelkey.OpFamilyPagedAttention, wantSigSubstr: "def run(q, k_cache, v_cache):"},
 	}
 
 	for _, tc := range cases {
@@ -872,7 +876,7 @@ func TestForgeMock_EmitsFamilyAppropriateSignaturesAndMockMetadata(t *testing.T)
 			require.True(t, ok)
 			require.Equal(t, true, entryMap["mock"], "dispatch-manifest entry must carry mock=true")
 
-			// Verify forge-verify still passes cleanly on every mock family output.
+			// Verify model-forger verify still passes cleanly on every mock family output.
 			report, err := RunForgeVerify(ForgeVerifyOptions{
 				InputDir:  inputDir,
 				OutputDir: outputDir,

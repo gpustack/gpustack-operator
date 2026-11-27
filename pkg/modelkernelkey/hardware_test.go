@@ -1,4 +1,4 @@
-package kernelkey
+package modelkernelkey
 
 import (
 	"testing"

@@ -15,8 +15,8 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/modelkernelkey"
 	"gpustack.ai/gpustack/pkg/webhook"
-	"gpustack.ai/gpustack/pkg/worker/kernelkey"
 )
 
 const (
@@ -271,7 +271,7 @@ func validateModelKernelArtifactCompatibility(
 		errs = append(errs, field.Invalid(path.Child("engineVersion"), compat.EngineVersion,
 			fmt.Sprintf("must be at most %d characters", modelKernelArtifactMaxVersionLen)))
 	default:
-		normVer, err := kernelkey.NormalizeEngineVersion(compat.EngineVersion)
+		normVer, err := modelkernelkey.NormalizeEngineVersion(compat.EngineVersion)
 		switch {
 		case err != nil:
 			errs = append(errs, field.Invalid(path.Child("engineVersion"), compat.EngineVersion, err.Error()))
@@ -288,7 +288,7 @@ func validateModelKernelArtifactCompatibility(
 		errs = append(errs, field.Required(path.Child("manufacturer"),
 			"must be a canonical lowercase accelerator manufacturer"))
 	} else {
-		normManu, err := kernelkey.NormalizeManufacturer(compat.Manufacturer)
+		normManu, err := modelkernelkey.NormalizeManufacturer(compat.Manufacturer)
 		switch {
 		case err != nil:
 			errs = append(errs, field.Invalid(path.Child("manufacturer"), compat.Manufacturer, err.Error()))
@@ -305,7 +305,7 @@ func validateModelKernelArtifactCompatibility(
 		errs = append(errs, field.Required(path.Child("architecture"),
 			"must be a canonical accelerator architecture"))
 	} else if manufacturerValid {
-		normArch, err := kernelkey.NormalizeArch(compat.Manufacturer, compat.Architecture)
+		normArch, err := modelkernelkey.NormalizeArch(compat.Manufacturer, compat.Architecture)
 		switch {
 		case err != nil:
 			errs = append(errs, field.Invalid(path.Child("architecture"), compat.Architecture, err.Error()))
@@ -327,7 +327,7 @@ func validateModelKernelArtifactCompatibility(
 	}
 
 	headerValid := engineValid && versionValid && manufacturerValid && archValid
-	target := kernelkey.CompatibilityTarget{
+	target := modelkernelkey.CompatibilityTarget{
 		Engine:        compat.Engine,
 		EngineVersion: compat.EngineVersion,
 		Manufacturer:  compat.Manufacturer,
@@ -343,7 +343,7 @@ func validateModelKernelArtifactCompatibility(
 		}
 		seen.Insert(raw)
 
-		parsed, err := kernelkey.Parse(raw)
+		parsed, err := modelkernelkey.Parse(raw)
 		if err != nil {
 			errs = append(errs, field.Invalid(keyPath, raw, err.Error()))
 			continue

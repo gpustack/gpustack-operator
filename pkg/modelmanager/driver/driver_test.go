@@ -551,10 +551,10 @@ func testKernelArtifact(namespace, name, uid, digest string, resolved, quarantin
 			},
 			Compatibility: workercore.ModelKernelArtifactCompatibility{
 				Engine:        "vLLM",
-				EngineVersion: "0.8.5",
+				EngineVersion: "0.8",
 				Manufacturer:  "nvidia",
 				Architecture:  "sm_90a",
-				KernelKeys:    []string{"vllm/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
+				KernelKeys:    []string{"vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
 			},
 		},
 		Status: workercore.ModelKernelArtifactStatus{

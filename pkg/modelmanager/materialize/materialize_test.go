@@ -730,7 +730,7 @@ func TestEnsureKernelFromPeersOnlyPreservesKind(t *testing.T) {
 	seedStore, err := store.Open(seedRoot)
 	require.NoError(t, err)
 
-	dispatchBody := `{"schemaVersion":"gpustack-forge-dispatch/v1","entries":[{"localKernelKey":"vllm/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef","libraryPath":"kernels/k.py"}]}`
+	dispatchBody := `{"schemaVersion":"gpustack-forge-dispatch/v1","entries":[{"localKernelKey":"vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef","libraryPath":"kernels/k.py"}]}`
 	kernelBody := "def run(x): return x\n"
 	manifest, err := modelartifact.NewManifest([]modelartifact.ManifestEntry{
 		{Path: "dispatch-manifest.json", Size: int64(len(dispatchBody)), Digest: "sha256:" + stringx.SumBySHA256(dispatchBody)},

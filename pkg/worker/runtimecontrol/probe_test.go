@@ -18,7 +18,7 @@ func TestClient_ProbeLifecycleAndPayloads(t *testing.T) {
 	const (
 		bootID  = "boot-probe-1"
 		probeID = "probe-uuid-1"
-		kKey    = "vllm/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef"
+		kKey    = "vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef"
 		authTok = "shared-probe-secret"
 	)
 

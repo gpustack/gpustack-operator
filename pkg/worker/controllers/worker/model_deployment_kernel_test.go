@@ -103,10 +103,10 @@ func newNodeStoreKernelArtifact(name, namespace, manifestChar, dispatchChar stri
 			},
 			Compatibility: workercore.ModelKernelArtifactCompatibility{
 				Engine:        "vLLM",
-				EngineVersion: "0.19.0",
+				EngineVersion: "0.19",
 				Manufacturer:  nodefeature.ManufacturerNVIDIA,
 				Architecture:  "sm_90a",
-				KernelKeys:    []string{"vLLM/0.19.0/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
+				KernelKeys:    []string{"vllm/0.19/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
 			},
 		},
 		Status: workercore.ModelKernelArtifactStatus{
@@ -724,7 +724,7 @@ func TestModelDeploymentKernel_CanaryReplacementSlotRequireReadiness(t *testing.
 			count := int(sentinelLoadedCount.Load())
 			keys := make([]string, 0, count)
 			for i := range count {
-				keys = append(keys, fmt.Sprintf("vLLM/0.19.0/nvidia/sm_90a/rmsnorm/%016x", i+1))
+				keys = append(keys, fmt.Sprintf("vllm/0.19/nvidia/sm_90a/rmsnorm/%016x", i+1))
 			}
 			payload := map[string]any{
 				"engine":                   "vllm",
@@ -994,7 +994,7 @@ func TestModelDeploymentKernel_ReadPodKernelRuntimeStateIPv6AndTLSConfig(t *test
 					"rank_id":                  0,
 					"boot_id":                  "boot-ipv6-tls",
 					"dispatch_manifest_digest": dispatchDigest,
-					"loaded_kernel_keys":       []string{"vLLM/0.19.0/nvidia/sm_90a/rmsnorm/0000000000000001"},
+					"loaded_kernel_keys":       []string{"vllm/0.19/nvidia/sm_90a/rmsnorm/0000000000000001"},
 				},
 			},
 		})
@@ -1038,7 +1038,7 @@ func TestModelDeploymentKernel_ReadPodKernelRuntimeStateIPv6AndTLSConfig(t *test
 	assert.Equal(t, "boot-ipv6-tls", state.BootID)
 	assert.True(t, state.Ready)
 	assert.Equal(t, dispatchDigest, state.DispatchManifestDigest)
-	assert.Equal(t, []string{"vLLM/0.19.0/nvidia/sm_90a/rmsnorm/0000000000000001"}, state.LoadedKernelKeys)
+	assert.Equal(t, []string{"vllm/0.19/nvidia/sm_90a/rmsnorm/0000000000000001"}, state.LoadedKernelKeys)
 }
 
 func TestModelDeploymentKernel_ImageCanaryKernelLoadErrorHoldsSlot(t *testing.T) {
@@ -1056,10 +1056,10 @@ func TestModelDeploymentKernel_ImageCanaryKernelLoadErrorHoldsSlot(t *testing.T)
 			},
 			Compatibility: workercore.ModelKernelArtifactCompatibility{
 				Engine:        "vLLM",
-				EngineVersion: "0.19.0",
+				EngineVersion: "0.19",
 				Manufacturer:  nodefeature.ManufacturerNVIDIA,
 				Architecture:  "sm_90a",
-				KernelKeys:    []string{"vLLM/0.19.0/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
+				KernelKeys:    []string{"vllm/0.19/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
 			},
 		},
 		Status: workercore.ModelKernelArtifactStatus{ObservedGeneration: 1},
@@ -1078,7 +1078,7 @@ func TestModelDeploymentKernel_ImageCanaryKernelLoadErrorHoldsSlot(t *testing.T)
 		count := int(sentinelLoadedCount.Load())
 		keys := make([]string, 0, count)
 		for i := range count {
-			keys = append(keys, fmt.Sprintf("vLLM/0.19.0/nvidia/sm_90a/rmsnorm/%016x", i+1))
+			keys = append(keys, fmt.Sprintf("vllm/0.19/nvidia/sm_90a/rmsnorm/%016x", i+1))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{

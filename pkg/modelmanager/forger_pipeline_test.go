@@ -136,7 +136,7 @@ func TestTwoNodeForgerIngestPeerSyncIsolationAndGC(t *testing.T) {
 		forgerUID      = "uid-forger-alpha"
 		sandboxPodName = "qwen-forger-sandbox-1"
 		sandboxPodUID  = "uid-sandbox-alpha-1"
-		kernelKey      = "vllm/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef"
+		kernelKey      = "vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef"
 		totalDiskBytes = uint64(10_000)
 	)
 	baseTime := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
@@ -474,7 +474,7 @@ func TestTwoNodeForgerIngestPeerSyncIsolationAndGC(t *testing.T) {
 			},
 			Compatibility: workercore.ModelKernelArtifactCompatibility{
 				Engine:        "vLLM",
-				EngineVersion: "0.8.5",
+				EngineVersion: "0.8",
 				Manufacturer:  "nvidia",
 				Architecture:  "sm_90a",
 				KernelKeys:    []string{kernelKey},

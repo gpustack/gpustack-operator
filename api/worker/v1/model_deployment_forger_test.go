@@ -49,10 +49,10 @@ func fullKernelArtifactFixture() *ModelKernelArtifact {
 			},
 			Compatibility: workercore.ModelKernelArtifactCompatibility{
 				Engine:        workercore.ModelDeploymentEngineVLLM,
-				EngineVersion: "0.8.5",
+				EngineVersion: "0.8",
 				Manufacturer:  "nvidia",
 				Architecture:  "sm_90a",
-				KernelKeys:    []string{"vLLM/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
+				KernelKeys:    []string{"vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
 			},
 		},
 		Status: workercore.ModelKernelArtifactStatus{
@@ -180,7 +180,7 @@ func fullDeploymentForgerFixture() *ModelDeploymentForger {
 					},
 					ObservedBottlenecks: []workercore.ModelDeploymentForgerBottleneck{
 						{
-							LocalKernelKey:      "vLLM/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef",
+							LocalKernelKey:      "vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef",
 							OpFamily:            "rmsnorm",
 							GPUTimeSharePercent: "12.5",
 							ObservedAt:          now,

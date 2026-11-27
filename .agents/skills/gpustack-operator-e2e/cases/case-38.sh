@@ -25,8 +25,8 @@
 #                Runs ModelDeploymentForger (mode: Active, sandbox.runnerMode: Mock) against a
 #                2-replica mock-sentinel SGLang ModelDeployment serving /gpustack/v1/{ready,live,
 #                ack,pause,runtime_config,probe} and /metrics:
-#                probe distillation -> Kueue single-card ForgeSandbox (forge-mock -> forge-verify ->
-#                forge-hold) -> seed node emptyDir /ingest/v1/trees (Kind: Kernel, Source: Forge) ->
+#                probe distillation -> Kueue single-card ForgeSandbox (model-forger mock -> verify ->
+#                hold) -> seed node emptyDir /ingest/v1/trees (Kind: Kernel, Source: Forge) ->
 #                NodeModelStore.spec.pinned watermark-GC survival -> peer node zero-Hub
 #                /peer/v1/trees/{hex} Peer Sync -> read-only /var/lib/gpustack/kernels/
 #                dispatch-manifest.json CSI mount inside replaced Pods -> readiness-gated canary
@@ -46,7 +46,7 @@
 #              GPU nodes, pre-warmed ModelArtifact (E2E_C38_ARTIFACT), E2E_C38_RUNNER_IMAGE, and
 #              E2E_C38_VLLM_IMAGE / E2E_C38_SGLANG_IMAGE; auto-skips cleanly otherwise.
 # Inputs:      MOCKED (Leg A Part 2): lightweight pure-stdlib mock-sentinel SGLang Pod script,
-#              built-in gpustack-operator forge-mock/forge-verify/forge-hold subcommands, Mock
+#              built-in gpustack-operator model-forger mock/verify/hold subcommands, Mock
 #              Device Manager presets (when active), and _model-hub.py for GC/cross-class fixtures.
 #              REAL: CRD schemas, webhooks, Kueue admission, model-manager /ingest/v1/trees,
 #              NodeModelStore pin union & GC, /peer/v1/trees/{hex}, model.csi.gpustack.ai mounts,
@@ -206,7 +206,7 @@ done
 
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
 
-# Compute a canonical LocalKernelKey signatureHash16 matching pkg/worker/kernelkey.
+# Compute a canonical LocalKernelKey signatureHash16 matching pkg/modelkernelkey.
 compute_kernel_key() {
   local engine="$1" version="$2" manu="$3" arch="$4" op="$5" hidden="$6"
   python3 - "$engine" "$version" "$manu" "$arch" "$op" "$hidden" <<'PY'
@@ -228,7 +228,7 @@ PY
 # ==============================================================================================
 echo "== Leg A Part 1: admission and security refusals =="
 
-SAMPLE_KEY="$(compute_kernel_key vLLM 0.19.0 nvidia sm_90a rmsnorm 4096)"
+SAMPLE_KEY="$(compute_kernel_key vLLM 0.19 nvidia sm_90a rmsnorm 4096)"
 SAMPLE_DIGEST="sha256:$(printf 'a%.0s' $(seq 64))"
 SAMPLE_DISPATCH="sha256:$(printf 'b%.0s' $(seq 64))"
 
@@ -245,7 +245,7 @@ spec:
       name: forbidden-kernel-cm
   compatibility:
     engine: vLLM
-    engineVersion: "0.19.0"
+    engineVersion: "0.19"
     manufacturer: nvidia
     architecture: sm_90a
     kernelKeys:
@@ -343,7 +343,7 @@ spec:
         uid: dummy-uid
   compatibility:
     engine: vLLM
-    engineVersion: "0.19.0"
+    engineVersion: "0.19"
     manufacturer: nvidia
     architecture: sm_90a
     kernelKeys:
@@ -594,7 +594,15 @@ def parse_port(argv):
     return 8000
 
 
+def normalize_major_minor(ver):
+    parts = ver.strip().lstrip("vV").split("+", 1)[0].split(".")
+    if len(parts) >= 2:
+        return f"{parts[0]}.{parts[1]}"
+    return ver
+
+
 def compute_key(engine, ver, manu, arch, op_family, hidden=4096):
+    norm_ver = normalize_major_minor(ver)
     payload = json.dumps(
         {
             "constAxes": {"hidden_size": int(hidden)},
@@ -606,7 +614,7 @@ def compute_key(engine, ver, manu, arch, op_family, hidden=4096):
         sort_keys=True,
     )
     sig = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
-    return f"{engine.lower()}/{ver}/{manu.lower()}/{arch.lower()}/{op_family.lower()}/{sig}"
+    return f"{engine.lower()}/{norm_ver}/{manu.lower()}/{arch.lower()}/{op_family.lower()}/{sig}"
 
 
 def read_fail_op():
@@ -651,11 +659,12 @@ def next_target_op(loaded_keys):
 def build_probe_payload(req_body):
     loaded_keys, _, _ = read_mounted_kernels()
     op_family = next_target_op(loaded_keys)
-    ver = req_body.get("engine_version") or "0.5.22"
+    ver = req_body.get("engine_version") or "0.5"
+    norm_ver = normalize_major_minor(ver)
     manu = req_body.get("manufacturer") or "nvidia"
     arch = req_body.get("architecture") or "sm_90a"
-    key = compute_key("SGLang", ver, manu, arch, op_family, 4096)
-    gemm_key = f"sglang/{ver}/{manu}/{arch}/gemm/0123456789abcdef"
+    key = compute_key("SGLang", norm_ver, manu, arch, op_family, 4096)
+    gemm_key = f"sglang/{norm_ver}/{manu}/{arch}/gemm/0123456789abcdef"
     def_name = f"{op_family}_h4096"
     steps = int(req_body.get("steps") or 4)
     return {
@@ -1000,9 +1009,9 @@ YAML
   fi
 
   if [ "$gen1_created" -eq 1 ]; then
-    record PASS "Leg A2: gen-1 ForgeSandbox (forge-mock -> forge-verify -> forge-hold) ingested ModelKernelArtifact" "${NS}/${gen1_name}"
+    record PASS "Leg A2: gen-1 ForgeSandbox (model-forger mock -> verify -> hold) ingested ModelKernelArtifact" "${NS}/${gen1_name}"
   else
-    record FAIL "Leg A2: gen-1 ForgeSandbox (forge-mock -> forge-verify -> forge-hold) ingested ModelKernelArtifact" \
+    record FAIL "Leg A2: gen-1 ForgeSandbox (model-forger mock -> verify -> hold) ingested ModelKernelArtifact" \
       "saw_sandbox=${saw_sandbox}, ${gen1_name} not created within ${BOUND}s"
     return 0
   fi

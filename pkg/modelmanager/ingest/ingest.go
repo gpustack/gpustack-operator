@@ -33,13 +33,13 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/modelartifact"
+	"gpustack.ai/gpustack/pkg/modelkernelkey"
 	"gpustack.ai/gpustack/pkg/modelmanager/download"
 	"gpustack.ai/gpustack/pkg/modelmanager/peer"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/utils/httpx"
 	"gpustack.ai/gpustack/pkg/utils/json"
-	"gpustack.ai/gpustack/pkg/worker/kernelkey"
 )
 
 // Hard limits enforced on every ingested ForgeSandbox output tree before reserving cache space.
@@ -553,22 +553,22 @@ func validateDispatchManifest(raw []byte, wantVerifiedEntries int) ([]string, er
 			wantVerifiedEntries, len(dm.Entries))
 	}
 
-	target := kernelkey.CompatibilityTarget{
+	target := modelkernelkey.CompatibilityTarget{
 		Engine:        dm.Compatibility.Engine,
 		EngineVersion: dm.Compatibility.EngineVersion,
 		Manufacturer:  dm.Compatibility.Manufacturer,
 		Arch:          dm.Compatibility.Architecture,
 	}
-	if _, err := kernelkey.NormalizeEngine(target.Engine); err != nil {
+	if _, err := modelkernelkey.NormalizeEngine(target.Engine); err != nil {
 		return nil, fmt.Errorf("compatibility.engine: %w", err)
 	}
-	if _, err := kernelkey.NormalizeEngineVersion(target.EngineVersion); err != nil {
+	if _, err := modelkernelkey.NormalizeEngineVersion(target.EngineVersion); err != nil {
 		return nil, fmt.Errorf("compatibility.engineVersion: %w", err)
 	}
-	if _, err := kernelkey.NormalizeManufacturer(target.Manufacturer); err != nil {
+	if _, err := modelkernelkey.NormalizeManufacturer(target.Manufacturer); err != nil {
 		return nil, fmt.Errorf("compatibility.manufacturer: %w", err)
 	}
-	if _, err := kernelkey.NormalizeArch(target.Manufacturer, target.Arch); err != nil {
+	if _, err := modelkernelkey.NormalizeArch(target.Manufacturer, target.Arch); err != nil {
 		return nil, fmt.Errorf("compatibility.architecture: %w", err)
 	}
 
@@ -576,14 +576,14 @@ func validateDispatchManifest(raw []byte, wantVerifiedEntries int) ([]string, er
 	keys := make([]string, 0, len(dm.Entries))
 	for i, e := range dm.Entries {
 		rawKey := strings.TrimSpace(e.LocalKernelKey)
-		parsed, err := kernelkey.Parse(rawKey)
+		parsed, err := modelkernelkey.Parse(rawKey)
 		if err != nil {
 			return nil, fmt.Errorf("entry %d localKernelKey: %w", i, err)
 		}
-		if excluded, reason := kernelkey.IsExcluded(parsed.OpFamily); excluded {
+		if excluded, reason := modelkernelkey.IsExcluded(parsed.OpFamily); excluded {
 			return nil, fmt.Errorf("entry %d localKernelKey excluded (%s)", i, reason)
 		}
-		if err := kernelkey.MatchCompatibility(parsed, target); err != nil {
+		if err := modelkernelkey.MatchCompatibility(parsed, target); err != nil {
 			return nil, fmt.Errorf("entry %d localKernelKey compatibility: %w", i, err)
 		}
 		if strings.TrimSpace(e.LibraryPath) == "" {

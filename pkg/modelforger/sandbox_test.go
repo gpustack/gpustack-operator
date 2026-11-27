@@ -1,4 +1,4 @@
-package forger
+package modelforger
 
 import (
 	"strings"
@@ -14,8 +14,8 @@ import (
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/modelkernelkey"
 	"gpustack.ai/gpustack/pkg/nodefeature"
-	"gpustack.ai/gpustack/pkg/worker/kernelkey"
 )
 
 func sampleForger() *workercore.ModelDeploymentForger {
@@ -28,8 +28,8 @@ func sampleForger() *workercore.ModelDeploymentForger {
 	}
 }
 
-func sampleNodeHardware() kernelkey.NodeHardware {
-	return kernelkey.NodeHardware{
+func sampleNodeHardware() modelkernelkey.NodeHardware {
+	return modelkernelkey.NodeHardware{
 		Key:          "nvidia-h100",
 		Manufacturer: nodefeature.ManufacturerNVIDIA,
 		Arch:         "sm_90a",
@@ -85,11 +85,11 @@ func TestBuildInputConfigMap_SuccessAndSizeLimit(t *testing.T) {
 	t.Parallel()
 
 	forger := sampleForger()
-	validKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
+	validKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRMSNorm)
 	hidden := int64(4096)
 	def := Definition{
 		Name:           "rmsnorm_hidden4096",
-		OpType:         kernelkey.OpFamilyRMSNorm,
+		OpType:         modelkernelkey.OpFamilyRMSNorm,
 		LocalKernelKey: validKey,
 		Axes: map[string]AxisSpec{
 			"hidden_size": {Type: "const", Value: &hidden},
@@ -172,13 +172,13 @@ func TestBuildInputConfigMap_TrimsLowestDurationWorkloadsBeforeFailingSizeCap(t 
 	t.Parallel()
 
 	forger := sampleForger()
-	rmsKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
-	lnKey := sampleValidKernelKey(t, kernelkey.OpFamilyLayerNorm)
+	rmsKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRMSNorm)
+	lnKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyLayerNorm)
 	hidden := int64(4096)
 
 	defA := Definition{
 		Name:           "rmsnorm_hidden4096",
-		OpType:         kernelkey.OpFamilyRMSNorm,
+		OpType:         modelkernelkey.OpFamilyRMSNorm,
 		LocalKernelKey: rmsKey,
 		Axes: map[string]AxisSpec{
 			"hidden_size": {Type: "const", Value: &hidden},
@@ -190,7 +190,7 @@ func TestBuildInputConfigMap_TrimsLowestDurationWorkloadsBeforeFailingSizeCap(t 
 	}
 	defB := Definition{
 		Name:           "layernorm_hidden4096",
-		OpType:         kernelkey.OpFamilyLayerNorm,
+		OpType:         modelkernelkey.OpFamilyLayerNorm,
 		LocalKernelKey: lnKey,
 		Axes: map[string]AxisSpec{
 			"hidden_size": {Type: "const", Value: &hidden},
@@ -337,9 +337,12 @@ func TestBuildSandboxPod_MockAndExternalModes(t *testing.T) {
 		require.Equal(t, hw.SelectorLabels, pod.Spec.NodeSelector)
 		require.Len(t, pod.Spec.InitContainers, 2)
 		require.Equal(t, RunnerContainerName, pod.Spec.InitContainers[0].Name)
+		require.Equal(t, []string{"model-forger", "mock", "--input-dir", InputMountPath, "--output-dir", OutputMountPath}, pod.Spec.InitContainers[0].Args)
 		require.Equal(t, VerifierContainerName, pod.Spec.InitContainers[1].Name)
+		require.Equal(t, []string{"model-forger", "verify"}, pod.Spec.InitContainers[1].Args[:2])
 		require.Len(t, pod.Spec.Containers, 1)
 		require.Equal(t, HoldContainerName, pod.Spec.Containers[0].Name)
+		require.Equal(t, []string{"model-forger", "hold", "--max-duration", "5m0s"}, pod.Spec.Containers[0].Args)
 
 		// Exactly 1 whole accelerator card on runner and verifier, 0 on hold container.
 		one := resource.MustParse("1")
@@ -706,7 +709,7 @@ func TestBuildSandboxPod_MockAndExternalModes(t *testing.T) {
 			{
 				Forger: forger, Name: "sb", RoleName: "decode", Generation: 1, InputConfigMapName: "cm", EntranceQueue: "lq", OperatorImage: "op",
 				Manufacturer: nodefeature.ManufacturerAMD,
-				Hardware: kernelkey.NodeHardware{
+				Hardware: modelkernelkey.NodeHardware{
 					Manufacturer:   nodefeature.ManufacturerAMD,
 					SelectorLabels: map[string]string{"feature.node.kubernetes.io/gpustack-acceleratable-amd-mi300x": "true"},
 				},
@@ -758,7 +761,7 @@ func TestSandboxLabels_DefensivelyTruncateLongForgerAndRoleNames(t *testing.T) {
 			UID:       types.UID("forger-uid-long"),
 		},
 	}
-	validKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
+	validKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRMSNorm)
 	req := ForgeRequest{
 		Engine:           "vLLM",
 		EngineVersion:    "0.8.5",

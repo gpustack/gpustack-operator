@@ -16,7 +16,7 @@ store-local `Kind: Kernel` isolation, and the 3-voice `NodeModelStore.spec.pinne
 
 ## LocalKernelKey contract
 
-`pkg/worker/kernelkey` identifies single-GPU operator specializations in canonical 6-segment form:
+`pkg/modelkernelkey` identifies single-GPU operator specializations in canonical 6-segment form:
 
 ```text
 <engine>/<engineVersion>/<manufacturer>/<arch>/<opFamily>/<signatureHash16>
@@ -33,9 +33,10 @@ store-local `Kind: Kernel` isolation, and the 3-voice `NodeModelStore.spec.pinne
   `num_decode_tokens`, `num_prefill_tokens`, `num_requests`, `num_seqs`, `num_tokens`, `q_len`,
   `seq_len`, `seq_length`, `sequence_length`, `token_count`, `total_tokens`).
 - **Segment normalization**: `engine` is lowercase (`vllm`, `sglang`); `engineVersion` strips build
-  metadata suffixes (`+cu128`, `+rocm6.3`, git suffixes) while retaining `major.minor.patch` (or
-  pre-release tags); `manufacturer` and `arch` match `pkg/nodefeature` labels (e.g.,
-  `nvidia/sm_90a`, `amd/gfx942`, `ascend/910b`).
+  metadata (`+cu128`, `+rocm6.3`, git/dirty suffixes) and collapses patch/micro/post releases to
+  canonical `major.minor` (`0.8.5` and `0.8.6` → `0.8`) while keeping pre-release tags (`0.9rc1`,
+  `0.9-rc.1`, `0.9.dev0`, `0.9a1`, `0.9b2`) isolated; `manufacturer` and `arch` match
+  `pkg/nodefeature` labels (e.g., `nvidia/sm_90a`, `amd/gfx942`, `ascend/910b`).
 
 ### Allowed and excluded operators
 
@@ -73,13 +74,13 @@ owner-referenced `ConfigMap` capped at `512 KiB`) and stages outputs in `forge-o
   "schemaVersion": "gpustack-forge-dispatch/v1",
   "compatibility": {
     "engine": "vLLM",
-    "engineVersion": "0.19.0",
+    "engineVersion": "0.8.5",
     "manufacturer": "nvidia",
     "architecture": "sm_90a"
   },
   "entries": [
     {
-      "localKernelKey": "vllm/0.19.0/nvidia/sm_90a/rmsnorm/0123456789abcdef",
+      "localKernelKey": "vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef",
       "definition": "rmsnorm_d4096",
       "solutionPath": "solutions/rmsnorm_v1.json",
       "solutionSha256": "sha256:...",
@@ -106,13 +107,13 @@ and `rtol` (`allclose_passed: true`), and `speedup_factor >= minSpeedupRatio`.
 
 ### Sandbox pod contract
 
-`pkg/worker/forger.BuildSandboxPod` and `ModelDeploymentForgerWebhook` enforce the PodSpec-style
+`pkg/modelforger.BuildSandboxPod` and `ModelDeploymentForgerWebhook` enforce the PodSpec-style
 `spec.sandbox` contract:
 
 | Surface | Fields and bounds | Rendering and isolation |
 |---|---|---|
-| Pod envelope | `priorityClassName`, `activeDeadlineSeconds` (`60..14400`, default `1800`), `outputSizeLimit` (`64Mi..16Gi`, default `2Gi`), `imagePullSecrets` (`<= 32` valid DNS-1123 subdomain names, no duplicates) | `imagePullSecrets` merges target `role.imagePullSecrets` followed by `sandbox.imagePullSecrets` (deduplicated in order) so `forge-verifier` still pulls private engine images. |
-| `runnerMode` & `runner` | `External` (default; requires `runner != nil` and `runner.image` `<= 512` chars matching `forger-allowed-runner-image-prefixes`) or `Mock` (rejects non-nil `runner`); `imagePullPolicy` (`Always`, `Never`, `IfNotPresent`); `command` & `args` (`<= 64` entries, `<= 4096` bytes each, no NUL `\x00`) | `runner.{imagePullPolicy,command,args,env,envFrom}` renders strictly on `initContainer: forge-runner` and is never passed to `forge-stage-sentinel`, `forge-verifier`, or `forge-hold`. |
+| Pod envelope | `priorityClassName`, `activeDeadlineSeconds` (`60..14400`, default `1800`), `outputSizeLimit` (`64Mi..16Gi`, default `2Gi`), `imagePullSecrets` (`<= 32` valid DNS-1123 subdomain names, no duplicates) | `imagePullSecrets` merges target `role.imagePullSecrets` followed by `sandbox.imagePullSecrets` (deduplicated in order) so `forge-verifier` still pulls private engine images; main container `forge-hold` runs `gpustack-operator model-forger hold`. |
+| `runnerMode` & `runner` | `External` (default; requires `runner != nil` and `runner.image` `<= 512` chars matching `forger-allowed-runner-image-prefixes`) or `Mock` (rejects non-nil `runner`, running `gpustack-operator model-forger mock` and `model-forger verify`); `imagePullPolicy` (`Always`, `Never`, `IfNotPresent`); `command` & `args` (`<= 64` entries, `<= 4096` bytes each, no NUL `\x00`) | `runner.{imagePullPolicy,command,args,env,envFrom}` renders strictly on `initContainer: forge-runner` and is never passed to `forge-stage-sentinel`, `forge-verifier`, or `forge-hold`. |
 | `runner.env` & `runner.envFrom` | `env` (`<= 64` unique valid env names `<= 256` chars; mutually exclusive `value` vs `valueFrom.{configMapKeyRef,secretKeyRef}`, no downward API); `envFrom` (`<= 16` entries, exactly one of `configMapRef` or `secretRef`, optional valid `prefix`) | Case-insensitive `GPUSTACK_FORGE_*` names and `envFrom[].prefix` values are rejected at admission and stripped defensively in `BuildSandboxPod`; operator `GPUSTACK_FORGE_INPUT_DIR` and `GPUSTACK_FORGE_OUTPUT_DIR` are always injected in `Env` so Kubernetes prioritizes them over `EnvFrom`. |
 | Host & accelerator `resources` | Positive `cpu`, `ram`, `localStorage` (`ephemeral-storage`); `acceleratorSlicedMemoryPercentage` (`0..100`), `acceleratorSlicedCoresPercentage` (`0..100`, requires `memory > 0`), `acceleratorPartitionedProfile` (`<= 64` chars, mutually exclusive with slicing) | Applied to sequential `initContainer`s `forge-runner` and `forge-verifier` (effective Pod request of `1` unit): `Exclusive` whole-card default (`<vendor>/<dev>: 1`, recommended for deterministic verification timing), `Partitioned` (`.partitioned: 1` + `.partitioned.<kind>-<profile>: 1` on a partition-offering pool), or `Sliced` (`.sliced: 1` + `.sliced.memory-percentage` + `.sliced.cores-percentage` on a sliceable pool). |
 

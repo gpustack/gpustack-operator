@@ -572,7 +572,7 @@ func TestClient_AdditiveKernelLoaderFields(t *testing.T) {
 	const (
 		bootID         = "boot-kernel-1"
 		dispatchDigest = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
-		kernelKey      = "vllm/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef"
+		kernelKey      = "vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef"
 	)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

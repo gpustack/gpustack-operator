@@ -47,7 +47,7 @@ const (
 	testNodeName   = "gpu-node-1"
 	testWorkerSA   = "custom-release-worker"
 	testSysNS      = "gpustack-system"
-	testKernelKey  = "vllm/0.8.5/nvidia/sm_90a/rmsnorm/0123456789abcdef"
+	testKernelKey  = "vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef"
 )
 
 var testTime = time.Date(2026, 11, 27, 8, 30, 0, 0, time.UTC)
@@ -612,7 +612,7 @@ func TestIngestRejectsFilesystemHazardsAndCapsBeforeReserve(t *testing.T) {
 		{
 			name: "verification-report.json failedCount non-zero with partial pass",
 			tamper: func(t *testing.T, outputDir, verifiedDir, _ string) {
-				secondKey := "vllm/0.8.5/nvidia/sm_90a/layernorm/fedcba9876543210"
+				secondKey := "vllm/0.8/nvidia/sm_90a/layernorm/fedcba9876543210"
 				multiDispatch := fmt.Sprintf(`{
   "schemaVersion": "gpustack-forge-dispatch/v1",
   "entries": [
@@ -629,7 +629,7 @@ func TestIngestRejectsFilesystemHazardsAndCapsBeforeReserve(t *testing.T) {
 		{
 			name: "verification-report.json entry with passed false and zero failedCount",
 			tamper: func(t *testing.T, outputDir, verifiedDir, _ string) {
-				secondKey := "vllm/0.8.5/nvidia/sm_90a/layernorm/fedcba9876543210"
+				secondKey := "vllm/0.8/nvidia/sm_90a/layernorm/fedcba9876543210"
 				multiDispatch := fmt.Sprintf(`{
   "schemaVersion": "gpustack-forge-dispatch/v1",
   "entries": [
@@ -646,7 +646,7 @@ func TestIngestRejectsFilesystemHazardsAndCapsBeforeReserve(t *testing.T) {
 		{
 			name: "verification-report.json entry with evaluation status FAILED",
 			tamper: func(t *testing.T, outputDir, verifiedDir, _ string) {
-				secondKey := "vllm/0.8.5/nvidia/sm_90a/layernorm/fedcba9876543210"
+				secondKey := "vllm/0.8/nvidia/sm_90a/layernorm/fedcba9876543210"
 				multiDispatch := fmt.Sprintf(`{
   "schemaVersion": "gpustack-forge-dispatch/v1",
   "entries": [
@@ -663,7 +663,7 @@ func TestIngestRejectsFilesystemHazardsAndCapsBeforeReserve(t *testing.T) {
 		{
 			name: "verification-report.json passedCount does not cover all dispatch-manifest entries",
 			tamper: func(t *testing.T, outputDir, verifiedDir, _ string) {
-				secondKey := "vllm/0.8.5/nvidia/sm_90a/layernorm/fedcba9876543210"
+				secondKey := "vllm/0.8/nvidia/sm_90a/layernorm/fedcba9876543210"
 				multiDispatch := fmt.Sprintf(`{
   "schemaVersion": "gpustack-forge-dispatch/v1",
   "entries": [
@@ -689,7 +689,7 @@ func TestIngestRejectsFilesystemHazardsAndCapsBeforeReserve(t *testing.T) {
 			tamper: func(t *testing.T, outputDir, verifiedDir, _ string) {
 				badDispatch := `{
   "schemaVersion": "gpustack-forge-dispatch/v1",
-  "entries": [{"localKernelKey": "vllm/0.8.5/nvidia/sm_90a/gemm/0123456789abcdef", "libraryPath": "kernels/rmsnorm_v1/kernel.py"}]
+  "entries": [{"localKernelKey": "vllm/0.8/nvidia/sm_90a/gemm/0123456789abcdef", "libraryPath": "kernels/rmsnorm_v1/kernel.py"}]
 }`
 				require.NoError(t, os.WriteFile(filepath.Join(outputDir, "dispatch-manifest.json"), []byte(badDispatch), 0o644))
 				d := "sha256:" + stringx.SumBySHA256(badDispatch)
@@ -853,7 +853,7 @@ func TestIngestAdditionalRequestReportAndConflictBranches(t *testing.T) {
 		env := newIngestTestEnv(t, forger, pod)
 		outDir, verifiedDir, _ := writeValidSandboxFiles(t, env.kubeletDir, testPodUID)
 
-		secondKey := "vllm/0.8.5/nvidia/sm_90a/layernorm/fedcba9876543210"
+		secondKey := "vllm/0.8/nvidia/sm_90a/layernorm/fedcba9876543210"
 		multiDispatch := fmt.Sprintf(`{
   "schemaVersion": "gpustack-forge-dispatch/v1",
   "compatibility": {

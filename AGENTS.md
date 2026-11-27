@@ -6,7 +6,7 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 ## Project Structure
 
 - `cmd/` — single `gpustack-operator` binary entrypoint (the cobra subcommands).
-- `pkg/` — implementation: `worker` (control plane), `devicemanager` (per-node DaemonSet), `nodefeature` (label algebra), `modelmanager` (node cache and CSI), `modeltransfer` (per-node remote-weight source broker), and supporting packages.
+- `pkg/` — implementation: `worker` (control plane), `devicemanager` (per-node DaemonSet), `nodefeature` (label algebra), `modelforger` (kernel sandbox schemas, builders, and helpers), `modelkernelkey` (single-GPU `LocalKernelKey` algebra), `modelmanager` (node cache and CSI), `modeltransfer` (per-node remote-weight source broker), and supporting packages.
 - `api/` — API types: CRDs + aggregated extension APIs.
 - `model-transfer/` — shared transfer contracts and portable Python `gpustack_model_transfer` package.
 - `engine-sentinel/` — zero-intrusion pure-Python `gpustack_engine_sentinel` package staged read-only for online runtime control, probes, pause, and PreStop drain.

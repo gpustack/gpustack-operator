@@ -28,10 +28,10 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/modelforger"
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/osx"
-	"gpustack.ai/gpustack/pkg/worker/forger"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
@@ -492,8 +492,8 @@ func (r *ModelDeploymentForgerReconciler) cleanupAllForgerSandboxes(
 	}
 
 	match := ctrlcli.MatchingLabels{
-		forger.SandboxLabelName:     "model-deployment-forger",
-		forger.SandboxLabelInstance: forger.SafeLabelValue(mdf.Name),
+		modelforger.SandboxLabelName:     "model-deployment-forger",
+		modelforger.SandboxLabelInstance: modelforger.SafeLabelValue(mdf.Name),
 	}
 	pods := new(core.PodList)
 	if err := r.Client.List(ctx, pods, ctrlcli.InNamespace(mdf.Namespace), match); err == nil {
@@ -547,13 +547,13 @@ func (r *ModelDeploymentForgerReconciler) ingestClient() (ModelDeploymentForgerI
 		return r.defaultIC, nil
 	}
 
-	var opts []forger.IngestClientOption
+	var opts []modelforger.IngestClientOption
 	if _, statErr := os.Stat(forgerWorkerCertCAFile); statErr == nil {
-		opts = append(opts, forger.WithIngestCAFile(forgerWorkerCertCAFile))
+		opts = append(opts, modelforger.WithIngestCAFile(forgerWorkerCertCAFile))
 	} else {
-		opts = append(opts, forger.WithIngestInsecureSkipVerify(true))
+		opts = append(opts, modelforger.WithIngestInsecureSkipVerify(true))
 	}
-	ic, err := forger.NewIngestClient(opts...)
+	ic, err := modelforger.NewIngestClient(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -828,11 +828,11 @@ func effectiveMaxKernelsPerGeneration(roleSpec *workercore.ModelDeploymentForger
 
 func effectiveMinSpeedupRatio(roleSpec *workercore.ModelDeploymentForgerRoleSpec) float64 {
 	if roleSpec == nil || strings.TrimSpace(roleSpec.MinSpeedupRatio) == "" {
-		return forger.DefaultMinSpeedupRatio
+		return modelforger.DefaultMinSpeedupRatio
 	}
 	parsed, err := strconv.ParseFloat(strings.TrimSpace(roleSpec.MinSpeedupRatio), 64)
-	if err != nil || parsed < forger.MinAllowedSpeedupRatio {
-		return forger.DefaultMinSpeedupRatio
+	if err != nil || parsed < modelforger.MinAllowedSpeedupRatio {
+		return modelforger.DefaultMinSpeedupRatio
 	}
 	return parsed
 }
@@ -882,7 +882,7 @@ func modelDeploymentForgerPredicate() ctrlpredicate.Predicate {
 func modelDeploymentForgerPodPredicate() ctrlpredicate.Predicate {
 	return ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
 		lbls := obj.GetLabels()
-		return lbls[forger.SandboxLabelName] == "model-deployment-forger" ||
+		return lbls[modelforger.SandboxLabelName] == "model-deployment-forger" ||
 			lbls[modelDeploymentLabelKeyName] == modelDeploymentLabelValueName
 	})
 }
@@ -890,7 +890,7 @@ func modelDeploymentForgerPodPredicate() ctrlpredicate.Predicate {
 func modelDeploymentForgerWorkloadPredicate() ctrlpredicate.Predicate {
 	return ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
 		lbls := obj.GetLabels()
-		return lbls[forger.SandboxLabelName] == "model-deployment-forger" ||
+		return lbls[modelforger.SandboxLabelName] == "model-deployment-forger" ||
 			lbls[modelDeploymentLabelKeyInstance] != ""
 	})
 }
@@ -925,13 +925,13 @@ func (r *ModelDeploymentForgerReconciler) mapForgerInstanceLabel(
 			}}
 		}
 	}
-	safeLabel := forger.SafeLabelValue(instanceLabel)
+	safeLabel := modelforger.SafeLabelValue(instanceLabel)
 	if r.Client != nil {
 		list := new(workercore.ModelDeploymentForgerList)
 		if err := r.Client.List(ctx, list, ctrlcli.InNamespace(obj.GetNamespace()), ctrlclix.WithoutQuorum); err == nil {
 			var reqs []ctrlreconcile.Request
 			for i := range list.Items {
-				if forger.SafeLabelValue(list.Items[i].Name) == safeLabel || list.Items[i].Name == instanceLabel {
+				if modelforger.SafeLabelValue(list.Items[i].Name) == safeLabel || list.Items[i].Name == instanceLabel {
 					reqs = append(reqs, ctrlreconcile.Request{
 						NamespacedName: ctrlcli.ObjectKeyFromObject(&list.Items[i]),
 					})
@@ -954,8 +954,8 @@ func (r *ModelDeploymentForgerReconciler) mapPod(
 	ctx context.Context, obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
 	lbls := obj.GetLabels()
-	if lbls[forger.SandboxLabelName] == "model-deployment-forger" && lbls[forger.SandboxLabelInstance] != "" {
-		return r.mapForgerInstanceLabel(ctx, obj, lbls[forger.SandboxLabelInstance])
+	if lbls[modelforger.SandboxLabelName] == "model-deployment-forger" && lbls[modelforger.SandboxLabelInstance] != "" {
+		return r.mapForgerInstanceLabel(ctx, obj, lbls[modelforger.SandboxLabelInstance])
 	}
 	if mdName := lbls[modelDeploymentLabelKeyInstance]; mdName != "" {
 		return r.mapTargetDeployment(ctx, &meta.PartialObjectMetadata{
@@ -1003,8 +1003,8 @@ func (r *ModelDeploymentForgerReconciler) mapWorkload(
 		}
 	}
 	lbls := obj.GetLabels()
-	if lbls[forger.SandboxLabelInstance] != "" {
-		return r.mapForgerInstanceLabel(ctx, obj, lbls[forger.SandboxLabelInstance])
+	if lbls[modelforger.SandboxLabelInstance] != "" {
+		return r.mapForgerInstanceLabel(ctx, obj, lbls[modelforger.SandboxLabelInstance])
 	}
 	return nil
 }

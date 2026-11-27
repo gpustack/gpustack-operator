@@ -1,4 +1,4 @@
-package forger
+package modelforger
 
 import (
 	"errors"
@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"gpustack.ai/gpustack/pkg/worker/kernelkey"
+	"gpustack.ai/gpustack/pkg/modelkernelkey"
 )
 
 const (
@@ -301,22 +301,22 @@ func ValidateForgeRequest(req *ForgeRequest) error {
 	if req.SchemaVersion != "" && req.SchemaVersion != ForgeRequestSchemaVersion {
 		return fmt.Errorf("unsupported forge request schemaVersion %q", req.SchemaVersion)
 	}
-	target := kernelkey.CompatibilityTarget{
+	target := modelkernelkey.CompatibilityTarget{
 		Engine:        req.Engine,
 		EngineVersion: req.EngineVersion,
 		Manufacturer:  req.Manufacturer,
 		Arch:          req.Architecture,
 	}
-	if _, err := kernelkey.NormalizeEngine(target.Engine); err != nil {
+	if _, err := modelkernelkey.NormalizeEngine(target.Engine); err != nil {
 		return fmt.Errorf("forge request engine: %w", err)
 	}
-	if _, err := kernelkey.NormalizeEngineVersion(target.EngineVersion); err != nil {
+	if _, err := modelkernelkey.NormalizeEngineVersion(target.EngineVersion); err != nil {
 		return fmt.Errorf("forge request engineVersion: %w", err)
 	}
-	if _, err := kernelkey.NormalizeManufacturer(target.Manufacturer); err != nil {
+	if _, err := modelkernelkey.NormalizeManufacturer(target.Manufacturer); err != nil {
 		return fmt.Errorf("forge request manufacturer: %w", err)
 	}
-	if _, err := kernelkey.NormalizeArch(target.Manufacturer, target.Arch); err != nil {
+	if _, err := modelkernelkey.NormalizeArch(target.Manufacturer, target.Arch); err != nil {
 		return fmt.Errorf("forge request architecture: %w", err)
 	}
 	if len(req.TargetKernelKeys) == 0 {
@@ -324,14 +324,14 @@ func ValidateForgeRequest(req *ForgeRequest) error {
 	}
 	seen := make(map[string]struct{}, len(req.TargetKernelKeys))
 	for i, rawKey := range req.TargetKernelKeys {
-		parsed, err := kernelkey.Parse(rawKey)
+		parsed, err := modelkernelkey.Parse(rawKey)
 		if err != nil {
 			return fmt.Errorf("targetKernelKeys[%d]: %w", i, err)
 		}
-		if excluded, reason := kernelkey.IsExcluded(parsed.OpFamily); excluded {
+		if excluded, reason := modelkernelkey.IsExcluded(parsed.OpFamily); excluded {
 			return fmt.Errorf("targetKernelKeys[%d]: excluded operator (%s)", i, reason)
 		}
-		if err := kernelkey.MatchCompatibility(parsed, target); err != nil {
+		if err := modelkernelkey.MatchCompatibility(parsed, target); err != nil {
 			return fmt.Errorf("targetKernelKeys[%d]: %w", i, err)
 		}
 		if _, dup := seen[rawKey]; dup {
@@ -362,14 +362,14 @@ func ValidateDefinition(def *Definition) error {
 	if strings.TrimSpace(def.Name) == "" {
 		return errors.New("definition name must not be empty")
 	}
-	if excluded, reason := kernelkey.IsExcluded(def.Name); excluded {
+	if excluded, reason := modelkernelkey.IsExcluded(def.Name); excluded {
 		return fmt.Errorf("definition name %q is excluded (%s)", def.Name, reason)
 	}
-	if err := kernelkey.ValidateOpFamily(def.OpType); err != nil {
+	if err := modelkernelkey.ValidateOpFamily(def.OpType); err != nil {
 		return fmt.Errorf("definition op_type: %w", err)
 	}
 	if def.LocalKernelKey != "" {
-		parsed, err := kernelkey.Parse(def.LocalKernelKey)
+		parsed, err := modelkernelkey.Parse(def.LocalKernelKey)
 		if err != nil {
 			return fmt.Errorf("definition local_kernel_key: %w", err)
 		}
@@ -387,7 +387,7 @@ func ValidateDefinition(def *Definition) error {
 		}
 		switch spec.Type {
 		case "const":
-			if kernelkey.IsDynamicVarAxis(axisName) {
+			if modelkernelkey.IsDynamicVarAxis(axisName) {
 				return fmt.Errorf("dynamic var axis %q must not be declared const", axisName)
 			}
 			if spec.Value == nil || *spec.Value <= 0 {
@@ -445,7 +445,7 @@ func ValidateWorkload(wl *Workload) error {
 		return errors.New("workload uuid must not be empty")
 	}
 	if wl.LocalKernelKey != "" {
-		if err := kernelkey.ValidateKey(wl.LocalKernelKey); err != nil {
+		if err := modelkernelkey.ValidateKey(wl.LocalKernelKey); err != nil {
 			return fmt.Errorf("workload local_kernel_key: %w", err)
 		}
 	}
@@ -489,7 +489,7 @@ func ValidateSolution(sol *Solution) error {
 		return errors.New("solution definition must not be empty")
 	}
 	if sol.LocalKernelKey != "" {
-		if err := kernelkey.ValidateKey(sol.LocalKernelKey); err != nil {
+		if err := modelkernelkey.ValidateKey(sol.LocalKernelKey); err != nil {
 			return fmt.Errorf("solution local_kernel_key: %w", err)
 		}
 	}
@@ -591,22 +591,22 @@ func ValidateDispatchManifest(manifest *DispatchManifest, minSpeedupRatio float6
 	if manifest.SchemaVersion != DispatchManifestSchemaVersion {
 		return fmt.Errorf("unsupported dispatch manifest schemaVersion %q", manifest.SchemaVersion)
 	}
-	target := kernelkey.CompatibilityTarget{
+	target := modelkernelkey.CompatibilityTarget{
 		Engine:        manifest.Compatibility.Engine,
 		EngineVersion: manifest.Compatibility.EngineVersion,
 		Manufacturer:  manifest.Compatibility.Manufacturer,
 		Arch:          manifest.Compatibility.Architecture,
 	}
-	if _, err := kernelkey.NormalizeEngine(target.Engine); err != nil {
+	if _, err := modelkernelkey.NormalizeEngine(target.Engine); err != nil {
 		return fmt.Errorf("compatibility.engine: %w", err)
 	}
-	if _, err := kernelkey.NormalizeEngineVersion(target.EngineVersion); err != nil {
+	if _, err := modelkernelkey.NormalizeEngineVersion(target.EngineVersion); err != nil {
 		return fmt.Errorf("compatibility.engineVersion: %w", err)
 	}
-	if _, err := kernelkey.NormalizeManufacturer(target.Manufacturer); err != nil {
+	if _, err := modelkernelkey.NormalizeManufacturer(target.Manufacturer); err != nil {
 		return fmt.Errorf("compatibility.manufacturer: %w", err)
 	}
-	if _, err := kernelkey.NormalizeArch(target.Manufacturer, target.Arch); err != nil {
+	if _, err := modelkernelkey.NormalizeArch(target.Manufacturer, target.Arch); err != nil {
 		return fmt.Errorf("compatibility.architecture: %w", err)
 	}
 	for relPath, digest := range manifest.Checksums {
@@ -634,16 +634,16 @@ func ValidateDispatchManifest(manifest *DispatchManifest, minSpeedupRatio float6
 }
 
 func validateDispatchManifestEntry(
-	index int, entry DispatchManifestEntry, target kernelkey.CompatibilityTarget, minSpeedupRatio float64,
+	index int, entry DispatchManifestEntry, target modelkernelkey.CompatibilityTarget, minSpeedupRatio float64,
 ) error {
-	parsed, err := kernelkey.Parse(entry.LocalKernelKey)
+	parsed, err := modelkernelkey.Parse(entry.LocalKernelKey)
 	if err != nil {
 		return fmt.Errorf("entries[%d].localKernelKey: %w", index, err)
 	}
-	if excluded, reason := kernelkey.IsExcluded(parsed.OpFamily); excluded {
+	if excluded, reason := modelkernelkey.IsExcluded(parsed.OpFamily); excluded {
 		return fmt.Errorf("entries[%d].localKernelKey: excluded operator (%s)", index, reason)
 	}
-	if err := kernelkey.MatchCompatibility(parsed, target); err != nil {
+	if err := modelkernelkey.MatchCompatibility(parsed, target); err != nil {
 		return fmt.Errorf("entries[%d].localKernelKey: %w", index, err)
 	}
 	if strings.TrimSpace(entry.Definition) == "" {
@@ -728,7 +728,7 @@ func ValidateVerificationReport(report *VerificationReport, wantDispatchDigest s
 		if !entry.Passed {
 			return fmt.Errorf("verification report entries[%d] did not pass", i)
 		}
-		if err := kernelkey.ValidateKey(entry.LocalKernelKey); err != nil {
+		if err := modelkernelkey.ValidateKey(entry.LocalKernelKey); err != nil {
 			return fmt.Errorf("verification report entries[%d].localKernelKey: %w", i, err)
 		}
 		if entry.Evaluation != nil {

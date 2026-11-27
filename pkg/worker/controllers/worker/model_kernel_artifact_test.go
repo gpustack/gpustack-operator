@@ -168,10 +168,10 @@ func testNodeStoreKernelArtifact(name string) *workercore.ModelKernelArtifact {
 			},
 			Compatibility: workercore.ModelKernelArtifactCompatibility{
 				Engine:        "vLLM",
-				EngineVersion: "0.8.0",
+				EngineVersion: "0.8",
 				Manufacturer:  "nvidia",
 				Architecture:  "sm_90a",
-				KernelKeys:    []string{"vllm/0.8.0/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
+				KernelKeys:    []string{"vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
 			},
 		},
 	}
@@ -194,10 +194,10 @@ func testHFKernelArtifact(name, revision, secret string) *workercore.ModelKernel
 			},
 			Compatibility: workercore.ModelKernelArtifactCompatibility{
 				Engine:        "vLLM",
-				EngineVersion: "0.8.0",
+				EngineVersion: "0.8",
 				Manufacturer:  "nvidia",
 				Architecture:  "sm_90a",
-				KernelKeys:    []string{"vllm/0.8.0/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
+				KernelKeys:    []string{"vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
 			},
 		},
 	}
@@ -221,10 +221,10 @@ func testImageKernelArtifact(name, ref string) *workercore.ModelKernelArtifact {
 			},
 			Compatibility: workercore.ModelKernelArtifactCompatibility{
 				Engine:        "vLLM",
-				EngineVersion: "0.8.0",
+				EngineVersion: "0.8",
 				Manufacturer:  "nvidia",
 				Architecture:  "sm_90a",
-				KernelKeys:    []string{"vllm/0.8.0/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
+				KernelKeys:    []string{"vllm/0.8/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
 			},
 		},
 	}

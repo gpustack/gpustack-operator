@@ -111,8 +111,10 @@ hex commit SHA under *`spec.source.huggingFace`* or a digest-pinned *`spec.sourc
 | Unsupported role shapes | Rejected | *Encode* roles, CPU-only roles, unmanaged *`roles[].command`* roles, SGLang-Ray roles, and *Elastic EP* roles |
 
 Each target key encodes static per-rank shard dimensions after *tensor parallelism (TP)* and
-*expert parallelism (EP)* sharding, excluding dynamic batch or sequence lengths. Changing a role's
-*TP* or *EP* degree produces new keys and triggers a fresh forge pass.
+*expert parallelism (EP)* sharding and normalizes the engine version to `major.minor` (keeping
+pre-release tags separate), excluding dynamic batch or sequence lengths. Patch upgrades (`0.8.x`)
+reuse verified artifacts, while minor upgrades (`0.8` → `0.9`) or *TP*/*EP* changes trigger
+re-forging.
 
 ## Runner and verifier contract
 
@@ -129,8 +131,9 @@ stages run inside the `Pod` in `External` mode (three in `Mock` mode):
 3. **`initContainer: forge-verifier`**: Mounts `forge-output` read-only, validates file integrity and
    checksums, re-executes candidate kernels on the sandbox GPU against held-out workloads, enforces
    *`minSpeedupRatio`* and numerical tolerances, and writes `verification-report.json`.
-4. **`forge-hold` main container**: Holds the `Pod` in `Running` after all init containers exit `0`
-   so the seed `Node`'s `model-manager` can ingest `forge-output` directly from kubelet's `emptyDir`.
+4. **`forge-hold` main container**: Runs `gpustack-operator model-forger hold` to keep the `Pod` in
+   `Running` after all init containers exit `0` so the seed `Node`'s `model-manager` can ingest
+   `forge-output` directly from kubelet's `emptyDir`.
 
 ### Runner container isolation
 
@@ -148,7 +151,8 @@ rejects *`sandbox.runner`*):
   role's *`imagePullSecrets`* (deduplicated in order), and `forger-allowed-runner-image-prefixes`
   restricts allowed *`sandbox.runner.image`* prefixes.
 - **Deterministic mock mode**: Set *`sandbox.runnerMode`* to `Mock` (with *`sandbox.runner`* omitted)
-  to run the built-in Go `gpustack-operator forge-mock` and `forge-verify` helpers without Python.
+  to run the built-in Go `gpustack-operator model-forger mock` and `model-forger verify` helpers
+  without Python.
 
 ### Sandbox accelerator allocation
 

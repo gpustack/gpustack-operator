@@ -1,4 +1,4 @@
-package forger
+package modelforger
 
 import (
 	"math"
@@ -7,13 +7,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"gpustack.ai/gpustack/pkg/modelkernelkey"
 	"gpustack.ai/gpustack/pkg/modelmanager/ingest"
-	"gpustack.ai/gpustack/pkg/worker/kernelkey"
 )
 
 func sampleValidKernelKey(t *testing.T, opFamily string) string {
 	t.Helper()
-	k, err := kernelkey.Build(kernelkey.BuildSpec{
+	k, err := modelkernelkey.Build(modelkernelkey.BuildSpec{
 		Engine:        "vLLM",
 		EngineVersion: "0.8.5",
 		Manufacturer:  "nvidia",
@@ -70,7 +70,7 @@ func TestValidateRelativePath(t *testing.T) {
 func TestValidateForgeRequest(t *testing.T) {
 	t.Parallel()
 
-	validKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
+	validKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRMSNorm)
 	baseReq := func() *ForgeRequest {
 		return &ForgeRequest{
 			SchemaVersion:       ForgeRequestSchemaVersion,
@@ -96,13 +96,13 @@ func TestValidateForgeRequest(t *testing.T) {
 		{name: "empty target keys", mutate: func(r *ForgeRequest) { r.TargetKernelKeys = nil }, wantErr: "must not be empty"},
 		{
 			name:    "excluded GEMM key",
-			mutate:  func(r *ForgeRequest) { r.TargetKernelKeys = []string{"vllm/0.8.5/nvidia/sm_90a/gemm/0123456789abcdef"} },
+			mutate:  func(r *ForgeRequest) { r.TargetKernelKeys = []string{"vllm/0.8/nvidia/sm_90a/gemm/0123456789abcdef"} },
 			wantErr: "excluded",
 		},
 		{
 			name: "excluded collective key",
 			mutate: func(r *ForgeRequest) {
-				r.TargetKernelKeys = []string{"vllm/0.8.5/nvidia/sm_90a/all_reduce/0123456789abcdef"}
+				r.TargetKernelKeys = []string{"vllm/0.8/nvidia/sm_90a/all_reduce/0123456789abcdef"}
 			},
 			wantErr: "excluded",
 		},
@@ -148,13 +148,13 @@ func TestValidateForgeRequest(t *testing.T) {
 func TestValidateDefinitionWorkloadSolution(t *testing.T) {
 	t.Parallel()
 
-	validKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
+	validKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRMSNorm)
 	hidden := int64(4096)
 
 	validDef := func() *Definition {
 		return &Definition{
 			Name:           "rmsnorm_hidden4096",
-			OpType:         kernelkey.OpFamilyRMSNorm,
+			OpType:         modelkernelkey.OpFamilyRMSNorm,
 			LocalKernelKey: validKey,
 			Axes: map[string]AxisSpec{
 				"hidden_size": {Type: "const", Value: &hidden},
@@ -323,7 +323,7 @@ func TestValidateTraceAndEvaluationThresholds(t *testing.T) {
 func TestValidateDispatchManifestAndVerificationReport(t *testing.T) {
 	t.Parallel()
 
-	validKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
+	validKey := sampleValidKernelKey(t, modelkernelkey.OpFamilyRMSNorm)
 	digestA := "sha256:" + strings.Repeat("a", 64)
 	digestB := "sha256:" + strings.Repeat("b", 64)
 
@@ -450,20 +450,20 @@ func TestValidateDispatchManifestAndVerificationReport(t *testing.T) {
 	hidden := int64(4096)
 	badDef := &Definition{
 		Name:   "rmsnorm_x",
-		OpType: kernelkey.OpFamilyRMSNorm,
+		OpType: modelkernelkey.OpFamilyRMSNorm,
 		Axes:   map[string]AxisSpec{"hidden_size": {Type: "const", Value: &hidden}, "bad": {Type: "other"}},
 	}
 	require.Error(t, ValidateDefinition(badDef))
 	badDefVar := &Definition{
 		Name:   "rmsnorm_x",
-		OpType: kernelkey.OpFamilyRMSNorm,
+		OpType: modelkernelkey.OpFamilyRMSNorm,
 		Axes:   map[string]AxisSpec{"num_tokens": {Type: "var", Value: &hidden}},
 	}
 	require.Error(t, ValidateDefinition(badDefVar))
 	badDefMismatchKey := &Definition{
 		Name:           "rmsnorm_x",
-		OpType:         kernelkey.OpFamilyRMSNorm,
-		LocalKernelKey: sampleValidKernelKey(t, kernelkey.OpFamilyLayerNorm),
+		OpType:         modelkernelkey.OpFamilyRMSNorm,
+		LocalKernelKey: sampleValidKernelKey(t, modelkernelkey.OpFamilyLayerNorm),
 		Axes:           map[string]AxisSpec{"hidden_size": {Type: "const", Value: &hidden}},
 		Inputs:         map[string]TensorSpec{"x": {Shape: []string{"hidden_size"}, Dtype: "bfloat16"}},
 		Outputs:        map[string]TensorSpec{"out": {Shape: []string{"hidden_size"}, Dtype: "bfloat16"}},

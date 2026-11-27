@@ -12,8 +12,9 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 
 The `gpustack-operator` binary has these subcommands: `worker` (control plane, [pkg/worker](../../../pkg/worker/)),
 `device-manager` (one DaemonSet per manufacturer, [pkg/devicemanager](../../../pkg/devicemanager/)),
-`model-manager` (per-node CSI plugin for model weights, [pkg/modelmanager](../../../pkg/modelmanager/)),
-`model-transfer` (remote weight source broker, [pkg/modeltransfer](../../../pkg/modeltransfer/)) and
+`model-manager` (per-node CSI plugin for model weights and kernels, [pkg/modelmanager](../../../pkg/modelmanager/)),
+`model-transfer` (remote weight source broker, [pkg/modeltransfer](../../../pkg/modeltransfer/)),
+`model-forger` (hidden `ForgeSandbox` helper subcommands, [pkg/modelforger](../../../pkg/modelforger/)) and
 `worker-gateway` (fleet view across clusters, [pkg/workergateway](../../../pkg/workergateway/)).
 
 **Device chain.** NFD labels nodes. The Device Manager records accelerators and NICs in a per-node
@@ -27,7 +28,8 @@ slicing preload libraries in [csrc/](../../../csrc/) are hand-written.
 **Serving chain.** The same controller directory, `pkg/worker/controllers/worker/`, groups by
 filename prefix. `node_*` and `topology_source_*` place workloads; `instance_*` runs `Instance`s;
 `model_*` delivers weights; `kv_cache_*` shares cache. `model_deployment_*` serves models: render,
-rollout, router, scaler, elastic resize, runtime control. Supporting packages: `pkg/worker/kvcache`,
+rollout, router, scaler, forger, elastic resize, runtime control. Supporting packages: `pkg/modelforger`,
+`pkg/modelkernelkey`, `pkg/worker/kvcache`,
 `pkg/worker/scaling`, `pkg/worker/runtimecontrol`, `pkg/worker/elasticengine`, and
 [engine-sentinel/python](../../../engine-sentinel/python/), staged into engine `Pod`s.
 

@@ -25,10 +25,10 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/modelforger"
+	"gpustack.ai/gpustack/pkg/modelkernelkey"
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
-	"gpustack.ai/gpustack/pkg/worker/forger"
-	"gpustack.ai/gpustack/pkg/worker/kernelkey"
 	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -447,7 +447,7 @@ func (r *ModelDeploymentForgerReconciler) sweepOrphanRoleSandboxes(
 	}
 
 	match := ctrlcli.MatchingLabels{
-		forger.SandboxLabelRole: forger.SafeLabelValue(roleName),
+		modelforger.SandboxLabelRole: modelforger.SafeLabelValue(roleName),
 	}
 	pods := new(core.PodList)
 	if err := r.Client.List(ctx, pods, ctrlcli.InNamespace(mdf.Namespace), match); err != nil {
@@ -751,7 +751,7 @@ func (r *ModelDeploymentForgerReconciler) finishCompletedProbe(
 		return ctrl.Result{}, err
 	}
 
-	targetCompat := kernelkey.CompatibilityTarget{
+	targetCompat := modelkernelkey.CompatibilityTarget{
 		Engine:        md.Spec.Engine.Name,
 		EngineVersion: normVer,
 		Manufacturer:  hw.Manufacturer,
@@ -774,19 +774,19 @@ func (r *ModelDeploymentForgerReconciler) finishCompletedProbe(
 	seenObserved := map[string]struct{}{}
 
 	for _, b := range sortedBottlenecks {
-		parsed, parseErr := kernelkey.Parse(b.LocalKernelKey)
+		parsed, parseErr := modelkernelkey.Parse(b.LocalKernelKey)
 		if parseErr != nil {
 			continue
 		}
-		if excluded, _ := kernelkey.IsExcluded(parsed.OpFamily); excluded {
+		if excluded, _ := modelkernelkey.IsExcluded(parsed.OpFamily); excluded {
 			continue
 		}
 		if b.OpFamily != "" {
-			if excluded, _ := kernelkey.IsExcluded(b.OpFamily); excluded {
+			if excluded, _ := modelkernelkey.IsExcluded(b.OpFamily); excluded {
 				continue
 			}
 		}
-		if matchErr := kernelkey.MatchCompatibility(parsed, targetCompat); matchErr != nil {
+		if matchErr := modelkernelkey.MatchCompatibility(parsed, targetCompat); matchErr != nil {
 			continue
 		}
 		if _, dup := seenObserved[b.LocalKernelKey]; dup {
@@ -878,7 +878,7 @@ func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 	roleSpec *workercore.ModelDeploymentForgerRoleSpec,
 	mdRole *workercore.ModelDeploymentRole,
 	rs *workercore.ModelDeploymentForgerRoleStatus,
-	hw kernelkey.NodeHardware,
+	hw modelkernelkey.NodeHardware,
 	normEngineVersion string,
 	selectedKeys []string,
 	baselineLatencies map[string]float64,
@@ -899,7 +899,7 @@ func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 	}
 
 	minSpeedup := effectiveMinSpeedupRatio(roleSpec)
-	thresholds := forger.DefaultVerificationThresholds()
+	thresholds := modelforger.DefaultVerificationThresholds()
 	thresholds.MinSpeedupRatio = minSpeedup
 
 	defs, workloads := buildSandboxDefinitionsAndWorkloads(payload, selectedKeys)
@@ -908,13 +908,13 @@ func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 		return ctrl.Result{}, err
 	}
 
-	cm, items, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
+	cm, items, err := modelforger.BuildInputConfigMap(modelforger.InputConfigMapSpec{
 		Forger:     mdf,
 		Name:       cmName,
 		RoleName:   roleSpec.Name,
 		Generation: rs.ActiveGeneration,
-		Request: forger.ForgeRequest{
-			SchemaVersion:       forger.ForgeRequestSchemaVersion,
+		Request: modelforger.ForgeRequest{
+			SchemaVersion:       modelforger.ForgeRequestSchemaVersion,
 			Engine:              md.Spec.Engine.Name,
 			EngineVersion:       normEngineVersion,
 			Manufacturer:        hw.Manufacturer,
@@ -942,7 +942,7 @@ func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 		engineImg = strings.TrimSpace(md.Spec.Engine.Image)
 	}
 
-	pod, err := forger.BuildSandboxPod(forger.SandboxPodSpec{
+	pod, err := modelforger.BuildSandboxPod(modelforger.SandboxPodSpec{
 		Forger:              mdf,
 		Name:                podName,
 		RoleName:            roleSpec.Name,
@@ -1000,7 +1000,7 @@ func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 
 func buildSandboxDefinitionsAndWorkloads(
 	payload *runtimecontrol.ProbePayload, selectedKeys []string,
-) ([]forger.Definition, []forger.Workload) {
+) ([]modelforger.Definition, []modelforger.Workload) {
 	if payload == nil {
 		return nil, nil
 	}
@@ -1010,30 +1010,30 @@ func buildSandboxDefinitionsAndWorkloads(
 	}
 
 	selectedDefNames := map[string]struct{}{}
-	var defs []forger.Definition
+	var defs []modelforger.Definition
 	for _, pd := range payload.Definitions {
 		if pd.LocalKernelKey != "" {
 			if _, ok := selectedSet[pd.LocalKernelKey]; !ok {
 				continue
 			}
 		}
-		axes := make(map[string]forger.AxisSpec, len(pd.Axes))
+		axes := make(map[string]modelforger.AxisSpec, len(pd.Axes))
 		for k, v := range pd.Axes {
 			var valCopy *int64
 			if v.Value != nil {
 				valCopy = ptr.To(*v.Value)
 			}
-			axes[k] = forger.AxisSpec{Type: v.Type, Value: valCopy}
+			axes[k] = modelforger.AxisSpec{Type: v.Type, Value: valCopy}
 		}
-		inputs := make(map[string]forger.TensorSpec, len(pd.Inputs))
+		inputs := make(map[string]modelforger.TensorSpec, len(pd.Inputs))
 		for k, v := range pd.Inputs {
-			inputs[k] = forger.TensorSpec{Shape: slices.Clone(v.Shape), Dtype: v.Dtype}
+			inputs[k] = modelforger.TensorSpec{Shape: slices.Clone(v.Shape), Dtype: v.Dtype}
 		}
-		outputs := make(map[string]forger.TensorSpec, len(pd.Outputs))
+		outputs := make(map[string]modelforger.TensorSpec, len(pd.Outputs))
 		for k, v := range pd.Outputs {
-			outputs[k] = forger.TensorSpec{Shape: slices.Clone(v.Shape), Dtype: v.Dtype}
+			outputs[k] = modelforger.TensorSpec{Shape: slices.Clone(v.Shape), Dtype: v.Dtype}
 		}
-		def := forger.Definition{
+		def := modelforger.Definition{
 			Name:           pd.Name,
 			OpType:         pd.OpType,
 			LocalKernelKey: pd.LocalKernelKey,
@@ -1043,13 +1043,13 @@ func buildSandboxDefinitionsAndWorkloads(
 			Reference:      pd.Reference,
 			Tags:           slices.Clone(pd.Tags),
 		}
-		if forger.ValidateDefinition(&def) == nil {
+		if modelforger.ValidateDefinition(&def) == nil {
 			defs = append(defs, def)
 			selectedDefNames[pd.Name] = struct{}{}
 		}
 	}
 
-	var workloads []forger.Workload
+	var workloads []modelforger.Workload
 	for _, pw := range payload.Workloads {
 		if pw.LocalKernelKey != "" {
 			if _, ok := selectedSet[pw.LocalKernelKey]; !ok {
@@ -1064,11 +1064,11 @@ func buildSandboxDefinitionsAndWorkloads(
 		for k, v := range pw.Axes {
 			wlAxes[k] = v
 		}
-		wlInputs := make(map[string]forger.WorkloadInput, len(pw.Inputs))
+		wlInputs := make(map[string]modelforger.WorkloadInput, len(pw.Inputs))
 		for k, v := range pw.Inputs {
-			wlInputs[k] = forger.WorkloadInput{Type: v.Type, Value: v.Value}
+			wlInputs[k] = modelforger.WorkloadInput{Type: v.Type, Value: v.Value}
 		}
-		wl := forger.Workload{
+		wl := modelforger.Workload{
 			UUID:               pw.UUID,
 			Definition:         pw.Definition,
 			LocalKernelKey:     pw.LocalKernelKey,
@@ -1077,7 +1077,7 @@ func buildSandboxDefinitionsAndWorkloads(
 			ObservedDurationUs: pw.ObservedDurationUs,
 			CallCount:          pw.CallCount,
 		}
-		if forger.ValidateWorkload(&wl) == nil {
+		if modelforger.ValidateWorkload(&wl) == nil {
 			workloads = append(workloads, wl)
 		}
 	}
@@ -1139,8 +1139,8 @@ func (r *ModelDeploymentForgerReconciler) reconcileSandboxRole(
 		return ctrl.Result{RequeueAfter: effectiveProbeCooldown(mdf)}, nil
 	}
 
-	runnerState, hasRunner := findInitContainerState(pod.Status.InitContainerStatuses, forger.RunnerContainerName)
-	verifierState, hasVerifier := findInitContainerState(pod.Status.InitContainerStatuses, forger.VerifierContainerName)
+	runnerState, hasRunner := findInitContainerState(pod.Status.InitContainerStatuses, modelforger.RunnerContainerName)
+	verifierState, hasVerifier := findInitContainerState(pod.Status.InitContainerStatuses, modelforger.VerifierContainerName)
 
 	if hasRunner && runnerState.Terminated != nil && runnerState.Terminated.ExitCode != 0 {
 		msg := fmt.Sprintf("forge-runner exited with code %d: %s",
@@ -1317,9 +1317,9 @@ func (r *ModelDeploymentForgerReconciler) reconcilePublishingRole(
 			PodUID:     sb.PodUID,
 		})
 		if callErr != nil {
-			if errors.Is(callErr, forger.ErrIngestInvalidOutput) ||
-				errors.Is(callErr, forger.ErrIngestBadRequest) ||
-				errors.Is(callErr, forger.ErrIngestForbidden) {
+			if errors.Is(callErr, modelforger.ErrIngestInvalidOutput) ||
+				errors.Is(callErr, modelforger.ErrIngestBadRequest) ||
+				errors.Is(callErr, modelforger.ErrIngestForbidden) {
 				r.cleanupRoleSandboxObjects(ctx, mdf.Namespace, sb)
 				rs.ActiveSandbox = nil
 				r.recordFailedGeneration(mdf, rs, "IngestRejected", callErr.Error(), startedAt, now)
@@ -1351,10 +1351,10 @@ func (r *ModelDeploymentForgerReconciler) reconcilePublishingRole(
 				Namespace: mdf.Namespace,
 				Name:      artifactName,
 				Labels: map[string]string{
-					forger.SandboxLabelName:       "model-deployment-forger",
-					forger.SandboxLabelInstance:   forger.SafeLabelValue(mdf.Name),
-					forger.SandboxLabelRole:       forger.SafeLabelValue(roleSpec.Name),
-					forger.SandboxLabelGeneration: strconv.FormatInt(gen, 10),
+					modelforger.SandboxLabelName:       "model-deployment-forger",
+					modelforger.SandboxLabelInstance:   modelforger.SafeLabelValue(mdf.Name),
+					modelforger.SandboxLabelRole:       modelforger.SafeLabelValue(roleSpec.Name),
+					modelforger.SandboxLabelGeneration: strconv.FormatInt(gen, 10),
 				},
 				Annotations: map[string]string{
 					forgerRunnerFingerprintAnnotationKey: forgerRunnerFingerprint(mdf),
@@ -1550,12 +1550,16 @@ func (r *ModelDeploymentForgerReconciler) readSandboxInputCompatibility(
 	if cmName != "" {
 		cm := new(core.ConfigMap)
 		if err := r.apiReaderOrClient().Get(ctx, ctrlcli.ObjectKey{Namespace: namespace, Name: cmName}, cm); err == nil {
-			if rawReq := cm.Data[forger.ForgeRequestFileName]; rawReq != "" {
-				var freq forger.ForgeRequest
+			if rawReq := cm.Data[modelforger.ForgeRequestFileName]; rawReq != "" {
+				var freq modelforger.ForgeRequest
 				if unmarshalErr := json.Unmarshal([]byte(rawReq), &freq); unmarshalErr == nil && len(freq.TargetKernelKeys) > 0 {
+					normVer, verErr := modelkernelkey.NormalizeEngineVersion(freq.EngineVersion)
+					if verErr != nil {
+						normVer = freq.EngineVersion
+					}
 					return workercore.ModelKernelArtifactCompatibility{
 						Engine:        md.Spec.Engine.Name,
-						EngineVersion: freq.EngineVersion,
+						EngineVersion: normVer,
 						Manufacturer:  freq.Manufacturer,
 						Architecture:  freq.Architecture,
 						KernelKeys:    freq.TargetKernelKeys,
@@ -1571,7 +1575,7 @@ func (r *ModelDeploymentForgerReconciler) readSandboxInputCompatibility(
 	}
 	return workercore.ModelKernelArtifactCompatibility{}, fmt.Errorf(
 		"sandbox input ConfigMap %q for %s/%s had no readable %s",
-		cmName, hw.Manufacturer, normVer, forger.ForgeRequestFileName,
+		cmName, hw.Manufacturer, normVer, modelforger.ForgeRequestFileName,
 	)
 }
 
@@ -2179,13 +2183,13 @@ func (r *ModelDeploymentForgerReconciler) pruneRetiredKernelArtifacts(
 		if mka.Spec.Source.NodeStore.ForgerRef.Name != mdf.Name {
 			continue
 		}
-		if roleLbl := mka.Labels[forger.SandboxLabelRole]; roleLbl != "" &&
-			roleLbl != forger.SafeLabelValue(roleName) && roleLbl != roleName {
+		if roleLbl := mka.Labels[modelforger.SandboxLabelRole]; roleLbl != "" &&
+			roleLbl != modelforger.SafeLabelValue(roleName) && roleLbl != roleName {
 			continue
 		}
 		gen, ok := parseForgerArtifactGeneration(mdf.Name, roleName, mka.Name)
 		if !ok {
-			if genStr := mka.Labels[forger.SandboxLabelGeneration]; genStr != "" {
+			if genStr := mka.Labels[modelforger.SandboxLabelGeneration]; genStr != "" {
 				parsed, parseErr := strconv.ParseInt(genStr, 10, 64)
 				if parseErr == nil && parsed >= 1 {
 					gen, ok = parsed, true
@@ -2243,8 +2247,8 @@ func quarantinedArtifactMatchesRole(
 		return false
 	}
 
-	safeRole := forger.SafeLabelValue(roleName)
-	if roleLbl := mka.Labels[forger.SandboxLabelRole]; roleLbl != "" {
+	safeRole := modelforger.SafeLabelValue(roleName)
+	if roleLbl := mka.Labels[modelforger.SandboxLabelRole]; roleLbl != "" {
 		if roleLbl != safeRole && roleLbl != roleName {
 			return false
 		}
@@ -2431,18 +2435,18 @@ func (r *ModelDeploymentForgerReconciler) resolveTargetCompatibility(
 	md *workercore.ModelDeployment,
 	mdRole *workercore.ModelDeploymentRole,
 	nodeName string,
-) (kernelkey.NodeHardware, string, error) {
+) (modelkernelkey.NodeHardware, string, error) {
 	rawVer := ModelDeploymentEffectiveEngineVersion(md, mdRole)
-	normVer, err := kernelkey.NormalizeEngineVersion(rawVer)
+	normVer, err := modelkernelkey.NormalizeEngineVersion(rawVer)
 	if err != nil {
-		return kernelkey.NodeHardware{}, "", fmt.Errorf("normalize engineVersion %q: %w", rawVer, err)
+		return modelkernelkey.NodeHardware{}, "", fmt.Errorf("normalize engineVersion %q: %w", rawVer, err)
 	}
 
 	var wantManu string
 	if mdRole.AcceleratorType != "" {
 		accType, atErr := r.getAcceleratorType(ctx, mdRole.AcceleratorType)
 		if atErr != nil {
-			return kernelkey.NodeHardware{}, "", atErr
+			return modelkernelkey.NodeHardware{}, "", atErr
 		}
 		if accType != nil {
 			wantManu = strings.ToLower(strings.TrimSpace(accType.Status.Detail.Manufacturer))
@@ -2451,9 +2455,9 @@ func (r *ModelDeploymentForgerReconciler) resolveTargetCompatibility(
 
 	node := new(core.Node)
 	if err := r.apiReaderOrClient().Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, node); err != nil {
-		return kernelkey.NodeHardware{}, "", fmt.Errorf("read node %q: %w", nodeName, err)
+		return modelkernelkey.NodeHardware{}, "", fmt.Errorf("read node %q: %w", nodeName, err)
 	}
-	hws := kernelkey.ExtractNodeHardwareFromNode(node)
+	hws := modelkernelkey.ExtractNodeHardwareFromNode(node)
 	for _, hw := range hws {
 		if wantManu != "" && hw.Manufacturer != wantManu {
 			continue
@@ -2463,7 +2467,7 @@ func (r *ModelDeploymentForgerReconciler) resolveTargetCompatibility(
 		}
 		return hw, normVer, nil
 	}
-	return kernelkey.NodeHardware{}, "", fmt.Errorf("node %q exposes no accelerator architecture labels", nodeName)
+	return modelkernelkey.NodeHardware{}, "", fmt.Errorf("node %q exposes no accelerator architecture labels", nodeName)
 }
 
 func (r *ModelDeploymentForgerReconciler) getAcceleratorType(
