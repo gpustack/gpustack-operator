@@ -27,7 +27,7 @@ env:
 
 jobs:
   sync:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Prepare Env
         env:
