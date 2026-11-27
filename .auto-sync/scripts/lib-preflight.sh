@@ -1501,6 +1501,8 @@ for k in (
     "changed",
     "ready_updates_count",
     "sync_image_command",
+    "sync_images",
+    "graduation",
     "patch_clean",
     "staging_updated",
     "generate_ran",

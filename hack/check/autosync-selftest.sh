@@ -491,9 +491,18 @@ for tp in taskpacks:
     proposal = spec.get("proposal")
     if not isinstance(proposal, dict):
         raise AssertionError(f"{rel_tp}: missing spec.proposal mapping")
-    check_repo_file(proposal.get("path"), f"{rel_tp} spec.proposal.path")
+    prop_full = check_repo_file(proposal.get("path"), f"{rel_tp} spec.proposal.path")
     if proposal.get("path") not in writable:
         raise AssertionError(f"{rel_tp}: spec.proposal.path must appear as an exact file in spec.scope.writable")
+    req_fields = proposal.get("requiredFields")
+    if isinstance(req_fields, list):
+        with open(prop_full, "r", encoding="utf-8") as pf_handle:
+            prop_obj = json.load(pf_handle)
+        missing_fields = [rf for rf in req_fields if rf not in prop_obj]
+        if missing_fields:
+            raise AssertionError(
+                f"{rel_tp}: proposal {proposal.get('path')} missing requiredFields {missing_fields!r}"
+            )
 
     baseline_align = spec.get("baselineAlignment")
     if not isinstance(baseline_align, dict) or baseline_align.get("policy") not in ("extract-context", "fail-fast"):
@@ -802,19 +811,22 @@ else
   fail "TaskpackSuite, Taskpack 2.0 manifests, digests, memory, proposals, holds, and workflow static checks"
 fi
 
-echo "== router freeze, sgl-router staging, and Base Image build recommendations end-to-end =="
+echo "== router freeze, commit graduation, sync_images, sgl-router staging, and Base Image build recommendations end-to-end =="
 if python3 -B - "${ROOT_DIR}" <<'PY'
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 
 root = sys.argv[1]
 sys.path.insert(0, os.path.join(root, ".auto-sync", "checks"))
 from base_image_builds import recommend_from_diff, validate_proposal_builds
+from dockerfile_arg import read_dockerfile_arg
 
 
 def run(cmd, *, cwd=None, env=None, check=True):
@@ -833,13 +845,24 @@ def read_json(path: str):
         return json.load(f)
 
 
-def git_init_commit(repo_dir: str, files: dict[str, str], tag: str, msg: str, env: dict) -> None:
+def write_json(path: str, data) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+
+
+def git_init_repo(repo_dir: str, env: dict) -> None:
+    os.makedirs(repo_dir, exist_ok=True)
+    run(["git", "-C", repo_dir, "init", "-q", "-b", "main"], env=env)
+    run(["git", "-C", repo_dir, "config", "user.name", "selftest"], env=env)
+    run(["git", "-C", repo_dir, "config", "user.email", "selftest@gpustack.local"], env=env)
+    run(["git", "-C", repo_dir, "config", "commit.gpgsign", "false"], env=env)
+
+
+def git_init_commit(repo_dir: str, files: dict[str, str], tag: str | None, msg: str, env: dict) -> str:
     if not os.path.isdir(os.path.join(repo_dir, ".git")):
-        os.makedirs(repo_dir, exist_ok=True)
-        run(["git", "-C", repo_dir, "init", "-q", "-b", "main"], env=env)
-        run(["git", "-C", repo_dir, "config", "user.name", "selftest"], env=env)
-        run(["git", "-C", repo_dir, "config", "user.email", "selftest@gpustack.local"], env=env)
-        run(["git", "-C", repo_dir, "config", "commit.gpgsign", "false"], env=env)
+        git_init_repo(repo_dir, env)
     for rel, content in files.items():
         fp = os.path.join(repo_dir, rel)
         os.makedirs(os.path.dirname(fp), exist_ok=True)
@@ -847,7 +870,139 @@ def git_init_commit(repo_dir: str, files: dict[str, str], tag: str, msg: str, en
             f.write(content)
     run(["git", "-C", repo_dir, "add", "-A"], env=env)
     run(["git", "-C", repo_dir, "commit", "-q", "--allow-empty", "-m", msg], env=env)
-    run(["git", "-C", repo_dir, "tag", "-f", tag], env=env)
+    sha = run(["git", "-C", repo_dir, "rev-parse", "HEAD"], env=env).stdout.strip()
+    if tag:
+        run(["git", "-C", repo_dir, "tag", "-f", tag], env=env)
+    return sha
+
+
+def replace_df_arg(txt: str, arg_name: str, value: str) -> str:
+    rendered = '""' if value == "" else value
+    out, n = re.subn(
+        rf"^(ARG {re.escape(arg_name)}=).*$",
+        rf"\g<1>{rendered}",
+        txt,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if n != 1:
+        raise AssertionError(f"could not replace ARG {arg_name} in Dockerfile")
+    return out
+
+
+def make_isolated_repo(
+    dst: str,
+    env: dict,
+    *,
+    llmd_commit: str = "",
+    vllm_commit: str = "",
+    sgl_router_commit: str = "",
+    sidecar_tag: str | None = None,
+    holds_doc: dict | None = None,
+    llmd_patches: dict[str, str] | None = None,
+) -> None:
+    """Create an isolated git repository copy decoupled from live *_COMMIT SHAs."""
+    for rel in (
+        ".auto-sync",
+        "pack/llm-router",
+        "pkg/worker/settings/value.go",
+        "docs/reference/settings.md",
+    ):
+        src = os.path.join(root, rel)
+        out = os.path.join(dst, rel)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        if os.path.isdir(src):
+            shutil.copytree(src, out)
+        else:
+            shutil.copy2(src, out)
+
+    df_path = os.path.join(dst, "pack/llm-router/Dockerfile")
+    with open(df_path, "r", encoding="utf-8") as f:
+        df_txt = f.read()
+    df_txt = replace_df_arg(df_txt, "LLMD_ROUTER_COMMIT", llmd_commit)
+    df_txt = replace_df_arg(df_txt, "VLLM_ROUTER_COMMIT", vllm_commit)
+    df_txt = replace_df_arg(df_txt, "SGL_ROUTER_COMMIT", sgl_router_commit)
+    with open(df_path, "w", encoding="utf-8") as f:
+        f.write(df_txt)
+
+    if sidecar_tag is not None:
+        new_sidecar = f"gpustack/mirrored-llm-d-router-disagg-sidecar:{sidecar_tag}"
+        vg_path = os.path.join(dst, "pkg/worker/settings/value.go")
+        with open(vg_path, "r", encoding="utf-8") as f:
+            vg_s = f.read()
+        vg_s, n1 = re.subn(
+            r'(ModelDeploymentRoutingSidecarImage\s*=\s*settings\.NewEditable\([^)]*?setting\.InitializeFromEnv\(")([^"]+)("\))',
+            rf"\g<1>{new_sidecar}\g<3>",
+            vg_s,
+            count=1,
+            flags=re.DOTALL,
+        )
+        assert n1 == 1, "failed to rewrite ModelDeploymentRoutingSidecarImage in isolated value.go"
+        with open(vg_path, "w", encoding="utf-8") as f:
+            f.write(vg_s)
+
+        sm_path = os.path.join(dst, "docs/reference/settings.md")
+        with open(sm_path, "r", encoding="utf-8") as f:
+            sm_s = f.read()
+        sm_s, n2 = re.subn(
+            r"^(\| `model-deployment-routing-sidecar-image`<br/>.*?<br/>Default: `)([^`]+)(`)",
+            rf"\g<1>{new_sidecar}\g<3>",
+            sm_s,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        assert n2 == 1, "failed to rewrite model-deployment-routing-sidecar-image in isolated settings.md"
+        with open(sm_path, "w", encoding="utf-8") as f:
+            f.write(sm_s)
+
+    if holds_doc is not None:
+        write_json(os.path.join(dst, ".auto-sync/setting-image-holds.json"), holds_doc)
+
+    if llmd_patches is not None:
+        llmd_pdir = os.path.join(dst, "pack/llm-router/patches/llm-d")
+        shutil.rmtree(llmd_pdir, ignore_errors=True)
+        os.makedirs(llmd_pdir, exist_ok=True)
+        for pname, pbody in llmd_patches.items():
+            with open(os.path.join(llmd_pdir, pname), "w", encoding="utf-8") as f:
+                f.write(pbody)
+
+    # Align isolated proposal versions with the isolated Dockerfile pins.
+    prop_path = os.path.join(dst, ".auto-sync/proposals/router.json")
+    pdoc = read_json(prop_path)
+    pdoc["stage"] = "aligned"
+    pdoc["versions"] = {
+        "llm-d-router": f"v1.0.0+{llmd_commit[:7]}" if llmd_commit else "v1.0.0",
+        "vllm-router": f"v0.1.17+{vllm_commit[:7]}" if vllm_commit else "v0.1.17",
+        "sglang-gateway": "gateway-v0.3.1",
+        "sgl-router": f"router-v0.1.0+{sgl_router_commit[:7]}" if sgl_router_commit else "router-v0.1.0",
+    }
+    pdoc["base_image_builds"] = []
+    pdoc["sync_images"] = []
+    write_json(prop_path, pdoc)
+
+    git_init_repo(dst, env)
+    run(["git", "-C", dst, "add", "-A"], env=env)
+    run(["git", "-C", dst, "commit", "-q", "-m", "isolated fixture baseline"], env=env)
+
+
+def make_build_recorder(script_path: str, log_path: str) -> str:
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "target=''\n"
+            "while (( $# > 0 )); do\n"
+            "  if [[ \"$1\" == '--target' && $# -ge 2 ]]; then\n"
+            "    target=\"$2\"\n"
+            "    shift 2\n"
+            "  else\n"
+            "    shift\n"
+            "  fi\n"
+            "done\n"
+            f"printf '%s\\n' \"${{target}}\" >> \"{log_path}\"\n"
+        )
+    os.chmod(script_path, stat.S_IRWXU)
+    return script_path
 
 
 git_env = {
@@ -908,7 +1063,92 @@ pub fn build_router_with_body_limit(ctx: Arc<AppContext>, max_body_bytes: usize)
 """
 
 with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
-    # 1. End-to-end router preflight: separate staging dirs, frozen sglang-gateway, sgl-router drift + base_image_builds.
+    # 0. Unit checks for dockerfile_arg.py allow_empty and base_image_builds.py empty *_COMMIT handling.
+    sample_df = (
+        'ARG LLMD_ROUTER_VERSION=v1.0.0\n'
+        'ARG LLMD_ROUTER_COMMIT=""\n'
+        'ARG VLLM_ROUTER_COMMIT=\n'
+        'ARG SGL_ROUTER_COMMIT=  # cleared\n'
+        'ARG EMPTY_SINGLE=\'\'\n'
+        'ARG BAD_MULTI="" extra\n'
+    )
+    assert read_dockerfile_arg(sample_df, "LLMD_ROUTER_VERSION") == "v1.0.0"
+    assert read_dockerfile_arg(sample_df, "LLMD_ROUTER_COMMIT", allow_empty=True) == ""
+    assert read_dockerfile_arg(sample_df, "VLLM_ROUTER_COMMIT", allow_empty=True) == ""
+    assert read_dockerfile_arg(sample_df, "SGL_ROUTER_COMMIT", allow_empty=True) == ""
+    assert read_dockerfile_arg(sample_df, "EMPTY_SINGLE", allow_empty=True) == ""
+    for strict_bad in ("LLMD_ROUTER_COMMIT", "VLLM_ROUTER_COMMIT", "SGL_ROUTER_COMMIT"):
+        try:
+            read_dockerfile_arg(sample_df, strict_bad)
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError(f"strict read_dockerfile_arg must reject empty {strict_bad}")
+    try:
+        read_dockerfile_arg(sample_df, "BAD_MULTI", allow_empty=True)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("read_dockerfile_arg(allow_empty=True) must still reject multi-token ARG")
+
+    df_cli_path = os.path.join(tmp, "sample.Dockerfile")
+    with open(df_cli_path, "w", encoding="utf-8") as f:
+        f.write(sample_df)
+    cli_empty = run(
+        ["python3", "-B", os.path.join(root, ".auto-sync/checks/dockerfile_arg.py"), "--allow-empty", df_cli_path, "LLMD_ROUTER_COMMIT"],
+        check=False,
+    )
+    assert cli_empty.returncode == 0 and cli_empty.stdout.strip() == "", f"unexpected CLI --allow-empty output: {cli_empty}"
+    cli_strict = run(
+        ["python3", "-B", os.path.join(root, ".auto-sync/checks/dockerfile_arg.py"), df_cli_path, "LLMD_ROUTER_COMMIT"],
+        check=False,
+    )
+    assert cli_strict.returncode != 0, "CLI without --allow-empty must reject empty ARG"
+    print("PASS  dockerfile_arg.py --allow-empty and strict non-empty parsing")
+
+    # Read current defaults dynamically from value.go so fixture manifests stay decoupled from tag bumps.
+    with open(os.path.join(root, "pkg/worker/settings/value.go"), "r", encoding="utf-8") as f:
+        vg_txt = f.read()
+
+    def cur_vg_img(var_name: str) -> str:
+        m = re.search(
+            rf'{re.escape(var_name)}\s*=\s*settings\.NewEditable\([^)]*?setting\.InitializeFromEnv\("([^"]+)"\)',
+            vg_txt,
+            re.DOTALL,
+        )
+        assert m, f"missing {var_name} in value.go"
+        return m.group(1).strip()
+
+    cur_router_img = cur_vg_img("ModelDeploymentRouterImage")
+    cur_proxy_img = cur_vg_img("ModelDeploymentRouterProxyImage")
+    cur_sidecar_img = cur_vg_img("ModelDeploymentRoutingSidecarImage")
+
+    def base_manifest_images(extra: dict | None = None) -> dict:
+        imgs = {
+            cur_router_img: {
+                "published": True,
+                "amd64Digest": "sha256:" + "1" * 64,
+                "arm64Digest": "sha256:" + "2" * 64,
+            },
+            cur_proxy_img: {
+                "published": True,
+                "amd64Digest": "sha256:" + "3" * 64,
+                "arm64Digest": "sha256:" + "4" * 64,
+            },
+            cur_sidecar_img: {
+                "published": True,
+                "amd64Digest": "sha256:" + "5" * 64,
+                "arm64Digest": "sha256:" + "6" * 64,
+            },
+        }
+        if extra:
+            imgs.update(extra)
+        return {"schemaVersion": 1, "images": imgs}
+
+    # 1. Isolated tag-pinned fixture (empty *_COMMIT=""): separate staging, freeze guard, sgl-router drift, stage isolation.
+    iso_tag_repo = os.path.join(tmp, "iso-tag-repo")
+    make_isolated_repo(iso_tag_repo, git_env, sidecar_tag="v1.0.0")
+
     fix_dir = os.path.join(tmp, "router-fixture")
     repos_dir = os.path.join(fix_dir, "repos")
     git_init_commit(
@@ -919,14 +1159,13 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
         git_env,
     )
     vllm_fix_repo = os.path.join(repos_dir, "vllm-router")
-    git_init_commit(
+    vllm_epd_sha = git_init_commit(
         vllm_fix_repo,
         {"Cargo.toml": '[package]\nname = "vllm-router"\nedition = "2021"\n'},
         "v0.1.17",
         "v0.1.17",
         git_env,
     )
-    vllm_epd_sha = run(["git", "-C", vllm_fix_repo, "rev-parse", "refs/tags/v0.1.17^{commit}"], env=git_env).stdout.strip()
     # Shared sglang fixture repo carrying gateway-v0.3.1, newer gateway-v0.4.0 (must be ignored!),
     # and router-v0.1.0 + router-v0.2.0 (sgl-router + rust subpaths).
     sgl_repo = os.path.join(repos_dir, "sglang")
@@ -962,47 +1201,18 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
         git_env,
     )
 
-    # Read current defaults dynamically from value.go so the test stays decoupled from setting tag bumps.
-    with open(os.path.join(root, "pkg/worker/settings/value.go"), "r", encoding="utf-8") as f:
-        vg_txt = f.read()
-    def cur_vg_img(var_name: str) -> str:
-        m = re.search(
-            rf'{re.escape(var_name)}\s*=\s*settings\.NewEditable\([^)]*?setting\.InitializeFromEnv\("([^"]+)"\)',
-            vg_txt,
-            re.DOTALL,
-        )
-        assert m, f"missing {var_name} in value.go"
-        return m.group(1).strip()
-
-    cur_router_img = cur_vg_img("ModelDeploymentRouterImage")
-    cur_proxy_img = cur_vg_img("ModelDeploymentRouterProxyImage")
-    cur_sidecar_img = cur_vg_img("ModelDeploymentRoutingSidecarImage")
-
+    sidecar_v100 = "gpustack/mirrored-llm-d-router-disagg-sidecar:v1.0.0"
     manifests_path = os.path.join(fix_dir, "image-manifests.json")
-    with open(manifests_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "schemaVersion": 1,
-                "images": {
-                    cur_router_img: {
-                        "published": True,
-                        "amd64Digest": "sha256:" + "1" * 64,
-                        "arm64Digest": "sha256:" + "2" * 64,
-                    },
-                    cur_proxy_img: {
-                        "published": True,
-                        "amd64Digest": "sha256:" + "3" * 64,
-                        "arm64Digest": "sha256:" + "4" * 64,
-                    },
-                    cur_sidecar_img: {
-                        "published": True,
-                        "amd64Digest": "sha256:" + "5" * 64,
-                        "arm64Digest": "sha256:" + "6" * 64,
-                    },
-                },
-            },
-            f,
-        )
+    write_json(
+        manifests_path,
+        base_manifest_images({
+            sidecar_v100: {
+                "published": True,
+                "amd64Digest": "sha256:" + "7" * 64,
+                "arm64Digest": "sha256:" + "8" * 64,
+            }
+        }),
+    )
 
     stage_dir = os.path.join(tmp, "stage-router")
     staging_dir = os.path.join(tmp, "preflight-staging")
@@ -1019,8 +1229,8 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
         "LOOPWRIGHT_PREFLIGHT_OUT": preflight_out,
     }
     pf_res = run(
-        ["bash", os.path.join(root, ".auto-sync/scripts/preflight-router.sh")],
-        cwd=root,
+        ["bash", os.path.join(iso_tag_repo, ".auto-sync/scripts/preflight-router.sh")],
+        cwd=iso_tag_repo,
         env=pf_env,
         check=False,
     )
@@ -1029,7 +1239,6 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
             f"preflight-router.sh failed (rc={pf_res.returncode}):\n{pf_res.stdout}\n{pf_res.stderr}"
         )
 
-    # Separate staging directories for sglang-gateway and sgl-router.
     gw_stage = os.path.join(stage_dir, "sglang-gateway")
     sr_stage = os.path.join(stage_dir, "sgl-router")
     if not os.path.isdir(os.path.join(gw_stage, ".git")):
@@ -1050,6 +1259,8 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
         raise AssertionError("frozen sglang-gateway must report stage_a_drifts=False")
     if rep["target_tags"]["sgl-router"] != "router-v0.2.0" or rep["stage_a_drifts"]["sgl-router"] is not True:
         raise AssertionError(f"expected sgl-router drift to router-v0.2.0, got {rep['target_tags']!r}")
+    if rep.get("sync_images") != []:
+        raise AssertionError(f"expected empty sync_images when sidecar already at v1.0.0, got {rep.get('sync_images')!r}")
 
     pf_builds = rep.get("base_image_builds")
     if not isinstance(pf_builds, list) or len(pf_builds) != 1:
@@ -1066,21 +1277,18 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
     pf_summary = read_json(os.path.join(staging_dir, "router-preflight-summary.json"))
     if (pf_summary.get("highlights") or {}).get("base_image_builds") != pf_builds:
         raise AssertionError("router-preflight-summary.json highlights.base_image_builds mismatch")
-    print("PASS  preflight-router.sh separate sglang-gateway/sgl-router staging, freeze skip, and base_image_builds")
+    if (pf_summary.get("highlights") or {}).get("sync_images") != []:
+        raise AssertionError("router-preflight-summary.json highlights.sync_images mismatch")
+    print("PASS  preflight-router.sh separate sglang-gateway/sgl-router staging, empty *_COMMIT, freeze skip, and base_image_builds")
 
     # 1b. Negative: upstream override for frozen sglang-gateway must fail loudly.
     fix_dir_bad = os.path.join(tmp, "router-fixture-bad-override")
     shutil.copytree(fix_dir, fix_dir_bad)
-    with open(os.path.join(fix_dir_bad, "upstream.json"), "w", encoding="utf-8") as f:
-        json.dump({"sglang-gateway": "gateway-v0.4.0"}, f)
-    pf_bad_env = {
-        **pf_env,
-        "AUTOSYNC_ROUTER_FIXTURE_DIR": fix_dir_bad,
-    }
+    write_json(os.path.join(fix_dir_bad, "upstream.json"), {"sglang-gateway": "gateway-v0.4.0"})
     pf_bad = run(
-        ["bash", os.path.join(root, ".auto-sync/scripts/preflight-router.sh")],
-        cwd=root,
-        env=pf_bad_env,
+        ["bash", os.path.join(iso_tag_repo, ".auto-sync/scripts/preflight-router.sh")],
+        cwd=iso_tag_repo,
+        env={**pf_env, "AUTOSYNC_ROUTER_FIXTURE_DIR": fix_dir_bad},
         check=False,
     )
     if pf_bad.returncode == 0 or "sglang-gateway is frozen" not in pf_bad.stderr:
@@ -1089,8 +1297,8 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
         )
     print("PASS  preflight-router.sh rejects frozen sglang-gateway upstream override")
 
-    # 2. validate_router.sh positive + negative freeze & base_image_builds tests.
-    def make_candidate_tree(dst: str) -> None:
+    # 2. validate_router.sh positive + negative freeze, stage-diff isolation, and base_image_builds tests.
+    def copy_candidate_tree(src_repo: str, dst: str) -> None:
         for rel in (
             "pack/llm-router",
             "pkg/worker/settings/value.go",
@@ -1099,7 +1307,7 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
             ".auto-sync/proposals/router.json",
             ".auto-sync/setting-image-holds.json",
         ):
-            src = os.path.join(root, rel)
+            src = os.path.join(src_repo, rel)
             out = os.path.join(dst, rel)
             os.makedirs(os.path.dirname(out), exist_ok=True)
             if os.path.isdir(src):
@@ -1113,17 +1321,20 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
     shutil.copy2(os.path.join(staging_dir, "router-preflight-report.json"), os.path.join(val_stage, "router-preflight-report.json"))
     shutil.copy2(os.path.join(staging_dir, "image-manifests.json"), os.path.join(val_stage, "image-manifests.json"))
     val_base = os.path.join(val_stage, "baseline")
-    make_candidate_tree(val_base)
+    copy_candidate_tree(iso_tag_repo, val_base)
 
-    def run_validate_router(cand_dir: str):
+    build_log_tag = os.path.join(tmp, "build-targets-tag.log")
+    build_rec_tag = make_build_recorder(os.path.join(tmp, "record-build-tag.sh"), build_log_tag)
+
+    def run_validate_router(cand_dir: str, *, stage_p: str = val_stage, base_p: str = val_base, runner: str = "true"):
         env = {
             **os.environ,
-            "AUTOSYNC_STAGE_DIR": val_stage,
-            "LOOPWRIGHT_BASE_DIR": val_base,
+            "AUTOSYNC_STAGE_DIR": stage_p,
+            "LOOPWRIGHT_BASE_DIR": base_p,
             "LOOPWRIGHT_CANDIDATE_DIR": cand_dir,
             "AUTOSYNC_FAST_SELFTEST": "true",
             "AUTOSYNC_ALLOW_MISSING_STAGED_REPO": "true",
-            "AUTOSYNC_ROUTER_BUILD_RUNNER": "true",
+            "AUTOSYNC_ROUTER_BUILD_RUNNER": runner,
         }
         return run(
             ["bash", os.path.join(root, ".auto-sync/checks/validate_router.sh")],
@@ -1132,9 +1343,9 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
             check=False,
         )
 
-    # 2a. Positive: sgl-router bump to router-v0.2.0 + valid base_image_builds passes (real git apply on sgl-router!).
+    # 2a. Positive: sgl-router bump to router-v0.2.0 + valid base_image_builds passes and builds ONLY sgl-router-builder.
     cand_ok = os.path.join(tmp, "cand-router-ok")
-    make_candidate_tree(cand_ok)
+    copy_candidate_tree(iso_tag_repo, cand_ok)
     df_ok = os.path.join(cand_ok, "pack/llm-router/Dockerfile")
     with open(df_ok, "r", encoding="utf-8") as f:
         df_txt = f.read()
@@ -1145,12 +1356,15 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
     pdoc["stage"] = "recipe_sync"
     pdoc["versions"]["sgl-router"] = "router-v0.2.0"
     pdoc["base_image_builds"] = pf_builds
-    with open(prop_ok, "w", encoding="utf-8") as f:
-        json.dump(pdoc, f, indent=2)
-    res_ok = run_validate_router(cand_ok)
+    pdoc["sync_images"] = []
+    write_json(prop_ok, pdoc)
+    res_ok = run_validate_router(cand_ok, runner=build_rec_tag)
     if res_ok.returncode != 0:
         raise AssertionError(f"valid sgl-router candidate failed validate_router.sh:\n{res_ok.stdout}\n{res_ok.stderr}")
-    print("PASS  validate_router.sh accepts sgl-router bump with real patch apply and base_image_builds")
+    built_targets = [ln.strip() for ln in open(build_log_tag, "r", encoding="utf-8").read().splitlines() if ln.strip()]
+    if built_targets != ["sgl-router-builder"]:
+        raise AssertionError(f"expected only ['sgl-router-builder'] built, got {built_targets!r}")
+    print("PASS  validate_router.sh accepts sgl-router bump with stage-diff isolation (sgl-router-builder only)")
 
     # 2b. Negative: modifying SGLANG_GATEWAY_VERSION must fail validate_router.sh.
     cand_unfreeze = os.path.join(tmp, "cand-router-unfreeze")
@@ -1189,8 +1403,7 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
     prop_nb = os.path.join(cand_no_builds, ".auto-sync/proposals/router.json")
     pdoc_nb = read_json(prop_nb)
     pdoc_nb["base_image_builds"] = []
-    with open(prop_nb, "w", encoding="utf-8") as f:
-        json.dump(pdoc_nb, f, indent=2)
+    write_json(prop_nb, pdoc_nb)
     res_nb = run_validate_router(cand_no_builds)
     if res_nb.returncode == 0 or "missing required build recommendation" not in res_nb.stderr:
         raise AssertionError(
@@ -1212,8 +1425,7 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
             "command": 'gh workflow run "Base Image" -f repository=mirrored-mooncake -f tag=0.3.15-cpu',
         }
     ]
-    with open(prop_eb, "w", encoding="utf-8") as f:
-        json.dump(pdoc_eb, f, indent=2)
+    write_json(prop_eb, pdoc_eb)
     res_eb = run_validate_router(cand_extra_builds)
     if res_eb.returncode == 0 or "unexpected build recommendation" not in res_eb.stderr:
         raise AssertionError(
@@ -1234,27 +1446,527 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
         encoding="utf-8",
     ) as f:
         f.write("+pub struct ObserverRouter {}\n")
-    res_bf = run(
-        ["bash", os.path.join(root, ".auto-sync/checks/validate_router.sh")],
-        cwd=cand_bad_fallback,
-        env={
-            **os.environ,
-            "AUTOSYNC_STAGE_DIR": val_stage_nostage,
-            "LOOPWRIGHT_BASE_DIR": val_base,
-            "LOOPWRIGHT_CANDIDATE_DIR": cand_bad_fallback,
-            "AUTOSYNC_FAST_SELFTEST": "true",
-            "AUTOSYNC_ALLOW_MISSING_STAGED_REPO": "true",
-            "AUTOSYNC_ROUTER_BUILD_RUNNER": "true",
-        },
-        check=False,
-    )
+    res_bf = run_validate_router(cand_bad_fallback, stage_p=val_stage_nostage, base_p=val_base)
     if res_bf.returncode == 0 or "missing observer module/endpoint hooks" not in res_bf.stderr:
         raise AssertionError(
             f"expected validate_router.sh fallback to reject truncated sgl-router patch; rc={res_bf.returncode}, stderr={res_bf.stderr!r}"
         )
     print("PASS  validate_router.sh missing-stage fallback rejects sgl-router patch without lib.rs/app.rs hooks")
 
-    # 3. Cross-domain base_image_builds tests for kv-transfer (mirrored-mooncake, model-transfer, mirrored-modelexpress-server).
+    # 2g. Negative: adding SGLANG_GATEWAY_COMMIT must fail validate_router.sh.
+    cand_gw_commit = os.path.join(tmp, "cand-router-gw-commit")
+    shutil.copytree(cand_ok, cand_gw_commit)
+    df_gwc = os.path.join(cand_gw_commit, "pack/llm-router/Dockerfile")
+    with open(df_gwc, "r", encoding="utf-8") as f:
+        t = f.read()
+    with open(df_gwc, "w", encoding="utf-8") as f:
+        f.write(
+            t.replace(
+                "ARG SGLANG_GATEWAY_VERSION=gateway-v0.3.1",
+                "ARG SGLANG_GATEWAY_VERSION=gateway-v0.3.1\nARG SGLANG_GATEWAY_COMMIT=deadbeef",
+                1,
+            )
+        )
+    res_gwc = run_validate_router(cand_gw_commit)
+    if res_gwc.returncode == 0 or "SGLANG_GATEWAY_COMMIT is forbidden" not in res_gwc.stderr:
+        raise AssertionError(
+            f"expected validate_router.sh to reject SGLANG_GATEWAY_COMMIT; rc={res_gwc.returncode}, stderr={res_gwc.stderr!r}"
+        )
+    print("PASS  validate_router.sh rejects SGLANG_GATEWAY_COMMIT")
+
+    # 2h. Negative: introducing a new *_COMMIT when baseline *_COMMIT="" must fail closed.
+    cand_new_commit = os.path.join(tmp, "cand-router-new-commit")
+    shutil.copytree(cand_ok, cand_new_commit)
+    df_nc = os.path.join(cand_new_commit, "pack/llm-router/Dockerfile")
+    with open(df_nc, "r", encoding="utf-8") as f:
+        t = f.read()
+    t = replace_df_arg(t, "LLMD_ROUTER_COMMIT", "1234567890abcdef")
+    with open(df_nc, "w", encoding="utf-8") as f:
+        f.write(t)
+    res_nc = run_validate_router(cand_new_commit)
+    if res_nc.returncode == 0 or "introduced a new pinned commit" not in res_nc.stderr:
+        raise AssertionError(
+            f"expected validate_router.sh to reject new *_COMMIT from tag-pinned baseline; rc={res_nc.returncode}, stderr={res_nc.stderr!r}"
+        )
+    print("PASS  validate_router.sh rejects candidate-introduced *_COMMIT from tag-pinned baseline")
+
+    # 3. Ancestry-gated commit graduation: non-ancestor hold, anti-downgrade rejection, ancestor graduation + patch rebase, and sync_images.
+    grad_fix = os.path.join(tmp, "grad-fixture")
+    grad_repos = os.path.join(grad_fix, "repos")
+    llmd_grad_repo = os.path.join(grad_repos, "llm-d-router")
+    # v1.0.0 baseline on main
+    git_init_commit(
+        llmd_grad_repo,
+        {
+            "go.mod": "module example.com/llmd\n\ngo 1.27.0\n",
+            "pkg/epp/observer_target.go": "package epp\n\nfunc Version() string {\n\treturn \"v1.0.0\"\n}\n",
+        },
+        "v1.0.0",
+        "v1.0.0",
+        git_env,
+    )
+    # Branch release-1.0 off v1.0.0 and cut patch tag v1.0.1 (NOT containing main's pinned commit!)
+    run(["git", "-C", llmd_grad_repo, "checkout", "-q", "-b", "release-1.0", "v1.0.0"], env=git_env)
+    v101_sha = git_init_commit(
+        llmd_grad_repo,
+        {"pkg/epp/release_fix.go": "package epp\n\nconst patchFix = true\n"},
+        "v1.0.1",
+        "v1.0.1 release-branch patch",
+        git_env,
+    )
+    # Switch back to main and create post-v1.0.0 PINNED_COMMIT with distinct context (so patch ONLY applies on PINNED_COMMIT, not v1.0.0!)
+    run(["git", "-C", llmd_grad_repo, "checkout", "-q", "main"], env=git_env)
+    pinned_llmd_sha = git_init_commit(
+        llmd_grad_repo,
+        {
+            "pkg/epp/observer_target.go": (
+                "package epp\n\n"
+                "// post-v1.0.0 main refactor\n"
+                "func Version() string {\n"
+                "\treturn \"main-feature\"\n"
+                "}\n\n"
+                "func Tail() int {\n"
+                "\treturn 1\n"
+                "}\n"
+            )
+        },
+        None,
+        "post-v1.0.0 main commit",
+        git_env,
+    )
+    # Build a real patch against pinned_llmd_sha (fails on v1.0.0, applies cleanly on pinned_llmd_sha).
+    llmd_test_patch = (
+        "Add observer marker on post-v1.0.0 main.\n\n"
+        f"AGAINST: llm-d/llm-d-router commit {pinned_llmd_sha} (post-v1.0.0 main).\n\n"
+        "diff --git a/pkg/epp/observer_target.go b/pkg/epp/observer_target.go\n"
+        "--- a/pkg/epp/observer_target.go\n"
+        "+++ b/pkg/epp/observer_target.go\n"
+        "@@ -2,5 +2,6 @@ package epp\n"
+        " \n"
+        " // post-v1.0.0 main refactor\n"
+        " func Version() string {\n"
+        "+\t// observer hook\n"
+        " \treturn \"main-feature\"\n"
+        " }\n"
+    )
+
+    # Copy vllm-router and sglang fixture repos (keep sgl-router at router-v0.1.0 so only llm-d-router varies).
+    shutil.copytree(vllm_fix_repo, os.path.join(grad_repos, "vllm-router"))
+    sgl_grad_repo = os.path.join(grad_repos, "sglang")
+    git_init_commit(
+        sgl_grad_repo,
+        {
+            "sgl-model-gateway/Cargo.toml": '[package]\nname = "sgl-model-gateway"\nedition = "2021"\n',
+            "sgl-router/Cargo.toml": '[package]\nname = "sgl-router"\nedition = "2021"\n',
+            "sgl-router/src/lib.rs": SGL_ROUTER_LIB_RS,
+            "sgl-router/src/server/app.rs": SGL_ROUTER_APP_RS,
+            "rust/Cargo.toml": '[workspace]\nmembers = []\n',
+        },
+        "gateway-v0.3.1",
+        "gateway-v0.3.1",
+        git_env,
+    )
+    run(["git", "-C", sgl_grad_repo, "tag", "-f", "router-v0.1.0"], env=git_env)
+
+    iso_commit_repo = os.path.join(tmp, "iso-commit-repo")
+    make_isolated_repo(
+        iso_commit_repo,
+        git_env,
+        llmd_commit=pinned_llmd_sha,
+        sidecar_tag="v1.0.0",
+        llmd_patches={"0001-observer-test.patch": llmd_test_patch},
+    )
+
+    # 3a. Non-ancestor newer patch tag (v1.0.1) holds llm-d-router without downgrading, AND emits sync_images for unmirrored v1.0.1 sidecar.
+    grad_manifests_missing = os.path.join(grad_fix, "image-manifests.json")
+    write_json(
+        grad_manifests_missing,
+        base_manifest_images({
+            sidecar_v100: {
+                "published": True,
+                "amd64Digest": "sha256:" + "7" * 64,
+                "arm64Digest": "sha256:" + "8" * 64,
+            }
+        }),
+    )
+    hold_stage = os.path.join(tmp, "stage-hold")
+    hold_staging = os.path.join(tmp, "staging-hold")
+    hold_out = os.path.join(tmp, "out-hold.json")
+    hold_res = run(
+        ["bash", os.path.join(iso_commit_repo, ".auto-sync/scripts/preflight-router.sh")],
+        cwd=iso_commit_repo,
+        env={
+            **pf_env,
+            "AUTOSYNC_STAGE_DIR": hold_stage,
+            "AUTOSYNC_ROUTER_FIXTURE_DIR": grad_fix,
+            "LOOPWRIGHT_STAGING_DIR": hold_staging,
+            "LOOPWRIGHT_PREFLIGHT_OUT": hold_out,
+        },
+        check=False,
+    )
+    if hold_res.returncode != 0:
+        raise AssertionError(f"preflight-router.sh (non-ancestor hold) failed:\n{hold_res.stdout}\n{hold_res.stderr}")
+
+    hold_rep = read_json(os.path.join(hold_staging, "router-preflight-report.json"))
+    hold_sum = read_json(os.path.join(hold_staging, "router-preflight-summary.json"))
+    hold_recs = {r["id"]: r for r in read_json(os.path.join(hold_stage, "upstream-records.json"))}
+    llmd_grad_info = (hold_rep.get("graduation") or {}).get("llm-d-router") or {}
+    if (
+        hold_rep.get("stage") != "no_change"
+        or hold_rep["stage_a_drifts"]["llm-d-router"] is not False
+        or llmd_grad_info.get("graduation_status") != "awaiting_tag_containing_commit"
+        or llmd_grad_info.get("is_ancestor") is not False
+        or llmd_grad_info.get("pinned_commit") != pinned_llmd_sha
+        or llmd_grad_info.get("latest_tag") != "v1.0.1"
+    ):
+        raise AssertionError(f"expected non-ancestor hold for llm-d-router, got report={hold_rep!r}")
+    if (
+        hold_recs["llm-d-router"].get("status") != "held_back"
+        or hold_recs["llm-d-router"].get("version") != f"v1.0.0+{pinned_llmd_sha[:7]}"
+    ):
+        raise AssertionError(f"expected held_back upstream record with <ver>+<short7>, got {hold_recs['llm-d-router']!r}")
+    if (hold_sum.get("highlights") or {}).get("graduation") != hold_rep.get("graduation"):
+        raise AssertionError("router-preflight-summary.json missing highlights.graduation")
+    expected_v101_cmd = 'gh workflow run "Sync Image" -f images="ghcr.io/llm-d/llm-d-router-disagg-sidecar:v1.0.1"'
+    hold_sync = hold_rep.get("sync_images")
+    if (
+        not isinstance(hold_sync, list)
+        or len(hold_sync) != 1
+        or hold_sync[0].get("source") != "ghcr.io/llm-d/llm-d-router-disagg-sidecar:v1.0.1"
+        or hold_sync[0].get("destination") != "gpustack/mirrored-llm-d-router-disagg-sidecar:v1.0.1"
+        or hold_sync[0].get("command") != expected_v101_cmd
+        or (hold_sum.get("highlights") or {}).get("sync_images") != hold_sync
+    ):
+        raise AssertionError(f"expected sync_images for unmirrored v1.0.1 sidecar, got {hold_sync!r}")
+    print("PASS  non-ancestor patch tag v1.0.1 holds commit-pinned llm-d-router without downgrading")
+
+    # 3b. Negative: manual candidate clearing or modifying *_COMMIT onto non-ancestor tag fails closed in validate_router.sh.
+    hold_val_stage = os.path.join(tmp, "val-stage-hold")
+    os.makedirs(hold_val_stage, exist_ok=True)
+    shutil.copytree(os.path.join(hold_stage, "llm-d-router"), os.path.join(hold_val_stage, "llm-d-router"))
+    shutil.copy2(os.path.join(hold_staging, "router-preflight-report.json"), os.path.join(hold_val_stage, "router-preflight-report.json"))
+    shutil.copy2(os.path.join(hold_staging, "image-manifests.json"), os.path.join(hold_val_stage, "image-manifests.json"))
+    hold_val_base = os.path.join(hold_val_stage, "baseline")
+    copy_candidate_tree(iso_commit_repo, hold_val_base)
+
+    # Positive check: unchanged commit-pinned candidate passes validate_router.sh (with real patch apply on pinned_llmd_sha!).
+    cand_held_ok = os.path.join(tmp, "cand-held-ok")
+    copy_candidate_tree(iso_commit_repo, cand_held_ok)
+    p_held = read_json(os.path.join(cand_held_ok, ".auto-sync/proposals/router.json"))
+    p_held["sync_images"] = hold_sync
+    write_json(os.path.join(cand_held_ok, ".auto-sync/proposals/router.json"), p_held)
+    res_held_ok = run_validate_router(cand_held_ok, stage_p=hold_val_stage, base_p=hold_val_base)
+    if res_held_ok.returncode != 0:
+        raise AssertionError(f"commit-pinned candidate failed validate_router.sh:\n{res_held_ok.stdout}\n{res_held_ok.stderr}")
+
+    # Negative 1: manually clearing LLMD_ROUTER_COMMIT="" onto non-ancestor v1.0.1 must fail closed.
+    cand_downgrade = os.path.join(tmp, "cand-downgrade")
+    shutil.copytree(cand_held_ok, cand_downgrade)
+    df_dg = os.path.join(cand_downgrade, "pack/llm-router/Dockerfile")
+    with open(df_dg, "r", encoding="utf-8") as f:
+        t = f.read()
+    t = replace_df_arg(t, "LLMD_ROUTER_VERSION", "v1.0.1")
+    t = replace_df_arg(t, "LLMD_ROUTER_COMMIT", "")
+    with open(df_dg, "w", encoding="utf-8") as f:
+        f.write(t)
+    res_dg = run_validate_router(cand_downgrade, stage_p=hold_val_stage, base_p=hold_val_base)
+    if res_dg.returncode == 0 or "anti-downgrade gate" not in res_dg.stderr:
+        raise AssertionError(
+            f"expected validate_router.sh to reject non-ancestor commit clear; rc={res_dg.returncode}, stderr={res_dg.stderr!r}"
+        )
+
+    # Negative 2: manually changing LLMD_ROUTER_COMMIT to another SHA must fail closed.
+    cand_swap_sha = os.path.join(tmp, "cand-swap-sha")
+    shutil.copytree(cand_held_ok, cand_swap_sha)
+    df_sw = os.path.join(cand_swap_sha, "pack/llm-router/Dockerfile")
+    with open(df_sw, "r", encoding="utf-8") as f:
+        t = f.read()
+    t = replace_df_arg(t, "LLMD_ROUTER_COMMIT", v101_sha)
+    with open(df_sw, "w", encoding="utf-8") as f:
+        f.write(t)
+    res_sw = run_validate_router(cand_swap_sha, stage_p=hold_val_stage, base_p=hold_val_base)
+    if res_sw.returncode == 0 or "modified pinned commit" not in res_sw.stderr:
+        raise AssertionError(
+            f"expected validate_router.sh to reject commit SHA modification; rc={res_sw.returncode}, stderr={res_sw.stderr!r}"
+        )
+
+    # Negative 3: mutating *_VERSION while keeping non-empty *_COMMIT unchanged must fail closed.
+    cand_mut_ver = os.path.join(tmp, "cand-mut-ver-same-commit")
+    shutil.copytree(cand_held_ok, cand_mut_ver)
+    df_mv = os.path.join(cand_mut_ver, "pack/llm-router/Dockerfile")
+    with open(df_mv, "r", encoding="utf-8") as f:
+        t = f.read()
+    t = replace_df_arg(t, "LLMD_ROUTER_VERSION", "v1.0.1")
+    with open(df_mv, "w", encoding="utf-8") as f:
+        f.write(t)
+    res_mv = run_validate_router(cand_mut_ver, stage_p=hold_val_stage, base_p=hold_val_base)
+    if res_mv.returncode == 0 or "while pinned commit" not in res_mv.stderr:
+        raise AssertionError(
+            f"expected validate_router.sh to reject *_VERSION mutation with unchanged *_COMMIT; rc={res_mv.returncode}, stderr={res_mv.stderr!r}"
+        )
+
+    # Negative 4: forged preflight report claiming is_ancestor=true against real non-ancestor staged repo must fail closed.
+    forged_val_stage = os.path.join(tmp, "val-stage-forged-report")
+    shutil.copytree(hold_val_stage, forged_val_stage)
+    forged_rep_path = os.path.join(forged_val_stage, "router-preflight-report.json")
+    forged_rep = read_json(forged_rep_path)
+    forged_rep["graduation"]["llm-d-router"]["is_ancestor"] = True
+    forged_rep["graduation"]["llm-d-router"]["graduation_status"] = "ready_to_graduate"
+    forged_rep["graduation"]["llm-d-router"]["latest_tag"] = "v1.0.1"
+    write_json(forged_rep_path, forged_rep)
+    res_forged = run_validate_router(cand_downgrade, stage_p=forged_val_stage, base_p=hold_val_base)
+    if res_forged.returncode == 0 or "git merge-base --is-ancestor" not in res_forged.stderr:
+        raise AssertionError(
+            f"expected validate_router.sh to reject forged report via real git merge-base check; rc={res_forged.returncode}, stderr={res_forged.stderr!r}"
+        )
+
+    # Negative 5: missing sync_images when preflight emitted one must fail closed.
+    cand_missing_sync = os.path.join(tmp, "cand-missing-sync")
+    shutil.copytree(cand_held_ok, cand_missing_sync)
+    p_ms = read_json(os.path.join(cand_missing_sync, ".auto-sync/proposals/router.json"))
+    p_ms["sync_images"] = []
+    write_json(os.path.join(cand_missing_sync, ".auto-sync/proposals/router.json"), p_ms)
+    res_ms = run_validate_router(cand_missing_sync, stage_p=hold_val_stage, base_p=hold_val_base)
+    if res_ms.returncode == 0 or "sync_images" not in res_ms.stderr:
+        raise AssertionError(
+            f"expected validate_router.sh to reject missing sync_images; rc={res_ms.returncode}, stderr={res_ms.stderr!r}"
+        )
+    print("PASS  validate_router.sh enforces anti-downgrade commit gate, forged-report check, and sync_images parity")
+
+    # 3c. Positive: ancestor release tag v1.1.0 (containing pinned_llmd_sha) graduates cleanly,
+    # pre-stages LLMD_ROUTER_VERSION=v1.1.0 + LLMD_ROUTER_COMMIT="", rebases patch from pinned_llmd_sha,
+    # builds ONLY epp-builder, and emits sync_images for unmirrored v1.1.0 sidecar.
+    run(["git", "-C", llmd_grad_repo, "checkout", "-q", "main"], env=git_env)
+    git_init_commit(
+        llmd_grad_repo,
+        {
+            "pkg/epp/observer_target.go": (
+                "package epp\n\n"
+                "// post-v1.0.0 main refactor\n"
+                "func Version() string {\n"
+                "\treturn \"main-feature\"\n"
+                "}\n\n"
+                "func Tail() int {\n"
+                "\treturn 2 // bumped in v1.1.0\n"
+                "}\n"
+            ),
+            "pkg/epp/v110_new.go": "package epp\n\nconst releaseV110 = true\n",
+        },
+        "v1.1.0",
+        "v1.1.0 release containing pinned commit",
+        git_env,
+    )
+
+    grad_stage = os.path.join(tmp, "stage-grad")
+    grad_staging = os.path.join(tmp, "staging-grad")
+    grad_out = os.path.join(tmp, "out-grad.json")
+    grad_res = run(
+        ["bash", os.path.join(iso_commit_repo, ".auto-sync/scripts/preflight-router.sh")],
+        cwd=iso_commit_repo,
+        env={
+            **pf_env,
+            "AUTOSYNC_STAGE_DIR": grad_stage,
+            "AUTOSYNC_ROUTER_FIXTURE_DIR": grad_fix,
+            "LOOPWRIGHT_STAGING_DIR": grad_staging,
+            "LOOPWRIGHT_PREFLIGHT_OUT": grad_out,
+        },
+        check=False,
+    )
+    if grad_res.returncode != 0:
+        raise AssertionError(f"preflight-router.sh (ancestor graduation) failed:\n{grad_res.stdout}\n{grad_res.stderr}")
+
+    grad_rep = read_json(os.path.join(grad_staging, "router-preflight-report.json"))
+    grad_sum = read_json(os.path.join(grad_staging, "router-preflight-summary.json"))
+    grad_recs = {r["id"]: r for r in read_json(os.path.join(grad_stage, "upstream-records.json"))}
+    g_llmd = (grad_rep.get("graduation") or {}).get("llm-d-router") or {}
+    if (
+        grad_rep.get("stage") != "recipe_sync"
+        or grad_rep["stage_a_drifts"]["llm-d-router"] is not True
+        or g_llmd.get("graduation_status") != "ready_to_graduate"
+        or g_llmd.get("is_ancestor") is not True
+        or g_llmd.get("latest_tag") != "v1.1.0"
+        or (grad_rep.get("rebase") or {}).get("llm-d-router", {}).get("auto_rebased") is not True
+    ):
+        raise AssertionError(f"expected ready_to_graduate + auto_rebased for llm-d-router, got {grad_rep!r}")
+    if (
+        grad_recs["llm-d-router"].get("status") != "available"
+        or grad_recs["llm-d-router"].get("version") != "v1.1.0"
+        or grad_recs["llm-d-router"].get("currentVersion") != f"v1.0.0+{pinned_llmd_sha[:7]}"
+    ):
+        raise AssertionError(f"unexpected graduated upstream record: {grad_recs['llm-d-router']!r}")
+
+    expected_v110_cmd = 'gh workflow run "Sync Image" -f images="ghcr.io/llm-d/llm-d-router-disagg-sidecar:v1.1.0"'
+    grad_sync = grad_rep.get("sync_images")
+    if (
+        not isinstance(grad_sync, list)
+        or len(grad_sync) != 1
+        or grad_sync[0].get("source") != "ghcr.io/llm-d/llm-d-router-disagg-sidecar:v1.1.0"
+        or grad_sync[0].get("destination") != "gpustack/mirrored-llm-d-router-disagg-sidecar:v1.1.0"
+        or grad_sync[0].get("command") != expected_v110_cmd
+        or (grad_sum.get("highlights") or {}).get("sync_images") != grad_sync
+    ):
+        raise AssertionError(f"expected sync_images for v1.1.0 sidecar, got {grad_sync!r}")
+
+    overlay_tgz = os.path.join(grad_staging, "candidate-overlay.tgz")
+    if not os.path.isfile(overlay_tgz):
+        raise AssertionError("expected candidate-overlay.tgz for graduated llm-d-router")
+
+    # Apply pre-staged overlay into candidate and validate with stage-diff build recorder.
+    grad_val_stage = os.path.join(tmp, "val-stage-grad")
+    os.makedirs(grad_val_stage, exist_ok=True)
+    shutil.copytree(os.path.join(grad_stage, "llm-d-router"), os.path.join(grad_val_stage, "llm-d-router"))
+    shutil.copy2(os.path.join(grad_staging, "router-preflight-report.json"), os.path.join(grad_val_stage, "router-preflight-report.json"))
+    shutil.copy2(os.path.join(grad_staging, "image-manifests.json"), os.path.join(grad_val_stage, "image-manifests.json"))
+    grad_val_base = os.path.join(grad_val_stage, "baseline")
+    copy_candidate_tree(iso_commit_repo, grad_val_base)
+
+    cand_grad = os.path.join(tmp, "cand-grad-ok")
+    copy_candidate_tree(iso_commit_repo, cand_grad)
+    with tarfile.open(overlay_tgz, "r:gz") as tf:
+        tf.extractall(cand_grad)
+
+    grad_df_txt = open(os.path.join(cand_grad, "pack/llm-router/Dockerfile"), "r", encoding="utf-8").read()
+    assert read_dockerfile_arg(grad_df_txt, "LLMD_ROUTER_VERSION") == "v1.1.0"
+    assert read_dockerfile_arg(grad_df_txt, "LLMD_ROUTER_COMMIT", allow_empty=True) == ""
+    grad_patch_txt = open(os.path.join(cand_grad, "pack/llm-router/patches/llm-d/0001-observer-test.patch"), "r", encoding="utf-8").read()
+    assert "AGAINST: llm-d/llm-d-router v1.1.0." in grad_patch_txt, f"expected AGAINST updated to v1.1.0: {grad_patch_txt[:200]}"
+
+    # Check base_image_builds diff handles cleared LLMD_ROUTER_COMMIT="" cleanly without reporting "removed".
+    grad_diff_builds = recommend_from_diff(grad_val_base, cand_grad, domain="router")
+    assert len(grad_diff_builds) == 1 and 'LLMD_ROUTER_COMMIT=""' in grad_diff_builds[0]["reason"], (
+        f"unexpected base_image_builds reason on commit graduation: {grad_diff_builds!r}"
+    )
+
+    p_grad = read_json(os.path.join(cand_grad, ".auto-sync/proposals/router.json"))
+    p_grad["stage"] = "recipe_sync"
+    p_grad["versions"]["llm-d-router"] = "v1.1.0"
+    p_grad["base_image_builds"] = grad_rep["base_image_builds"]
+    p_grad["sync_images"] = grad_sync
+    write_json(os.path.join(cand_grad, ".auto-sync/proposals/router.json"), p_grad)
+
+    build_log_grad = os.path.join(tmp, "build-targets-grad.log")
+    build_rec_grad = make_build_recorder(os.path.join(tmp, "record-build-grad.sh"), build_log_grad)
+    res_grad_val = run_validate_router(cand_grad, stage_p=grad_val_stage, base_p=grad_val_base, runner=build_rec_grad)
+    if res_grad_val.returncode != 0:
+        raise AssertionError(
+            f"graduated llm-d-router candidate failed validate_router.sh:\n{res_grad_val.stdout}\n{res_grad_val.stderr}"
+        )
+    grad_built = [ln.strip() for ln in open(build_log_grad, "r", encoding="utf-8").read().splitlines() if ln.strip()]
+    if grad_built != ["epp-builder"]:
+        raise AssertionError(f"expected only ['epp-builder'] built on graduation, got {grad_built!r}")
+    print("PASS  ancestor release tag v1.1.0 graduates llm-d-router, rebases from PINNED_COMMIT, and builds epp-builder only")
+
+    # 3d. sync_images matrix: single-arch emits alert; published multi-arch emits []; held sidecar emits [].
+    sidecar_v110 = "gpustack/mirrored-llm-d-router-disagg-sidecar:v1.1.0"
+    # Single-arch only (missing arm64Digest) -> must still emit sync_images.
+    man_single_arch = os.path.join(tmp, "manifests-single-arch.json")
+    write_json(
+        man_single_arch,
+        base_manifest_images({
+            sidecar_v100: {
+                "published": True,
+                "amd64Digest": "sha256:" + "7" * 64,
+                "arm64Digest": "sha256:" + "8" * 64,
+            },
+            sidecar_v110: {
+                "published": True,
+                "amd64Digest": "sha256:" + "9" * 64,
+                "arm64Digest": "",
+            },
+        }),
+    )
+    sa_stage = os.path.join(tmp, "stage-sync-single")
+    sa_staging = os.path.join(tmp, "staging-sync-single")
+    sa_res = run(
+        ["bash", os.path.join(iso_commit_repo, ".auto-sync/scripts/preflight-router.sh")],
+        cwd=iso_commit_repo,
+        env={
+            **pf_env,
+            "AUTOSYNC_STAGE_DIR": sa_stage,
+            "AUTOSYNC_ROUTER_FIXTURE_DIR": grad_fix,
+            "AUTOSYNC_MOCK_MANIFESTS_JSON": man_single_arch,
+            "LOOPWRIGHT_STAGING_DIR": sa_staging,
+            "LOOPWRIGHT_PREFLIGHT_OUT": os.path.join(tmp, "out-sync-single.json"),
+        },
+        check=False,
+    )
+    assert sa_res.returncode == 0, f"preflight single-arch failed: {sa_res.stderr}"
+    sa_rep = read_json(os.path.join(sa_staging, "router-preflight-report.json"))
+    assert len(sa_rep.get("sync_images") or []) == 1 and sa_rep["sync_images"][0]["command"] == expected_v110_cmd, (
+        f"single-arch sidecar must still emit sync_images, got {sa_rep.get('sync_images')!r}"
+    )
+
+    # Published multi-arch -> must emit sync_images: [].
+    man_multi_arch = os.path.join(tmp, "manifests-multi-arch.json")
+    write_json(
+        man_multi_arch,
+        base_manifest_images({
+            sidecar_v100: {
+                "published": True,
+                "amd64Digest": "sha256:" + "7" * 64,
+                "arm64Digest": "sha256:" + "8" * 64,
+            },
+            sidecar_v110: {
+                "published": True,
+                "amd64Digest": "sha256:" + "a" * 64,
+                "arm64Digest": "sha256:" + "b" * 64,
+            },
+        }),
+    )
+    ma_stage = os.path.join(tmp, "stage-sync-multi")
+    ma_staging = os.path.join(tmp, "staging-sync-multi")
+    ma_res = run(
+        ["bash", os.path.join(iso_commit_repo, ".auto-sync/scripts/preflight-router.sh")],
+        cwd=iso_commit_repo,
+        env={
+            **pf_env,
+            "AUTOSYNC_STAGE_DIR": ma_stage,
+            "AUTOSYNC_ROUTER_FIXTURE_DIR": grad_fix,
+            "AUTOSYNC_MOCK_MANIFESTS_JSON": man_multi_arch,
+            "LOOPWRIGHT_STAGING_DIR": ma_staging,
+            "LOOPWRIGHT_PREFLIGHT_OUT": os.path.join(tmp, "out-sync-multi.json"),
+        },
+        check=False,
+    )
+    assert ma_res.returncode == 0, f"preflight multi-arch failed: {ma_res.stderr}"
+    ma_rep = read_json(os.path.join(ma_staging, "router-preflight-report.json"))
+    assert ma_rep.get("sync_images") == [], f"multi-arch published sidecar must emit [], got {ma_rep.get('sync_images')!r}"
+
+    # Held sidecar in setting-image-holds.json -> must emit sync_images: [].
+    held_sidecar_holds = os.path.join(tmp, "held-sidecar-holds.json")
+    write_json(
+        held_sidecar_holds,
+        {
+            "schema_version": 1,
+            "holds": {
+                "sidecar": {
+                    "tag": "v1.0.0",
+                    "reason": "test hold on sidecar",
+                }
+            },
+        },
+    )
+    hs_stage = os.path.join(tmp, "stage-sync-held")
+    hs_staging = os.path.join(tmp, "staging-sync-held")
+    hs_res = run(
+        ["bash", os.path.join(iso_commit_repo, ".auto-sync/scripts/preflight-router.sh")],
+        cwd=iso_commit_repo,
+        env={
+            **pf_env,
+            "AUTOSYNC_STAGE_DIR": hs_stage,
+            "AUTOSYNC_ROUTER_FIXTURE_DIR": grad_fix,
+            "AUTOSYNC_SETTING_IMAGE_HOLDS_FILE": held_sidecar_holds,
+            "LOOPWRIGHT_STAGING_DIR": hs_staging,
+            "LOOPWRIGHT_PREFLIGHT_OUT": os.path.join(tmp, "out-sync-held.json"),
+        },
+        check=False,
+    )
+    assert hs_res.returncode == 0, f"preflight held-sidecar failed: {hs_res.stderr}"
+    hs_rep = read_json(os.path.join(hs_staging, "router-preflight-report.json"))
+    assert hs_rep.get("sync_images") == [], f"held sidecar must emit [], got {hs_rep.get('sync_images')!r}"
+    print("PASS  sync_images emits on missing/single-arch sidecar and suppresses on multi-arch, held, or ineligible")
+
+    # 4. Cross-domain base_image_builds tests for kv-transfer (mirrored-mooncake, model-transfer, mirrored-modelexpress-server).
     kv_base = os.path.join(tmp, "kv-base")
     kv_cand = os.path.join(tmp, "kv-cand")
     for rel in (
@@ -1327,14 +2039,12 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
     kv_prop = os.path.join(kv_cand, ".auto-sync/proposals/kv-transfer.json")
     kv_pdoc = read_json(kv_prop)
     kv_pdoc["base_image_builds"] = kv_builds
-    with open(kv_prop, "w", encoding="utf-8") as f:
-        json.dump(kv_pdoc, f, indent=2)
+    write_json(kv_prop, kv_pdoc)
     validate_proposal_builds(kv_base, kv_cand, kv_prop, "kv-transfer")
 
     # Negative: dropping one required target fails validation.
     kv_pdoc["base_image_builds"] = [b for b in kv_builds if b["target"] != "cann"]
-    with open(kv_prop, "w", encoding="utf-8") as f:
-        json.dump(kv_pdoc, f, indent=2)
+    write_json(kv_prop, kv_pdoc)
     try:
         validate_proposal_builds(kv_base, kv_cand, kv_prop, "kv-transfer")
     except SystemExit as exc:
@@ -1345,8 +2055,7 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
 
     # Negative: extraneous cross-domain entry on kv-transfer fails validation.
     kv_pdoc["base_image_builds"] = kv_builds + pf_builds
-    with open(kv_prop, "w", encoding="utf-8") as f:
-        json.dump(kv_pdoc, f, indent=2)
+    write_json(kv_prop, kv_pdoc)
     try:
         validate_proposal_builds(kv_base, kv_cand, kv_prop, "kv-transfer")
     except SystemExit as exc:
@@ -1357,8 +2066,7 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
 
     # Negative: non-empty base_image_builds when no pack/* files changed must fail.
     kv_pdoc["base_image_builds"] = kv_builds
-    with open(kv_prop, "w", encoding="utf-8") as f:
-        json.dump(kv_pdoc, f, indent=2)
+    write_json(kv_prop, kv_pdoc)
     try:
         validate_proposal_builds(kv_base, kv_base, kv_prop, "kv-transfer")
     except SystemExit as exc:
@@ -1373,9 +2081,9 @@ with tempfile.TemporaryDirectory(prefix="autosync-selftest-e2e.") as tmp:
     print("PASS  base_image_builds positive and negative validation across router and kv-transfer domains")
 PY
 then
-  pass "router freeze, sgl-router staging, and Base Image build recommendations end-to-end"
+  pass "router freeze, commit graduation, sync_images, sgl-router staging, and Base Image build recommendations end-to-end"
 else
-  fail "router freeze, sgl-router staging, and Base Image build recommendations end-to-end"
+  fail "router freeze, commit graduation, sync_images, sgl-router staging, and Base Image build recommendations end-to-end"
 fi
 
 echo

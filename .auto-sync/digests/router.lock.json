@@ -5,17 +5,17 @@
     {
       "path": ".auto-sync/checks",
       "kind": "directory",
-      "sha256": "88cac62304897198f9d201ef68429349ad954d657ad2f958f70017a2b8f9b08d"
+      "sha256": "c89aaa9c3a15620777162f58db1db79d3772f91fa380a6668fefa55ef33d668a"
     },
     {
       "path": ".auto-sync/instructions/router.md",
       "kind": "file",
-      "sha256": "f39dd08de6e54ee08a50855e9e52b81702fa23dee67469295afde64f19b67c99"
+      "sha256": "aba2ad05680099b92dbcde8ee5621b72f625a99b2b01b857ad173192a33b9d84"
     },
     {
       "path": ".auto-sync/scripts/preflight-router.sh",
       "kind": "file",
-      "sha256": "483bf915914df404be7f2c35dc4838bdd55380c93f08f78685b47bbf89e42c80"
+      "sha256": "6a9f64ec3957b2e94c650d4bc3c07863728fb3c0c1cefa0096c6de39bd466326"
     }
   ]
 }

@@ -2,10 +2,10 @@
 # Platforms: linux/amd64 and linux/arm64.
 # Run from the repository root:
 #   PACKAGE_ARCH=amd64 PACKAGE_TAG=dev make package llm-router
-# Router source versions are the LLMD_ROUTER_VERSION, VLLM_ROUTER_VERSION,
-# SGLANG_GATEWAY_VERSION (frozen) and SGL_ROUTER_VERSION build arguments below. Pass overrides with Docker Buildx:
+# Active router pins pair *_VERSION tags with optional *_COMMIT overrides below
+# (SGLANG_GATEWAY_VERSION is frozen and has no commit override). Pass overrides with Docker Buildx:
 #   docker buildx build --platform linux/amd64 --load -t gpustack/llm-router:dev \
-#     --build-arg VLLM_ROUTER_VERSION=v0.1.17 -f pack/llm-router/Dockerfile .
+#     --build-arg VLLM_ROUTER_VERSION=v0.1.17 --build-arg VLLM_ROUTER_COMMIT="" -f pack/llm-router/Dockerfile .
 
 # One image carrying every router a ModelDeployment can name.
 #
@@ -29,8 +29,10 @@
 # reference, would have nowhere to go. Building all of them from source is what keeps each version
 # an argument.
 #
-# VERSIONS: one ARG per router, each naming an upstream git reference. They move independently
-# because the upstream projects release independently; nothing here requires them to agree.
+# VERSIONS: each active router pairs a *_VERSION tag with an optional *_COMMIT SHA override
+# (LLMD_ROUTER_*, VLLM_ROUTER_*, SGL_ROUTER_*). When *_COMMIT is non-empty, its builder fetches
+# that commit directly; when empty, it clones the *_VERSION tag. They move independently because
+# the upstream projects release independently; nothing here requires them to agree.
 #
 # NOT IN THIS IMAGE: the llm-d disaggregation sidecar. It runs in a DECODE role's Pod, not in a
 # router Pod, so putting it here would pull a router image into every decoder.
@@ -40,11 +42,14 @@ ARG GO_VERSION=1.27-bookworm
 ARG RUST_VERSION=1.95-bookworm
 
 ARG LLMD_ROUTER_VERSION=v1.0.0
+ARG LLMD_ROUTER_COMMIT=3283d440334109fc785d4380355cc0375fc32755
 ARG VLLM_ROUTER_VERSION=v0.1.17
+ARG VLLM_ROUTER_COMMIT=c132dbc0cfdf5c642c3dca6caa71218f3c3035cb
 # FROZEN: upstream deleted sgl-model-gateway in sgl-project/sglang PR #50732 (commit 2588d80d062).
 # Keep gateway-v0.3.1 pinned until sglang-gateway is removed after its deprecation window.
 ARG SGLANG_GATEWAY_VERSION=gateway-v0.3.1
 ARG SGL_ROUTER_VERSION=router-v0.1.0
+ARG SGL_ROUTER_COMMIT=51c77c89f889050599b6e6e4838a44c3b95d8384
 
 ######################## llm-d endpoint picker ########################
 
@@ -53,23 +58,26 @@ FROM golang:${GO_VERSION} AS epp-builder
 SHELL ["/bin/bash", "-c"]
 
 ARG LLMD_ROUTER_VERSION
+ARG LLMD_ROUTER_COMMIT
 
 WORKDIR /src
 
-# Shallow and single-tag: this build never reads history, and the full clone is large enough for
-# the difference to show up on every rebuild.
-#
-# SUBMODULES ARE RECURSED THOUGH NONE OF THE THREE SOURCES DECLARES ANY at the references pinned
-# above. The flag is here for the version bump rather than for today: a source that grows a
-# submodule later would otherwise check out short, and the failure is a compile error in a file
-# nobody edited rather than anything naming the missing tree. --shallow-submodules keeps the
-# recursion as cheap as the --depth above.
+# Shallow single-commit fetch when LLMD_ROUTER_COMMIT is set, or single-tag clone when empty.
+# Submodules are initialized with depth 1 so any future upstream submodule checks out cleanly.
 RUN <<EOF
     set -exo pipefail
 
-    git clone --depth 1 --branch "${LLMD_ROUTER_VERSION}" \
-        --recurse-submodules --shallow-submodules \
-        https://github.com/llm-d/llm-d-router.git .
+    if [ -n "${LLMD_ROUTER_COMMIT}" ]; then
+        git init .
+        git remote add origin https://github.com/llm-d/llm-d-router.git
+        git fetch --depth 1 origin "${LLMD_ROUTER_COMMIT}"
+        git checkout FETCH_HEAD
+        git submodule update --init --recursive --depth 1
+    else
+        git clone --depth 1 --branch "${LLMD_ROUTER_VERSION}" \
+            --recurse-submodules --shallow-submodules \
+            https://github.com/llm-d/llm-d-router.git .
+    fi
     git rev-parse HEAD >/tmp/commit
 EOF
 
@@ -100,10 +108,14 @@ RUN <<EOF
     CGO_ENABLED=0 go test ./pkg/epp/observer/...
 
     COMMIT="$(cat /tmp/commit)"
+    BUILD_REF="${LLMD_ROUTER_VERSION}"
+    if [ -n "${LLMD_ROUTER_COMMIT}" ]; then
+        BUILD_REF="${LLMD_ROUTER_VERSION}+$(printf '%.7s' "${LLMD_ROUTER_COMMIT}")"
+    fi
     CGO_ENABLED=0 go build \
         -ldflags="-s -w \
             -X github.com/llm-d/llm-d-router/version.CommitSHA=${COMMIT} \
-            -X github.com/llm-d/llm-d-router/version.BuildRef=${LLMD_ROUTER_VERSION}" \
+            -X github.com/llm-d/llm-d-router/version.BuildRef=${BUILD_REF}" \
         -o /out/epp ./cmd/epp
 EOF
 
@@ -144,6 +156,7 @@ FROM rust-builder AS vllm-router-builder
 SHELL ["/bin/bash", "-c"]
 
 ARG VLLM_ROUTER_VERSION
+ARG VLLM_ROUTER_COMMIT
 
 WORKDIR /src
 
@@ -152,27 +165,28 @@ WORKDIR /src
 RUN <<EOF
     set -exo pipefail
 
-    git clone --depth 1 --branch "${VLLM_ROUTER_VERSION}" \
-        --recurse-submodules --shallow-submodules \
-        https://github.com/vllm-project/router.git .
+    if [ -n "${VLLM_ROUTER_COMMIT}" ]; then
+        git init .
+        git remote add origin https://github.com/vllm-project/router.git
+        git fetch --depth 1 origin "${VLLM_ROUTER_COMMIT}"
+        git checkout FETCH_HEAD
+        git submodule update --init --recursive --depth 1
+    else
+        git clone --depth 1 --branch "${VLLM_ROUTER_VERSION}" \
+            --recurse-submodules --shallow-submodules \
+            https://github.com/vllm-project/router.git .
+    fi
 EOF
 
-# The patches under pack/llm-router/patches/vllm-router/ repair upstream defects this
-# image cannot wait out; each patch header states the defect it repairs and the upstream
-# reference it was written against. The per-router subdirectory is copied rather than the
-# patches root because each Rust stage compiles a different upstream tree: a wildcard
-# applied here would hand the vLLM router's hunks to the SGLang gateway, whose files have
-# the same names but different contents, and the failure would be a confusing reject
-# rather than a missing patch.
+# The patches under pack/llm-router/patches/vllm-router/ repair upstream gaps this
+# image cannot wait out; each patch header states what it adds and the upstream reference
+# it was written against. The per-router subdirectory is copied rather than the patches root
+# because each Rust stage compiles a different upstream tree.
 #
-# This stage previously carried upstream PR 266 -- commit 516f1cb, the encoder-prefill-decode
-# routing -- as 0001-epd-routing.patch, a cherry-pick onto v0.1.16.1. RETIRED at v0.1.17: that
-# tag's tree contains the commit, so the cherry-pick patch was deleted and VLLM_ROUTER_VERSION
-# moved to the first upstream tag carrying it. The former 0004-discovery-readiness-and-
-# deselect-removal.patch (the Kubernetes discovery readiness-loss deselect) is likewise retired
-# at this tag; the two remaining patches (lazy Mooncake 0002, the read-only observer endpoint
-# 0003) stay until their own WHEN TO REMOVE condition holds, and each patch header names the
-# tag it is written against under AGAINST.
+# Earlier patches (EPD routing 0001, discovery readiness deselect 0004, and /metrics KV cache
+# metadata discovery) were retired once upstream absorbed them. The two active patches (lazy
+# Mooncake bootstrap lookup 0002 and read-only observer endpoint 0003) remain until their
+# WHEN TO REMOVE condition holds.
 #
 # Applied with git apply, which fails the build loudly on a version bump whose hunks no
 # longer match -- that failure is the tripwire, and git is already in the base stage so no
@@ -286,6 +300,7 @@ FROM rust-builder AS sgl-router-builder
 SHELL ["/bin/bash", "-c"]
 
 ARG SGL_ROUTER_VERSION
+ARG SGL_ROUTER_COMMIT
 
 WORKDIR /src
 
@@ -295,11 +310,21 @@ WORKDIR /src
 RUN <<EOF
     set -exo pipefail
 
-    git clone --depth 1 --branch "${SGL_ROUTER_VERSION}" \
-        --filter=blob:none --sparse \
-        https://github.com/sgl-project/sglang.git .
-    git sparse-checkout set sgl-router rust
-    git submodule update --init --recursive --depth 1
+    if [ -n "${SGL_ROUTER_COMMIT}" ]; then
+        git init .
+        git sparse-checkout init --cone
+        git sparse-checkout set sgl-router rust
+        git remote add origin https://github.com/sgl-project/sglang.git
+        git fetch --depth 1 --filter=blob:none origin "${SGL_ROUTER_COMMIT}"
+        git checkout FETCH_HEAD
+        git submodule update --init --recursive --depth 1
+    else
+        git clone --depth 1 --branch "${SGL_ROUTER_VERSION}" \
+            --filter=blob:none --sparse \
+            https://github.com/sgl-project/sglang.git .
+        git sparse-checkout set sgl-router rust
+        git submodule update --init --recursive --depth 1
+    fi
 EOF
 
 # Patches use repository-root-relative paths (sgl-router/src/...) and apply from /src.

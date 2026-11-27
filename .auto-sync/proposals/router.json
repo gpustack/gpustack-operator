@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "stage": "aligned",
-  "summary": "Promoted gpustack/llm-router:v0.6.0 as the default router image alongside llm-d-router v1.0.0, vllm-router v0.1.17, frozen sglang-gateway gateway-v0.3.1, and sgl-router router-v0.1.0.",
+  "summary": "Pinned llm-d-router v1.0.0+3283d44, vllm-router v0.1.17+c132dbc, and sgl-router router-v0.1.0+51c77c8 with ancestry-gated commit graduation alongside frozen sglang-gateway gateway-v0.3.1.",
   "versions": {
-    "llm-d-router": "v1.0.0",
-    "vllm-router": "v0.1.17",
+    "llm-d-router": "v1.0.0+3283d44",
+    "vllm-router": "v0.1.17+c132dbc",
     "sglang-gateway": "gateway-v0.3.1",
-    "sgl-router": "router-v0.1.0"
+    "sgl-router": "router-v0.1.0+51c77c8"
   },
   "subscriptions": [
     "llm-d-router",
@@ -14,5 +14,6 @@
     "sglang-gateway",
     "sgl-router"
   ],
-  "base_image_builds": []
+  "base_image_builds": [],
+  "sync_images": []
 }
