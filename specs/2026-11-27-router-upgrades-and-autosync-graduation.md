@@ -1,7 +1,7 @@
 # Spec: ModelDeployment Router Upgrades, External DP Balancing, and Auto-Sync Commit Graduation
 
 Status: Building
-Blocked on: PR 1 (`T1`–`T2`) merging to `main` and publishing multi-arch `gpustack/llm-router:v0.6.1` (`T3`) before PR 2 (`T4`–`T7`) lands.
+Blocked on: PR 2 (`T7` public site and documentation alignment) remaining before marking `Shipped`.
 Type: Feature
 
 ## Summary
@@ -260,7 +260,7 @@ if kind != roleKindDecode {
       Acceptance: `dockerfile_arg.py`, `base_image_builds.py`, `preflight-router.sh`, `lib-preflight.sh`, `validate_router.sh`, `router-taskpack.yaml`, `instructions/router.md`, and `proposals/router.json` support optional empty `*_COMMIT=""` without triggering `sglang-gateway-builder`, fetch full commit graphs (`--filter=blob:none`, no `--depth 1`) when `*_COMMIT` is non-empty, enforce `git merge-base --is-ancestor` hold (`held_back` / `awaiting_tag_containing_commit`) vs graduation (`ready_to_graduate`, clearing `*_COMMIT=""` and rebasing from `PINNED_COMMIT`), validate `versions[uid]` (`<ver>+<short7>` when commit-pinned, `<ver>` when tag-pinned), emit `sync_images` recommendations in report, summary (`summary_highlights`), and proposal JSON for eligible unmirrored `mirrored-llm-d-router-disagg-sidecar:<tag>` releases, and regenerate all six `.auto-sync/digests/*.lock.json` lockfiles; `hack/check/autosync-selftest.sh` covers every positive and negative case.
       Verify: `bash hack/check/autosync-selftest.sh && make lint`
 
-- [ ] **T3 · PR 1 merge and `gpustack/llm-router:v0.6.1` multi-arch publication checkpoint**
+- [x] **T3 · PR 1 merge and `gpustack/llm-router:v0.6.1` multi-arch publication checkpoint**
       Blocked by: T1, T2
       Owns: None
       Gate: review
@@ -280,7 +280,7 @@ if kind != roleKindDecode {
       Acceptance: `ModelDeploymentRouterImage` defaults to `gpustack/llm-router:v0.6.1` and `ModelDeploymentRoutingSidecarImage` defaults to `gpustack/mirrored-llm-d-router-disagg-sidecar:v1.0.0` in `pkg/worker/settings/value.go`, with `pkg/worker/settings/value_test.go` updated and passing.
       Verify: `go test -v -cover ./pkg/worker/settings/...`
 
-- [ ] **T6 · Controller wiring, webhook owned-arg guard, golden fixture updates, and standing-Pod currency verification (PR 2)**
+- [x] **T6 · Controller wiring, webhook owned-arg guard, golden fixture updates, and standing-Pod currency verification (PR 2)**
       Blocked by: T4, T5
       Owns: `pkg/worker/controllers/worker/**`, `pkg/worker/webhooks/worker/**`
       Gate: review

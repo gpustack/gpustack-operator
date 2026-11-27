@@ -172,7 +172,7 @@ func TestRenderModelDeploymentPod_DecodeUsesRoutingSidecar(t *testing.T) {
 			require.Len(t, pod.Spec.InitContainers, 1)
 			sidecar := pod.Spec.InitContainers[0]
 			assert.Equal(t, "routing-proxy", sidecar.Name)
-			assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0", sidecar.Image)
+			assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v1.0.0", sidecar.Image)
 			require.NotNil(t, sidecar.RestartPolicy)
 			assert.Equal(t, core.ContainerRestartPolicyAlways, *sidecar.RestartPolicy)
 			assert.Contains(t, sidecar.Args, fmt.Sprintf("--port=%d", tc.externalPort))
@@ -375,7 +375,7 @@ func TestRenderModelDeploymentPod_DecodeUsesClassicSidecarBelowTheFloor(t *testi
 
 	sidecar := pod.Spec.Containers[0]
 	assert.Equal(t, "routing-proxy", sidecar.Name, "the proxy is the FIRST regular container, the closest list order gets to starting first")
-	assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0", sidecar.Image)
+	assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v1.0.0", sidecar.Image)
 	assert.Nil(t, sidecar.RestartPolicy,
 		"a regular container leaves the field nil and lets the Pod's restartPolicy restart it")
 	assert.Contains(t, sidecar.Args, "--port=8000")
@@ -3334,8 +3334,8 @@ func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t 
 		"a sole server role": "7ad675fa1d3551c0843ec690f1c0e994bf6df78e192e3341b619eced6cc9f09f",
 		"a sole server role with a synthesized cache connector":                              "41ec47248abc38a498e5821795203467fa339bb30634854fe98dbd9fb05a47b5",
 		"a take-over role carrying a connector it must be given no part of":                  "f3f26080d4924c1a2c7304f8560197b2cc0683b45751552e4c895fabe6376725",
-		"a direct decoder with a native routing sidecar":                                     "5bc842901c67a848db0efedc3fc19b17ecfca45d90d1ae29d188f23c8c104179",
-		"a direct decoder with a classic routing sidecar":                                    "29d2163047c7774fddb6784b8f147693eb90572299d37a9262fed626ca10946d",
+		"a direct decoder with a native routing sidecar":                                     "1d166efa56e21a15d7b53c2998e6f257b730b0ad6d63fa1eb0da8ba456ec4b50",
+		"a direct decoder with a classic routing sidecar":                                    "b15217ef40a6ce84c30f061f84698b610616e962610a578e9f536a208f61447a",
 		"a role naming no image, which runs the engine's image":                              "7ad675fa1d3551c0843ec690f1c0e994bf6df78e192e3341b619eced6cc9f09f",
 		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "ad7ceeefffbc4cf541bd6babc80004d8a72d1a4ed8dc981fa6690b5aa02470d7",
 		"the prefill role of a two-role deployment":                                          "3df99cb5b902a54725480a6b4e2530878a9a17d1feed1c4f1efb70f27c59171f",
