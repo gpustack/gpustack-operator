@@ -823,6 +823,117 @@ func TestDevicesReconciler_ReconcileNotifier_Unsubscribes(t *testing.T) {
 	assert.Empty(t, r.notifiers)
 }
 
+// TestDevicesReconciler_ReconcileNotifier_BroadcastIsLossless pins the two properties that make
+// the wake broadcast lossless. A wake dropped because one is already pending must not block the
+// broadcaster, and the subscriber must still read the newest set afterwards; and a subscriber
+// registered after a broadcast must receive one wake, so its loop reads the stored set on its
+// first iteration instead of waiting for the next broadcast.
+func TestDevicesReconciler_ReconcileNotifier_BroadcastIsLossless(t *testing.T) {
+	t.Run("a full wake slot does not block and the newest set is still read", func(t *testing.T) {
+		r := &DevicesReconciler{}
+		wake, release := r.getReconcileNotifier(
+			nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModePartitioned,
+		)
+		defer release()
+
+		store := func(set []string) {
+			r.notifiersMutex.Lock()
+			r.lastLivePodUIDs = set
+			r.notifiersMutex.Unlock()
+			notifyDone := make(chan struct{})
+			go func() {
+				r.notifyListeners()
+				close(notifyDone)
+			}()
+			select {
+			case <-notifyDone:
+			case <-time.After(time.Second):
+				t.Fatal("notifyListeners blocked on a subscriber whose wake slot is full")
+			}
+		}
+
+		// Two broadcasts with no reader: the first fills the slot, the second is dropped.
+		store([]string{"pod-a"})
+		require.Len(t, wake, 1, "the first broadcast leaves one wake pending")
+		store([]string{"pod-b"})
+		require.Len(t, wake, 1, "a second wake is dropped behind the pending one")
+
+		// The subscriber wakes once, and the set it reads is the newest one.
+		select {
+		case <-wake:
+		default:
+			t.Fatal("the pending wake must still be delivered")
+		}
+		live, ok := r.livePodUIDs()
+		require.True(t, ok, "a stored set must be reported as present")
+		assert.Equal(t, []string{"pod-b"}, live)
+		select {
+		case <-wake:
+			t.Fatal("a dropped wake must not be delivered twice")
+		default:
+		}
+	})
+
+	t.Run("a subscriber registered after a broadcast is seeded with one wake", func(t *testing.T) {
+		r := &DevicesReconciler{}
+
+		r.notifiersMutex.Lock()
+		r.lastLivePodUIDs = []string{"pod-a"}
+		r.notifiersMutex.Unlock()
+		r.notifyListeners()
+
+		wake, release := r.getReconcileNotifier(
+			nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModePartitioned,
+		)
+		defer release()
+		select {
+		case <-wake:
+		default:
+			t.Fatal("a late subscriber must be seeded with one wake")
+		}
+		live, ok := r.livePodUIDs()
+		require.True(t, ok)
+		assert.Equal(t, []string{"pod-a"}, live)
+		select {
+		case <-wake:
+			t.Fatal("the seed is one wake, not a stream of them")
+		default:
+		}
+	})
+
+	t.Run("no set stored yet is reported as absent", func(t *testing.T) {
+		r := &DevicesReconciler{}
+		wake, release := r.getReconcileNotifier(
+			nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModePartitioned,
+		)
+		defer release()
+		// A reservation before the first Reconcile notifies, but nothing is stored yet: no wake
+		// may be delivered, and the getter must say there is no set.
+		r.notifyListeners()
+		select {
+		case <-wake:
+			t.Fatal("no wake may be sent before a set is stored")
+		default:
+		}
+		_, ok := r.livePodUIDs()
+		assert.False(t, ok)
+	})
+
+	t.Run("the returned set is a copy", func(t *testing.T) {
+		r := &DevicesReconciler{}
+		r.notifiersMutex.Lock()
+		r.lastLivePodUIDs = []string{"pod-a"}
+		r.notifiersMutex.Unlock()
+		live, ok := r.livePodUIDs()
+		require.True(t, ok)
+		live[0] = "mutated"
+		r.notifiersMutex.RLock()
+		stored := r.lastLivePodUIDs[0]
+		r.notifiersMutex.RUnlock()
+		assert.Equal(t, "pod-a", stored, "a reader must not hold the slice the next broadcast replaces")
+	})
+}
+
 // foreignSelection builds interface-policy state a concurrent writer owns on the same status:
 // a selection reference, exclusions and the resolved condition. No production writer publishes
 // it yet; the tests below stand in for whoever does.

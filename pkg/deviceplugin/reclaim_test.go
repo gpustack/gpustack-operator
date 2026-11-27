@@ -2,6 +2,7 @@ package deviceplugin
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,46 +14,240 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/gox"
 )
 
-// reclaimLoop must (1) never reconcile on a resync before the first broadcast seeds
-// the live set, (2) reconcile with the broadcast's set on every broadcast, (3)
-// reconcile against the last seeded set on a resync tick, and (4) stop on ctx cancel.
-func Test_reclaimLoop(t *testing.T) {
-	calls := make(chan []string, 8)
-	reconcile := func(live []string) { calls <- live }
+// reclaimHarness drives one reclaimLoop with a latest closure the test writes and a wake channel
+// the test fills. It is the seam the loop's contract is stated in: a store is a write the getter
+// will serve, a wake is a signal, and a call is one reconcile.
+type reclaimHarness struct {
+	mu      sync.Mutex
+	current []string
+	stored  bool
 
-	notifier := make(chan []string)
+	calls  chan []string
+	wake   chan struct{}
+	resync chan time.Time
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// newReclaimHarness builds a loop whose wake channel has the given buffer size and starts it.
+// Buffer 1 is what production hands the loop: one pending wake, a second send dropped.
+func newReclaimHarness(t *testing.T, wakeBuffer int) *reclaimHarness {
+	t.Helper()
+	h := newReclaimHarnessUnstarted()
+	h.wake = make(chan struct{}, wakeBuffer)
+	h.start(t)
+	return h
+}
+
+// newReclaimHarnessUnstarted builds a loop with a one-slot wake channel and does NOT start it, so
+// a row can fill the wake slot and store sets before anything exists to drain or read them.
+func newReclaimHarnessUnstarted() *reclaimHarness {
+	return &reclaimHarness{
+		calls:  make(chan []string, 16),
+		wake:   make(chan struct{}, 1),
+		resync: make(chan time.Time),
+		done:   make(chan struct{}),
+	}
+}
+
+// start runs the loop. Split from the constructor so a row can fill the wake slot before the loop
+// exists to drain it.
+func (h *reclaimHarness) start(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	h.cancel = cancel
+	go func() {
+		reclaimLoop(ctx, func(live []string) { h.calls <- live }, h.latest, h.wake, h.resync)
+		close(h.done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-h.done:
+		case <-time.After(time.Second):
+			t.Error("reclaim loop did not stop on cancel")
+		}
+	})
+}
+
+// latest is the getter handed to the loop.
+func (h *reclaimHarness) latest() ([]string, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.current, h.stored
+}
+
+// store makes set the newest stored set.
+func (h *reclaimHarness) store(set []string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.current = set
+	h.stored = true
+}
+
+// expectCall reads one reconcile call and checks its set.
+func (h *reclaimHarness) expectCall(t *testing.T, want []string, when string) {
+	t.Helper()
+	select {
+	case got := <-h.calls:
+		assert.Equal(t, want, got, when)
+	case <-time.After(time.Second):
+		t.Fatalf("%s: reconcile was not called", when)
+	}
+}
+
+// expectNoCall checks that the loop stays quiet for a while.
+func (h *reclaimHarness) expectNoCall(t *testing.T, when string) {
+	t.Helper()
+	select {
+	case got := <-h.calls:
+		t.Fatalf("%s: unexpected reconcile with %v", when, got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// expectCalls reads exactly the wanted calls, in order, then checks the loop is quiet.
+func (h *reclaimHarness) expectCalls(t *testing.T, want [][]string) {
+	t.Helper()
+	for _, w := range want {
+		h.expectCall(t, w, "expected call")
+	}
+	h.expectNoCall(t, "after the expected calls")
+}
+
+// Test_reclaimLoop pins the loop's contract: a tick or a wake before any set is stored never
+// reconciles, a wake or a tick reconciles with the newest stored set, two stores before one wake
+// reconcile once with the newer set, and a wake dropped behind a pending one still reconciles with
+// the newest set.
+func Test_reclaimLoop(t *testing.T) {
+	t.Run("tick before any stored set does not reconcile", func(t *testing.T) {
+		h := newReclaimHarness(t, 0)
+		h.resync <- time.Time{}
+		h.expectNoCall(t, "a tick before any broadcast")
+	})
+
+	t.Run("wake before any stored set does not reconcile", func(t *testing.T) {
+		h := newReclaimHarness(t, 0)
+		h.wake <- struct{}{}
+		h.expectNoCall(t, "a wake before any broadcast")
+	})
+
+	t.Run("a wake reconciles with the stored set", func(t *testing.T) {
+		h := newReclaimHarness(t, 0)
+		h.store([]string{"pod-a"})
+		h.wake <- struct{}{}
+		h.expectCalls(t, [][]string{{"pod-a"}})
+	})
+
+	t.Run("a tick reconciles with the newest stored set", func(t *testing.T) {
+		h := newReclaimHarness(t, 0)
+		h.store([]string{"pod-a"})
+		h.resync <- time.Time{}
+		h.expectCall(t, []string{"pod-a"}, "first tick")
+
+		h.store([]string{"pod-a", "pod-b"})
+		h.resync <- time.Time{}
+		h.expectCalls(t, [][]string{{"pod-a", "pod-b"}})
+	})
+
+	t.Run("two stores before the loop runs then one wake reconcile once with the newer", func(t *testing.T) {
+		// The loop does not exist yet, so nothing can drain the wake or read a set early. This is
+		// the reclaim loop starting after a burst of Reconciles: it must read the set as it is NOW.
+		h := newReclaimHarnessUnstarted()
+		h.store([]string{"pod-a"})
+		h.store([]string{"pod-b"})
+		h.wake <- struct{}{}
+		h.start(t)
+		h.expectCalls(t, [][]string{{"pod-b"}})
+	})
+
+	t.Run("a store landed after the wake was sent is what the wake reconciles with", func(t *testing.T) {
+		// The ordering that defeated the old buffered channel: a wake is already pending, THEN a
+		// newer set is stored, THEN the loop gets to run. The old loop replayed the set the wake
+		// carried; this one reads the set at the moment it runs, which is the newer one.
+		h := newReclaimHarnessUnstarted()
+		h.store([]string{"pod-a", "pod-dead"})
+		h.wake <- struct{}{}
+		h.store([]string{"pod-a"})
+		h.start(t)
+		h.expectCalls(t, [][]string{{"pod-a"}})
+	})
+
+	t.Run("a wake dropped behind a pending one still reconciles with the newest set", func(t *testing.T) {
+		// Store, wake, store, wake: the second wake is dropped behind the first because no loop
+		// is running to drain it, and the drop is therefore deterministic. The one wake that is
+		// delivered must still reconcile with the second set.
+		h := newReclaimHarnessUnstarted()
+		h.store([]string{"pod-a"})
+		h.wake <- struct{}{}
+		h.store([]string{"pod-b"})
+		select {
+		case h.wake <- struct{}{}:
+			t.Fatal("precondition: the wake slot must be full so this send is dropped")
+		default:
+		}
+		h.start(t)
+		h.expectCalls(t, [][]string{{"pod-b"}})
+	})
+
+	t.Run("ctx cancel stops the loop", func(t *testing.T) {
+		h := newReclaimHarness(t, 0)
+		h.cancel()
+		select {
+		case <-h.done:
+		case <-time.After(time.Second):
+			t.Fatal("loop did not stop on ctx cancel")
+		}
+	})
+}
+
+// Test_reclaimLoop_DroppedWakeReconcilesNewest reproduces the dropped-wake shape through the
+// reconciler's own broadcaster rather than a hand-filled channel: two notifyListeners calls with
+// no loop running yet, so the second wake is dropped behind the first, and the loop that then
+// starts reconciles with the second set and never the first.
+func Test_reclaimLoop_DroppedWakeReconcilesNewest(t *testing.T) {
+	reconciler := &DevicesReconciler{}
+
+	// Subscribe first, with no reader, so the wake has somewhere to land and nowhere to be drained.
+	wake, release := reconciler.getReconcileNotifier(nodefeature.ManufacturerNVIDIA,
+		workercore.DeviceAllocationModePartitioned)
+	defer release()
+	require.Empty(t, wake, "a fresh subscription before any broadcast must carry no seed")
+
+	broadcast := func(set []string) {
+		reconciler.notifiersMutex.Lock()
+		reconciler.lastLivePodUIDs = set
+		reconciler.notifiersMutex.Unlock()
+		reconciler.notifyListeners()
+	}
+	broadcast([]string{"pod-a"})
+	require.Len(t, wake, 1, "the first broadcast leaves one wake pending")
+	broadcast([]string{"pod-b"})
+	require.Len(t, wake, 1, "the second broadcast is dropped behind the pending wake")
+
+	// Now the loop starts and drains that single wake. It must read the set stored NOW.
+	calls := make(chan []string, 16)
+	latest := reconciler.livePodUIDs
 	resync := make(chan time.Time)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
 	done := make(chan struct{})
 	go func() {
-		reclaimLoop(ctx, reconcile, notifier, resync)
+		reclaimLoop(ctx, func(live []string) { calls <- live }, latest, wake, resync)
 		close(done)
 	}()
 
-	// A resync before any broadcast (unseeded) must not reconcile. The unbuffered send
-	// synchronizes with the loop's receive, so the loop has processed it once this returns.
-	resync <- time.Time{}
 	select {
-	case <-calls:
-		t.Fatal("resync before seeding must not reconcile")
+	case got := <-calls:
+		assert.Equal(t, []string{"pod-b"}, got, "the loop must read the newest set, not the one the wake was sent for")
+	case <-time.After(time.Second):
+		t.Fatal("reclaim loop was not woken by the pending wake")
+	}
+	select {
+	case got := <-calls:
+		t.Fatalf("a dropped wake must not produce a second reconcile; got %v", got)
 	case <-time.After(50 * time.Millisecond):
 	}
-
-	// A broadcast seeds the live set and reconciles with it.
-	notifier <- []string{"pod-a"}
-	assert.Equal(t, []string{"pod-a"}, <-calls)
-
-	// A resync now reconciles against the last seeded set.
-	resync <- time.Time{}
-	assert.Equal(t, []string{"pod-a"}, <-calls)
-
-	// A newer broadcast updates the seeded set for later resyncs.
-	notifier <- []string{}
-	assert.Empty(t, <-calls)
-	resync <- time.Time{}
-	assert.Empty(t, <-calls)
 
 	cancel()
 	select {

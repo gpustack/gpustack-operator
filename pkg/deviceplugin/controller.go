@@ -41,10 +41,15 @@ import (
 )
 
 type (
+	// _DevicesNotifier is one subscriber to the live pod-UID broadcast. Wake carries no payload:
+	// it is a 1-slot signal that the stored set has moved, and the subscriber reads the newest set
+	// with livePodUIDs after it fires. That shape is what makes the broadcast lossless — a second
+	// signal arriving while one is pending is dropped, and costs nothing, because the subscriber
+	// fetches the newest set either way.
 	_DevicesNotifier struct {
 		Manufacturer   string
 		AllocationMode workercore.DeviceAllocationMode
-		Channel        chan []string
+		Wake           chan struct{}
 	}
 
 	// _ReservationKey identifies one container's in-process allocation claim. A pod can hold
@@ -73,10 +78,12 @@ type (
 
 		notifiersMutex sync.RWMutex
 		notifiers      []_DevicesNotifier
-		// lastLivePodUIDs caches the most recent broadcast live pod-UID set so a notifier
-		// that subscribes after a reconcile is seeded immediately. Without it a late
-		// subscriber (a per-vendor reclaim loop registering after the initial reconcile)
-		// could stay unseeded until the next reconcile and never reclaim on its resync tick.
+		// lastLivePodUIDs is the newest live pod-UID set a Reconcile has stored. It is the value
+		// half of the broadcast: notifyListeners only signals, and every subscriber reads this
+		// through livePodUIDs once woken, so a dropped signal cannot lose a set. It also seeds a
+		// late subscriber (a per-vendor reclaim loop registering after the initial reconcile),
+		// which would otherwise stay unseeded until the next reconcile and never reclaim on its
+		// resync tick. Nil until the first store, which is what tells a reader no set exists yet.
 		lastLivePodUIDs []string
 
 		// reservations records, keyed by pod UID AND container name, the accelerator
@@ -460,13 +467,17 @@ func absorbFoldFailure(logger logr.Logger) func(step foldStep, pod *core.Pod, er
 	}
 }
 
-// notifyListeners broadcasts the last live-pod-UID sweep to every ListAndWatch subscriber,
-// triggering an immediate response rebuild. It fires on every Reconcile and synchronously from
+// notifyListeners wakes every ListAndWatch subscriber to the last live-pod-UID sweep, triggering
+// an immediate response rebuild. It fires on every Reconcile and synchronously from
 // reserveDevices/releaseReservation, so an accelerator reserved (or freed) in-process is reported
 // Unhealthy (or Healthy again) to kubelet in the same instant instead of waiting for the next
 // annotation-driven reconcile — closing the window where kubelet could hand a just-held accelerator
-// to an opposite-mode pod. Sends are non-blocking and skipped until the first sweep seeds the set,
-// so a pre-Reconcile reservation cannot flush a nil live set into the sliced working-dir GC.
+// to an opposite-mode pod.
+//
+// It carries no payload: the subscriber reads the set with livePodUIDs once woken. The signal is
+// non-blocking, and a signal dropped because one is already pending is harmless — the pending one
+// still wakes the subscriber, which then reads the newest set. Nothing is sent until a Reconcile has
+// stored a set, so a pre-Reconcile reservation cannot wake a reader into a set that does not exist.
 func (r *DevicesReconciler) notifyListeners() {
 	r.notifiersMutex.Lock()
 	defer r.notifiersMutex.Unlock()
@@ -474,12 +485,29 @@ func (r *DevicesReconciler) notifyListeners() {
 		return
 	}
 	for i := range r.notifiers {
-		notifier := &r.notifiers[i]
-		select {
-		case notifier.Channel <- r.lastLivePodUIDs:
-		default:
-		}
+		wakeReconcileNotifier(&r.notifiers[i])
 	}
+}
+
+// wakeReconcileNotifier signals one subscriber without blocking. A signal already pending is left
+// as it is: it already says the set has moved, and the subscriber reads the newest one regardless.
+func wakeReconcileNotifier(notifier *_DevicesNotifier) {
+	select {
+	case notifier.Wake <- struct{}{}:
+	default:
+	}
+}
+
+// livePodUIDs returns a copy of the newest live pod-UID set a Reconcile has stored, and whether
+// one has ever been stored. A reader woken by notifyListeners calls it to learn what changed; the
+// copy is what lets a reader hold its set while the next Reconcile replaces the stored one.
+func (r *DevicesReconciler) livePodUIDs() ([]string, bool) {
+	r.notifiersMutex.RLock()
+	defer r.notifiersMutex.RUnlock()
+	if r.lastLivePodUIDs == nil {
+		return nil, false
+	}
+	return slices.Clone(r.lastLivePodUIDs), true
 }
 
 // IndexingPodsByNodeName is the field-indexer key SetupController registers for Pods, keyed by
@@ -606,40 +634,45 @@ func (r *DevicesReconciler) enqueueDevicesWhenPodChanged(
 	return reqs
 }
 
-// getReconcileNotifier subscribes to the live-pod-UID broadcast and returns the channel to read
-// plus the function that unsubscribes it. Every subscriber must call the second return value when
-// it stops reading: a subscription outlives its reader otherwise, and a broadcast walks the whole
-// set under the notifiers mutex — some of it from inside the node allocate mutex.
+// getReconcileNotifier subscribes to the live-pod-UID broadcast and returns the wake channel to
+// select on plus the function that unsubscribes it. The channel carries a signal and no payload: on
+// every signal the subscriber reads the newest set with livePodUIDs, and reconciling over that set
+// is idempotent, so two broadcasts that collapse into one signal lose nothing. Every subscriber
+// must call the second return value when it stops reading: a subscription outlives its reader
+// otherwise, and a broadcast walks the whole set under the notifiers mutex — some of it from
+// inside the node allocate mutex.
+//
+// A subscriber registered after a set has been stored is seeded with one signal, so its loop reads
+// that set on its first iteration instead of waiting for the next broadcast. The channel is
+// freshly made and empty, so this send never blocks.
 func (r *DevicesReconciler) getReconcileNotifier(
 	manufacturer string, allocationMode workercore.DeviceAllocationMode,
-) (<-chan []string, func()) {
+) (<-chan struct{}, func()) {
 	r.notifiersMutex.Lock()
 	defer r.notifiersMutex.Unlock()
 
-	channel := make(chan []string, 4)
+	wake := make(chan struct{}, 1)
 	r.notifiers = append(r.notifiers, _DevicesNotifier{
 		Manufacturer:   manufacturer,
 		AllocationMode: allocationMode,
-		Channel:        channel,
+		Wake:           wake,
 	})
-	// Seed a late subscriber with the last broadcast set so its reclaim loop never stays
-	// unseeded. The channel is freshly buffered, so this send never blocks.
 	if r.lastLivePodUIDs != nil {
-		channel <- r.lastLivePodUIDs
+		wake <- struct{}{}
 	}
-	return channel, func() {
-		r.dropReconcileNotifier(channel)
+	return wake, func() {
+		r.dropReconcileNotifier(wake)
 	}
 }
 
-// dropReconcileNotifier removes a subscription, identified by the channel it was handed. It is safe
-// to call more than once: a channel already gone matches nothing.
-func (r *DevicesReconciler) dropReconcileNotifier(channel chan []string) {
+// dropReconcileNotifier removes a subscription, identified by the wake channel it was handed. It
+// is safe to call more than once: a channel already gone matches nothing.
+func (r *DevicesReconciler) dropReconcileNotifier(wake chan struct{}) {
 	r.notifiersMutex.Lock()
 	defer r.notifiersMutex.Unlock()
 
 	r.notifiers = slices.DeleteFunc(r.notifiers, func(n _DevicesNotifier) bool {
-		return n.Channel == channel
+		return n.Wake == wake
 	})
 }
 
@@ -738,19 +771,12 @@ func (r *DevicesReconciler) applyRDMASelection(resolution RDMAPolicyResolution) 
 func (r *DevicesReconciler) notifyRDMAListeners() {
 	r.notifiersMutex.Lock()
 	defer r.notifiersMutex.Unlock()
-	payload := r.lastLivePodUIDs
-	if payload == nil {
-		payload = []string{}
-	}
 	for i := range r.notifiers {
 		notifier := &r.notifiers[i]
 		if notifier.Manufacturer != rdmaFamilyName {
 			continue
 		}
-		select {
-		case notifier.Channel <- payload:
-		default:
-		}
+		wakeReconcileNotifier(notifier)
 	}
 }
 
