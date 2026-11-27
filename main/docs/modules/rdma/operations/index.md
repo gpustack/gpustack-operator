@@ -296,6 +296,30 @@ kubectl get devices <node> -o json |
   verify verbs driver binding when a physical NIC has `rdmaDevice` absent, and run
   `device-manager preflight` on the host.
 
+### Fabric check between nodes
+
+The `rdma.*` labels and the link verdicts describe what Device Manager read on one `Node`: its
+inventory and the state of each port. They say nothing about whether *RDMA* traffic passes between two
+`Node`s.
+
+A routed RoCE path can carry every IP packet and still drop RoCE v2 frames, and a path that passes one
+connection can fail the next. Before a workload that spans `Node`s relies on these labels, run verbs
+traffic between them, from a `Pod` that holds the *RDMA* devices or from the hosts. `rping` ships with
+`rdma-core`.
+
+```bash
+# On the first node: a server bound to the data address, serving any number of clients
+rping -s -P -a <node-a-data-address> -v
+
+# On the second node: a client bound to its own data address, five verified round trips
+rping -c -a <node-a-data-address> -I <node-b-data-address> -C 5 -S 1024 -V
+```
+
+Bind both sides to the address the workload will use. A `Node` with policy routing answers on the
+wrong interface otherwise, and the failure looks like a fabric fault. Repeat the client several
+times: a path that passes some connections and fails others is a fabric problem to take to the
+network team, not a label to work around.
+
 ## EFA engine images
 
 Official GPUStack runner images carry standard Mooncake wheels without EFA support (while the
