@@ -551,6 +551,86 @@ func (in ModelDeploymentEnvVar) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForger) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForger"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerBinding) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerBinding"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerBindingStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerBindingStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerBottleneck) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerBottleneck"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerDecision) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerDecision"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerGenerationStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerGenerationStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerProbeSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerProbeSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerRoleSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerRoleSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerRoleStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerRoleStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerRolloutSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerRolloutSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerSandboxResources) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerSandboxResources"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerSandboxSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerSandboxSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerSandboxStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerSandboxStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentForgerStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentGroupMemberStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentGroupMemberStatus"
 }
@@ -643,6 +723,11 @@ func (in ModelDeploymentRole) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentRoleEndpointsStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleEndpointsStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRoleKernelArtifactStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleKernelArtifactStatus"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
@@ -913,6 +998,51 @@ func (in ModelDeploymentSpec) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelKernelArtifact) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelKernelArtifact"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelKernelArtifactCompatibility) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelKernelArtifactCompatibility"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelKernelArtifactForgerReference) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelKernelArtifactForgerReference"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelKernelArtifactList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelKernelArtifactList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelKernelArtifactNodeStoreSource) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelKernelArtifactNodeStoreSource"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelKernelArtifactResolved) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelKernelArtifactResolved"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelKernelArtifactSource) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelKernelArtifactSource"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelKernelArtifactSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelKernelArtifactSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelKernelArtifactStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelKernelArtifactStatus"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

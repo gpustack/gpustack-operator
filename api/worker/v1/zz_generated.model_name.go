@@ -236,6 +236,16 @@ func (in ModelDeploymentCacheHit) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForger) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelDeploymentForger"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentForgerList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelDeploymentForgerList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentList) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.ModelDeploymentList"
 }
@@ -268,6 +278,16 @@ func (in ModelDeploymentScaler) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentScalerList) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.ModelDeploymentScalerList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelKernelArtifact) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelKernelArtifact"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelKernelArtifactList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelKernelArtifactList"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

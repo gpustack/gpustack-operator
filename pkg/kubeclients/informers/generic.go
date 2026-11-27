@@ -304,8 +304,12 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().ModelArtifacts().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("modeldeployments"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().ModelDeployments().Informer()}, nil
+	case workerv1.SchemeGroupVersion.WithResource("modeldeploymentforgers"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().ModelDeploymentForgers().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("modeldeploymentscalers"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().ModelDeploymentScalers().Informer()}, nil
+	case workerv1.SchemeGroupVersion.WithResource("modelkernelartifacts"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().ModelKernelArtifacts().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("modelprefetches"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().ModelPrefetches().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("modelstores"):
@@ -338,8 +342,12 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().ModelArtifacts().Informer()}, nil
 	case workerv1alpha1.SchemeGroupVersion.WithResource("modeldeployments"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().ModelDeployments().Informer()}, nil
+	case workerv1alpha1.SchemeGroupVersion.WithResource("modeldeploymentforgers"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().ModelDeploymentForgers().Informer()}, nil
 	case workerv1alpha1.SchemeGroupVersion.WithResource("modeldeploymentscalers"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().ModelDeploymentScalers().Informer()}, nil
+	case workerv1alpha1.SchemeGroupVersion.WithResource("modelkernelartifacts"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().ModelKernelArtifacts().Informer()}, nil
 	case workerv1alpha1.SchemeGroupVersion.WithResource("modelprefetches"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().ModelPrefetches().Informer()}, nil
 	case workerv1alpha1.SchemeGroupVersion.WithResource("modelstores"):

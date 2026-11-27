@@ -26,7 +26,9 @@ func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 		"KVCachePoolBinding":         crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding(),
 		"ModelArtifact":              crd_gpustack_api_worker_v1alpha1_ModelArtifact(),
 		"ModelDeployment":            crd_gpustack_api_worker_v1alpha1_ModelDeployment(),
+		"ModelDeploymentForger":      crd_gpustack_api_worker_v1alpha1_ModelDeploymentForger(),
 		"ModelDeploymentScaler":      crd_gpustack_api_worker_v1alpha1_ModelDeploymentScaler(),
+		"ModelKernelArtifact":        crd_gpustack_api_worker_v1alpha1_ModelKernelArtifact(),
 		"ModelPrefetch":              crd_gpustack_api_worker_v1alpha1_ModelPrefetch(),
 		"ModelStore":                 crd_gpustack_api_worker_v1alpha1_ModelStore(),
 		"ModelStoreBinding":          crd_gpustack_api_worker_v1alpha1_ModelStoreBinding(),
@@ -5918,6 +5920,20 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Nullable:  true,
 															XListType: ptr.To[string]("atomic"),
 														},
+														"kernelArtifactRef": {
+															Description: "KernelArtifactRef optionally names a ModelKernelArtifact in this namespace whose verified\nkernel bundle is mounted read-only at /var/lib/gpustack/kernels on this role's Pods.\nChanging or clearing it triggers a readiness-gated rolling replacement of this role's\nreplicas while leaving deployments that omit it unchanged.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"name": {
+																	Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`""`),
+																	},
+																},
+															},
+															Nullable: true,
+														},
 														"kind": {
 															Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name\nis free-form and identifies the PodSet, while this selects behavior, and a semantic reachable\nby typing a string is one typo away from silently changing. Two roles may share a kind and\ndiffer in name ONLY where that kind is Server, because a pair of servers is a set of equals and\ntwo prefillers are not: nothing that consumes these roles expresses a second prefiller, so a\ndeployment declaring one would render a role no reader of the rendered configuration could\nreach. It defaults to Server, the shape a deployment written before disaggregation existed has,\nso such a deployment renders exactly as it did.",
 															Type:        "string",
@@ -6282,7 +6298,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 									Type: "object",
 									Properties: map[string]v1.JSONSchemaProps{
 										"conditions": {
-											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady,\nWeightsReady, RuntimeControlSynced. They are independent —\n\"quota reserved but cache not attached\" is a real and actionable state — which is what a single\nphase string cannot carry.\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher\nthat was configured and then crashed therefore remains True until a live consumer observes it.\nWeightsReady reports whether every engine role's weights are available: a claim artifact\nmounted, or an engine's own download of a hub artifact finished. While it is False for a\nreason other than a Pod still starting, no replica is created and none that runs is touched.",
+											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady,\nWeightsReady, KernelsReady, RuntimeControlSynced. They are independent —\n\"quota reserved but cache not attached\" is a real and actionable state — which is what a single\nphase string cannot carry.\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher\nthat was configured and then crashed therefore remains True until a live consumer observes it.\nWeightsReady reports whether every engine role's weights are available: a claim artifact\nmounted, or an engine's own download of a hub artifact finished. While it is False for a\nreason other than a Pod still starting, no replica is created and none that runs is touched.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{
@@ -6896,6 +6912,51 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Nullable:  true,
 															XListType: ptr.To[string]("atomic"),
 														},
+														"kernelArtifact": {
+															Description: "KernelArtifact echoes the resolved kernel bundle identity, delivery mechanism, and loaded\nkernel count when this role sets spec.roles[].kernelArtifactRef.",
+															Type:        "object",
+															Required: []string{
+																"artifact",
+																"delivery",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"artifact": {
+																	Description: "Artifact is the name of the referenced ModelKernelArtifact in this namespace.",
+																	Type:        "string",
+																},
+																"delivery": {
+																	Description: "Delivery reports whether the kernel bundle reaches Pods via Node CSI cache or OCI Image\nvolume.",
+																	Type:        "string",
+																	Enum: []v1.JSON{
+																		{
+																			Raw: []byte(`"Node"`),
+																		},
+																		{
+																			Raw: []byte(`"Image"`),
+																		},
+																	},
+																},
+																"dispatchManifestDigest": {
+																	Description: "DispatchManifestDigest is the SHA-256 digest of dispatch-manifest.json observed for the\nkernel bundle.",
+																	Type:        "string",
+																},
+																"loadedKernels": {
+																	Description: "LoadedKernels is the count of specialized kernels confirmed loaded by engine sentinel across\nconverged instances of this role.",
+																	Type:        "integer",
+																	Format:      "int32",
+																	Minimum:     ptr.To[float64](0),
+																},
+																"manifestDigest": {
+																	Description: "ManifestDigest is the resolved gpustack-manifest v1 digest for node-delivered kernel\nbundles; absent for OCI image delivery.",
+																	Type:        "string",
+																},
+																"quarantined": {
+																	Description: "Quarantined echoes whether the referenced ModelKernelArtifact has been quarantined.",
+																	Type:        "boolean",
+																},
+															},
+															Nullable: true,
+														},
 														"kind": {
 															Description: "Kind echoes the role's kind, so reading the status alone answers which half of a\ndisaggregated deployment an entry describes. It is ALWAYS present: every role has a kind,\ndefaulted if the user named none, so an absent value would mean the status was written by\nsomething that did not know about kinds rather than that the role has none.\nThe enum is the same one the spec field carries and has to stay that way: this field is written\nfrom the spec field with the unset case resolved, so a value the writer can produce and this\nlist does not name would make every later status write on the object fail, taking every other\nfigure down with the kind. The marker sits on the field because the type's own enum marker is a\nGo-level one and does not become schema validation.",
 															Type:        "string",
@@ -7297,6 +7358,675 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 							Description: "",
 							Priority:    0,
 							JSONPath:    ".status.endpoint",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_ModelDeploymentForger() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "modeldeploymentforgers.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "modeldeploymentforgers",
+				Singular: "modeldeploymentforger",
+				ShortNames: []string{
+					"mdf",
+				},
+				Kind:     "ModelDeploymentForger",
+				ListKind: "ModelDeploymentForgerList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Namespaced",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "ModelDeploymentForger automates closed-loop short-window kernel probing, Kueue-scheduled\nsingle-GPU sandbox synthesis and independent verification, NodeModelStore publication, and\nreadiness-gated canary rollout over one ModelDeployment.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"targetRef",
+										"roles",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"mode": {
+											Description: "Mode selects how far the closed loop proceeds: ObserveOnly distills bottlenecks from probes\nonly, Shadow also runs ForgeSandbox and publishes verified ModelKernelArtifacts without\nmutating the target, and Active promotes verified artifacts onto target roles.",
+											Type:        "string",
+											Default: &v1.JSON{
+												Raw: []byte(`"Shadow"`),
+											},
+											Enum: []v1.JSON{
+												{
+													Raw: []byte(`"ObserveOnly"`),
+												},
+												{
+													Raw: []byte(`"Shadow"`),
+												},
+												{
+													Raw: []byte(`"Active"`),
+												},
+											},
+										},
+										"probe": {
+											Description: "Probe configures short-window live sentinel profiling passes.",
+											Type:        "object",
+											Default: &v1.JSON{
+												Raw: []byte(`{}`),
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"cooldownSeconds": {
+													Description: "CooldownSeconds is the minimum wait time in seconds between probe passes (at least 60,\ndefault 600).",
+													Type:        "integer",
+													Format:      "int32",
+													Default: &v1.JSON{
+														Raw: []byte(`600`),
+													},
+													Minimum: ptr.To[float64](60),
+												},
+												"minActiveRequests": {
+													Description: "MinActiveRequests is the minimum running request count observed on a leader replica before\narming a short-window probe.",
+													Type:        "integer",
+													Format:      "int32",
+													Default: &v1.JSON{
+														Raw: []byte(`1`),
+													},
+													Minimum: ptr.To[float64](0),
+												},
+												"steps": {
+													Description: "Steps is the number of execution steps captured per probe window (3 to 5, default 4).",
+													Type:        "integer",
+													Format:      "int32",
+													Default: &v1.JSON{
+														Raw: []byte(`4`),
+													},
+													Maximum: ptr.To[float64](5),
+													Minimum: ptr.To[float64](3),
+												},
+											},
+										},
+										"roles": {
+											Description: "Roles lists the serving roles on the target ModelDeployment to probe and specialize.",
+											Type:        "array",
+											MinItems:    ptr.To[int64](1),
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"maxKernelsPerGeneration": {
+															Description: "MaxKernelsPerGeneration caps how many top non-GEMM single-GPU operator bottlenecks are\ntargeted in one ForgeSandbox pass.",
+															Type:        "integer",
+															Format:      "int32",
+															Default: &v1.JSON{
+																Raw: []byte(`4`),
+															},
+															Maximum: ptr.To[float64](16),
+															Minimum: ptr.To[float64](1),
+														},
+														"minSpeedupRatio": {
+															Description: "MinSpeedupRatio is a decimal ratio string at or above \"1.01\" (default \"1.05\") that\nforge-verifier requires over the reference implementation before admitting a kernel.",
+															Type:        "string",
+															Default: &v1.JSON{
+																Raw: []byte(`"1.05"`),
+															},
+															MaxLength: ptr.To[int64](32),
+															MinLength: ptr.To[int64](1),
+														},
+														"name": {
+															Description: "Name is the target role name in ModelDeployment.spec.roles (Server, Prefill, or Decode).",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+															MinLength:   ptr.To[int64](1),
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"rollout": {
+											Description: "Rollout configures generation retention and canary failure rollback deadlines.",
+											Type:        "object",
+											Default: &v1.JSON{
+												Raw: []byte(`{}`),
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"failureTimeoutSeconds": {
+													Description: "FailureTimeoutSeconds is how long a promoted kernel generation may wait for canary readiness\nand loaded-kernel confirmation before automatic rollback and quarantine (default 600).",
+													Type:        "integer",
+													Format:      "int32",
+													Default: &v1.JSON{
+														Raw: []byte(`600`),
+													},
+													Minimum: ptr.To[float64](1),
+												},
+												"maxRetainedGenerations": {
+													Description: "MaxRetainedGenerations is the number of recent ModelKernelArtifact generations retained per\nrole before unreferenced older generations are pruned (1 to 16, default 3).",
+													Type:        "integer",
+													Format:      "int32",
+													Default: &v1.JSON{
+														Raw: []byte(`3`),
+													},
+													Maximum: ptr.To[float64](16),
+													Minimum: ptr.To[float64](1),
+												},
+											},
+										},
+										"sandbox": {
+											Description: "Sandbox configures the Kueue-admitted single-GPU ForgeSandbox Pod and verifier limits.",
+											Type:        "object",
+											Default: &v1.JSON{
+												Raw: []byte(`{}`),
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"outputSizeLimit": {
+													Description: "OutputSizeLimit bounds the forge-output emptyDir staging volume (64Mi to 16Gi, default 2Gi).",
+													Default: &v1.JSON{
+														Raw: []byte(`"2Gi"`),
+													},
+													Pattern: `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													Nullable:     true,
+													XIntOrString: true,
+												},
+												"priorityClassName": {
+													Description: "PriorityClassName optionally sets the Kubernetes PriorityClass on the ForgeSandbox Pod.",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](253),
+												},
+												"resources": {
+													Description: "Resources optionally specifies host CPU and memory requests and limits for ForgeSandbox\ncontainers alongside the single whole accelerator card requested from Kueue.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"cpu": {
+															Description: "CPU is the host CPU request and limit for the ForgeSandbox Pod, such as \"8\".",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+														"ram": {
+															Description: "RAM is the host memory request and limit for the ForgeSandbox Pod, such as \"32Gi\".",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															Nullable:     true,
+															XIntOrString: true,
+														},
+													},
+													Nullable: true,
+												},
+												"runnerImage": {
+													Description: "RunnerImage is the container image executed by forge-runner when RunnerMode is External.",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](512),
+												},
+												"runnerMode": {
+													Description: "RunnerMode selects External (black-box synthesis container image) or Mock (deterministic\nbuilt-in operator subcommands for pipeline qualification).",
+													Type:        "string",
+													Default: &v1.JSON{
+														Raw: []byte(`"External"`),
+													},
+													Enum: []v1.JSON{
+														{
+															Raw: []byte(`"External"`),
+														},
+														{
+															Raw: []byte(`"Mock"`),
+														},
+													},
+												},
+												"timeoutSeconds": {
+													Description: "TimeoutSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400,\ndefault 1800).",
+													Type:        "integer",
+													Format:      "int32",
+													Default: &v1.JSON{
+														Raw: []byte(`1800`),
+													},
+													Maximum: ptr.To[float64](14400),
+													Minimum: ptr.To[float64](60),
+												},
+											},
+										},
+										"suspend": {
+											Description: "Suspend pauses probing, sandbox creation, and promotion and releases any held target binding\nwithout deleting the forger.",
+											Type:        "boolean",
+										},
+										"targetRef": {
+											Description: "TargetRef names the target ModelDeployment in this namespace. Immutable after creation.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"name": {
+													Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+													Type:        "string",
+													Default: &v1.JSON{
+														Raw: []byte(`""`),
+													},
+												},
+											},
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"binding": {
+											Description: "Binding records the active forger-binding lease held on the target ModelDeployment.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"targetName": {
+													Description: "TargetName is the name of the bound ModelDeployment.",
+													Type:        "string",
+												},
+												"targetUID": {
+													Description: "TargetUID is the UID of the bound ModelDeployment.",
+													Type:        "string",
+												},
+												"term": {
+													Description: "Term is the monotonic binding term under which the forger writes.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+											},
+											Nullable: true,
+										},
+										"conditions": {
+											Description: "Conditions reports Bound, Active, Blocked, and Ready status for the forger.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"observedGeneration": {
+											Description: "ObservedGeneration is the metadata generation last evaluated by the controller.",
+											Type:        "integer",
+											Format:      "int64",
+										},
+										"roles": {
+											Description: "Roles reports per-role forging phase, active sandbox identity, distilled bottlenecks, and\nrecent generation outcomes.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"activeGeneration": {
+															Description: "ActiveGeneration is the monotonically increasing forge generation number currently running or\nmost recently promoted for this role.",
+															Type:        "integer",
+															Format:      "int64",
+														},
+														"activeKernelArtifact": {
+															Description: "ActiveKernelArtifact names the ModelKernelArtifact currently promoted or staged for this\nrole.",
+															Type:        "string",
+														},
+														"activeSandbox": {
+															Description: "ActiveSandbox records the worker-created ForgeSandbox Pod currently running for this role.\nModel-manager verifies PodUID against this worker-guarded field before ingesting outputs.",
+															Type:        "object",
+															Required: []string{
+																"podName",
+																"podUID",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"configMapName": {
+																	Description: "ConfigMapName is the name of the owner-referenced input ConfigMap mounted into the sandbox.",
+																	Type:        "string",
+																},
+																"nodeName": {
+																	Description: "NodeName is the Kubernetes Node where the ForgeSandbox Pod was scheduled; empty while\nawaiting scheduling.",
+																	Type:        "string",
+																},
+																"podName": {
+																	Description: "PodName is the name of the ForgeSandbox Pod in this namespace.",
+																	Type:        "string",
+																	MaxLength:   ptr.To[int64](253),
+																	MinLength:   ptr.To[int64](1),
+																},
+																"podUID": {
+																	Description: "PodUID is the Kubernetes UID of the ForgeSandbox Pod, verified by model-manager before\ningesting emptyDir outputs.",
+																	Type:        "string",
+																	MaxLength:   ptr.To[int64](128),
+																	MinLength:   ptr.To[int64](1),
+																},
+																"startedAt": {
+																	Description: "StartedAt is when the ForgeSandbox Pod was created.",
+																	Type:        "string",
+																	Format:      "date-time",
+																	Nullable:    true,
+																},
+															},
+															Nullable: true,
+														},
+														"generations": {
+															Description: "Generations is a bounded history (up to 16 entries) of forge generations for this role.",
+															Type:        "array",
+															MaxItems:    ptr.To[int64](16),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"generation",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"artifactName": {
+																			Description: "ArtifactName is the ModelKernelArtifact created for this generation, if published.",
+																			Type:        "string",
+																		},
+																		"finishedAt": {
+																			Description: "FinishedAt is when this generation reached its terminal outcome.",
+																			Type:        "string",
+																			Format:      "date-time",
+																			Nullable:    true,
+																		},
+																		"generation": {
+																			Description: "Generation is the sequential 1-based forge generation number for this role.",
+																			Type:        "integer",
+																			Format:      "int64",
+																			Minimum:     ptr.To[float64](1),
+																		},
+																		"manifestDigest": {
+																			Description: "ManifestDigest is the content address of the published kernel bundle, if published.",
+																			Type:        "string",
+																		},
+																		"message": {
+																			Description: "Message provides human-readable context for Outcome.",
+																			Type:        "string",
+																		},
+																		"outcome": {
+																			Description: "Outcome summarizes how this generation ended.",
+																			Type:        "string",
+																			Enum: []v1.JSON{
+																				{
+																					Raw: []byte(`"Promoted"`),
+																				},
+																				{
+																					Raw: []byte(`"RolledBack"`),
+																				},
+																				{
+																					Raw: []byte(`"Failed"`),
+																				},
+																				{
+																					Raw: []byte(`"Skipped"`),
+																				},
+																			},
+																		},
+																		"reason": {
+																			Description: "Reason is a machine-readable reason code for Outcome.",
+																			Type:        "string",
+																		},
+																		"startedAt": {
+																			Description: "StartedAt is when this generation began.",
+																			Type:        "string",
+																			Format:      "date-time",
+																			Nullable:    true,
+																		},
+																	},
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+														"name": {
+															Description: "Name is the targeted role name in ModelDeployment.spec.roles.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+															MinLength:   ptr.To[int64](1),
+														},
+														"observedBottlenecks": {
+															Description: "ObservedBottlenecks lists the hottest eligible single-GPU non-GEMM kernels distilled from the\nmost recent probe pass.",
+															Type:        "array",
+															MaxItems:    ptr.To[int64](32),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"localKernelKey",
+																		"opFamily",
+																		"gpuTimeSharePercent",
+																		"observedAt",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"gpuTimeSharePercent": {
+																			Description: "GPUTimeSharePercent is the decimal percentage of profiled single-GPU kernel self-time spent\nin this operator, such as \"12.5\".",
+																			Type:        "string",
+																			MaxLength:   ptr.To[int64](32),
+																			MinLength:   ptr.To[int64](1),
+																		},
+																		"localKernelKey": {
+																			Description: "LocalKernelKey is the canonical single-GPU operator key over static per-rank dimensions.",
+																			Type:        "string",
+																			MinLength:   ptr.To[int64](1),
+																		},
+																		"observedAt": {
+																			Description: "ObservedAt is when the probe window that distilled this bottleneck completed.",
+																			Type:        "string",
+																			Format:      "date-time",
+																		},
+																		"opFamily": {
+																			Description: "OpFamily is the canonical single-GPU operator family name, such as \"rmsnorm\".",
+																			Type:        "string",
+																			MinLength:   ptr.To[int64](1),
+																		},
+																	},
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+														"phase": {
+															Description: "Phase is the current lifecycle step for this role.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"Idle"`),
+																},
+																{
+																	Raw: []byte(`"Probing"`),
+																},
+																{
+																	Raw: []byte(`"Forging"`),
+																},
+																{
+																	Raw: []byte(`"Verifying"`),
+																},
+																{
+																	Raw: []byte(`"Publishing"`),
+																},
+																{
+																	Raw: []byte(`"Promoting"`),
+																},
+															},
+														},
+														"previousKernelArtifact": {
+															Description: "PreviousKernelArtifact names the prior ModelKernelArtifact retained and pinned for automatic\nrollback while a promotion is in flight; empty when stock engine kernels were running.",
+															Type:        "string",
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Target",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.targetRef.name",
+						},
+						{
+							Name:        "Mode",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.mode",
+						},
+						{
+							Name:        "Bound",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.conditions[?(@.type=='Bound')].status",
+						},
+						{
+							Name:        "Active",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.conditions[?(@.type=='Active')].status",
+						},
+						{
+							Name:        "Blocked",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.conditions[?(@.type=='Blocked')].status",
+						},
+						{
+							Name:        "Ready",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.conditions[?(@.type=='Ready')].status",
+						},
+						{
+							Name:        "Age",
+							Type:        "date",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".metadata.creationTimestamp",
 						},
 					},
 				},
@@ -9059,6 +9789,490 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeploymentScaler() *v1.CustomResource
 	}
 }
 
+func crd_gpustack_api_worker_v1alpha1_ModelKernelArtifact() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "modelkernelartifacts.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "modelkernelartifacts",
+				Singular: "modelkernelartifact",
+				ShortNames: []string{
+					"mkart",
+				},
+				Kind:     "ModelKernelArtifact",
+				ListKind: "ModelKernelArtifactList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Namespaced",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "ModelKernelArtifact declares an immutable, content-addressed bundle of specialized single-GPU\noperator kernels and their hardware and engine compatibility envelope.\nIts whole spec is immutable after creation, enforced at admission. Binary kernel bundles live in\nNodeModelStore, a commit-pinned hub repository, or a digest-pinned OCI image; ConfigMap sources\nare omitted from the schema by design.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"source",
+										"compatibility",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"compatibility": {
+											Description: "Compatibility declares the engine, hardware architecture, and canonical single-GPU kernel\nkeys this bundle was built and verified for.",
+											Type:        "object",
+											Required: []string{
+												"engine",
+												"engineVersion",
+												"manufacturer",
+												"architecture",
+												"kernelKeys",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"architecture": {
+													Description: "Architecture is the canonical accelerator architecture identifier, such as \"sm_90a\",\n\"gfx942\", or \"910b\".",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](63),
+													MinLength:   ptr.To[int64](1),
+												},
+												"engine": {
+													Description: "Engine selects the inference engine family this bundle targets.",
+													Type:        "string",
+													Enum: []v1.JSON{
+														{
+															Raw: []byte(`"vLLM"`),
+														},
+														{
+															Raw: []byte(`"SGLang"`),
+														},
+													},
+												},
+												"engineVersion": {
+													Description: "EngineVersion is the normalized inference engine release version this bundle was verified\nagainst.",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](64),
+													MinLength:   ptr.To[int64](1),
+												},
+												"kernelKeys": {
+													Description: "KernelKeys lists the canonical single-GPU LocalKernelKey entries carried in this bundle's\ndispatch manifest, over static per-rank dimensions only.",
+													Type:        "array",
+													MaxItems:    ptr.To[int64](128),
+													MinItems:    ptr.To[int64](1),
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "string",
+														},
+													},
+													Nullable:  true,
+													XListType: ptr.To[string]("atomic"),
+												},
+												"manufacturer": {
+													Description: "Manufacturer is the canonical lowercase accelerator vendor key, such as \"nvidia\", \"amd\", or\n\"ascend\".",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](63),
+													MinLength:   ptr.To[int64](1),
+												},
+											},
+										},
+										"source": {
+											Description: "Source declares where the verified kernel bundle comes from.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"huggingFace": {
+													Description: "HuggingFace imports an exported kernel bundle from a Hugging Face repository pinned to a\nfull 40-character hexadecimal commit SHA.",
+													Type:        "object",
+													Required: []string{
+														"repository",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"repository": {
+															Description: "Repository is the repository id, \"owner/name\", or a bare canonical name.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](256),
+															MinLength:   ptr.To[int64](1),
+														},
+														"revision": {
+															Description: "Revision is a branch, a tag or a commit. Admission defaults it to \"main\". It is resolved to a\nfull commit once, at creation, into status.resolved.revision.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](255),
+														},
+														"secretRef": {
+															Description: "SecretRef names a Secret in this namespace whose \"token\" key is the hub token. It is read by\nthe controller for resolution and revalidation, and handed to an engine that downloads the\nweights itself through an environment variable referencing the Secret, so the value never\nenters a Pod spec, a status or an event.\nThe Secret need not exist at admission; a missing one is reported in status.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"name": {
+																	Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`""`),
+																	},
+																},
+															},
+															Nullable: true,
+														},
+													},
+													Nullable: true,
+												},
+												"image": {
+													Description: "Image imports an exported kernel bundle from a digest-pinned OCI image mounted read-only\nthrough a Kubernetes image volume.",
+													Type:        "object",
+													Required: []string{
+														"reference",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"reference": {
+															Description: "Reference is the image reference, pinned to a digest:\n\"registry/repository@sha256:<64 lowercase hex>\". The digest is the artifact's whole\nidentity; status.resolved stays empty for an image source, as for a claim, and the\nreference in this immutable spec is the only record of what the artifact delivers.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															MinLength:   ptr.To[int64](1),
+														},
+													},
+													Nullable: true,
+												},
+												"nodeStore": {
+													Description: "NodeStore references a forged kernel bundle ingested into NodeModelStore on a seed node and\nreplicated across peers. Only the operator worker identity may create artifacts with this\nsource.",
+													Type:        "object",
+													Required: []string{
+														"manifestDigest",
+														"dispatchManifestDigest",
+														"sizeBytes",
+														"fileCount",
+														"seedNode",
+														"forgerRef",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"dispatchManifestDigest": {
+															Description: "DispatchManifestDigest is the SHA-256 digest of dispatch-manifest.json at the root of the\nkernel tree (\"sha256:\" followed by 64 lowercase hexadecimal characters).",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](71),
+															Pattern:     `^sha256:[a-f0-9]{64}$`,
+														},
+														"fileCount": {
+															Description: "FileCount is the number of regular files in the published kernel tree, including\ndispatch-manifest.json and at least one solution or kernel file.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](2),
+														},
+														"forgerRef": {
+															Description: "ForgerRef identifies the owning ModelDeploymentForger in this namespace that produced the\nkernel bundle.",
+															Type:        "object",
+															Required: []string{
+																"name",
+																"uid",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"name": {
+																	Description: "Name is the name of the owning ModelDeploymentForger in this namespace.",
+																	Type:        "string",
+																	MaxLength:   ptr.To[int64](253),
+																	MinLength:   ptr.To[int64](1),
+																},
+																"uid": {
+																	Description: "UID is the Kubernetes UID of the owning ModelDeploymentForger at creation time.",
+																	Type:        "string",
+																	MaxLength:   ptr.To[int64](128),
+																	MinLength:   ptr.To[int64](1),
+																},
+															},
+														},
+														"manifestDigest": {
+															Description: "ManifestDigest is the content address of the published kernel tree (\"sha256:\" followed by\n64 lowercase hexadecimal characters).",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](71),
+															Pattern:     `^sha256:[a-f0-9]{64}$`,
+														},
+														"seedNode": {
+															Description: "SeedNode names the Kubernetes Node whose model-manager daemon first ingested and published\nthe verified kernel tree.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+															MinLength:   ptr.To[int64](1),
+														},
+														"sizeBytes": {
+															Description: "SizeBytes is the total byte size of all files in the published kernel tree.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](1),
+														},
+													},
+													Nullable: true,
+												},
+											},
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"conditions": {
+											Description: "Conditions reports Resolved, Degraded, and Pinned state for this kernel artifact.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"nodes": {
+											Description: "Nodes summarizes how many NodeModelStore caches hold, download, or failed this artifact's\nmanifest digest without exposing node names.",
+											Type:        "object",
+											Required: []string{
+												"ready",
+												"downloading",
+												"failed",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"downloading": {
+													Description: "Downloading counts the nodes downloading it.",
+													Type:        "integer",
+													Format:      "int32",
+													Minimum:     ptr.To[float64](0),
+												},
+												"downloadingPercent": {
+													Description: "DownloadingPercent is the mean progress of the downloading nodes, each a whole copy, rounded\ndown to a multiple of 5. Ready nodes are counted, not averaged in. Absent while no node\ndownloads.",
+													Type:        "integer",
+													Format:      "int32",
+													Maximum:     ptr.To[float64](100),
+													Minimum:     ptr.To[float64](0),
+													Nullable:    true,
+												},
+												"failed": {
+													Description: "Failed counts the nodes whose last attempt failed and that wait to retry.",
+													Type:        "integer",
+													Format:      "int32",
+													Minimum:     ptr.To[float64](0),
+												},
+												"ready": {
+													Description: "Ready counts the nodes holding the content published.",
+													Type:        "integer",
+													Format:      "int32",
+													Minimum:     ptr.To[float64](0),
+												},
+											},
+											Nullable: true,
+										},
+										"observedGeneration": {
+											Description: "ObservedGeneration is the metadata generation this status reflects.",
+											Type:        "integer",
+											Format:      "int64",
+										},
+										"quarantineMessage": {
+											Description: "QuarantineMessage provides human-readable details for why Quarantined was set.",
+											Type:        "string",
+										},
+										"quarantineReason": {
+											Description: "QuarantineReason classifies why Quarantined was set.",
+											Type:        "string",
+										},
+										"quarantined": {
+											Description: "Quarantined is true when a canary rollout or runtime load check failed on this bundle.\nQuarantined artifacts are never promoted or newly mounted, and quarantine persists across\nforger recreation.",
+											Type:        "boolean",
+										},
+										"resolved": {
+											Description: "Resolved records the immutable content identity once resolution succeeds. Absent for OCI\nimage sources and before initial resolution completes.",
+											Type:        "object",
+											Required: []string{
+												"resolvedTime",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"digestSource": {
+													Description: "DigestSource records whether ManifestDigest originated from an in-cluster Forge publish or a\nHugging Face Hub listing.",
+													Type:        "string",
+													Enum: []v1.JSON{
+														{
+															Raw: []byte(`"Forge"`),
+														},
+														{
+															Raw: []byte(`"Hub"`),
+														},
+													},
+												},
+												"dispatchManifestDigest": {
+													Description: "DispatchManifestDigest is the SHA-256 digest of dispatch-manifest.json at the root of the\nresolved kernel tree.",
+													Type:        "string",
+												},
+												"fileCount": {
+													Description: "FileCount is the number of files in the resolved manifest.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+												"lastValidatedTime": {
+													Description: "LastValidatedTime is when source availability or hub access was most recently confirmed.",
+													Type:        "string",
+													Format:      "date-time",
+													Nullable:    true,
+												},
+												"manifestDigest": {
+													Description: "ManifestDigest is the canonical gpustack-manifest v1 SHA-256 content address of the tree.",
+													Type:        "string",
+												},
+												"resolvedTime": {
+													Description: "ResolvedTime is when the source first resolved to its content identity.",
+													Type:        "string",
+													Format:      "date-time",
+												},
+												"revision": {
+													Description: "Revision is the 40-character commit SHA when imported from Hugging Face; empty for forged\nnodeStore bundles.",
+													Type:        "string",
+												},
+												"sizeBytes": {
+													Description: "SizeBytes is the total byte size of all files in the resolved manifest.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+											},
+											Nullable: true,
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Engine",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.compatibility.engine",
+						},
+						{
+							Name:        "Arch",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.compatibility.architecture",
+						},
+						{
+							Name:        "Size",
+							Type:        "integer",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.resolved.sizeBytes",
+						},
+						{
+							Name:        "Resolved",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.conditions[?(@.type=='Resolved')].status",
+						},
+						{
+							Name:        "Ready",
+							Type:        "integer",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.nodes.ready",
+						},
+						{
+							Name:        "Quarantined",
+							Type:        "boolean",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.quarantined",
+						},
+						{
+							Name:        "Age",
+							Type:        "date",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".metadata.creationTimestamp",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func crd_gpustack_api_worker_v1alpha1_ModelPrefetch() *v1.CustomResourceDefinition {
 	return &v1.CustomResourceDefinition{
 		TypeMeta: metav1.TypeMeta{
@@ -10275,7 +11489,7 @@ func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinit
 											Nullable:    true,
 										},
 										"pinned": {
-											Description: "Pinned lists the manifest digests the node must retain: the union of the prefetches whose\nretention pins them and whose target set holds this node. A pinned digest is never a\ncollection candidate, though it still counts toward usage. The prefetch controller writes\nthe field and the configuration reconciler carries it over untouched, so the two never\noverwrite each other's work on the same object.",
+											Description: "Pinned lists the manifest digests the node must retain: the single-writer union of admitted\nModelTransfer source generations, active and rollback ModelKernelArtifact digests, and\nModelPrefetch retention pins targeting this node. A pinned digest is never a collection\ncandidate, though it still counts toward usage. The prefetch controller is the sole writer\nof this field and the configuration reconciler carries it over untouched, so the two never\noverwrite each other's work on the same object.",
 											Type:        "array",
 											MaxItems:    ptr.To[int64](256),
 											Items: &v1.JSONSchemaPropsOrArray{
@@ -10556,7 +11770,7 @@ func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinit
 															Format:      "int64",
 														},
 														"source": {
-															Description: "Source is where the content's bytes come from: Hub, the model hub, or Peer, the plugins of\nother nodes. It names no repository or endpoint. Content published before the field existed\nhas none.",
+															Description: "Source is where the content's bytes come from: Hub, the model hub, Peer, the plugins of\nother nodes, or Forge, a verified kernel bundle published locally on this node. It names no\nrepository, tenant or endpoint. Content published before the field existed has none.",
 															Type:        "string",
 															Enum: []v1.JSON{
 																{
@@ -10564,6 +11778,9 @@ func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinit
 																},
 																{
 																	Raw: []byte(`"Peer"`),
+																},
+																{
+																	Raw: []byte(`"Forge"`),
 																},
 															},
 														},

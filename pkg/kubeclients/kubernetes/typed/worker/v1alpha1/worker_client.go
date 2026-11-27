@@ -27,7 +27,9 @@ type WorkerV1alpha1Interface interface {
 	KVCachePoolBindingsGetter
 	ModelArtifactsGetter
 	ModelDeploymentsGetter
+	ModelDeploymentForgersGetter
 	ModelDeploymentScalersGetter
+	ModelKernelArtifactsGetter
 	ModelPrefetchesGetter
 	ModelStoresGetter
 	ModelStoreBindingsGetter
@@ -80,8 +82,16 @@ func (c *WorkerV1alpha1Client) ModelDeployments(namespace string) ModelDeploymen
 	return newModelDeployments(c, namespace)
 }
 
+func (c *WorkerV1alpha1Client) ModelDeploymentForgers(namespace string) ModelDeploymentForgerInterface {
+	return newModelDeploymentForgers(c, namespace)
+}
+
 func (c *WorkerV1alpha1Client) ModelDeploymentScalers(namespace string) ModelDeploymentScalerInterface {
 	return newModelDeploymentScalers(c, namespace)
+}
+
+func (c *WorkerV1alpha1Client) ModelKernelArtifacts(namespace string) ModelKernelArtifactInterface {
+	return newModelKernelArtifacts(c, namespace)
 }
 
 func (c *WorkerV1alpha1Client) ModelPrefetches(namespace string) ModelPrefetchInterface {

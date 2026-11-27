@@ -37,7 +37,7 @@ func TestEveryCRDViewServesDelete(t *testing.T) {
 		_, watches := s.(rest.Watcher)
 		assert.True(t, deletes && lists && watches, "the v1 view of %s serves delete, list and watch", kind)
 	}
-	assert.GreaterOrEqual(t, checked, 13, "every primary storage kind is served by a view that is checked here")
+	assert.GreaterOrEqual(t, checked, 18, "every primary storage kind is served by a view that is checked here")
 }
 
 // TestEveryStorageKindHasPublicProxy pins the registry coverage: every primary storage kind has a
@@ -86,7 +86,38 @@ func TestEveryStorageKindHasPublicProxy(t *testing.T) {
 				"the v1 view of %s serves the storage scope", gvk.Kind)
 		})
 	}
-	assert.GreaterOrEqual(t, checked, 13, "every primary storage kind is enumerated here")
+	assert.GreaterOrEqual(t, checked, 18, "every primary storage kind is enumerated here")
+}
+
+// TestForgerAndKernelArtifactPublicProxiesHaveReadOnlyStatus pins that ModelKernelArtifact and
+// ModelDeploymentForger support full main-object CRUD and watch on v1 while exposing no writable
+// status subresource.
+func TestForgerAndKernelArtifactPublicProxiesHaveReadOnlyStatus(t *testing.T) {
+	for _, kind := range []string{"ModelKernelArtifact", "ModelDeploymentForger"} {
+		t.Run(kind, func(t *testing.T) {
+			var storage rest.Storage
+			for _, setup := range setups {
+				candidate, ok := setup.(rest.Storage)
+				if ok && reflect.TypeOf(candidate.New()).Elem().Name() == kind {
+					storage = candidate
+					break
+				}
+			}
+			require.NotNil(t, storage, "%s must be registered in setups", kind)
+
+			_, gets := storage.(rest.Getter)
+			_, lists := storage.(rest.Lister)
+			_, watches := storage.(rest.Watcher)
+			_, creates := storage.(rest.Creater)
+			_, updates := storage.(rest.Updater)
+			_, deletes := storage.(rest.GracefulDeleter)
+			assert.True(t, gets && lists && watches && creates && updates && deletes,
+				"%s v1 proxy must serve get, list, watch, create, update/patch, and delete", kind)
+
+			_, servesStatus := storage.New().(extensionapi.ObjectWithStatusSubResource)
+			assert.False(t, servesStatus, "%s v1 proxy must not expose a writable status subresource", kind)
+		})
+	}
 }
 
 // TestPublicClientStatusMethodsMatchHandlers compares client promises with installed status routes.

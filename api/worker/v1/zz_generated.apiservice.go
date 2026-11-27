@@ -582,6 +582,40 @@ func (in *ModelDeployment) CopyStatusTo(out runtime.Object) {
 	out.(*ModelDeployment).Status = in.Status
 }
 
+var _ rest.Scoper = (*ModelDeploymentForger)(nil)
+
+func (*ModelDeploymentForger) NamespaceScoped() bool {
+	return true
+}
+
+var _ rest.KindProvider = (*ModelDeploymentForger)(nil)
+
+func (*ModelDeploymentForger) Kind() string {
+	return "ModelDeploymentForger"
+}
+
+var _ rest.SingularNameProvider = (*ModelDeploymentForger)(nil)
+
+func (*ModelDeploymentForger) GetSingularName() string {
+	return "modeldeploymentforger"
+}
+
+var _ rest.ShortNamesProvider = (*ModelDeploymentForger)(nil)
+
+func (*ModelDeploymentForger) ShortNames() []string {
+	return []string{
+		"mdf",
+	}
+}
+
+var _ rest.CategoriesProvider = (*ModelDeploymentForger)(nil)
+
+func (*ModelDeploymentForger) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
 var _ rest.Scoper = (*ModelDeploymentScaler)(nil)
 
 func (*ModelDeploymentScaler) NamespaceScoped() bool {
@@ -618,6 +652,40 @@ var _ WithStatusSubResource = (*ModelDeploymentScaler)(nil)
 
 func (in *ModelDeploymentScaler) CopyStatusTo(out runtime.Object) {
 	out.(*ModelDeploymentScaler).Status = in.Status
+}
+
+var _ rest.Scoper = (*ModelKernelArtifact)(nil)
+
+func (*ModelKernelArtifact) NamespaceScoped() bool {
+	return true
+}
+
+var _ rest.KindProvider = (*ModelKernelArtifact)(nil)
+
+func (*ModelKernelArtifact) Kind() string {
+	return "ModelKernelArtifact"
+}
+
+var _ rest.SingularNameProvider = (*ModelKernelArtifact)(nil)
+
+func (*ModelKernelArtifact) GetSingularName() string {
+	return "modelkernelartifact"
+}
+
+var _ rest.ShortNamesProvider = (*ModelKernelArtifact)(nil)
+
+func (*ModelKernelArtifact) ShortNames() []string {
+	return []string{
+		"mkart",
+	}
+}
+
+var _ rest.CategoriesProvider = (*ModelKernelArtifact)(nil)
+
+func (*ModelKernelArtifact) Categories() []string {
+	return []string{
+		"gpustack",
+	}
 }
 
 var _ rest.Scoper = (*ModelPrefetch)(nil)

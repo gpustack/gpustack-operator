@@ -33,8 +33,12 @@ type Interface interface {
 	ModelArtifacts() ModelArtifactInformer
 	// ModelDeployments returns a ModelDeploymentInformer.
 	ModelDeployments() ModelDeploymentInformer
+	// ModelDeploymentForgers returns a ModelDeploymentForgerInformer.
+	ModelDeploymentForgers() ModelDeploymentForgerInformer
 	// ModelDeploymentScalers returns a ModelDeploymentScalerInformer.
 	ModelDeploymentScalers() ModelDeploymentScalerInformer
+	// ModelKernelArtifacts returns a ModelKernelArtifactInformer.
+	ModelKernelArtifacts() ModelKernelArtifactInformer
 	// ModelPrefetches returns a ModelPrefetchInformer.
 	ModelPrefetches() ModelPrefetchInformer
 	// ModelStores returns a ModelStoreInformer.
@@ -108,9 +112,19 @@ func (v *version) ModelDeployments() ModelDeploymentInformer {
 	return &modelDeploymentInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
+// ModelDeploymentForgers returns a ModelDeploymentForgerInformer.
+func (v *version) ModelDeploymentForgers() ModelDeploymentForgerInformer {
+	return &modelDeploymentForgerInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
 // ModelDeploymentScalers returns a ModelDeploymentScalerInformer.
 func (v *version) ModelDeploymentScalers() ModelDeploymentScalerInformer {
 	return &modelDeploymentScalerInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// ModelKernelArtifacts returns a ModelKernelArtifactInformer.
+func (v *version) ModelKernelArtifacts() ModelKernelArtifactInformer {
+	return &modelKernelArtifactInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // ModelPrefetches returns a ModelPrefetchInformer.

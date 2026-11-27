@@ -42,10 +42,11 @@ type NodeModelStoreSpecApplyConfiguration struct {
 	// none does, so the cluster defaults apply. The worker writes it; nothing else does.
 	//
 	Store *string `json:"store,omitempty"`
-	// Pinned lists the manifest digests the node must retain: the union of the prefetches whose
-	// retention pins them and whose target set holds this node. A pinned digest is never a
-	// collection candidate, though it still counts toward usage. The prefetch controller writes
-	// the field and the configuration reconciler carries it over untouched, so the two never
+	// Pinned lists the manifest digests the node must retain: the single-writer union of admitted
+	// ModelTransfer source generations, active and rollback ModelKernelArtifact digests, and
+	// ModelPrefetch retention pins targeting this node. A pinned digest is never a collection
+	// candidate, though it still counts toward usage. The prefetch controller is the sole writer
+	// of this field and the configuration reconciler carries it over untouched, so the two never
 	// overwrite each other's work on the same object.
 	//
 	Pinned []string `json:"pinned,omitempty"`

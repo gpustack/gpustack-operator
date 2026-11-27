@@ -1318,8 +1318,12 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.ModelArtifactApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("ModelDeployment"):
 		return &applyconfigurationworkerv1.ModelDeploymentApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("ModelDeploymentForger"):
+		return &applyconfigurationworkerv1.ModelDeploymentForgerApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("ModelDeploymentScaler"):
 		return &applyconfigurationworkerv1.ModelDeploymentScalerApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("ModelKernelArtifact"):
+		return &applyconfigurationworkerv1.ModelKernelArtifactApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("ModelPrefetch"):
 		return &applyconfigurationworkerv1.ModelPrefetchApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("ModelStore"):
@@ -1534,6 +1538,32 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentEngineApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentEnvVar"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentEnvVarApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForger"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerBindingStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerBindingStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerBottleneck"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerBottleneckApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerGenerationStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerGenerationStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerProbeSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerProbeSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerRoleSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerRoleSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerRoleStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerRoleStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerRolloutSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerRolloutSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerSandboxResources"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerSandboxResourcesApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerSandboxSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerSandboxSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerSandboxStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerSandboxStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentForgerStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentForgerStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentGroupMemberStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentGroupMemberStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentGroupStatus"):
@@ -1570,6 +1600,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleEndpointsStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleEndpointsStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleKernelArtifactStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleKernelArtifactStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleParallelismStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleParallelismStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleResources"):
@@ -1662,6 +1694,22 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelKernelArtifact"):
+		return &applyconfigurationworkerv1alpha1.ModelKernelArtifactApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelKernelArtifactCompatibility"):
+		return &applyconfigurationworkerv1alpha1.ModelKernelArtifactCompatibilityApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelKernelArtifactForgerReference"):
+		return &applyconfigurationworkerv1alpha1.ModelKernelArtifactForgerReferenceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelKernelArtifactNodeStoreSource"):
+		return &applyconfigurationworkerv1alpha1.ModelKernelArtifactNodeStoreSourceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelKernelArtifactResolved"):
+		return &applyconfigurationworkerv1alpha1.ModelKernelArtifactResolvedApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelKernelArtifactSource"):
+		return &applyconfigurationworkerv1alpha1.ModelKernelArtifactSourceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelKernelArtifactSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelKernelArtifactSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelKernelArtifactStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelKernelArtifactStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetch"):
 		return &applyconfigurationworkerv1alpha1.ModelPrefetchApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetchArtifactReference"):

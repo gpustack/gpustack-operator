@@ -27,9 +27,9 @@ type NodeModelStoreModelApplyConfiguration struct {
 	// since the node's status was last written. Absent outside Downloading.
 	//
 	DownloadedBytes *int64 `json:"downloadedBytes,omitempty"`
-	// Source is where the content's bytes come from: Hub, the model hub, or Peer, the plugins of
-	// other nodes. It names no repository or endpoint. Content published before the field existed
-	// has none.
+	// Source is where the content's bytes come from: Hub, the model hub, Peer, the plugins of
+	// other nodes, or Forge, a verified kernel bundle published locally on this node. It names no
+	// repository, tenant or endpoint. Content published before the field existed has none.
 	//
 	Source *workerv1alpha1.NodeModelStoreModelSource `json:"source,omitempty"`
 	// Referenced says some Pod mounts the content. Which Pod is never recorded.

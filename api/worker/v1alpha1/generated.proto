@@ -3585,6 +3585,456 @@ message ModelDeploymentEnvVar {
   optional string value = 2;
 }
 
+// ModelDeploymentForger automates closed-loop short-window kernel probing, Kueue-scheduled
+// single-GPU sandbox synthesis and independent verification, NodeModelStore publication, and
+// readiness-gated canary rollout over one ModelDeployment.
+//
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["mdf"],subResources=["status"]
+// +k8s:crd-gen:printcolumn:name="Target",type="string",jsonPath=".spec.targetRef.name"
+// +k8s:crd-gen:printcolumn:name="Mode",type="string",jsonPath=".spec.mode"
+// +k8s:crd-gen:printcolumn:name="Bound",type="string",jsonPath=".status.conditions[?(@.type=='Bound')].status"
+// +k8s:crd-gen:printcolumn:name="Active",type="string",jsonPath=".status.conditions[?(@.type=='Active')].status"
+// +k8s:crd-gen:printcolumn:name="Blocked",type="string",jsonPath=".status.conditions[?(@.type=='Blocked')].status"
+// +k8s:crd-gen:printcolumn:name="Ready",type="string",jsonPath=".status.conditions[?(@.type=='Ready')].status"
+// +k8s:crd-gen:printcolumn:name="Age",type="date",jsonPath=".metadata.creationTimestamp"
+message ModelDeploymentForger {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional ModelDeploymentForgerSpec spec = 2;
+
+  optional ModelDeploymentForgerStatus status = 3;
+}
+
+// ModelDeploymentForgerBinding is the JSON payload stored in the forger-binding annotation on a
+// target ModelDeployment.
+message ModelDeploymentForgerBinding {
+  // ForgerName is the name of the ModelDeploymentForger that owns the target lease.
+  optional string forgerName = 1;
+
+  // ForgerUID is the UID of the ModelDeploymentForger that owns the target lease.
+  optional string forgerUID = 2;
+
+  // Term is the monotonic binding term under which the owner writes.
+  optional int64 term = 3;
+}
+
+// ModelDeploymentForgerBindingStatus reports the lease held on a target ModelDeployment.
+message ModelDeploymentForgerBindingStatus {
+  // TargetUID is the UID of the bound ModelDeployment.
+  //
+  // +optional
+  optional string targetUID = 1;
+
+  // TargetName is the name of the bound ModelDeployment.
+  //
+  // +optional
+  optional string targetName = 2;
+
+  // Term is the monotonic binding term under which the forger writes.
+  //
+  // +optional
+  optional int64 term = 3;
+}
+
+// ModelDeploymentForgerBottleneck summarizes one eligible single-GPU non-GEMM operator bottleneck
+// distilled from a short-window sentinel probe.
+message ModelDeploymentForgerBottleneck {
+  // LocalKernelKey is the canonical single-GPU operator key over static per-rank dimensions.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  optional string localKernelKey = 1;
+
+  // OpFamily is the canonical single-GPU operator family name, such as "rmsnorm".
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  optional string opFamily = 2;
+
+  // GPUTimeSharePercent is the decimal percentage of profiled single-GPU kernel self-time spent
+  // in this operator, such as "12.5".
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=32
+  optional string gpuTimeSharePercent = 3;
+
+  // ObservedAt is when the probe window that distilled this bottleneck completed.
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time observedAt = 4;
+}
+
+// ModelDeploymentForgerDecision is the JSON payload stored in the forger-decision annotation on a
+// target ModelDeployment to allow controller restart recovery without duplicate promotions.
+message ModelDeploymentForgerDecision {
+  // DecisionID identifies the committed promotion or rollback decision.
+  optional string decisionID = 1;
+
+  // Term is the binding term under which this decision was committed.
+  optional int64 term = 2;
+
+  // KernelArtifacts maps each managed role name to the ModelKernelArtifact name committed by
+  // this decision, or empty string when rolled back to stock engine kernels.
+  map<string, string> kernelArtifacts = 3;
+}
+
+// ModelDeploymentForgerGenerationStatus records the outcome of one forge generation for a role.
+message ModelDeploymentForgerGenerationStatus {
+  // Generation is the sequential 1-based forge generation number for this role.
+  //
+  // +required
+  // +k8s:validation:minimum=1
+  optional int64 generation = 1;
+
+  // ArtifactName is the ModelKernelArtifact created for this generation, if published.
+  //
+  // +optional
+  optional string artifactName = 2;
+
+  // ManifestDigest is the content address of the published kernel bundle, if published.
+  //
+  // +optional
+  optional string manifestDigest = 3;
+
+  // Outcome summarizes how this generation ended.
+  //
+  // +optional
+  // +k8s:validation:enum=["Promoted","RolledBack","Failed","Skipped"]
+  optional string outcome = 4;
+
+  // Reason is a machine-readable reason code for Outcome.
+  //
+  // +optional
+  optional string reason = 5;
+
+  // Message provides human-readable context for Outcome.
+  //
+  // +optional
+  optional string message = 6;
+
+  // StartedAt is when this generation began.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time startedAt = 7;
+
+  // FinishedAt is when this generation reached its terminal outcome.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time finishedAt = 8;
+}
+
+// ModelDeploymentForgerList holds a list of ModelDeploymentForger resources.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelDeploymentForgerList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelDeploymentForger items = 2;
+}
+
+// ModelDeploymentForgerProbeSpec configures bounded short-window sentinel profiling.
+message ModelDeploymentForgerProbeSpec {
+  // Steps is the number of execution steps captured per probe window (3 to 5, default 4).
+  //
+  // +optional
+  // +k8s:validation:default=4
+  // +k8s:validation:minimum=3
+  // +k8s:validation:maximum=5
+  optional int32 steps = 1;
+
+  // CooldownSeconds is the minimum wait time in seconds between probe passes (at least 60,
+  // default 600).
+  //
+  // +optional
+  // +k8s:validation:default=600
+  // +k8s:validation:minimum=60
+  optional int32 cooldownSeconds = 2;
+
+  // MinActiveRequests is the minimum running request count observed on a leader replica before
+  // arming a short-window probe.
+  //
+  // +optional
+  // +k8s:validation:default=1
+  // +k8s:validation:minimum=0
+  optional int32 minActiveRequests = 3;
+}
+
+// ModelDeploymentForgerRoleSpec configures kernel forging thresholds for one target role.
+message ModelDeploymentForgerRoleSpec {
+  // Name is the target role name in ModelDeployment.spec.roles (Server, Prefill, or Decode).
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string name = 1;
+
+  // MaxKernelsPerGeneration caps how many top non-GEMM single-GPU operator bottlenecks are
+  // targeted in one ForgeSandbox pass.
+  //
+  // +optional
+  // +k8s:validation:default=4
+  // +k8s:validation:minimum=1
+  // +k8s:validation:maximum=16
+  optional int32 maxKernelsPerGeneration = 2;
+
+  // MinSpeedupRatio is a decimal ratio string at or above "1.01" (default "1.05") that
+  // forge-verifier requires over the reference implementation before admitting a kernel.
+  //
+  // +optional
+  // +k8s:validation:default="1.05"
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=32
+  optional string minSpeedupRatio = 3;
+}
+
+// ModelDeploymentForgerRoleStatus reports closed-loop state for one targeted role.
+message ModelDeploymentForgerRoleStatus {
+  // Name is the targeted role name in ModelDeployment.spec.roles.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string name = 1;
+
+  // Phase is the current lifecycle step for this role.
+  //
+  // +optional
+  // +k8s:validation:enum=["Idle","Probing","Forging","Verifying","Publishing","Promoting"]
+  optional string phase = 2;
+
+  // ActiveGeneration is the monotonically increasing forge generation number currently running or
+  // most recently promoted for this role.
+  //
+  // +optional
+  optional int64 activeGeneration = 3;
+
+  // ActiveKernelArtifact names the ModelKernelArtifact currently promoted or staged for this
+  // role.
+  //
+  // +optional
+  optional string activeKernelArtifact = 4;
+
+  // PreviousKernelArtifact names the prior ModelKernelArtifact retained and pinned for automatic
+  // rollback while a promotion is in flight; empty when stock engine kernels were running.
+  //
+  // +optional
+  optional string previousKernelArtifact = 5;
+
+  // ActiveSandbox records the worker-created ForgeSandbox Pod currently running for this role.
+  // Model-manager verifies PodUID against this worker-guarded field before ingesting outputs.
+  //
+  // +optional
+  optional ModelDeploymentForgerSandboxStatus activeSandbox = 6;
+
+  // ObservedBottlenecks lists the hottest eligible single-GPU non-GEMM kernels distilled from the
+  // most recent probe pass.
+  //
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:maxItems=32
+  repeated ModelDeploymentForgerBottleneck observedBottlenecks = 7;
+
+  // Generations is a bounded history (up to 16 entries) of forge generations for this role.
+  //
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:maxItems=16
+  repeated ModelDeploymentForgerGenerationStatus generations = 8;
+}
+
+// ModelDeploymentForgerRolloutSpec configures artifact retention and canary rollback timing.
+message ModelDeploymentForgerRolloutSpec {
+  // MaxRetainedGenerations is the number of recent ModelKernelArtifact generations retained per
+  // role before unreferenced older generations are pruned (1 to 16, default 3).
+  //
+  // +optional
+  // +k8s:validation:default=3
+  // +k8s:validation:minimum=1
+  // +k8s:validation:maximum=16
+  optional int32 maxRetainedGenerations = 1;
+
+  // FailureTimeoutSeconds is how long a promoted kernel generation may wait for canary readiness
+  // and loaded-kernel confirmation before automatic rollback and quarantine (default 600).
+  //
+  // +optional
+  // +k8s:validation:default=600
+  // +k8s:validation:minimum=1
+  optional int32 failureTimeoutSeconds = 2;
+}
+
+// ModelDeploymentForgerSandboxResources specifies host CPU and memory requests for ForgeSandbox.
+message ModelDeploymentForgerSandboxResources {
+  // CPU is the host CPU request and limit for the ForgeSandbox Pod, such as "8".
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity cpu = 1;
+
+  // RAM is the host memory request and limit for the ForgeSandbox Pod, such as "32Gi".
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity ram = 2;
+}
+
+// ModelDeploymentForgerSandboxSpec configures Kueue-admitted single-GPU ForgeSandbox execution.
+message ModelDeploymentForgerSandboxSpec {
+  // RunnerMode selects External (black-box synthesis container image) or Mock (deterministic
+  // built-in operator subcommands for pipeline qualification).
+  //
+  // +optional
+  // +k8s:validation:enum=["External","Mock"]
+  // +k8s:validation:default="External"
+  optional string runnerMode = 1;
+
+  // RunnerImage is the container image executed by forge-runner when RunnerMode is External.
+  //
+  // +optional
+  // +k8s:validation:maxLength=512
+  optional string runnerImage = 2;
+
+  // PriorityClassName optionally sets the Kubernetes PriorityClass on the ForgeSandbox Pod.
+  //
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string priorityClassName = 3;
+
+  // TimeoutSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400,
+  // default 1800).
+  //
+  // +optional
+  // +k8s:validation:default=1800
+  // +k8s:validation:minimum=60
+  // +k8s:validation:maximum=14400
+  optional int32 timeoutSeconds = 4;
+
+  // OutputSizeLimit bounds the forge-output emptyDir staging volume (64Mi to 16Gi, default 2Gi).
+  //
+  // +optional
+  // +k8s:validation:default="2Gi"
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity outputSizeLimit = 5;
+
+  // Resources optionally specifies host CPU and memory requests and limits for ForgeSandbox
+  // containers alongside the single whole accelerator card requested from Kueue.
+  //
+  // +optional
+  optional ModelDeploymentForgerSandboxResources resources = 6;
+}
+
+// ModelDeploymentForgerSandboxStatus records the identity of an active worker-owned ForgeSandbox
+// Pod.
+message ModelDeploymentForgerSandboxStatus {
+  // PodName is the name of the ForgeSandbox Pod in this namespace.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string podName = 1;
+
+  // PodUID is the Kubernetes UID of the ForgeSandbox Pod, verified by model-manager before
+  // ingesting emptyDir outputs.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=128
+  optional string podUID = 2;
+
+  // NodeName is the Kubernetes Node where the ForgeSandbox Pod was scheduled; empty while
+  // awaiting scheduling.
+  //
+  // +optional
+  optional string nodeName = 3;
+
+  // ConfigMapName is the name of the owner-referenced input ConfigMap mounted into the sandbox.
+  //
+  // +optional
+  optional string configMapName = 4;
+
+  // StartedAt is when the ForgeSandbox Pod was created.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time startedAt = 5;
+}
+
+// ModelDeploymentForgerSpec defines the desired closed-loop kernel forging policy for one
+// ModelDeployment.
+message ModelDeploymentForgerSpec {
+  // TargetRef names the target ModelDeployment in this namespace. Immutable after creation.
+  //
+  // +required
+  optional .k8s.io.api.core.v1.LocalObjectReference targetRef = 1;
+
+  // Mode selects how far the closed loop proceeds: ObserveOnly distills bottlenecks from probes
+  // only, Shadow also runs ForgeSandbox and publishes verified ModelKernelArtifacts without
+  // mutating the target, and Active promotes verified artifacts onto target roles.
+  //
+  // +optional
+  // +k8s:validation:enum=["ObserveOnly","Shadow","Active"]
+  // +k8s:validation:default="Shadow"
+  optional string mode = 2;
+
+  // Suspend pauses probing, sandbox creation, and promotion and releases any held target binding
+  // without deleting the forger.
+  //
+  // +optional
+  optional bool suspend = 3;
+
+  // Roles lists the serving roles on the target ModelDeployment to probe and specialize.
+  //
+  // +required
+  // +k8s:validation:minItems=1
+  // +listType=map
+  // +listMapKey=name
+  repeated ModelDeploymentForgerRoleSpec roles = 4;
+
+  // Probe configures short-window live sentinel profiling passes.
+  //
+  // +optional
+  // +k8s:validation:default={}
+  optional ModelDeploymentForgerProbeSpec probe = 5;
+
+  // Sandbox configures the Kueue-admitted single-GPU ForgeSandbox Pod and verifier limits.
+  //
+  // +optional
+  // +k8s:validation:default={}
+  optional ModelDeploymentForgerSandboxSpec sandbox = 6;
+
+  // Rollout configures generation retention and canary failure rollback deadlines.
+  //
+  // +optional
+  // +k8s:validation:default={}
+  optional ModelDeploymentForgerRolloutSpec rollout = 7;
+}
+
+// ModelDeploymentForgerStatus defines the observed closed-loop state of ModelDeploymentForger.
+message ModelDeploymentForgerStatus {
+  // ObservedGeneration is the metadata generation last evaluated by the controller.
+  //
+  // +optional
+  optional int64 observedGeneration = 1;
+
+  // Binding records the active forger-binding lease held on the target ModelDeployment.
+  //
+  // +optional
+  optional ModelDeploymentForgerBindingStatus binding = 2;
+
+  // Roles reports per-role forging phase, active sandbox identity, distilled bottlenecks, and
+  // recent generation outcomes.
+  //
+  // +optional
+  // +listType=map
+  // +listMapKey=name
+  repeated ModelDeploymentForgerRoleStatus roles = 3;
+
+  // Conditions reports Bound, Active, Blocked, and Ready status for the forger.
+  //
+  // +optional
+  // +patchMergeKey=type
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=type
+  repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 4;
+}
+
 // ModelDeploymentGroupMemberStatus is one member of a group, as it currently stands.
 message ModelDeploymentGroupMemberStatus {
   // Name is the member Pod's name.
@@ -4479,6 +4929,14 @@ message ModelDeploymentRole {
   //
   // +optional
   optional ModelDeploymentRoleRuntimeControl runtimeControl = 23;
+
+  // KernelArtifactRef optionally names a ModelKernelArtifact in this namespace whose verified
+  // kernel bundle is mounted read-only at /var/lib/gpustack/kernels on this role's Pods.
+  // Changing or clearing it triggers a readiness-gated rolling replacement of this role's
+  // replicas while leaving deployments that omit it unchanged.
+  //
+  // +optional
+  optional .k8s.io.api.core.v1.LocalObjectReference kernelArtifactRef = 25;
 }
 
 // ModelDeploymentRoleEndpointsStatus is one role's endpoint eligibility and actual serving
@@ -4499,6 +4957,45 @@ message ModelDeploymentRoleEndpointsStatus {
   //
   // +optional
   optional ModelDeploymentServingStatus serving = 2;
+}
+
+// ModelDeploymentRoleKernelArtifactStatus echoes the observed kernel bundle state for one role.
+message ModelDeploymentRoleKernelArtifactStatus {
+  // Artifact is the name of the referenced ModelKernelArtifact in this namespace.
+  //
+  // +required
+  optional string artifact = 1;
+
+  // ManifestDigest is the resolved gpustack-manifest v1 digest for node-delivered kernel
+  // bundles; absent for OCI image delivery.
+  //
+  // +optional
+  optional string manifestDigest = 2;
+
+  // DispatchManifestDigest is the SHA-256 digest of dispatch-manifest.json observed for the
+  // kernel bundle.
+  //
+  // +optional
+  optional string dispatchManifestDigest = 3;
+
+  // Delivery reports whether the kernel bundle reaches Pods via Node CSI cache or OCI Image
+  // volume.
+  //
+  // +required
+  // +k8s:validation:enum=["Node","Image"]
+  optional string delivery = 4;
+
+  // LoadedKernels is the count of specialized kernels confirmed loaded by engine sentinel across
+  // converged instances of this role.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  optional int32 loadedKernels = 5;
+
+  // Quarantined echoes whether the referenced ModelKernelArtifact has been quarantined.
+  //
+  // +optional
+  optional bool quarantined = 6;
 }
 
 // ModelDeploymentRoleParallelismStatus is one role's declared parallelism, read from the
@@ -4775,6 +5272,12 @@ message ModelDeploymentRoleStatus {
   //
   // +optional
   optional ModelDeploymentRoleRuntimeControlStatus runtimeControl = 11;
+
+  // KernelArtifact echoes the resolved kernel bundle identity, delivery mechanism, and loaded
+  // kernel count when this role sets spec.roles[].kernelArtifactRef.
+  //
+  // +optional
+  optional ModelDeploymentRoleKernelArtifactStatus kernelArtifact = 12;
 }
 
 // ModelDeploymentRoleTopology is the topology request for one independent replica group.
@@ -6356,7 +6859,7 @@ message ModelDeploymentStatus {
 
   // Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,
   // CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady,
-  // WeightsReady, RuntimeControlSynced. They are independent —
+  // WeightsReady, KernelsReady, RuntimeControlSynced. They are independent —
   // "quota reserved but cache not attached" is a real and actionable state — which is what a single
   // phase string cannot carry.
   //
@@ -6429,6 +6932,277 @@ message ModelDeploymentStatus {
   //
   // +optional
   optional ModelDeploymentRetirementStatus retirement = 10;
+}
+
+// ModelKernelArtifact declares an immutable, content-addressed bundle of specialized single-GPU
+// operator kernels and their hardware and engine compatibility envelope.
+//
+// Its whole spec is immutable after creation, enforced at admission. Binary kernel bundles live in
+// NodeModelStore, a commit-pinned hub repository, or a digest-pinned OCI image; ConfigMap sources
+// are omitted from the schema by design.
+//
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["mkart"],subResources=["status"]
+// +k8s:crd-gen:printcolumn:name="Engine",type="string",jsonPath=".spec.compatibility.engine"
+// +k8s:crd-gen:printcolumn:name="Arch",type="string",jsonPath=".spec.compatibility.architecture"
+// +k8s:crd-gen:printcolumn:name="Size",type="integer",jsonPath=".status.resolved.sizeBytes"
+// +k8s:crd-gen:printcolumn:name="Resolved",type="string",jsonPath=".status.conditions[?(@.type=='Resolved')].status"
+// +k8s:crd-gen:printcolumn:name="Ready",type="integer",jsonPath=".status.nodes.ready"
+// +k8s:crd-gen:printcolumn:name="Quarantined",type="boolean",jsonPath=".status.quarantined"
+// +k8s:crd-gen:printcolumn:name="Age",type="date",jsonPath=".metadata.creationTimestamp"
+message ModelKernelArtifact {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional ModelKernelArtifactSpec spec = 2;
+
+  optional ModelKernelArtifactStatus status = 3;
+}
+
+// ModelKernelArtifactCompatibility declares the runtime engine, hardware target, and canonical
+// single-GPU kernel identities a bundle serves.
+message ModelKernelArtifactCompatibility {
+  // Engine selects the inference engine family this bundle targets.
+  //
+  // +required
+  // +k8s:validation:enum=["vLLM","SGLang"]
+  optional string engine = 1;
+
+  // EngineVersion is the normalized inference engine release version this bundle was verified
+  // against.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=64
+  optional string engineVersion = 2;
+
+  // Manufacturer is the canonical lowercase accelerator vendor key, such as "nvidia", "amd", or
+  // "ascend".
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=63
+  optional string manufacturer = 3;
+
+  // Architecture is the canonical accelerator architecture identifier, such as "sm_90a",
+  // "gfx942", or "910b".
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=63
+  optional string architecture = 4;
+
+  // KernelKeys lists the canonical single-GPU LocalKernelKey entries carried in this bundle's
+  // dispatch manifest, over static per-rank dimensions only.
+  //
+  // +required
+  // +listType=atomic
+  // +k8s:validation:minItems=1
+  // +k8s:validation:maxItems=128
+  repeated string kernelKeys = 5;
+}
+
+// ModelKernelArtifactForgerReference identifies the ModelDeploymentForger that produced a
+// node-stored kernel artifact.
+message ModelKernelArtifactForgerReference {
+  // Name is the name of the owning ModelDeploymentForger in this namespace.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string name = 1;
+
+  // UID is the Kubernetes UID of the owning ModelDeploymentForger at creation time.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=128
+  optional string uid = 2;
+}
+
+// ModelKernelArtifactList holds a list of ModelKernelArtifact resources.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelKernelArtifactList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelKernelArtifact items = 2;
+}
+
+// ModelKernelArtifactNodeStoreSource identifies a verified forged kernel tree published in
+// NodeModelStore.
+message ModelKernelArtifactNodeStoreSource {
+  // ManifestDigest is the content address of the published kernel tree ("sha256:" followed by
+  // 64 lowercase hexadecimal characters).
+  //
+  // +required
+  // +k8s:validation:pattern="^sha256:[a-f0-9]{64}$"
+  // +k8s:validation:maxLength=71
+  optional string manifestDigest = 1;
+
+  // DispatchManifestDigest is the SHA-256 digest of dispatch-manifest.json at the root of the
+  // kernel tree ("sha256:" followed by 64 lowercase hexadecimal characters).
+  //
+  // +required
+  // +k8s:validation:pattern="^sha256:[a-f0-9]{64}$"
+  // +k8s:validation:maxLength=71
+  optional string dispatchManifestDigest = 2;
+
+  // SizeBytes is the total byte size of all files in the published kernel tree.
+  //
+  // +required
+  // +k8s:validation:minimum=1
+  optional int64 sizeBytes = 3;
+
+  // FileCount is the number of regular files in the published kernel tree, including
+  // dispatch-manifest.json and at least one solution or kernel file.
+  //
+  // +required
+  // +k8s:validation:minimum=2
+  optional int64 fileCount = 4;
+
+  // SeedNode names the Kubernetes Node whose model-manager daemon first ingested and published
+  // the verified kernel tree.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string seedNode = 5;
+
+  // ForgerRef identifies the owning ModelDeploymentForger in this namespace that produced the
+  // kernel bundle.
+  //
+  // +required
+  optional ModelKernelArtifactForgerReference forgerRef = 6;
+}
+
+// ModelKernelArtifactResolved records the verified content identity of a resolved kernel source.
+message ModelKernelArtifactResolved {
+  // ManifestDigest is the canonical gpustack-manifest v1 SHA-256 content address of the tree.
+  //
+  // +optional
+  optional string manifestDigest = 1;
+
+  // DispatchManifestDigest is the SHA-256 digest of dispatch-manifest.json at the root of the
+  // resolved kernel tree.
+  //
+  // +optional
+  optional string dispatchManifestDigest = 2;
+
+  // Revision is the 40-character commit SHA when imported from Hugging Face; empty for forged
+  // nodeStore bundles.
+  //
+  // +optional
+  optional string revision = 3;
+
+  // FileCount is the number of files in the resolved manifest.
+  //
+  // +optional
+  optional int64 fileCount = 4;
+
+  // SizeBytes is the total byte size of all files in the resolved manifest.
+  //
+  // +optional
+  optional int64 sizeBytes = 5;
+
+  // ResolvedTime is when the source first resolved to its content identity.
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time resolvedTime = 6;
+
+  // LastValidatedTime is when source availability or hub access was most recently confirmed.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time lastValidatedTime = 7;
+
+  // DigestSource records whether ManifestDigest originated from an in-cluster Forge publish or a
+  // Hugging Face Hub listing.
+  //
+  // +optional
+  // +k8s:validation:enum=["Forge","Hub"]
+  optional string digestSource = 8;
+}
+
+// ModelKernelArtifactSource is a tagged union naming where a kernel bundle is stored. Exactly one
+// member must be set, enforced at admission; ConfigMap sources do not exist on this union.
+message ModelKernelArtifactSource {
+  // NodeStore references a forged kernel bundle ingested into NodeModelStore on a seed node and
+  // replicated across peers. Only the operator worker identity may create artifacts with this
+  // source.
+  //
+  // +optional
+  optional ModelKernelArtifactNodeStoreSource nodeStore = 1;
+
+  // HuggingFace imports an exported kernel bundle from a Hugging Face repository pinned to a
+  // full 40-character hexadecimal commit SHA.
+  //
+  // +optional
+  optional ModelArtifactHubSource huggingFace = 2;
+
+  // Image imports an exported kernel bundle from a digest-pinned OCI image mounted read-only
+  // through a Kubernetes image volume.
+  //
+  // +optional
+  optional ModelArtifactImageSource image = 3;
+}
+
+// ModelKernelArtifactSpec defines the immutable source and compatibility contract of a
+// ModelKernelArtifact.
+message ModelKernelArtifactSpec {
+  // Source declares where the verified kernel bundle comes from.
+  //
+  // +required
+  optional ModelKernelArtifactSource source = 1;
+
+  // Compatibility declares the engine, hardware architecture, and canonical single-GPU kernel
+  // keys this bundle was built and verified for.
+  //
+  // +required
+  optional ModelKernelArtifactCompatibility compatibility = 2;
+}
+
+// ModelKernelArtifactStatus defines the observed state of ModelKernelArtifact.
+message ModelKernelArtifactStatus {
+  // ObservedGeneration is the metadata generation this status reflects.
+  //
+  // +optional
+  optional int64 observedGeneration = 1;
+
+  // Resolved records the immutable content identity once resolution succeeds. Absent for OCI
+  // image sources and before initial resolution completes.
+  //
+  // +optional
+  optional ModelKernelArtifactResolved resolved = 2;
+
+  // Nodes summarizes how many NodeModelStore caches hold, download, or failed this artifact's
+  // manifest digest without exposing node names.
+  //
+  // +optional
+  optional ModelArtifactNodes nodes = 3;
+
+  // Quarantined is true when a canary rollout or runtime load check failed on this bundle.
+  // Quarantined artifacts are never promoted or newly mounted, and quarantine persists across
+  // forger recreation.
+  //
+  // +optional
+  optional bool quarantined = 4;
+
+  // QuarantineReason classifies why Quarantined was set.
+  //
+  // +optional
+  optional string quarantineReason = 5;
+
+  // QuarantineMessage provides human-readable details for why Quarantined was set.
+  //
+  // +optional
+  optional string quarantineMessage = 6;
+
+  // Conditions reports Resolved, Degraded, and Pinned state for this kernel artifact.
+  //
+  // +optional
+  // +patchMergeKey=type
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=type
+  repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 7;
 }
 
 // ModelPrefetch is the schema for worker.gpustack.ai.
@@ -7216,12 +7990,12 @@ message NodeModelStoreModel {
   // +k8s:validation:minimum=0
   optional int64 downloadedBytes = 9;
 
-  // Source is where the content's bytes come from: Hub, the model hub, or Peer, the plugins of
-  // other nodes. It names no repository or endpoint. Content published before the field existed
-  // has none.
+  // Source is where the content's bytes come from: Hub, the model hub, Peer, the plugins of
+  // other nodes, or Forge, a verified kernel bundle published locally on this node. It names no
+  // repository, tenant or endpoint. Content published before the field existed has none.
   //
   // +optional
-  // +k8s:validation:enum=["Hub","Peer"]
+  // +k8s:validation:enum=["Hub","Peer","Forge"]
   optional string source = 10;
 
   // Referenced says some Pod mounts the content. Which Pod is never recorded.
@@ -7385,10 +8159,11 @@ message NodeModelStoreSpec {
   // +optional
   optional string store = 5;
 
-  // Pinned lists the manifest digests the node must retain: the union of the prefetches whose
-  // retention pins them and whose target set holds this node. A pinned digest is never a
-  // collection candidate, though it still counts toward usage. The prefetch controller writes
-  // the field and the configuration reconciler carries it over untouched, so the two never
+  // Pinned lists the manifest digests the node must retain: the single-writer union of admitted
+  // ModelTransfer source generations, active and rollback ModelKernelArtifact digests, and
+  // ModelPrefetch retention pins targeting this node. A pinned digest is never a collection
+  // candidate, though it still counts toward usage. The prefetch controller is the sole writer
+  // of this field and the configuration reconciler carries it over untouched, so the two never
   // overwrite each other's work on the same object.
   //
   // +optional

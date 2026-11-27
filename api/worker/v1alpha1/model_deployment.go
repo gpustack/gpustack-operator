@@ -578,6 +578,14 @@ type ModelDeploymentRole struct {
 	//
 	// +optional
 	RuntimeControl *ModelDeploymentRoleRuntimeControl `json:"runtimeControl,omitempty" protobuf:"bytes,23,opt,name=runtimeControl"` // nolint: lll
+
+	// KernelArtifactRef optionally names a ModelKernelArtifact in this namespace whose verified
+	// kernel bundle is mounted read-only at /var/lib/gpustack/kernels on this role's Pods.
+	// Changing or clearing it triggers a readiness-gated rolling replacement of this role's
+	// replicas while leaving deployments that omit it unchanged.
+	//
+	// +optional
+	KernelArtifactRef *core.LocalObjectReference `json:"kernelArtifactRef,omitempty" protobuf:"bytes,25,opt,name=kernelArtifactRef"` // nolint: lll
 }
 
 // ModelDeploymentRoleRuntimeControl defines live-reconciled engine control parameters applied
@@ -955,7 +963,7 @@ type ModelDeploymentStatus struct {
 
 	// Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,
 	// CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady,
-	// WeightsReady, RuntimeControlSynced. They are independent —
+	// WeightsReady, KernelsReady, RuntimeControlSynced. They are independent —
 	// "quota reserved but cache not attached" is a real and actionable state — which is what a single
 	// phase string cannot carry.
 	//
@@ -1448,6 +1456,103 @@ type ModelDeploymentRoleStatus struct {
 	//
 	// +optional
 	RuntimeControl *ModelDeploymentRoleRuntimeControlStatus `json:"runtimeControl,omitempty" protobuf:"bytes,11,opt,name=runtimeControl"` // nolint: lll
+
+	// KernelArtifact echoes the resolved kernel bundle identity, delivery mechanism, and loaded
+	// kernel count when this role sets spec.roles[].kernelArtifactRef.
+	//
+	// +optional
+	KernelArtifact *ModelDeploymentRoleKernelArtifactStatus `json:"kernelArtifact,omitempty" protobuf:"bytes,12,opt,name=kernelArtifact"` // nolint: lll
+}
+
+// Condition type and reason constants for ModelDeployment kernel artifact readiness and admission.
+const (
+	// ModelDeploymentConditionTypeKernelsReady reports whether every role's referenced
+	// ModelKernelArtifact is resolved, unquarantined, and deliverable.
+	ModelDeploymentConditionTypeKernelsReady = "KernelsReady"
+
+	// ModelDeploymentReasonKernelsNotApplicable says no role references a ModelKernelArtifact.
+	ModelDeploymentReasonKernelsNotApplicable = "NotApplicable"
+
+	// ModelDeploymentReasonKernelsReady says every referenced ModelKernelArtifact is resolved and
+	// deliverable.
+	ModelDeploymentReasonKernelsReady = "KernelsReady"
+
+	// ModelDeploymentReasonKernelArtifactNotFound says a referenced ModelKernelArtifact does not
+	// exist in this namespace.
+	ModelDeploymentReasonKernelArtifactNotFound = "KernelArtifactNotFound"
+
+	// ModelDeploymentReasonKernelArtifactNotResolved says a referenced ModelKernelArtifact has not
+	// finished resolving.
+	ModelDeploymentReasonKernelArtifactNotResolved = "KernelArtifactNotResolved"
+
+	// ModelDeploymentReasonKernelArtifactQuarantined says a referenced ModelKernelArtifact is
+	// quarantined and blocked from new replica creation.
+	ModelDeploymentReasonKernelArtifactQuarantined = "KernelArtifactQuarantined"
+
+	// ModelDeploymentReasonKernelNodeDeliveryUnavailable says node CSI delivery is unavailable for
+	// a referenced ModelKernelArtifact.
+	ModelDeploymentReasonKernelNodeDeliveryUnavailable = "NodeDeliveryUnavailable"
+
+	// ModelDeploymentReasonKernelPeerSyncDisabled says Peer Sync is disabled on a consumer node for
+	// a node-stored ModelKernelArtifact.
+	ModelDeploymentReasonKernelPeerSyncDisabled = "PeerSyncDisabled"
+
+	// ModelDeploymentReasonConfigMapKernelMountForbidden says an additional ConfigMap volume
+	// overlaps the managed /var/lib/gpustack/kernels mount path.
+	ModelDeploymentReasonConfigMapKernelMountForbidden = "ConfigMapKernelMountForbidden"
+)
+
+// ModelDeploymentKernelDelivery names how a ModelKernelArtifact reaches a serving role's Pods.
+// +enum
+type ModelDeploymentKernelDelivery string
+
+const (
+	// ModelDeploymentKernelDeliveryNode mounts verified files from NodeModelStore via the
+	// model-manager CSI plugin.
+	ModelDeploymentKernelDeliveryNode ModelDeploymentKernelDelivery = "Node"
+
+	// ModelDeploymentKernelDeliveryImage mounts a digest-pinned OCI image read-only via a
+	// Kubernetes image volume.
+	ModelDeploymentKernelDeliveryImage ModelDeploymentKernelDelivery = "Image"
+)
+
+// ModelDeploymentRoleKernelArtifactStatus echoes the observed kernel bundle state for one role.
+type ModelDeploymentRoleKernelArtifactStatus struct {
+	// Artifact is the name of the referenced ModelKernelArtifact in this namespace.
+	//
+	// +required
+	Artifact string `json:"artifact" protobuf:"bytes,1,name=artifact"`
+
+	// ManifestDigest is the resolved gpustack-manifest v1 digest for node-delivered kernel
+	// bundles; absent for OCI image delivery.
+	//
+	// +optional
+	ManifestDigest string `json:"manifestDigest,omitempty" protobuf:"bytes,2,opt,name=manifestDigest"`
+
+	// DispatchManifestDigest is the SHA-256 digest of dispatch-manifest.json observed for the
+	// kernel bundle.
+	//
+	// +optional
+	DispatchManifestDigest string `json:"dispatchManifestDigest,omitempty" protobuf:"bytes,3,opt,name=dispatchManifestDigest"` // nolint: lll
+
+	// Delivery reports whether the kernel bundle reaches Pods via Node CSI cache or OCI Image
+	// volume.
+	//
+	// +required
+	// +k8s:validation:enum=["Node","Image"]
+	Delivery ModelDeploymentKernelDelivery `json:"delivery" protobuf:"bytes,4,name=delivery,casttype=ModelDeploymentKernelDelivery"` // nolint: lll
+
+	// LoadedKernels is the count of specialized kernels confirmed loaded by engine sentinel across
+	// converged instances of this role.
+	//
+	// +optional
+	// +k8s:validation:minimum=0
+	LoadedKernels int32 `json:"loadedKernels,omitempty" protobuf:"varint,5,opt,name=loadedKernels"`
+
+	// Quarantined echoes whether the referenced ModelKernelArtifact has been quarantined.
+	//
+	// +optional
+	Quarantined bool `json:"quarantined,omitempty" protobuf:"varint,6,opt,name=quarantined"`
 }
 
 // ModelDeploymentRoleRuntimeControlStatus reports live runtime-control convergence for one role.

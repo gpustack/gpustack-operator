@@ -63,6 +63,14 @@ type ModelDeploymentListerExpansion interface{}
 // ModelDeploymentNamespaceLister.
 type ModelDeploymentNamespaceListerExpansion interface{}
 
+// ModelDeploymentForgerListerExpansion allows custom methods to be added to
+// ModelDeploymentForgerLister.
+type ModelDeploymentForgerListerExpansion interface{}
+
+// ModelDeploymentForgerNamespaceListerExpansion allows custom methods to be added to
+// ModelDeploymentForgerNamespaceLister.
+type ModelDeploymentForgerNamespaceListerExpansion interface{}
+
 // ModelDeploymentScalerListerExpansion allows custom methods to be added to
 // ModelDeploymentScalerLister.
 type ModelDeploymentScalerListerExpansion interface{}
@@ -70,6 +78,14 @@ type ModelDeploymentScalerListerExpansion interface{}
 // ModelDeploymentScalerNamespaceListerExpansion allows custom methods to be added to
 // ModelDeploymentScalerNamespaceLister.
 type ModelDeploymentScalerNamespaceListerExpansion interface{}
+
+// ModelKernelArtifactListerExpansion allows custom methods to be added to
+// ModelKernelArtifactLister.
+type ModelKernelArtifactListerExpansion interface{}
+
+// ModelKernelArtifactNamespaceListerExpansion allows custom methods to be added to
+// ModelKernelArtifactNamespaceLister.
+type ModelKernelArtifactNamespaceListerExpansion interface{}
 
 // ModelPrefetchListerExpansion allows custom methods to be added to
 // ModelPrefetchLister.
