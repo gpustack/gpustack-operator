@@ -267,7 +267,7 @@ if kind != roleKindDecode {
       Acceptance: PR 1 merges cleanly to `main`; `gh workflow run "Base Image" -f repository=llm-router -f tag=v0.6.1` succeeds; Docker Hub manifest for `gpustack/llm-router:v0.6.1` reports both `linux/amd64` and `linux/arm64` digests.
       Verify: `crane manifest docker.io/gpustack/llm-router:v0.6.1 | jq '.manifests[].platform'` (or Docker Hub tag API verifying `amd64` and `arm64`).
 
-- [ ] **T4 · `llm-d-router` External DP balancing and `endpoint-health-filter` renderer (PR 2)**
+- [x] **T4 · `llm-d-router` External DP balancing and `endpoint-health-filter` renderer (PR 2)**
       Blocked by: T3
       Owns: `pkg/worker/kvcache/router/**`
       Gate: review

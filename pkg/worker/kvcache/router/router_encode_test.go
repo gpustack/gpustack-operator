@@ -354,6 +354,14 @@ plugins:
       modeldeployment.gpustack.ai/role-kind: prefill
   type: label-selector-filter
 - parameters:
+    maxEjectionPercent: 50
+    pollFailureThreshold: 3
+    responseFailureCodes:
+    - 502
+    - 503
+    responseFailureThreshold: 5
+  type: endpoint-health-filter
+- parameters:
     modelName: Qwen/Qwen3-8B
     vllm:
       url: http://qwen-prefill.team-a.svc:8000
@@ -394,6 +402,7 @@ schedulingProfiles:
 - name: decode
   plugins:
   - pluginRef: decode-pods
+  - pluginRef: endpoint-health-filter
   - pluginRef: queue-scorer
     weight: 2
   - pluginRef: kv-cache-utilization-scorer
@@ -402,6 +411,7 @@ schedulingProfiles:
 - name: prefill
   plugins:
   - pluginRef: prefill-pods
+  - pluginRef: endpoint-health-filter
   - pluginRef: queue-scorer
     weight: 2
   - pluginRef: kv-cache-utilization-scorer
