@@ -47,7 +47,7 @@ tables, raw captures and deterministic simulations; public guides own operator p
 | `gpustack-node-devices`, `OnceMaxRequest`, `EX` / `SH` / `SL` / `PT` | Admission | [Admission](devices-admission.md#four-view-status) |
 | `nvidia.com/gpu.partitioned.mig-*`, `mig-3g.40gb`, `device.gpustack.ai/accelerator.allocated` | Capture | [NVIDIA MIG Transcripts](devices-mig-transcripts.md#all-physical-configuration) |
 | `InstanceTypeFlavor`, `node-a10g-gpustack-worker`, `gpustack.ai/managed` | Capture | [Devices Scheduling Capture](devices-scheduling-capture.md#initial-pool-objects) |
-| `Devices.spec.interfaces`, `pciRootId`, `pciSwitches`, `rdma.capable` | *RDMA* | [Network Topology](rdma-network-topology.md#interface-inventory) |
+| `Devices.spec.interfaces`, `pciRootId`, `pciSwitches`, `rdma.capable`, `rdma.software` | *RDMA* | [Network Topology](rdma-network-topology.md#interface-inventory) |
 | `TopologySource`, `topology.gpustack.ai/profile` | *TAS* | [Topology-Aware Scheduling](topology-scheduling.md#topologysource-contract) |
 | `roles[].topology.requiredLevel` | *TAS* | [Topology-Aware Scheduling](topology-scheduling.md#per-replica-topology-requests) |
 | `gpustack-model-deployment-joint` | Admission | [Scheduling Chain](devices-scheduling.md#queue-quota-and-draining) |

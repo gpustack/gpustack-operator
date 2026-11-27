@@ -1226,8 +1226,12 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 															Type:        "boolean",
 														},
 														"rdmaDevice": {
-															Description: "RDMADevice is the bound RDMA device's name. Empty when RDMA is false.",
+															Description: "RDMADevice is the bound RDMA device's name. Empty when RDMA is false, and also on an\ninterface that RDMASoftware marks: that device is advertised under its own name, so the\nallocation identity stays with it.",
 															Type:        "string",
+														},
+														"rdmaSoftware": {
+															Description: "RDMASoftware reports that RDMA reaches this interface through a software device, such as\nSoft-RoCE (`rxe`), which runs RDMA in the kernel over an ordinary network device such as a\nbond or a plain NIC. A VLAN device cannot carry Soft-RoCE: the kernel's `rxe_newlink` refuses\nan 8021Q or 8021ad device with `rxe creation allowed on top of a real device only`. The\nDevice Manager finds the interface by its name in the software device's ports, because the\ndevice has no PCI address to look up.\nA node whose usable RDMA interfaces are all software-carried carries the node label\n`feature.gpustack.ai/rdma.software=true`. The `rdma.distance` and `rdma.numa` node labels\nare never derived from such an interface. Performance is far below a hardware adapter's.\nThe `feature.gpustack.ai/rdma.external` node label is independent of this field: it names\nan RDMA device under another owner's allocation, which GPUStack never allocates, so an\nexternally owned device beside a software one publishes both keys.",
+															Type:        "boolean",
 														},
 														"sriov": {
 															Description: "SRIOV reports that this interface is an SR-IOV physical function. It is a SEPARATE fact\nfrom the length of VirtualFunctions: \"a PF with zero VFs configured\" and \"not a PF at\nall\" are different states, and deriving the second from an empty VF list collapses them.",

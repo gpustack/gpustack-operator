@@ -327,10 +327,21 @@ func TestAllocator_PartitionedVisibilityAndReclaimLoop_EndToEnd(t *testing.T) {
 	_, err = rec.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: nodeName}})
 	require.NoError(t, err)
 
+	var rearmErr error
 	require.Eventually(t, func() bool {
-		_, exists := store.Get(wantID1)
-		return !exists && store.Count() == 1
+		// The live-set broadcast the reclaim loop consumes is lossy: a 4-slot buffer that the
+		// reserve notifies of the Allocates above can fill while the loop goroutine lags, so the
+		// delete-triggering broadcast can be dropped and the next wake is the 60s resync ticker.
+		// Production re-arms the trigger itself: every Reconcile requeues and re-broadcasts the
+		// live set. Mirror that here by re-running Reconcile while the partition is still present,
+		// so the loop gets a broadcast the buffer can take.
+		if _, exists := store.Get(wantID1); exists {
+			_, rearmErr = rec.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: nodeName}})
+			return false
+		}
+		return store.Count() == 1
 	}, 5*time.Second, 20*time.Millisecond, "RunReclaimLoop must reclaim pod1's virtual partition")
+	require.NoError(t, rearmErr)
 
 	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, gotDevs))
 	accStatus = gotDevs.Status.Groups[0].Accelerators[0]

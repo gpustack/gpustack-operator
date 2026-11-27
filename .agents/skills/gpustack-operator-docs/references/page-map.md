@@ -71,9 +71,9 @@ is *allowed* (that is `docs/reference/devices-admission.md`).
 **Owns** — the `Devices.spec.interfaces` inventory and why enumeration starts at the interface rather
 than the bus, the sysfs read discipline, `pciRootId` (the outermost bridge) against `pciSwitches`, the
 three RDMA link states and why an unreadable file is never `failed`, the existential aggregation into
-`rdma.capable`, the withhold-by-removal mechanism, the distance vocabulary's unreachable levels, and
-the RDMA extended resources — the three keys and what a quantity means, the mode judgment, the link
-gate into health, the NUMA hint, and what an allocation hands over.
+`rdma.capable`, `rdma.software`, the withhold-by-removal mechanism, the distance vocabulary's
+unreachable levels, and the RDMA extended resources — the three keys and what a quantity means, the
+mode judgment, the link gate into health, the NUMA hint, and what an allocation hands over.
 
 **Never** — the accelerator side of the ledger (`docs/reference/devices-discovery.md`), how a node label reaches a
 flavor selector (`docs/reference/devices-scheduling.md`), or the request rules an RDMA key obeys

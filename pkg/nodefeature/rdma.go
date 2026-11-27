@@ -55,6 +55,38 @@ const (
 	// rdmaNumaSeparator joins the NUMA node ids. See NodeRDMANumaLabelKey for why it is not a
 	// comma, which is the separator this would otherwise obviously use.
 	rdmaNumaSeparator = "_"
+
+	// NodeRDMASoftwareLabelKey says that every usable RDMA interface on this node is
+	// software-carried, as DeviceInterface.RDMASoftware marks one. It is set only when at least one
+	// interface is usable, so a node whose only software port is down carries neither this key nor
+	// the capable key.
+	//
+	// It means software ONLY. A node with a usable hardware adapter beside a software device does
+	// not carry it: a reader that excludes software RDMA must not lose a node that has hardware.
+	//
+	// Software RDMA performs far below a hardware adapter, so a workload that needs hardware
+	// excludes this key through its own nodeSelector or affinity. No operator-generated
+	// ResourceFlavor pins it, the same as the capable key.
+	NodeRDMASoftwareLabelKey = RDMAFeatureLabelPrefix + "software"
+
+	// NodeRDMAExternalLabelKey says this node has an RDMA device under another owner's allocation,
+	// one GPUStack never hands out, as device.RDMADeviceOwnerExternal marks the device. It is set
+	// on ownership evidence alone: the device's driver names another owner, today the AWS EFA
+	// driver, and a usable interface is not required. An EFA device sits on a PCI function with no
+	// netdev, so no interface record names it, and a node whose only RDMA is that device carries
+	// this key with neither capable nor software.
+	//
+	// It answers a different question from NodeRDMASoftwareLabelKey: that key says the RDMA
+	// GPUStack hands out on this node is software, this one says there is RDMA here GPUStack never
+	// allocates. Both may be true at once — an EFA device beside a software one publishes capable,
+	// software and external — because hiding the software fact on the strength of an unallocatable
+	// device would send a workload that needs hardware RDMA to a node whose only allocatable RDMA
+	// is the software one.
+	//
+	// Informational only, and pinned by no operator-generated ResourceFlavor. It never changes the
+	// other four keys: those are reduced over the interfaces alone, so an external device beside a
+	// usable one moves none of them.
+	NodeRDMAExternalLabelKey = RDMAFeatureLabelPrefix + "external"
 )
 
 // rdmaResourceNameBase is the base of the RDMA resource keys: the operator's own device
@@ -119,6 +151,8 @@ func GetRDMAResourceName(mode workercore.DeviceAllocationMode) core.ResourceName
 }
 
 // ConstructRDMANodeLabels constructs the RDMA feature labels from one detect pass's inventory.
+// The devices argument is the pass's host verbs inventory, and it decides one key alone: the
+// external-owner key, which is set on ownership evidence rather than on any usable endpoint.
 //
 // An endpoint counts as RDMA-capable when its link check did not conclude that the link is broken,
 // falling back to whether a device is bound only when no verdict was reached at all. So `failed` is
@@ -132,31 +166,59 @@ func GetRDMAResourceName(mode workercore.DeviceAllocationMode) core.ResourceName
 // an RDMA workload. Which endpoint is broken lives in `Devices`, per interface and per virtual
 // function; a node label cannot express it.
 //
-// It returns an empty map rather than nil for a node with no such interface, and the caller's
-// removal of stale keys is what makes that absence take effect — the labels are additive at the
-// object they are written to, so a key that stops being reported does not stop existing.
+// It returns a non-nil map that may carry only the external key — a node with no usable interface
+// and an externally owned device is exactly that — and is otherwise empty for a node with no such
+// interface and no such device. The caller's removal of stale keys is what makes that absence take
+// effect — the labels are additive at the object they are written to, so a key that stops being
+// reported does not stop existing.
 func ConstructRDMANodeLabels(
-	groups device.DevicesGroupList, interfaces []device.Interface,
+	groups device.DevicesGroupList, interfaces []device.Interface, devices []device.RDMADevice,
 ) map[string]string {
 	capable := rdmaEndpoints(interfaces)
 
 	labels := map[string]string{}
+	// The external key is decided on the verbs inventory alone, so it is set before the early
+	// return below rather than after the locality logic: a node whose only RDMA is externally owned
+	// has no usable endpoint, takes that return, and is the one node this key exists for. It never
+	// feeds the other four keys, so computing it here changes none of them.
+	for i := range devices {
+		if devices[i].Owner == device.RDMADeviceOwnerExternal {
+			labels[NodeRDMAExternalLabelKey] = "true"
+			break
+		}
+	}
 	if len(capable) == 0 {
 		return labels
 	}
 	labels[NodeRDMACapableLabelKey] = "true"
+
+	// A software-carried endpoint stays out of both locality values. The coordinates it may carry
+	// are its netdev's, and they place no RDMA hardware an accelerator can sit near. Reducing over
+	// the hardware endpoints alone keeps a software-only node free of both keys rather than
+	// publishing an unknown distance as if it were a measurement.
+	hardware := make([]device.Interface, 0, len(capable))
+	for i := range capable {
+		if !capable[i].RDMASoftware {
+			hardware = append(hardware, capable[i])
+		}
+	}
+	// Software ONLY: at least one usable endpoint, and every usable endpoint software-carried. The
+	// early return above settles the first half; an empty set here settles the second.
+	if len(hardware) == 0 {
+		labels[NodeRDMASoftwareLabelKey] = "true"
+	}
 
 	// The NUMA set is a COMPOSITE value, so the sanitizer below is not a safety net for it: it caps
 	// a label value at 63 characters, and truncating "0_1_..._31" publishes a SUBSET as if it were
 	// the set — a wrong fact rather than a degraded one. A node with enough NUMA nodes to exceed the
 	// cap therefore gets no NUMA key at all. `rdma.capable` still says the node has RDMA, and the
 	// per-endpoint affinities are in `Devices`, which carries no such limit.
-	if numa := rdmaNumaNodes(capable); numa != "" && kubemeta.SanitizeLabelValue(numa) == numa {
+	if numa := rdmaNumaNodes(hardware); numa != "" && kubemeta.SanitizeLabelValue(numa) == numa {
 		labels[NodeRDMANumaLabelKey] = numa
 	}
 	// Reported only when an accelerator was there to measure from. A distance is a statement about
 	// a PAIR, so a node with RDMA and no accelerators has no distance rather than an unknown one.
-	if distance, ok := closestAcceleratorDistance(groups, capable); ok {
+	if distance, ok := closestAcceleratorDistance(groups, hardware); ok {
 		labels[NodeRDMADistanceLabelKey] = distance.String()
 	}
 
