@@ -79,9 +79,7 @@ type ModelDeploymentReconciler struct {
 	// than a dial this reconciler makes, because every case the condition it feeds has to get right
 	// is a failure, and a real dial cannot be made to fail on demand.
 	//
-	// A nil scraper is every replica unreadable, which the condition reports as Unknown. It is nil
-	// today: the concrete per-engine reader is not written, and inventing a metric name would be the
-	// exact assumption the condition exists to refuse.
+	// A nil scraper is the production one, which reads the engine's own Prometheus exposition.
 	CacheScraper ModelDeploymentCacheScraper
 
 	// servingViewFetch reads one Router Pod's observer view. It is a function rather
@@ -1605,6 +1603,18 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote &&
 		!weights.Render.SourceReady {
 		return ctrl.Result{RequeueAfter: modelDeploymentDeliveryRecheck}, nil
+	}
+
+	// A POOL-BOUND DEPLOYMENT IS LOOKED AT AGAIN ON ITS OWN once a pass found nothing to roll. Its
+	// cache condition reports transfers between an engine and a store, and nothing about them is an
+	// event this controller watches: a converged pass that returned nothing here would leave the
+	// condition at whatever the last traffic-free pass wrote.
+	//
+	// A PASS THAT LEFT REPLICAS OUTDATED IS NOT CONVERGED and keeps its result. The admission event,
+	// the Binding watch or the delivery recheck brings that deployment back, and a poll beside them
+	// is the timer a held rollout deliberately does without.
+	if md.Spec.KVCache != nil && rollout.outdated == 0 {
+		return ctrl.Result{RequeueAfter: modelDeploymentCacheRequeue}, nil
 	}
 
 	return ctrl.Result{}, nil

@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,6 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -25,32 +31,59 @@ import (
 // Unknown path unreachable in tests while it is the common case in production.
 type fakeModelDeploymentCacheScraper struct {
 	readings map[string]ModelDeploymentCacheReading
+	// counts gives a replica's attempted transfer operations, the keys they touched and the keys
+	// that failed, for the cases about what a message says rather than about which verdict it carries.
+	counts map[string][3]float64
 	// errs marks replicas whose endpoint did not answer at all, which is the OTHER way to have no
 	// account — distinct from answering without the metric family.
-	errs  map[string]bool
+	errs map[string]bool
+	// calls records every replica asked. The reconciler scrapes together, so the record is guarded
+	// and its ORDER IS THE ORDER THE SCRAPES COMPLETED IN, which nothing may assert on; scraped()
+	// hands back the set.
+	mu    sync.Mutex
 	calls []string
 }
 
 func (f *fakeModelDeploymentCacheScraper) ScrapeCache(
 	_ context.Context, pod *core.Pod,
-) (ModelDeploymentCacheReading, error) {
+) (ModelDeploymentCacheAccount, error) {
+	f.mu.Lock()
 	f.calls = append(f.calls, pod.Name)
+	f.mu.Unlock()
 	if f.errs[pod.Name] {
-		return ModelDeploymentCacheUnreadable, errors.New("dial tcp: connection refused")
+		return ModelDeploymentCacheAccount{}, errors.New("dial tcp: connection refused")
 	}
 
-	return f.readings[pod.Name], nil
+	account := ModelDeploymentCacheAccount{Reading: f.readings[pod.Name]}
+	counts := f.counts[pod.Name]
+	account.Attempted, account.Keys, account.Failed = counts[0], counts[1], counts[2]
+
+	return account, nil
+}
+
+// scraped is the set of replicas asked, in name order.
+func (f *fakeModelDeploymentCacheScraper) scraped() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	names := append([]string(nil), f.calls...)
+	slices.Sort(names)
+
+	return names
 }
 
 // cacheAttachedOf drives one reading through the whole status compute, so the assertions are over
 // what an operator would read off the object rather than over an internal return value.
+//
+// extra objects join the deployment and its AcceleratorType in the client, for the cases about what
+// a message can say about the pool.
 func cacheAttachedOf(
 	t *testing.T, md *workercore.ModelDeployment, pods []core.Pod,
-	domain *modelDeploymentDomain, scraper ModelDeploymentCacheScraper,
+	domain *modelDeploymentDomain, scraper ModelDeploymentCacheScraper, extra ...ctrlcli.Object,
 ) *workercore.ModelDeployment {
 	t.Helper()
 
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
+	cli := newModelDeploymentClient(append([]ctrlcli.Object{md.DeepCopy(), newRenderAcceleratorType()}, extra...)...)
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, CacheScraper: scraper}
 
 	status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, pods, domain, nil, nil, nil)
@@ -252,9 +285,9 @@ func TestModelDeploymentCacheAttached_Table(t *testing.T) {
 			wantReason: modelDeploymentReasonCacheActive,
 		},
 		{
-			// A reconciler built without a scraper is every replica unreadable. It is the shipped
-			// state today, and it must read as Unknown rather than as a detachment.
-			name:       "no scraper at all",
+			// A reconciler built without a scraper reads through the production one. It cannot reach a
+			// replica that carries no address, so it must read as Unknown rather than as a detachment.
+			name:       "no scraper assigned",
 			pods:       func(md *workercore.ModelDeployment) []core.Pod { return readyPods(md, 2) },
 			domain:     readyDomain(),
 			wantStatus: "Unknown",
@@ -437,7 +470,7 @@ func TestModelDeploymentCacheAttached_AnInstanceShortAMemberIsNotAsked(t *testin
 
 		got := cacheAttachedOf(t, md, pods, readyDomain(), scraper)
 
-		assert.Equal(t, []string{"qwen-server-r0-m0", "qwen-server-r1-m0"}, scraper.calls,
+		assert.Equal(t, []string{"qwen-server-r0-m0", "qwen-server-r1-m0"}, scraper.scraped(),
 			"one leader per whole instance, and only the leader: the ranks serve no API to ask")
 		assert.True(t, ModelDeploymentConditionCacheAttached.IsTrue(got))
 	})
@@ -523,4 +556,467 @@ func TestModelDeploymentCacheAttached_UnreadableExecutionIsNeverTrue(t *testing.
 	assert.Equal(t, modelDeploymentReasonCacheNotAttributable,
 		ModelDeploymentConditionCacheAttached.GetReason(got),
 		"the reason names the refusal rather than the missing observation it would otherwise report")
+}
+
+// readyRoleReplica builds a Ready replica of one declared role, on the shape readyReplica builds for
+// the first: the role's own labels, name and declared size.
+func readyRoleReplica(md *workercore.ModelDeployment, role int, ordinal int32, ready bool) core.Pod {
+	pod := readyReplica(md, ordinal, ready)
+	declared := &md.Spec.Roles[role]
+	pod.Name = fmt.Sprintf("%s-%s-%d", md.Name, declared.Name, ordinal)
+	pod.UID = types.UID(pod.Name + "-uid")
+	pod.Labels = modelDeploymentPodLabels(md, declared, "fixture-entrance")
+	pod.Annotations[kueuepodconst.GroupTotalCountAnnotation] = strconv.Itoa(modelDeploymentRoleSize(declared))
+
+	return *pod
+}
+
+// routedPairDeployment is a prefill/decode pair behind the engine's own router, bound to a pool,
+// with an encoder stage in front when withEncoder is set: the 1P1D and 1E1P1D shapes.
+func routedPairDeployment(engine string, withEncoder bool) *workercore.ModelDeployment {
+	router := workercore.ModelDeploymentRouterLLMD
+	if engine == workercore.ModelDeploymentEngineSGLang {
+		router = workercore.ModelDeploymentRouterSGL
+	}
+
+	return newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Engine.Name = engine
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: router}
+		md.Spec.Roles = []workercore.ModelDeploymentRole{
+			{Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill, Replicas: 1, AcceleratorType: "h20-8x"},
+			{Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode, Replicas: 1, AcceleratorType: "h20-8x"},
+		}
+		if withEncoder {
+			md.Spec.Roles = append([]workercore.ModelDeploymentRole{{
+				Name: "encode", Kind: workercore.ModelDeploymentRoleKindEncode, Replicas: 1, AcceleratorType: "h20-8x",
+			}}, md.Spec.Roles...)
+		}
+	})
+}
+
+func TestModelDeploymentCacheAttached_OnlyStoreClientRolesAreAsked(t *testing.T) {
+	t.Run("vllm_1e1p1d_asks_the_prefiller_alone", func(t *testing.T) {
+		md := routedPairDeployment(workercore.ModelDeploymentEngineVLLM, true)
+		pods := []core.Pod{
+			readyRoleReplica(md, 0, 0, true), readyRoleReplica(md, 1, 0, true), readyRoleReplica(md, 2, 0, true),
+		}
+		scraper := &fakeModelDeploymentCacheScraper{readings: map[string]ModelDeploymentCacheReading{
+			"qwen-prefill-0": ModelDeploymentCacheActive,
+		}}
+
+		got := cacheAttachedOf(t, md, pods, readyDomain(), scraper)
+
+		assert.Equal(t, []string{"qwen-prefill-0"}, scraper.calls,
+			"the encoder holds no KV cache and the vLLM decode half receives its blocks from the prefiller")
+		assert.True(t, ModelDeploymentConditionCacheAttached.IsTrue(got))
+		assert.Contains(t, ModelDeploymentConditionCacheAttached.GetMessage(got), "1 of 1 ready replicas")
+	})
+
+	t.Run("sglang_1p1d_asks_both_halves", func(t *testing.T) {
+		md := routedPairDeployment(workercore.ModelDeploymentEngineSGLang, false)
+		pods := []core.Pod{readyRoleReplica(md, 0, 0, true), readyRoleReplica(md, 1, 0, true)}
+		scraper := &fakeModelDeploymentCacheScraper{}
+
+		cacheAttachedOf(t, md, pods, readyDomain(), scraper)
+
+		assert.Equal(t, []string{"qwen-decode-0", "qwen-prefill-0"}, scraper.scraped(),
+			"SGLang's store client is role-blind, so its decode half carries one")
+	})
+}
+
+// TestModelDeploymentRoleRendersStore asks the renderer's predicate through the deployment, for
+// every role shape that could be mistaken for a store client.
+func TestModelDeploymentRoleRendersStore(t *testing.T) {
+	vllm := workercore.ModelDeploymentEngineVLLM
+	sglang := workercore.ModelDeploymentEngineSGLang
+	role := func(name string, kind workercore.ModelDeploymentRoleKind) workercore.ModelDeploymentRole {
+		return workercore.ModelDeploymentRole{Name: name, Kind: kind, Replicas: 1, AcceleratorType: "h20-8x"}
+	}
+	withRole := func(name string, kind workercore.ModelDeploymentRoleKind, mutate ...func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles = []workercore.ModelDeploymentRole{role(name, kind)}
+		})
+		for _, m := range mutate {
+			m(md)
+		}
+
+		return md
+	}
+	// paired puts the role under test behind the engine's own router with the other half declared,
+	// which is what makes a prefill or decode role a disaggregated one.
+	paired := func(engine string) func(*workercore.ModelDeployment) {
+		router := workercore.ModelDeploymentRouterLLMD
+		if engine == sglang {
+			router = workercore.ModelDeploymentRouterSGL
+		}
+
+		return func(md *workercore.ModelDeployment) {
+			md.Spec.Engine.Name = engine
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: router}
+			other := workercore.ModelDeploymentRoleKindDecode
+			if md.Spec.Roles[0].Kind == workercore.ModelDeploymentRoleKindDecode {
+				other = workercore.ModelDeploymentRoleKindPrefill
+			}
+			md.Spec.Roles = append(md.Spec.Roles, role("other", other))
+		}
+	}
+
+	testCases := []struct {
+		name string
+		md   *workercore.ModelDeployment
+		want bool
+	}{
+		{name: "a vLLM server", md: withRole("server", workercore.ModelDeploymentRoleKindServer), want: true},
+		{name: "a vLLM prefiller", md: withRole("prefill", workercore.ModelDeploymentRoleKindPrefill), want: true},
+		{
+			name: "a vLLM prefiller behind a router",
+			md:   withRole("prefill", workercore.ModelDeploymentRoleKindPrefill, paired(vllm)), want: true,
+		},
+		{
+			// The decode half receives its blocks from its prefiller, which reads and writes the store.
+			name: "a disaggregated vLLM decoder",
+			md:   withRole("decode", workercore.ModelDeploymentRoleKindDecode, paired(vllm)), want: false,
+		},
+		{
+			// A lone decode half has no pair to receive from and runs undivided, on the store.
+			name: "a lone vLLM decoder",
+			md:   withRole("decode", workercore.ModelDeploymentRoleKindDecode), want: true,
+		},
+		{name: "a vLLM encoder", md: withRole("encode", workercore.ModelDeploymentRoleKindEncode), want: false},
+		{
+			name: "a take-over role",
+			md: withRole("server", workercore.ModelDeploymentRoleKindServer, func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Command = []string{"/bin/my-server"}
+			}),
+			want: false,
+		},
+		{
+			name: "a disaggregated SGLang decoder",
+			md:   withRole("decode", workercore.ModelDeploymentRoleKindDecode, paired(sglang)), want: true,
+		},
+		{
+			name: "a role of a deployment with no pool",
+			md: withRole("server", workercore.ModelDeploymentRoleKindServer, func(md *workercore.ModelDeployment) {
+				md.Spec.KVCache = nil
+			}),
+			want: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, ModelDeploymentRoleRendersStore(tc.md, &tc.md.Spec.Roles[0]))
+		})
+	}
+}
+
+// TestModelDeploymentCacheAttached_Messages reads what an operator would read off the object. A
+// condition an operator acts on has to name the pool, what the pool's transport asks of the engine,
+// what the role asked for, and what each replica reported.
+func TestModelDeploymentCacheAttached_Messages(t *testing.T) {
+	rdmaBackend := newRenderBackend()
+	rdmaBackend.Spec.Transport.Protocol = "RDMA"
+	failing := func() *fakeModelDeploymentCacheScraper {
+		return &fakeModelDeploymentCacheScraper{
+			readings: map[string]ModelDeploymentCacheReading{
+				"qwen-server-0": ModelDeploymentCacheFailing,
+				"qwen-server-1": ModelDeploymentCacheFailing,
+			},
+			counts: map[string][3]float64{"qwen-server-0": {3, 3, 3}, "qwen-server-1": {2, 2, 2}},
+		}
+	}
+	withInterface := func(value string) func(*workercore.ModelDeployment) {
+		return func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Replicas = 2
+			if value != "" {
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					Interface: ptr.To(resource.MustParse(value)),
+				}
+			}
+		}
+	}
+	message := func(t *testing.T, md *workercore.ModelDeployment, scraper *fakeModelDeploymentCacheScraper,
+		domain *modelDeploymentDomain, extra ...ctrlcli.Object,
+	) string {
+		t.Helper()
+
+		return ModelDeploymentConditionCacheAttached.GetMessage(
+			cacheAttachedOf(t, md, readyPods(md, 2), domain, scraper, extra...),
+		)
+	}
+
+	t.Run("failing_without_an_interface_on_a_fabric_pool", func(t *testing.T) {
+		got := message(t, newRenderDeployment(withInterface("0")), failing(), readyDomain(),
+			newRenderPool(), rdmaBackend)
+
+		assert.Contains(t, got, `pool "shared" (transports: [rdma])`)
+		assert.Contains(t, got, "2 of 2 ready replicas report store transfers of which every key failed")
+		assert.Contains(t, got, `qwen-server-0 (role "server", resources.interface: 0): 3 transfer operations attempted, 3 of 3 keys failed`)
+		assert.Contains(t, got, `qwen-server-1 (role "server", resources.interface: 0): 2 transfer operations attempted, 2 of 2 keys failed`)
+		assert.Contains(t, got, "this engine has no RDMA interface while every transport of the pool requires one")
+	})
+
+	t.Run("failing_with_the_interface_unset_on_a_fabric_pool", func(t *testing.T) {
+		got := message(t, newRenderDeployment(withInterface("")), failing(), readyDomain(),
+			newRenderPool(), rdmaBackend)
+
+		assert.Contains(t, got, `resources.interface: unset`)
+		assert.Contains(t, got, "this engine has no RDMA interface while every transport of the pool requires one")
+	})
+
+	t.Run("failing_with_an_interface_on_a_fabric_pool", func(t *testing.T) {
+		got := message(t, newRenderDeployment(withInterface("1")), failing(), readyDomain(),
+			newRenderPool(), rdmaBackend)
+
+		assert.Contains(t, got, `resources.interface: 1`)
+		assert.NotContains(t, got, "no RDMA interface", "the role asked for an interface, so its absence is not the cause to name")
+	})
+
+	t.Run("failing_without_an_interface_on_a_tcp_pool", func(t *testing.T) {
+		got := message(t, newRenderDeployment(withInterface("0")), failing(), readyDomain(),
+			newRenderPool(), newRenderBackend())
+
+		assert.Contains(t, got, `pool "shared" (transports: [tcp])`)
+		assert.NotContains(t, got, "no RDMA interface", "a tcp pool asks no fabric interface of the engine")
+	})
+
+	t.Run("active_names_the_failing_sibling", func(t *testing.T) {
+		scraper := &fakeModelDeploymentCacheScraper{
+			readings: map[string]ModelDeploymentCacheReading{
+				"qwen-server-0": ModelDeploymentCacheActive,
+				"qwen-server-1": ModelDeploymentCacheFailing,
+			},
+			counts: map[string][3]float64{"qwen-server-0": {5, 9, 1}, "qwen-server-1": {2, 2, 2}},
+		}
+
+		got := message(t, newRenderDeployment(withInterface("1")), scraper, readyDomain(),
+			newRenderPool(), rdmaBackend)
+
+		assert.Contains(t, got, "1 of 2 ready replicas report succeeding store transfers")
+		assert.Contains(t, got, `qwen-server-0 (role "server", resources.interface: 1): 5 transfer operations attempted, 1 of 9 keys failed`)
+		assert.Contains(t, got, "1 report transfers of which every key failed")
+		assert.Contains(t, got, `qwen-server-1 (role "server", resources.interface: 1): 2 transfer operations attempted, 2 of 2 keys failed`)
+	})
+
+	t.Run("unreadable_says_no_transfer_was_observed", func(t *testing.T) {
+		scraper := &fakeModelDeploymentCacheScraper{errs: map[string]bool{"qwen-server-0": true, "qwen-server-1": true}}
+
+		got := message(t, newRenderDeployment(withInterface("1")), scraper, readyDomain(),
+			newRenderPool(), rdmaBackend)
+
+		assert.Contains(t, got, `pool "shared" (transports: [rdma]); no store transfer was observed: none of the 2 ready replicas`)
+		assert.NotContains(t, got, ". ", "the Unknown says so in one sentence")
+	})
+
+	t.Run("an_unresolved_binding_names_the_binding", func(t *testing.T) {
+		scraper := &fakeModelDeploymentCacheScraper{readings: map[string]ModelDeploymentCacheReading{
+			"qwen-server-0": ModelDeploymentCacheFailing,
+			"qwen-server-1": ModelDeploymentCacheFailing,
+		}}
+
+		got := message(t, newRenderDeployment(withInterface("0")), scraper, nil, newRenderPool(), rdmaBackend)
+
+		assert.Contains(t, got, `binding "shared-kv" (transports: unresolved)`)
+	})
+}
+
+// TestModelDeploymentReconciler_APoolBoundDeploymentIsLookedAtAgain is what keeps the cache
+// condition honest once a deployment has converged.
+//
+// A converged pass returns an empty result, and nothing that moves the condition is an event: the
+// transfers it reports are traffic between an engine and a store, on objects this controller is not
+// watching for it. Without a pass of its own the condition a reader sees is the one the first
+// traffic-free pass wrote. A deployment with no pool has no such condition and keeps its result.
+func TestModelDeploymentReconciler_APoolBoundDeploymentIsLookedAtAgain(t *testing.T) {
+	convergedResult := func(t *testing.T, md *workercore.ModelDeployment) ctrl.Result {
+		t.Helper()
+
+		cli := newModelDeploymentClient(md, newRenderAcceleratorType())
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		res, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+
+		return res
+	}
+
+	t.Run("bound_to_a_pool", func(t *testing.T) {
+		res := convergedResult(t, newRenderDeployment())
+
+		assert.Positive(t, res.RequeueAfter)
+		assert.LessOrEqual(t, res.RequeueAfter, modelDeploymentCacheRequeue)
+		assert.Equal(t, modelDeploymentCacheRequeue, res.RequeueAfter)
+	})
+
+	t.Run("no_pool", func(t *testing.T) {
+		res := convergedResult(t, newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.KVCache = nil }))
+
+		assert.Equal(t, ctrl.Result{}, res)
+	})
+
+	t.Run("a_rollout_waiting_for_admission", func(t *testing.T) {
+		// The same hold TestModelDeploymentWorkloadWatch_ReleasesAHeldRollout walks: a pass that left
+		// replicas outdated is not converged, and the admission event is what brings it back.
+		cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		standInForKueue(t, cli, false)
+		changed := getModelDeployment(t, cli)
+		changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
+		require.NoError(t, cli.Update(context.Background(), changed))
+
+		res, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+
+		assert.Equal(t, ctrl.Result{}, res)
+	})
+}
+
+// TestModelDeploymentPoolTransportsNeedInterface reads the rule off the backend shapes admission and
+// the cache condition both judge: every member group has to reach the host's fabric for an engine
+// with no fabric interface to be unable to transfer at all.
+func TestModelDeploymentPoolTransportsNeedInterface(t *testing.T) {
+	one := int32(1)
+	// group is one member group: its own transport when it declares one, and its fabric interface
+	// count.
+	type group struct {
+		protocol string
+		count    *int32
+	}
+	backend := func(protocol string, groups ...group) *workercore.KVCacheBackend {
+		kvcb := newRenderBackend()
+		kvcb.Spec.Transport.Protocol = protocol
+		if len(groups) == 0 {
+			return kvcb
+		}
+		managed := &workercore.KVCacheBackendManaged{}
+		for _, group := range groups {
+			member := workercore.KVCacheBackendMember{FabricInterfaceCount: group.count}
+			if group.protocol != "" {
+				member.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: group.protocol}
+			}
+			managed.Members = append(managed.Members, member)
+		}
+		kvcb.Spec.Connection.Managed = managed
+
+		return kvcb
+	}
+
+	testCases := []struct {
+		name string
+		kvcb *workercore.KVCacheBackend
+		want bool
+	}{
+		{name: "an external rdma backend", kvcb: backend("RDMA"), want: true},
+		{name: "an external efa backend", kvcb: backend("EFA"), want: true},
+		{name: "an external tcp backend", kvcb: backend("TCP"), want: false},
+		{
+			name: "an external ascend backend, which has no group to opt into host roce",
+			kvcb: backend("CANN"), want: false,
+		},
+		{name: "one rdma group", kvcb: backend("RDMA", group{count: &one}), want: true},
+		{name: "rdma groups with and without a count", kvcb: backend("RDMA", group{count: &one}, group{}), want: true},
+		{name: "an ascend group on host roce", kvcb: backend("CANN", group{count: &one}), want: true},
+		{name: "an ascend group with no count", kvcb: backend("CANN", group{}), want: false},
+		{
+			name: "ascend groups with and without host roce",
+			kvcb: backend("CANN", group{count: &one}, group{}), want: false,
+		},
+		{name: "rdma beside tcp", kvcb: backend("RDMA", group{protocol: "TCP"}, group{}), want: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, ModelDeploymentPoolTransportsNeedInterface(tc.kvcb))
+		})
+	}
+}
+
+// TestModelDeploymentCacheAttached_MessageIsBounded keeps the CacheAttached message under the
+// length the API accepts however many replicas are ready.
+//
+// A condition message is capped by the schema at 32768 characters, and one segment per replica grows
+// with the role's replica count, which the schema allows up to 1024. At most a named count of
+// replicas is rendered per role; the rest are counted in one tail that still names their verdict, so
+// a reader is told what they are not being shown.
+func TestModelDeploymentCacheAttached_MessageIsBounded(t *testing.T) {
+	const omitted = 7
+	rendered := int32(modelDeploymentCacheMessageReplicas)
+	perReplica := int32(modelDeploymentCacheMessageReplicas) + omitted
+
+	t.Run("one_role_all_failing", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = perReplica })
+		readings := make(map[string]ModelDeploymentCacheReading, perReplica)
+		for i := range perReplica {
+			readings[fmt.Sprintf("qwen-server-%d", i)] = ModelDeploymentCacheFailing
+		}
+
+		got := cacheAttachedOf(t, md, readyPods(md, perReplica), readyDomain(),
+			&fakeModelDeploymentCacheScraper{readings: readings})
+		message := ModelDeploymentConditionCacheAttached.GetMessage(got)
+
+		assert.Equal(t, "False", ModelDeploymentConditionCacheAttached.GetStatus(got))
+		assert.Equal(t, modelDeploymentReasonCacheOperationsFailing,
+			ModelDeploymentConditionCacheAttached.GetReason(got))
+		assert.Contains(t, message, fmt.Sprintf("%d of %d ready replicas report store transfers of which every key failed",
+			perReplica, perReplica), "the head still counts every replica")
+		assert.Equal(t, int(rendered), strings.Count(message, "transfer operations attempted"),
+			"at most the bound of replicas is rendered")
+		assert.Contains(t, message, fmt.Sprintf("and %d more role %q report transfers of which every key failed", omitted, "server"),
+			"the tail names the omitted replicas, their role and their verdict")
+		assert.Less(t, len(message), 1200, "the message stays bounded")
+	})
+
+	t.Run("two_roles_each_rendered_up_to_the_cap", func(t *testing.T) {
+		// Ten replicas per role: the first five succeed and the rest fail, so both lines are capped
+		// and each role is rendered up to the rendered in each.
+		const perRole, failingPerRole = 10, 5
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Replicas = perRole
+			md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+				Name: "worker", Replicas: perRole, AcceleratorType: "h20-8x",
+			})
+		})
+		pods := append(readyRolePods(md, 0, perRole), readyRolePods(md, 1, perRole)...)
+		readings := make(map[string]ModelDeploymentCacheReading, 2*perRole)
+		for i := range perRole {
+			verdict := ModelDeploymentCacheActive
+			if i >= failingPerRole {
+				verdict = ModelDeploymentCacheFailing
+			}
+			readings[fmt.Sprintf("qwen-server-%d", i)] = verdict
+			readings[fmt.Sprintf("qwen-worker-%d", i)] = verdict
+		}
+
+		got := cacheAttachedOf(t, md, pods, readyDomain(), &fakeModelDeploymentCacheScraper{readings: readings})
+		message := ModelDeploymentConditionCacheAttached.GetMessage(got)
+
+		assert.Equal(t, "True", ModelDeploymentConditionCacheAttached.GetStatus(got))
+		assert.Equal(t, modelDeploymentReasonCacheActive, ModelDeploymentConditionCacheAttached.GetReason(got))
+		assert.Contains(t, message, fmt.Sprintf("%d of %d ready replicas report succeeding store transfers", 2*failingPerRole, 2*perRole))
+		assert.Contains(t, message, fmt.Sprintf("; %d report transfers of which every key failed", 2*failingPerRole))
+		assert.Equal(t, 4*int(rendered), strings.Count(message, "transfer operations attempted"),
+			"each role renders up to the rendered in each line")
+		for _, role := range []string{"server", "worker"} {
+			assert.Equal(t, 2*int(rendered)+2, strings.Count(message, fmt.Sprintf("role %q", role)),
+				"role %q is rendered in both lines up to the bound and named once in each line's tail", role)
+		}
+		for _, role := range []string{"server", "worker"} {
+			assert.Contains(t, message, fmt.Sprintf("and %d more role %q report succeeding store transfers", failingPerRole-int(rendered), role),
+				"the tail of the succeeding line names the role it left out")
+			assert.Contains(t, message, fmt.Sprintf("and %d more role %q report transfers of which every key failed", failingPerRole-int(rendered), role),
+				"the tail of the failing line names the role it left out")
+		}
+		assert.Less(t, len(message), 2400, "the message stays bounded")
+	})
+}
+
+// readyRolePods builds n Ready replicas of one declared role of the deployment.
+func readyRolePods(md *workercore.ModelDeployment, role, n int32) []core.Pod {
+	pods := make([]core.Pod, 0, n)
+	for ordinal := range n {
+		pods = append(pods, readyRoleReplica(md, int(role), ordinal, true))
+	}
+
+	return pods
 }

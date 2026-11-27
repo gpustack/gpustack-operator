@@ -601,6 +601,19 @@ func TestGroupForwardURLReadsThePortTheAnnotationNames(t *testing.T) {
 	}
 }
 
+// An IPv6 PodIP is one address, not a host and a port. The URL brackets it, or the dial reads the
+// address as invalid.
+func TestGroupForwardURLBracketsAnIPv6Address(t *testing.T) {
+	member := probeMember(0, 0, "uid-a")
+	member.Status.PodIP = "fd00::1"
+	member.Annotations["prometheus.io/port"] = "8000"
+
+	address, err := modelDeploymentGroupForwardURL(member, "/metrics")
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://[fd00::1]:8000/metrics", address)
+}
+
 // boundProbeFetch is a transport whose every member answers the request it was sent, bound to that
 // request. A case that is about some OTHER leg passes this so the group leg is a stated fact —
 // verified — instead of a side effect of the case having passed no transport at all.

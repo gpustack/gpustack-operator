@@ -323,7 +323,7 @@ func renderSGLang(in Input) (*Result, error) {
 	}
 
 	result := &Result{}
-	if hasStore {
+	if RendersStore(in) {
 		env = append(env, []core.EnvVar{
 			{Name: sglangMasterEnv, Value: in.Connection.MasterAddress},
 			{Name: sglangMetadataServerEnv, Value: MetadataServer},

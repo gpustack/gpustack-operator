@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
@@ -869,6 +870,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 ) (ctrladmission.Warnings, error) {
 	md := obj.(*workercore.ModelDeployment)
 
+	warnings := r.warnModelDeploymentStoreRoleWithoutInterface(ctx, nil, md)
 	errs := validateModelDeployment(md, nil)
 	errs = append(errs, r.validateModelDeploymentScalerFence(ctx, nil, md)...)
 	errs = append(errs, r.ValidateModelDeploymentElasticEP(ctx, md, nil)...)
@@ -909,10 +911,10 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	}
 
 	if len(errs) > 0 {
-		return nil, kerrors.NewInvalid(md.GroupVersionKind().GroupKind(), md.Name, errs)
+		return warnings, kerrors.NewInvalid(md.GroupVersionKind().GroupKind(), md.Name, errs)
 	}
 
-	return nil, nil
+	return warnings, nil
 }
 
 func (r *ModelDeploymentWebhook) ValidateUpdate(
@@ -920,6 +922,8 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 ) (ctrladmission.Warnings, error) {
 	md := newObj.(*workercore.ModelDeployment)
 	old, _ := oldObj.(*workercore.ModelDeployment)
+
+	warnings := r.warnModelDeploymentStoreRoleWithoutInterface(ctx, old, md)
 
 	// WHAT THIS DEPLOYMENT IS CANNOT BE EDITED; HOW IT IS CURRENTLY RUN CAN. The fields answering the
 	// first question are refused here, and the criterion that sorts them is stated on
@@ -973,10 +977,163 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	}
 
 	if len(errs) > 0 {
-		return nil, kerrors.NewInvalid(md.GroupVersionKind().GroupKind(), md.Name, errs)
+		return warnings, kerrors.NewInvalid(md.GroupVersionKind().GroupKind(), md.Name, errs)
 	}
 
-	return nil, nil
+	return warnings, nil
+}
+
+// warnModelDeploymentStoreRoleWithoutInterface warns about a role that renders a store client for a
+// pool whose every transport reaches the host's fabric while requesting no fabric interface of its
+// own.
+//
+// IT WARNS AND NEVER REFUSES, because the deployment is valid: it serves every request, and what it
+// never does is write to the pool. The members listen on the fabric alone, a client that holds no
+// fabric interface falls back to TCP, and a transfer from a TCP client to a fabric segment is
+// refused. Nothing in the object says so until traffic, which is why admission names the field
+// rather than leaving the deployment's CacheAttached condition to find it.
+//
+// ONLY ROLES THAT RENDER A STORE CLIENT ARE JUDGED, by the reconciler's own predicate: a take-over
+// role, an encoder stage and a disaggregated vLLM decode half carry none, and a false warning on a
+// decoder is harmful rather than noise, because adding an interface to it moves the direct transfer
+// onto the fabric.
+//
+// A POOL IS JUDGED ON ITS EFFECTIVE TRANSPORTS, never on spec.transport.protocol read once: rdma and
+// efa reach the host fabric unconditionally, and ascend reaches it only where the member group opts
+// into Ascend A5 Host RoCE with a positive fabricInterfaceCount. A pool with any group that stays off
+// the fabric never warns, because its segments take a TCP client.
+//
+// old is nil on create, where every such role warns. On an update a role warns only when an input of
+// the warning moved, which is decided from the two objects alone before anything is read: the
+// reconciler's writes are updates too, and one that scales replicas must neither repeat a warning
+// nobody reads nor read the Binding, the pool and the backend. The pool's transports enter through the
+// Binding alone, since admission is not run on the backend.
+//
+// AN OBJECT BEING DELETED IS NEVER WARNED, and neither is a deployment whose Binding, pool or backend
+// cannot be read: a missing object means no answer, never a refusal, which is the lenient path
+// validateModelDeploymentPoolTransport takes and not the one validateModelDeploymentInterfaceRequests
+// takes for a role that requests an interface.
+func (r *ModelDeploymentWebhook) warnModelDeploymentStoreRoleWithoutInterface(
+	ctx context.Context, old, md *workercore.ModelDeployment,
+) ctrladmission.Warnings {
+	if md.Spec.KVCache == nil || md.DeletionTimestamp != nil {
+		return nil
+	}
+
+	var candidates []int
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if modelDeploymentRoleRequestsInterface(role) || !workerctrl.ModelDeploymentRoleRendersStore(md, role) {
+			continue
+		}
+		if old != nil && !modelDeploymentStoreInterfaceInputsMoved(old, md, role) {
+			continue
+		}
+		candidates = append(candidates, i)
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	pool, backend := r.resolveModelDeploymentPoolBackend(ctx, md)
+	if backend == nil || !workerctrl.ModelDeploymentPoolTransportsNeedInterface(backend) {
+		return nil
+	}
+
+	warnings := make(ctrladmission.Warnings, 0, len(candidates))
+	for _, i := range candidates {
+		warnings = append(warnings, fmt.Sprintf(
+			"%s: role %q writes to kv cache pool %q over %v, and every transport of this pool needs a "+
+				"fabric interface on the engine; set resources.interface, or every engine-to-store "+
+				"transfer is refused while the deployment keeps reporting Ready",
+			field.NewPath("spec", "roles").Index(i).Child("resources", "interface"),
+			md.Spec.Roles[i].Name, pool.Name, mooncake.MemberProtocols(backend),
+		))
+	}
+
+	return warnings
+}
+
+// modelDeploymentRoleRequestsInterface reports whether the role asks for at least one fabric interface.
+func modelDeploymentRoleRequestsInterface(role *workercore.ModelDeploymentRole) bool {
+	return role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0
+}
+
+// modelDeploymentStoreInterfaceInputsMoved reports whether an update moved any input of the interface
+// warning for one role: the interface it requests, the Binding the deployment is bound through, and
+// whether the role renders a store client at all, which its command line, its kind and the router
+// that makes a decode role disaggregated each decide. Roles are matched by name, as the identity
+// rules match them.
+func modelDeploymentStoreInterfaceInputsMoved(old, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole) bool {
+	if !kubemeta.DeepEqual(old.Spec.KVCache, md.Spec.KVCache) || !kubemeta.DeepEqual(old.Spec.Router, md.Spec.Router) {
+		return true
+	}
+
+	var stored *workercore.ModelDeploymentRole
+	for i := range old.Spec.Roles {
+		if old.Spec.Roles[i].Name == role.Name {
+			stored = &old.Spec.Roles[i]
+		}
+	}
+	if stored == nil {
+		return true
+	}
+
+	return stored.Kind != role.Kind || !kubemeta.DeepEqual(stored.Command, role.Command) ||
+		!modelDeploymentSameInterface(stored.Resources, role.Resources)
+}
+
+// modelDeploymentSameInterface reports whether two resources blocks request the same interface
+// count, unset counting as a value of its own.
+func modelDeploymentSameInterface(a, b *workercore.ModelDeploymentRoleResources) bool {
+	switch {
+	case a == nil || a.Interface == nil:
+		return b == nil || b.Interface == nil
+	case b == nil || b.Interface == nil:
+		return false
+	}
+
+	return a.Interface.Cmp(*b.Interface) == 0
+}
+
+// resolveModelDeploymentPoolBackend reads the pool and the backend the deployment's Binding points
+// at, for a warning and not a verdict.
+//
+// IT IS LENIENT AT EVERY STEP, along the path validateModelDeploymentPoolTransport takes: a Binding,
+// pool or backend that does not exist, a pool that names no backend, and a read that failed all
+// answer nil, which is no warning. Nothing here refuses.
+func (r *ModelDeploymentWebhook) resolveModelDeploymentPoolBackend(
+	ctx context.Context, md *workercore.ModelDeployment,
+) (*workercore.KVCachePool, *workercore.KVCacheBackend) {
+	// A missing object is no answer and no event. Any other read failure is logged, because the
+	// warning this feeds is the only place the shape surfaces at admission, and a warning dropped
+	// without a trace is indistinguishable from a shape that was never there.
+	swallow := func(err error, what string) {
+		if err != nil && !kerrors.IsNotFound(err) {
+			ctrllog.FromContext(ctx).Error(err, "read the "+what+" for the interface warning",
+				"modelDeployment", md.Name, "namespace", md.Namespace)
+		}
+	}
+	binding := &workercore.KVCachePoolBinding{}
+	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: md.Namespace, Name: md.Spec.KVCache.PoolRef.Name,
+	}, binding); err != nil {
+		swallow(err, "KV cache pool binding")
+		return nil, nil
+	}
+	pool := &workercore.KVCachePool{}
+	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: binding.Spec.PoolRef.Name}, pool); err != nil ||
+		len(pool.Spec.Backends) == 0 {
+		swallow(err, "KV cache pool")
+		return nil, nil
+	}
+	backend := &workercore.KVCacheBackend{}
+	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: pool.Spec.Backends[0]}, backend); err != nil {
+		swallow(err, "KV cache backend")
+		return nil, nil
+	}
+
+	return pool, backend
 }
 
 // modelDeploymentIdentityMessage is the one reason every identity refusal carries.
