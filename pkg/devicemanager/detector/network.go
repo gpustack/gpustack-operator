@@ -515,7 +515,7 @@ func sharedPortNote(ports []softwareRDMAport) string {
 
 // attachSoftwareRDMA records the software RDMA device that serves the interface, when one does.
 //
-// rxe and its peers bind an RDMA device to an ordinary netdev — a bond, a VLAN or a plain NIC — and
+// rxe and its peers bind an RDMA device to an ordinary netdev — a bond or a plain NIC — and
 // that device has no PCI parent, so the PCI lookup cannot reach it. Its ports name the netdevs they
 // serve, and the match is this interface's own name against that table (softwareRDMAIndex). The
 // lookup runs where the PCI one had nothing to say: on a virtual interface, which has no device to

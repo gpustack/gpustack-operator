@@ -123,10 +123,13 @@ their `Pod`s wait `Pending` in kube-scheduler:
 
 ### Software RDMA
 
-Soft-RoCE (`rxe`) runs *RDMA* in the kernel over an ordinary interface, including a bond or a VLAN.
-Device Manager records such an interface with `rdma: true`, `rdmaSoftware: true` and a link verdict,
-and sets `feature.gpustack.ai/rdma.software=true` when every usable *RDMA* endpoint on the `Node` is
-software-carried. The device itself is advertised under its own name, such as `rxe0`.
+Soft-RoCE (`rxe`) runs *RDMA* in the kernel over an ordinary interface, such as a bond or a plain
+NIC. Device Manager records such an interface with `rdma: true`, `rdmaSoftware: true` and a link
+verdict, and sets `feature.gpustack.ai/rdma.software=true` when every usable *RDMA* endpoint on the
+`Node` is software-carried. The device itself is advertised under its own name, such as `rxe0`.
+
+A VLAN device cannot carry Soft-RoCE: the kernel's `rxe_newlink` refuses an 8021Q or 8021ad device
+with `rxe creation allowed on top of a real device only`.
 
 Performance is far below a hardware adapter's. To keep a hardware pool off such `Node`s, write a node
 affinity that excludes `feature.gpustack.ai/rdma.software`, or exclude the `rxe` devices with a
@@ -280,7 +283,7 @@ kubectl get devices <node> -o json |
 ```
 
 - **Healthy (`rdma.capable=true`)**: At least one physical NIC, SR-IOV VF or software RDMA interface
-  (a bond, VLAN or NIC with `rdmaSoftware: true`) reports `link.state` `OK` or `Unverified` (or `rdma: true`
+  (a bond or NIC with `rdmaSoftware: true`) reports `link.state` `OK` or `Unverified` (or `rdma: true`
   without a link verdict).
 - **Missing (`rdma.capable` absent)**: Every endpoint that carries an RDMA record reports
   `link.state: Failed` (with port state and `firstSeen`), or no interface carries one.

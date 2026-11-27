@@ -947,7 +947,7 @@ type ifaceVerdict struct {
 	busID    string
 }
 
-// TestEnumerateInterfacesJoinsSoftwareRDMAByNetdev pins the netdev-keyed lookup: a bond or VLAN that
+// TestEnumerateInterfacesJoinsSoftwareRDMAByNetdev pins the netdev-keyed lookup: a bond or NIC that
 // carries a software RDMA device gets the RDMA record, the link verdict and the node labels that the
 // PCI-keyed lookup could not give it, because it has no device to start from.
 //

@@ -64,7 +64,7 @@ func interfacesChanged(
 // takes the loop round like any other.
 //
 // Such an interface exists: readInterface matches an interface by name against the ports of the
-// node's software RDMA devices, so a bond, a VLAN or a plain NIC carrying Soft-RoCE carries a record
+// node's software RDMA devices, so a bond or a plain NIC carrying Soft-RoCE carries a record
 // and a verdict.
 // A software device bound to a Pod veth is matched the same way, and every Pod then changes the
 // triggering subset. That shape is a limit of the lookup and is not excluded here.

@@ -1230,7 +1230,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 															Type:        "string",
 														},
 														"rdmaSoftware": {
-															Description: "RDMASoftware reports that RDMA reaches this interface through a software device, such as\nSoft-RoCE (`rxe`), which runs RDMA in the kernel over an ordinary network device such as a\nbond, a VLAN or a plain NIC. The Device Manager finds the interface by its name in the\nsoftware device's ports, because the device has no PCI address to look up.\nA node whose usable RDMA interfaces are all software-carried carries the node label\n`feature.gpustack.ai/rdma.software=true`. The `rdma.distance` and `rdma.numa` node labels\nare never derived from such an interface. Performance is far below a hardware adapter's.",
+															Description: "RDMASoftware reports that RDMA reaches this interface through a software device, such as\nSoft-RoCE (`rxe`), which runs RDMA in the kernel over an ordinary network device such as a\nbond or a plain NIC. A VLAN device cannot carry Soft-RoCE: the kernel's `rxe_newlink` refuses\nan 8021Q or 8021ad device with `rxe creation allowed on top of a real device only`. The\nDevice Manager finds the interface by its name in the software device's ports, because the\ndevice has no PCI address to look up.\nA node whose usable RDMA interfaces are all software-carried carries the node label\n`feature.gpustack.ai/rdma.software=true`. The `rdma.distance` and `rdma.numa` node labels\nare never derived from such an interface. Performance is far below a hardware adapter's.",
 															Type:        "boolean",
 														},
 														"sriov": {

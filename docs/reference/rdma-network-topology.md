@@ -94,7 +94,7 @@ bound device whose verdict is `Failed` does not. The key disappears only from a 
 endpoint is unusable, which is stricter than "every bound interface reports `Failed`".
 
 Software *RDMA* is recognized by name. Soft-RoCE (`rxe`) binds an *RDMA* device to an ordinary
-netdev, which can be a bond, a VLAN or a plain NIC, and that device has no PCI address. Each of its
+netdev, which can be a bond or a plain NIC, and that device has no PCI address. Each of its
 ports names the netdevs it serves. When the *PCI* lookup finds no device and reads the whole tree, the
 Device Manager matches the interface's own name against those tables. A match gets `rdma: true`,
 `rdmaSoftware: true` and a verdict read from that port alone.
