@@ -2807,3 +2807,61 @@ def test_nonfinite_and_bool_evaluation_sanitizes_report_and_aligns_omitted_allcl
         assert res.overall_status == want_status, case_name
         parsed = _assert_rfc8259_report(rep_path)
         assert parsed["overallStatus"] == want_status, case_name
+
+
+def test_forge_verifier_major_minor_engine_version_compatibility(
+    tmp_path: Path,
+) -> None:
+    def _pass_exec(*_args: Any) -> dict[str, Any]:
+        return {
+            "status": "PASSED",
+            "correctness": {"max_abs_error": 0.0, "max_relative_error": 0.0},
+            "performance": {
+                "speedup_factor": 1.25,
+                "latency_ms": 0.4,
+                "reference_latency_ms": 0.5,
+            },
+        }
+
+    # 1. Patch/post variants in the same 0.8 line match compatibility and canonical 0.8 entry key.
+    in_ok, out_ok, rep_ok, key_ok = _build_forge_dirs(tmp_path / "ver_ok")
+    assert key_ok.startswith("vllm/0.8/nvidia/sm_90a/rmsnorm/")
+    req_ok = json.loads((in_ok / "forge-request.json").read_text("utf-8"))
+    req_ok["engineVersion"] = "0.8.6.post1"
+    (in_ok / "forge-request.json").write_text(json.dumps(req_ok), encoding="utf-8")
+    man_ok = json.loads((out_ok / "dispatch-manifest.json").read_text("utf-8"))
+    man_ok["compatibility"]["engineVersion"] = "v0.8.5+cu128"
+    (out_ok / "dispatch-manifest.json").write_text(json.dumps(man_ok), encoding="utf-8")
+
+    res_ok = verify_forge_output(
+        input_dir=in_ok,
+        output_dir=out_ok,
+        report_path=rep_ok,
+        executor=_pass_exec,
+    )
+    assert res_ok.overall_status == "PASSED"
+
+    # 2. Minor bump (0.8.5 vs 0.9.0) and pre-release mismatch (0.9.0 vs 0.9.0rc1) fail verification.
+    for case_name, req_ver, man_ver in (
+        ("minor_mismatch", "0.9.0", "0.8.5"),
+        ("prerelease_mismatch", "0.9.0", "0.9.0rc1"),
+        ("invalid_manifest_ver", "0.8.5", "not-a-version"),
+    ):
+        in_bad, out_bad, rep_bad, _ = _build_forge_dirs(tmp_path / case_name)
+        req_doc = json.loads((in_bad / "forge-request.json").read_text("utf-8"))
+        req_doc["engineVersion"] = req_ver
+        (in_bad / "forge-request.json").write_text(
+            json.dumps(req_doc), encoding="utf-8"
+        )
+        man_doc = json.loads((out_bad / "dispatch-manifest.json").read_text("utf-8"))
+        man_doc["compatibility"]["engineVersion"] = man_ver
+        (out_bad / "dispatch-manifest.json").write_text(
+            json.dumps(man_doc), encoding="utf-8"
+        )
+        res_bad = verify_forge_output(
+            input_dir=in_bad,
+            output_dir=out_bad,
+            report_path=rep_bad,
+            executor=_pass_exec,
+        )
+        assert res_bad.overall_status == "FAILED", case_name

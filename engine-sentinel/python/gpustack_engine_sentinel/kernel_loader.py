@@ -183,12 +183,23 @@ def _is_compatible(
         != canonical_engine_name(have_engine).lower()
     ):
         return False
-    if (
-        want_version
-        and have_version
-        and normalize_engine_version(want_version)
-        != normalize_engine_version(have_version)
+    norm_want_ver: str | None = None
+    if want_version is not None and (
+        not isinstance(want_version, str) or want_version.strip()
     ):
+        try:
+            norm_want_ver = normalize_engine_version(want_version)
+        except ValueError:
+            return False
+    norm_have_ver: str | None = None
+    if have_version is not None and (
+        not isinstance(have_version, str) or have_version.strip()
+    ):
+        try:
+            norm_have_ver = normalize_engine_version(have_version)
+        except ValueError:
+            return False
+    if norm_want_ver and norm_have_ver and norm_want_ver != norm_have_ver:
         return False
     if (
         want_manufacturer

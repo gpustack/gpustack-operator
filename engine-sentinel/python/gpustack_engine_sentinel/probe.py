@@ -352,12 +352,14 @@ _OP_REFERENCES: dict[str, str] = {
     "custom_elementwise_fusion": "def run(x, y):\n    return x + y",
 }
 
-_VERSION_BUILD_SPLIT_RE = re.compile(r"[+]")
 _VERSION_GIT_DESCRIBE_RE = re.compile(
-    r"(?:-\d+)?[-.](?:g|git)[0-9a-f]{6,}(?:[-.].*)?$", re.IGNORECASE
+    r"(?:-\d+)?[-.](?:g|git)[0-9a-fA-F]{6,}(?:[-.].*)?$", re.ASCII
 )
-_VERSION_DIRTY_RE = re.compile(r"[-.]dirty$", re.IGNORECASE)
-_BARE_MAJOR_MINOR_RE = re.compile(r"^(\d+)\.(\d+)$")
+_VERSION_DIRTY_RE = re.compile(r"[-.]dirty$", re.ASCII)
+_CANONICAL_ENGINE_VERSION_RE = re.compile(
+    r"^(\d+)\.(\d+)(?:\.\d+(?:\.\d+)?)?(?:(?:\.?|-)post\d+(?:\.\d+)*)?((?:(?:\.?[ab]|(?:\.?|-)(?:rc|alpha|beta|dev))\d*(?:\.\d+)*)?)$",
+    re.ASCII,
+)
 _HEX16_RE = re.compile(r"^[0-9a-f]{16}$")
 _NVIDIA_DOT_COMCAP_RE = re.compile(r"^(\d+)\.(\d+)([a-z]*)$")
 _NVIDIA_SM_OR_COMPUTE_RE = re.compile(r"^(?:sm|compute)_(\d+)([a-z]*)$")
@@ -449,18 +451,25 @@ def canonical_engine_name(raw: str | None) -> str:
 
 
 def normalize_engine_version(raw: str | None) -> str:
-    """Normalize engine version matching pkg/worker/kernelkey: strip +build, git-describe, and -dirty; pad X.Y to X.Y.0."""
-    text = (raw or "").strip()
+    """Normalize engine version to canonical major.minor(+prerelease), stripping build and git suffixes."""
+    if not isinstance(raw, str):
+        raise ValueError(f"Invalid engineVersion: {raw!r}")
+    text = raw.strip()
     if not text:
-        return "0.0.0"
-    if text.startswith(("v", "V")) and len(text) > 1 and text[1].isdigit():
+        raise ValueError("engineVersion must not be empty")
+    if any(c.isspace() or c == "/" for c in text):
+        raise ValueError(f"engineVersion {raw!r} contains invalid characters")
+    if len(text) > 1 and text[0] in ("v", "V") and "0" <= text[1] <= "9":
         text = text[1:]
-    text = _VERSION_BUILD_SPLIT_RE.split(text, maxsplit=1)[0]
+    plus = text.find("+")
+    if plus >= 0:
+        text = text[:plus]
     text = _VERSION_GIT_DESCRIBE_RE.sub("", text)
-    text = _VERSION_DIRTY_RE.sub("", text).strip(".-_")
-    if _BARE_MAJOR_MINOR_RE.match(text):
-        text = f"{text}.0"
-    return text or "0.0.0"
+    text = _VERSION_DIRTY_RE.sub("", text)
+    m = _CANONICAL_ENGINE_VERSION_RE.fullmatch(text)
+    if m is None:
+        raise ValueError(f"Invalid engineVersion: {raw!r}")
+    return f"{m.group(1)}.{m.group(2)}{m.group(3)}"
 
 
 def _normalize_dtypes(dtypes: list[str] | tuple[str, ...] | None) -> list[str]:
@@ -576,6 +585,7 @@ def parse_local_kernel_key(key: str) -> dict[str, str]:
     if len(parts) != 6 or any(not p for p in parts):
         raise ValueError(f"Invalid LocalKernelKey format: {key!r}")
     engine, engine_version, manufacturer, arch, op_family, sig = parts
+    normalize_engine_version(engine_version)
     if op_family not in ALLOWED_OP_FAMILIES or is_excluded_operator(op_family):
         raise ValueError(
             f"Excluded or invalid opFamily in LocalKernelKey: {op_family!r}"

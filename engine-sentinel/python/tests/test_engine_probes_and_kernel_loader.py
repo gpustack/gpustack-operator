@@ -254,7 +254,7 @@ def test_vllm_rank0_collective_rpc_probe_autostops_and_distills(
         assert body["state"] == "completed"
         payload = body["payload"]
         assert payload["engine"] == "vllm"
-        assert payload["engine_version"] == "0.8.5"
+        assert payload["engine_version"] == "0.8"
         assert payload["diagnostics"]["steps_captured"] == 3
         assert payload["diagnostics"]["filtered_excluded_count"] == 2
         op_families = [d["op_type"] for d in payload["definitions"]]
@@ -462,7 +462,7 @@ def test_sglang_inprocess_probe_record_shapes_and_all_rank_cleanup(
         assert body["state"] == "completed"
         payload = body["payload"]
         assert payload["engine"] == "sglang"
-        assert payload["engine_version"] == "0.4.6"
+        assert payload["engine_version"] == "0.4"
         assert [d["op_type"] for d in payload["definitions"]] == ["rmsnorm"]
         assert payload["diagnostics"]["filtered_excluded_count"] == 2
         assert "DO_NOT_LEAK_THIS_PROMPT" not in json.dumps(payload)
@@ -2073,3 +2073,130 @@ def test_sglang_ready_queries_scheduler_subprocesses_for_kernel_load_error(
         assert r_fallback.json()["ready"] is True
     finally:
         reset_process_kernel_registry()
+
+
+def test_kernel_loader_major_minor_version_sharing_and_minor_or_prerelease_skip(
+    tmp_path: Path,
+) -> None:
+    reset_process_kernel_registry()
+
+    # 1. Bundle built for 0.8.5 (canonical 0.8) loads cleanly across 0.8.x patch/post releases.
+    bundle_08 = tmp_path / "bundle_08"
+    key_08, digest_08 = _write_sample_kernel_bundle(
+        bundle_08,
+        engine="vLLM",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        architecture="sm_90a",
+        include_mismatch=False,
+    )
+    assert key_08.startswith("vllm/0.8/nvidia/sm_90a/rmsnorm/")
+
+    for compat_runtime_ver in (
+        "0.8.6",
+        "0.8",
+        "v0.8.6+cu128",
+        "0.8.6.post1",
+        "0.8.5-12-g1a2b3c4",
+    ):
+        st_ok = load_kernel_dispatch_manifest(
+            bundle_08,
+            engine="vLLM",
+            engine_version=compat_runtime_ver,
+            manufacturer="nvidia",
+            architecture="sm_90a",
+        )
+        assert st_ok.kernel_load_error is None, compat_runtime_ver
+        assert st_ok.dispatch_manifest_digest == digest_08
+        assert st_ok.loaded_kernel_keys == [key_08]
+
+    # 2. Manifest built for 0.8.5 is rejected cleanly on 0.9.0, 0.9.0rc1, or invalid version strings.
+    for incompat_runtime_ver in ("0.9.0", "0.9.0rc1", "invalid-version"):
+        st_rej = load_kernel_dispatch_manifest(
+            bundle_08,
+            engine="vLLM",
+            engine_version=incompat_runtime_ver,
+            manufacturer="nvidia",
+            architecture="sm_90a",
+        )
+        assert st_rej.kernel_load_error == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+        assert st_rej.loaded_kernel_keys == []
+
+    # 3. Entry-level filtering skips a 0.8 entry on 0.9.0 and skips a 0.9 entry on 0.9.0rc1.
+    entry_filter_dir = tmp_path / "entry_version_filter"
+    key_09 = format_local_kernel_key(
+        engine="vLLM",
+        engine_version="0.9.0",
+        manufacturer="nvidia",
+        arch="sm_90a",
+        op_family="layernorm",
+        const_axes={"hidden_size": 4096},
+        input_dtypes=["bfloat16"],
+        output_dtypes=["bfloat16"],
+    )
+    (entry_filter_dir / "kernels" / "k").mkdir(parents=True)
+    (entry_filter_dir / "kernels" / "k" / "kernel.py").write_text(
+        "def run(x):\n    return x\n",
+        encoding="utf-8",
+    )
+    (entry_filter_dir / "dispatch-manifest.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": DISPATCH_MANIFEST_SCHEMA_VERSION,
+                "compatibility": {
+                    "engine": "vLLM",
+                    "manufacturer": "nvidia",
+                    "architecture": "sm_90a",
+                },
+                "entries": [
+                    {
+                        "localKernelKey": key_08,
+                        "definition": "rmsnorm_4096",
+                        "libraryPath": "kernels/k/kernel.py",
+                        "entrypoint": "run",
+                    },
+                    {
+                        "localKernelKey": key_09,
+                        "definition": "layernorm_4096",
+                        "libraryPath": "kernels/k/kernel.py",
+                        "entrypoint": "run",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    on_086 = load_kernel_dispatch_manifest(
+        entry_filter_dir,
+        engine="vLLM",
+        engine_version="0.8.6",
+        manufacturer="nvidia",
+        architecture="sm_90a",
+    )
+    assert on_086.kernel_load_error is None
+    assert on_086.loaded_kernel_keys == [key_08]
+    assert on_086.skipped_kernel_keys == [key_09]
+
+    on_090 = load_kernel_dispatch_manifest(
+        entry_filter_dir,
+        engine="vLLM",
+        engine_version="0.9.0",
+        manufacturer="nvidia",
+        architecture="sm_90a",
+    )
+    assert on_090.kernel_load_error is None
+    assert on_090.loaded_kernel_keys == [key_09]
+    assert on_090.skipped_kernel_keys == [key_08]
+
+    on_090rc1 = load_kernel_dispatch_manifest(
+        entry_filter_dir,
+        engine="vLLM",
+        engine_version="0.9.0rc1",
+        manufacturer="nvidia",
+        architecture="sm_90a",
+    )
+    assert on_090rc1.kernel_load_error is None
+    assert on_090rc1.loaded_kernel_keys == []
+    assert on_090rc1.skipped_kernel_keys == sorted([key_08, key_09])
+    reset_process_kernel_registry()

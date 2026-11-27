@@ -1657,11 +1657,27 @@ def _validate_compatibility_match(
                 f"manifest compatibility.engine {man_engine!r} does not match request {req_engine!r}"
             )
 
-    req_ver = str(request_compat.get("engineVersion") or "").strip()
-    if req_ver:
-        man_ver = str(manifest_compat.get("engineVersion") or "").strip()
-        if not man_ver or (
-            normalize_engine_version(man_ver) != normalize_engine_version(req_ver)
+    raw_man_ver = manifest_compat.get("engineVersion")
+    man_ver = ""
+    if raw_man_ver is not None:
+        if not isinstance(raw_man_ver, str):
+            raise ValueError(
+                f"manifest compatibility.engineVersion must be a string, got {raw_man_ver!r}"
+            )
+        man_ver = raw_man_ver.strip()
+        if man_ver:
+            normalize_engine_version(man_ver)
+
+    raw_req_ver = request_compat.get("engineVersion")
+    if raw_req_ver is not None:
+        if not isinstance(raw_req_ver, str):
+            raise ValueError(
+                f"request compatibility.engineVersion must be a string, got {raw_req_ver!r}"
+            )
+        req_ver = raw_req_ver.strip()
+        if req_ver and (
+            not man_ver
+            or normalize_engine_version(man_ver) != normalize_engine_version(req_ver)
         ):
             raise ValueError(
                 f"manifest compatibility.engineVersion {man_ver!r} does not match request {req_ver!r}"
@@ -1700,14 +1716,20 @@ def _validate_key_against_compatibility(
             f"Entry key engine {parsed_key['engine']!r} does not match manifest compatibility {man_engine!r}"
         )
 
-    man_ver = str(compat.get("engineVersion") or "").strip()
-    if man_ver and (
-        normalize_engine_version(man_ver)
-        != normalize_engine_version(str(parsed_key["engine_version"]))
-    ):
-        raise ValueError(
-            f"Entry key engineVersion {parsed_key['engine_version']!r} does not match manifest compatibility {man_ver!r}"
-        )
+    raw_man_ver = compat.get("engineVersion")
+    if raw_man_ver is not None:
+        if not isinstance(raw_man_ver, str):
+            raise ValueError(
+                f"manifest compatibility.engineVersion must be a string, got {raw_man_ver!r}"
+            )
+        man_ver = raw_man_ver.strip()
+        if man_ver and (
+            normalize_engine_version(man_ver)
+            != normalize_engine_version(str(parsed_key["engine_version"]))
+        ):
+            raise ValueError(
+                f"Entry key engineVersion {parsed_key['engine_version']!r} does not match manifest compatibility {man_ver!r}"
+            )
 
     man_mfr = str(compat.get("manufacturer") or "").strip().lower()
     if man_mfr and man_mfr != str(parsed_key["manufacturer"]).strip().lower():

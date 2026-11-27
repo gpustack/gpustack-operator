@@ -148,11 +148,33 @@ def test_allowed_op_families_classified_correctly(
 
 
 def test_local_kernel_key_canonical_hash_const_axes_only_and_version_norm() -> None:
-    assert normalize_engine_version("v0.8.5+cu128") == "0.8.5"
-    assert normalize_engine_version("0.4.6.post1+rocm6.3") == "0.4.6.post1"
-    assert normalize_engine_version("0.9.0.dev123+gabcdef1") == "0.9.0.dev123"
-    assert normalize_engine_version("0.9.0-gabcdef1-dirty") == "0.9.0"
-    assert normalize_engine_version("0.34") == "0.34.0"
+    expected_versions = (
+        ("0.8.5", "0.8"),
+        ("0.8.6", "0.8"),
+        ("0.8", "0.8"),
+        ("v0.8.5+cu128", "0.8"),
+        ("V0.8.5+cu128", "0.8"),
+        ("0.8.5-12-g1a2b3c4", "0.8"),
+        ("0.8.6.post1", "0.8"),
+        ("0.4.6.post2", "0.4"),
+        ("0.4.6.post1+rocm6.3", "0.4"),
+        ("0.9.0", "0.9"),
+        ("0.9.0-gabcdef1-dirty", "0.9"),
+        ("0.9.0rc1", "0.9rc1"),
+        ("0.9.0-rc.1", "0.9-rc.1"),
+        ("0.9.0.dev0", "0.9.dev0"),
+        ("0.9.0.dev123+gabcdef1", "0.9.dev123"),
+        ("0.9.0a1", "0.9a1"),
+        ("0.9.0b2", "0.9b2"),
+        ("0.34", "0.34"),
+        ("0.10.1.1+cu126", "0.10"),
+    )
+    for raw_ver, want_ver in expected_versions:
+        assert normalize_engine_version(raw_ver) == want_ver
+
+    for bad_ver in ("", "   ", "latest", "1", "0.8.5/evil", "0.34.", "0.8.5 extra"):
+        with pytest.raises(ValueError):
+            normalize_engine_version(bad_ver)
 
     const_axes = {"hidden_size": 4096}
     in_dtypes = ["torch.bfloat16", "bfloat16"]
@@ -197,11 +219,61 @@ def test_local_kernel_key_canonical_hash_const_axes_only_and_version_norm() -> N
         output_dtypes=out_dtypes,
         constants=constants,
     )
-    assert key == f"vllm/0.8.5/nvidia/sm_90a/rmsnorm/{expected_sig}"
+    assert key == f"vllm/0.8/nvidia/sm_90a/rmsnorm/{expected_sig}"
+    for same_line_ver in (
+        "0.8.5",
+        "0.8.6",
+        "0.8",
+        "v0.8.5+cu128",
+        "0.8.5-12-g1a2b3c4",
+        "0.8.6.post1",
+    ):
+        assert (
+            format_local_kernel_key(
+                engine="vLLM",
+                engine_version=same_line_ver,
+                manufacturer="NVIDIA",
+                arch="SM_90A",
+                op_family="rmsnorm",
+                const_axes=const_axes,
+                input_dtypes=in_dtypes,
+                output_dtypes=out_dtypes,
+                constants=constants,
+            )
+            == key
+        )
+
+    key_09 = format_local_kernel_key(
+        engine="vLLM",
+        engine_version="0.9.0",
+        manufacturer="NVIDIA",
+        arch="SM_90A",
+        op_family="rmsnorm",
+        const_axes=const_axes,
+        input_dtypes=in_dtypes,
+        output_dtypes=out_dtypes,
+        constants=constants,
+    )
+    key_09_rc1 = format_local_kernel_key(
+        engine="vLLM",
+        engine_version="0.9.0rc1",
+        manufacturer="NVIDIA",
+        arch="SM_90A",
+        op_family="rmsnorm",
+        const_axes=const_axes,
+        input_dtypes=in_dtypes,
+        output_dtypes=out_dtypes,
+        constants=constants,
+    )
+    assert key_09 == f"vllm/0.9/nvidia/sm_90a/rmsnorm/{expected_sig}"
+    assert key_09_rc1 == f"vllm/0.9rc1/nvidia/sm_90a/rmsnorm/{expected_sig}"
+    assert key_09 != key
+    assert key_09_rc1 != key_09
+
     parsed = parse_local_kernel_key(key)
     assert parsed == {
         "engine": "vllm",
-        "engine_version": "0.8.5",
+        "engine_version": "0.8",
         "manufacturer": "nvidia",
         "architecture": "sm_90a",
         "op_family": "rmsnorm",
@@ -728,7 +800,10 @@ def test_probe_edge_cases_error_paths_and_definition_trimming(
     assert is_excluded_operator(123) is True  # type: ignore[arg-type]
     assert classify_op_family("") is None
     assert canonical_engine_name("custom") == "custom"
-    assert normalize_engine_version("") == "0.0.0"
+    with pytest.raises(ValueError):
+        normalize_engine_version("")
+    with pytest.raises(ValueError):
+        normalize_engine_version(None)
 
     with pytest.raises(ValueError):
         parse_local_kernel_key("")
