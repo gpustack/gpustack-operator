@@ -8,7 +8,7 @@
 # about a fixture.
 #
 # Prerequisites: nodes=1; gpu=none; cluster=any
-# Goal:        Report, for every cases/case-N.sh (1..37), whether the cluster in front of us
+# Goal:        Report, for every cases/case-N.sh (1..38), whether the cluster in front of us
 #              satisfies the Prerequisites its own header declares, without running a single case.
 # Environment: Any cluster, or none. The cluster is read once per resource, with read-only kubectl
 #              get calls only: the node inventory, the operator's Devices ledger, the Mock Device

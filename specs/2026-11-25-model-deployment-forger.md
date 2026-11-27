@@ -1,7 +1,7 @@
 # Spec: ModelDeploymentForger and ModelKernelArtifact — Closed-Loop Kernel Probing, Forging, and NodeModelStore Delivery
 
-Status: Building
-Blocked on: Implementation of T1–T11, chart verification via gpustack-operator-chart-e2e, and end-to-end deterministic mock-Forge plus live-GPU qualification via gpustack-operator-e2e before promoting Status to Shipped.
+Status: Built
+Blocked on: Chart verification via gpustack-operator-chart-e2e and end-to-end deterministic mock-Forge plus live-GPU qualification via gpustack-operator-e2e before promoting Status to Shipped.
 Type: Feature
 
 - **Related Specs**: [2026-09-25-model-artifact.md](2026-09-25-model-artifact.md) · [2026-09-25-node-model-store.md](2026-09-25-node-model-store.md) · [2026-09-27-model-peer-sync.md](2026-09-27-model-peer-sync.md) · [2026-09-27-model-prefetch.md](2026-09-27-model-prefetch.md) · [2026-09-29-model-artifact-expected-digest.md](2026-09-29-model-artifact-expected-digest.md) · [2026-10-21-model-deployment-scaler.md](2026-10-21-model-deployment-scaler.md) · [2026-11-19-model-deployment-online-runtime-control.md](2026-11-19-model-deployment-online-runtime-control.md) · [2026-11-24-cpu-mock-device-manager-and-e2e-consolidation.md](2026-11-24-cpu-mock-device-manager-and-e2e-consolidation.md)
@@ -470,7 +470,7 @@ Tasks `T1`, `T2`, and `T3` start concurrently with disjoint `Owns:` globs (`T3` 
       Acceptance: Registers `ModelDeploymentForgerReconciler` and `ModelKernelArtifactReconciler` in `pkg/worker/controllers/setup.go`; manages `forger-binding` lifecycle (`ObserveOnly`, `Shadow`, `Active`, `suspend`, finalizer cleanup, restart recovery); coordinates with `role.Pause`, per-role `status.roles[*].runtimeControl.synced`, and `status.retirement`; uses `DrainReader` `/metrics` for `minActiveRequests` and selects leader Pod (`member-index == 0`); executes `Idle -> Probing -> Forging -> Verifying -> Publishing -> Promoting` per target role, persists `activeSandbox.podUID` before calling `/ingest/v1/trees`, deletes sandbox Pod + input `ConfigMap` after ingestion, pins both active and `previousKernelArtifact` across rollout, confirms convergence via `observedGeneration` + `pod-spec-hash` + `/gpustack/v1/runtime_config` `loaded_kernel_keys`, auto-rolls back to `previousKernelArtifact` (or `nil`) on `failureTimeoutSeconds` or `unsupported_kernel_artifact` while setting `ModelKernelArtifact.status.quarantined = true`, prunes retired unreferenced generations beyond `maxRetainedGenerations`, and emits Prometheus metrics + Kubernetes Events (supports F5).
       Verify: `CGO_ENABLED=1 go test -tags 'goccy netgo' -race ./pkg/worker/controllers/worker/... -run 'TestModelDeploymentScaler|TestModelDeploymentForger|TestModelKernelArtifact'`
 
-- [ ] **T10 · Deterministic mock-Forge end-to-end suite (`case-38.sh`) and skill index sync**
+- [x] **T10 · Deterministic mock-Forge end-to-end suite (`case-38.sh`) and skill index sync**
       Blocked by: T9
       Owns: `.agents/skills/gpustack-operator-e2e/cases/case-38.sh`, `.agents/skills/gpustack-operator-e2e/cases/_env-audit.sh`, `.agents/skills/gpustack-operator-e2e/SKILL.md`, `.agents/skills/gpustack-operator-e2e-chaos/SKILL.md`
       Gate: review
