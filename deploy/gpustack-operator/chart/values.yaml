@@ -1126,9 +1126,12 @@ csi-driver-nfs:
   # 4.13.4 ships, the driver's included, and each one is mirrored — an unmirrored tag would put
   # every install in ImagePullBackOff. The three sidecars this driver shares with `csi-driver-s3`
   # (`csiProvisioner`, `livenessProbe`, `nodeDriverRegistrar`) carry the same tag on both, so a
-  # release ships one image per component rather than two versions of each. The
-  # `externalSnapshotter` image is absent because that component is off, and turning it on would
-  # need a mirror first.
+  # release ships one image per component rather than two versions of each. Of the
+  # external-snapshotter project only the `csi-snapshotter` sidecar image is listed: the sidecar
+  # runs in the controller pods by the subchart's default, so volume snapshots work with whatever
+  # snapshot-controller the cluster has, and turning on the bundled one later
+  # (`externalSnapshotter.enabled`) does not restart the NFS controller. The bundled
+  # snapshot-controller itself is not rendered by default, so its image is not listed here.
   image:
     baseRepo: docker.io
     nfs:
