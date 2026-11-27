@@ -1582,7 +1582,7 @@ spec:
           speculative.draftBudgetFraction: "0.5"
 EOF
 
-    # 4. Router isolation forbidden args.
+    # 4. Router isolation forbidden args and router owned args.
     rt_dry_refuse "router isolation rejects --enable-igw in spec.router.extraArgs" "enable-igw" <<EOF
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
@@ -1599,6 +1599,58 @@ spec:
     name: sglang-gateway
     extraArgs:
       - --enable-igw
+  roles:
+    - name: server
+      kind: Server
+      replicas: 1
+      acceleratorType: ${RT_AT}
+      resources:
+        accelerator: "1"
+EOF
+
+    rt_dry_refuse "llm-d-router owned args reject --allow-experimental-plugins in spec.router.extraArgs" \
+      '"--allow-experimental-plugins" is set by the operator for router "llm-d-router"' <<EOF
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: ${RUN_PREFIX}-router-exp-flag
+  namespace: ${NS}
+spec:
+  model:
+    name: Qwen/Qwen3-8B
+  engine:
+    name: vLLM
+    image: ${IMAGE}
+  router:
+    name: llm-d-router
+    extraArgs:
+      - --allow-experimental-plugins
+  roles:
+    - name: server
+      kind: Server
+      replicas: 1
+      acceleratorType: ${RT_AT}
+      resources:
+        accelerator: "1"
+EOF
+
+    rt_dry_refuse "llm-d-router owned args reject --allow-experimental-plugins=false in spec.router.extraArgs" \
+      '"--allow-experimental-plugins" is set by the operator for router "llm-d-router"' <<EOF
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: ${RUN_PREFIX}-router-exp-false
+  namespace: ${NS}
+spec:
+  model:
+    name: Qwen/Qwen3-8B
+  engine:
+    name: vLLM
+    image: ${IMAGE}
+  router:
+    name: llm-d-router
+    extraArgs:
+      - --allow-experimental-plugins=false
   roles:
     - name: server
       kind: Server

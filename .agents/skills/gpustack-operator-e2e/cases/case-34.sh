@@ -38,8 +38,8 @@
 # Inputs:      All real, nothing mocked. E2E_C34_ACCELERATOR_TYPE / E2E_C34_INSTANCE_TYPE
 #              (required), E2E_C34_CLAIM (required on Ascend; existing RWX PVC in <NS>),
 #              E2E_C34_MOUNT (default /ec-cache), E2E_C34_IMAGE (default per manufacturer),
-#              E2E_C34_ROUTER_IMAGE (default docker.io/gpustack/llm-router:v0.3.1),
-#              E2E_C34_SIDECAR_IMAGE (default docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0),
+#              E2E_C34_ROUTER_IMAGE (default docker.io/gpustack/llm-router:v0.6.1),
+#              E2E_C34_SIDECAR_IMAGE (default docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v1.0.0),
 #              E2E_C34_WEIGHTS (default /data/models/model_scope/Qwen/Qwen2.5-VL-7B-Instruct),
 #              E2E_C34_MODEL (default /models/Qwen2.5-VL-7B-Instruct),
 #              E2E_C34_PROBE_IMAGE (default docker.io/curlimages/curl:8.10.1),
@@ -76,8 +76,8 @@ IT="${E2E_C34_ACCELERATOR_TYPE:-${E2E_C34_INSTANCE_TYPE:-}}"
 CLAIM="${E2E_C34_CLAIM:-}"
 MOUNT="${E2E_C34_MOUNT:-/ec-cache}"
 IMAGE="${E2E_C34_IMAGE:-}"
-ROUTER_IMAGE="${E2E_C34_ROUTER_IMAGE:-docker.io/gpustack/llm-router:v0.3.1}"
-SIDECAR_IMAGE="${E2E_C34_SIDECAR_IMAGE:-docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0}"
+ROUTER_IMAGE="${E2E_C34_ROUTER_IMAGE:-docker.io/gpustack/llm-router:v0.6.1}"
+SIDECAR_IMAGE="${E2E_C34_SIDECAR_IMAGE:-docker.io/gpustack/mirrored-llm-d-router-disagg-sidecar:v1.0.0}"
 WEIGHTS="${E2E_C34_WEIGHTS:-/data/models/model_scope/Qwen/Qwen2.5-VL-7B-Instruct}"
 MODEL="${E2E_C34_MODEL:-/models/Qwen2.5-VL-7B-Instruct}"
 PROBE_IMAGE="${E2E_C34_PROBE_IMAGE:-docker.io/curlimages/curl:8.10.1}"
