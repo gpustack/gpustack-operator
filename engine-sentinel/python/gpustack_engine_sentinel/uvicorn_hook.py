@@ -8,11 +8,13 @@ import sys
 from functools import wraps
 from typing import Any
 
+from gpustack_engine_sentinel.kernel_loader import get_process_kernel_report
 from gpustack_engine_sentinel.latch import BootLatch
 from gpustack_engine_sentinel.protocol import (
     ALL_CANONICAL_FIELDS,
     ENGINE_SGLANG,
     ENGINE_VLLM,
+    UnsupportedEngineVersionError,
     UnsupportedFieldsError,
 )
 from gpustack_engine_sentinel.server import (
@@ -71,6 +73,15 @@ class FallbackSentinelBackend:
         parameters = dict(request_data.get("parameters") or {})
         requested = sorted(parameters.keys()) or sorted(ALL_CANONICAL_FIELDS)
         raise UnsupportedFieldsError(requested, supported_fields=[])
+
+    def get_kernel_summary(self) -> dict[str, Any]:
+        return get_process_kernel_report(engine=self.engine)
+
+    async def start_probe(self, spec: dict[str, Any]) -> dict[str, Any]:
+        del spec
+        raise UnsupportedEngineVersionError(
+            f"Fallback sentinel backend for {self.engine!r} lacks worker probe hooks"
+        )
 
 
 def is_sentinel_installed(app: Any) -> bool:

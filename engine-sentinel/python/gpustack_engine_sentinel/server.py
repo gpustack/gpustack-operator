@@ -8,11 +8,17 @@ import logging
 import re
 from typing import Any, Protocol
 
+from gpustack_engine_sentinel.kernel_loader import (
+    aggregate_kernel_reports,
+    get_process_kernel_report,
+)
 from gpustack_engine_sentinel.latch import BootLatch
+from gpustack_engine_sentinel.probe import ProbeManager
 from gpustack_engine_sentinel.protocol import (
     ACK_PATH,
     LIVE_PATH,
     PAUSE_PATH,
+    PROBE_PATH,
     READY_PATH,
     RUNTIME_CONFIG_PATH,
     AckRequest,
@@ -20,6 +26,7 @@ from gpustack_engine_sentinel.protocol import (
     LiveResponse,
     PauseRequest,
     PauseResponse,
+    ProbeCooldownError,
     ReadyResponse,
     RuntimeConfigRequest,
     RuntimeConfigResponse,
@@ -133,20 +140,98 @@ async def _read_json_body(receive: Any) -> Any:
 
 
 class SentinelControlPlane:
-    """Serves /gpustack/v1/{ready,live,ack,pause,runtime_config} in pure ASGI."""
+    """Serves /gpustack/v1/{ready,live,ack,pause,runtime_config,probe} in pure ASGI."""
 
     def __init__(
         self,
         *,
         backend: EngineSentinelBackend,
         latch: BootLatch | None = None,
+        probe_manager: ProbeManager | None = None,
     ) -> None:
         self.backend = backend
         self.latch = latch or BootLatch()
+        # Stale probe directory sweep (> 60s) runs exclusively on API-server latch startup.
+        self.probe_manager = probe_manager or ProbeManager(
+            backend=self.backend,
+            latch=self.latch,
+            sweep_on_init=True,
+        )
+        self._last_kernel_summary: dict[str, Any] = {}
 
     @property
     def paused(self) -> bool:
         return self.latch.paused
+
+    def _extract_kernel_summary_from_state(
+        self, state_dict: dict[str, Any]
+    ) -> dict[str, Any]:
+        top_has = any(
+            k in state_dict
+            for k in (
+                "loaded_kernel_keys",
+                "dispatch_manifest_digest",
+                "kernel_load_error",
+            )
+        )
+        if top_has:
+            summary: dict[str, Any] = {}
+            if "loaded_kernel_keys" in state_dict:
+                summary["loaded_kernel_keys"] = list(
+                    state_dict["loaded_kernel_keys"] or ()
+                )
+            if state_dict.get("dispatch_manifest_digest"):
+                summary["dispatch_manifest_digest"] = str(
+                    state_dict["dispatch_manifest_digest"]
+                )
+            if state_dict.get("kernel_load_error"):
+                summary["kernel_load_error"] = str(state_dict["kernel_load_error"])
+            if summary:
+                self._last_kernel_summary = dict(summary)
+            return summary
+
+        rank_reports = [
+            rk
+            for rk in state_dict.get("ranks", ())
+            if isinstance(rk, dict)
+            and any(
+                k in rk
+                for k in (
+                    "loaded_kernel_keys",
+                    "dispatch_manifest_digest",
+                    "kernel_load_error",
+                )
+            )
+        ]
+        if rank_reports:
+            summary = aggregate_kernel_reports(rank_reports)
+            if summary:
+                self._last_kernel_summary = dict(summary)
+            return summary
+
+        local_report = get_process_kernel_report(engine=self.backend.engine)
+        if local_report:
+            self._last_kernel_summary = dict(local_report)
+        return local_report
+
+    async def _resolve_ready_kernel_summary(self) -> dict[str, Any]:
+        get_summary_fn = getattr(self.backend, "get_kernel_summary", None)
+        if callable(get_summary_fn):
+            try:
+                res = get_summary_fn()
+                if inspect.isawaitable(res):
+                    res = await res
+                if isinstance(res, dict) and res:
+                    self._last_kernel_summary = dict(res)
+                    return res
+            except Exception:
+                LOGGER.debug("Backend get_kernel_summary failed", exc_info=True)
+        if self._last_kernel_summary:
+            return dict(self._last_kernel_summary)
+        local_report = get_process_kernel_report(engine=self.backend.engine)
+        if local_report:
+            self._last_kernel_summary = dict(local_report)
+        return local_report
 
     async def _check_backend_ready(self) -> tuple[bool, str | None]:
         check_ready_fn = getattr(self.backend, "check_ready", None)
@@ -159,6 +244,20 @@ class SentinelControlPlane:
 
     async def handle_ready(self) -> tuple[int, dict[str, Any]]:
         snap = self.latch.snapshot()
+        kernel_summary = await self._resolve_ready_kernel_summary()
+        kernel_kwargs: dict[str, Any] = {}
+        if kernel_summary:
+            if "loaded_kernel_keys" in kernel_summary:
+                kernel_kwargs["loaded_kernel_keys"] = kernel_summary[
+                    "loaded_kernel_keys"
+                ]
+            if kernel_summary.get("dispatch_manifest_digest"):
+                kernel_kwargs["dispatch_manifest_digest"] = kernel_summary[
+                    "dispatch_manifest_digest"
+                ]
+            if kernel_summary.get("kernel_load_error"):
+                kernel_kwargs["kernel_load_error"] = kernel_summary["kernel_load_error"]
+
         alive, engine_paused, err = await self.backend.check_live()
         if not alive:
             return (
@@ -169,6 +268,7 @@ class SentinelControlPlane:
                     observed_generation=snap.observed_generation,
                     applied_config_digest=snap.applied_config_digest,
                     reason=err or "engine_not_alive",
+                    **kernel_kwargs,
                 ).to_dict(),
             )
         if snap.paused or engine_paused:
@@ -180,6 +280,7 @@ class SentinelControlPlane:
                     observed_generation=snap.observed_generation,
                     applied_config_digest=snap.applied_config_digest,
                     reason="role_paused",
+                    **kernel_kwargs,
                 ).to_dict(),
             )
         engine_ready, ready_reason = await self._check_backend_ready()
@@ -192,6 +293,7 @@ class SentinelControlPlane:
                     observed_generation=snap.observed_generation,
                     applied_config_digest=snap.applied_config_digest,
                     reason=ready_reason or "engine_starting",
+                    **kernel_kwargs,
                 ).to_dict(),
             )
         if not snap.acked:
@@ -203,6 +305,7 @@ class SentinelControlPlane:
                     observed_generation=snap.observed_generation,
                     applied_config_digest=snap.applied_config_digest,
                     reason="awaiting_ack",
+                    **kernel_kwargs,
                 ).to_dict(),
             )
         return (
@@ -212,6 +315,7 @@ class SentinelControlPlane:
                 boot_id=snap.boot_id,
                 observed_generation=snap.observed_generation,
                 applied_config_digest=snap.applied_config_digest,
+                **kernel_kwargs,
             ).to_dict(),
         )
 
@@ -260,6 +364,7 @@ class SentinelControlPlane:
     ) -> dict[str, Any]:
         snap = self.latch.snapshot()
         paused = bool(snap.paused or engine_paused)
+        kernel_summary = self._extract_kernel_summary_from_state(state_dict)
         resp = RuntimeConfigResponse(
             engine=self.backend.engine,
             boot_id=snap.boot_id,
@@ -274,6 +379,9 @@ class SentinelControlPlane:
             boot_defaults=dict(state_dict.get("boot_defaults", {})),
             ranks=list(state_dict.get("ranks", ())),
             values=dict(state_dict.get("values", {})),
+            loaded_kernel_keys=kernel_summary.get("loaded_kernel_keys"),
+            dispatch_manifest_digest=kernel_summary.get("dispatch_manifest_digest"),
+            kernel_load_error=kernel_summary.get("kernel_load_error"),
         )
         return resp.to_dict()
 
@@ -326,6 +434,26 @@ class SentinelControlPlane:
                 engine_ready=engine_ready,
             ),
         )
+
+    async def handle_get_probe(
+        self, headers: dict[str, str] | list[tuple[bytes, bytes]] | None = None
+    ) -> tuple[int, dict[str, Any]]:
+        self.probe_manager.check_auth(headers)
+        return await self.probe_manager.get_probe()
+
+    async def handle_post_probe(
+        self,
+        body: Any,
+        headers: dict[str, str] | list[tuple[bytes, bytes]] | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        self.probe_manager.check_auth(headers)
+        return await self.probe_manager.start_probe(body)
+
+    async def handle_delete_probe(
+        self, headers: dict[str, str] | list[tuple[bytes, bytes]] | None = None
+    ) -> tuple[int, dict[str, Any]]:
+        self.probe_manager.check_auth(headers)
+        return await self.probe_manager.delete_probe()
 
     async def handle_asgi(
         self,
@@ -405,6 +533,25 @@ class SentinelControlPlane:
                 await _method_not_allowed(b"GET, HEAD, POST")
                 return
 
+            if path == PROBE_PATH:
+                raw_headers = scope.get("headers")
+                if method in ("GET", "HEAD"):
+                    status, payload = await self.handle_get_probe(raw_headers)
+                    await send_json_response(send, status, payload, head_only=head_only)
+                    return
+                if method == "POST":
+                    self.probe_manager.check_auth(raw_headers)
+                    body = await _read_json_body(receive)
+                    status, payload = await self.handle_post_probe(body, raw_headers)
+                    await send_json_response(send, status, payload)
+                    return
+                if method == "DELETE":
+                    status, payload = await self.handle_delete_probe(raw_headers)
+                    await send_json_response(send, status, payload)
+                    return
+                await _method_not_allowed(b"GET, HEAD, POST, DELETE")
+                return
+
             await send_json_response(
                 send,
                 404,
@@ -416,6 +563,17 @@ class SentinelControlPlane:
             )
         except _ClientDisconnectedError:
             return
+        except ProbeCooldownError as exc:
+            retry_hdr = str(max(1, int(exc.retry_after_seconds + 0.999))).encode(
+                "ascii"
+            )
+            await send_json_response(
+                send,
+                exc.status_code,
+                exc.to_dict(),
+                extra_headers=[(b"retry-after", retry_hdr)],
+                head_only=head_only,
+            )
         except SentinelError as exc:
             await send_json_response(
                 send, exc.status_code, exc.to_dict(), head_only=head_only
@@ -535,6 +693,53 @@ class SentinelControlPlane:
                     )
                 return JSONResponse(content=data, status_code=code)
 
+            async def _probe_get_ep(request: Request) -> JSONResponse:
+                try:
+                    code, data = await self.handle_get_probe(dict(request.headers))
+                except SentinelError as exc:
+                    return JSONResponse(
+                        content=exc.to_dict(), status_code=exc.status_code
+                    )
+                return JSONResponse(content=data, status_code=code)
+
+            async def _probe_post_ep(request: Request) -> JSONResponse:
+                try:
+                    hdrs = dict(request.headers)
+                    self.probe_manager.check_auth(hdrs)
+                    code, data = await self.handle_post_probe(
+                        await _read_bounded_json(request), hdrs
+                    )
+                except ProbeCooldownError as exc:
+                    retry_hdr = str(max(1, int(exc.retry_after_seconds + 0.999)))
+                    return JSONResponse(
+                        content=exc.to_dict(),
+                        status_code=exc.status_code,
+                        headers={"retry-after": retry_hdr},
+                    )
+                except SentinelError as exc:
+                    return JSONResponse(
+                        content=exc.to_dict(), status_code=exc.status_code
+                    )
+                except Exception:
+                    LOGGER.exception("Unhandled error in %s", PROBE_PATH)
+                    return JSONResponse(
+                        content={
+                            "error": "internal_error",
+                            "message": "Internal server error",
+                        },
+                        status_code=500,
+                    )
+                return JSONResponse(content=data, status_code=code)
+
+            async def _probe_delete_ep(request: Request) -> JSONResponse:
+                try:
+                    code, data = await self.handle_delete_probe(dict(request.headers))
+                except SentinelError as exc:
+                    return JSONResponse(
+                        content=exc.to_dict(), status_code=exc.status_code
+                    )
+                return JSONResponse(content=data, status_code=code)
+
             add_api_route(READY_PATH, _ready_ep, methods=["GET", "HEAD"])
             add_api_route(LIVE_PATH, _live_ep, methods=["GET", "HEAD"])
             add_api_route(ACK_PATH, _ack_ep, methods=["POST"])
@@ -542,6 +747,9 @@ class SentinelControlPlane:
             add_api_route(PAUSE_PATH, _pause_post_ep, methods=["POST"])
             add_api_route(RUNTIME_CONFIG_PATH, _rc_get_ep, methods=["GET", "HEAD"])
             add_api_route(RUNTIME_CONFIG_PATH, _rc_post_ep, methods=["POST"])
+            add_api_route(PROBE_PATH, _probe_get_ep, methods=["GET", "HEAD"])
+            add_api_route(PROBE_PATH, _probe_post_ep, methods=["POST"])
+            add_api_route(PROBE_PATH, _probe_delete_ep, methods=["DELETE"])
             return
 
         LOGGER.warning(

@@ -12,9 +12,29 @@ LIVE_PATH = "/gpustack/v1/live"
 ACK_PATH = "/gpustack/v1/ack"
 PAUSE_PATH = "/gpustack/v1/pause"
 RUNTIME_CONFIG_PATH = "/gpustack/v1/runtime_config"
+PROBE_PATH = "/gpustack/v1/probe"
 
 ENV_ENABLE = "GPUSTACK_ENGINE_SENTINEL_ENABLE"
 ENV_REQUIRE_ACK = "GPUSTACK_ENGINE_SENTINEL_REQUIRE_ACK"
+ENV_PROBE_MIN_COOLDOWN_SECONDS = "GPUSTACK_PROBE_MIN_COOLDOWN_SECONDS"
+ENV_PROBE_AUTH_TOKEN = "GPUSTACK_PROBE_AUTH_TOKEN"
+ENV_PROBE_SHM_DIR = "GPUSTACK_PROBE_SHM_DIR"
+ENV_PROBE_SHM_SIZE_BYTES = "GPUSTACK_PROBE_SHM_SIZE_BYTES"
+ENV_KERNEL_ARTIFACT_DIR = "GPUSTACK_KERNEL_ARTIFACT_DIR"
+
+DEFAULT_KERNEL_ARTIFACT_DIR = "/var/lib/gpustack/kernels"
+DEFAULT_PROBE_SHM_DIR = "/dev/shm/gpustack-probe"
+DEFAULT_SHM_SIZE_BYTES = 16 * 1024 * 1024 * 1024
+DEFAULT_PROBE_MIN_COOLDOWN_SECONDS = 60.0
+DEFAULT_PROBE_STEPS = 4
+MIN_PROBE_STEPS = 3
+MAX_PROBE_STEPS = 5
+PROBE_WALL_CLOCK_CAP_SECONDS = 15.0
+PROBE_MAX_PAYLOAD_BYTES = 512 * 1024
+PROBE_MAX_SHM_BYTES = 64 * 1024 * 1024
+PROBE_SHM_FRACTION = 0.05
+PROBE_STALE_AGE_SECONDS = 60.0
+DISPATCH_MANIFEST_SCHEMA_VERSION = "gpustack-forge-dispatch/v1"
 
 ENGINE_VLLM = "vllm"
 ENGINE_SGLANG = "sglang"
@@ -142,6 +162,70 @@ class UnsupportedFieldsError(SentinelError):
         )
 
 
+class UnauthorizedError(SentinelError):
+    """Missing or invalid probe authentication token (HTTP 401)."""
+
+    def __init__(
+        self, message: str = "Missing or invalid probe authorization token"
+    ) -> None:
+        super().__init__(401, "unauthorized", message)
+
+
+class RolePausedError(SentinelError):
+    """Probe refused because the role is paused (HTTP 409)."""
+
+    def __init__(self, *, boot_id: str) -> None:
+        super().__init__(
+            409,
+            "role_paused",
+            "Cannot start probe while role is paused",
+            extra={"boot_id": boot_id},
+        )
+
+
+class ProbeInProgressError(SentinelError):
+    """A probe is already running on this engine boot (HTTP 409)."""
+
+    def __init__(self, *, boot_id: str, probe_id: str) -> None:
+        super().__init__(
+            409,
+            "probe_in_progress",
+            f"Probe {probe_id} is already in progress",
+            extra={"boot_id": boot_id, "probe_id": probe_id},
+        )
+
+
+class ProbeCooldownError(SentinelError):
+    """Per-boot probe cooldown floor has not elapsed (HTTP 429)."""
+
+    def __init__(
+        self,
+        *,
+        boot_id: str,
+        retry_after_seconds: float,
+        cooldown_seconds: float,
+    ) -> None:
+        retry_after = max(0.0, round(retry_after_seconds, 3))
+        super().__init__(
+            429,
+            "probe_cooldown",
+            f"Probe cooldown active; retry after {retry_after}s",
+            extra={
+                "boot_id": boot_id,
+                "retry_after_seconds": retry_after,
+                "cooldown_seconds": cooldown_seconds,
+            },
+        )
+        self.retry_after_seconds = retry_after
+
+
+class UnsupportedEngineVersionError(SentinelError):
+    """Running engine lacks the required probe worker/scheduler capability (HTTP 422)."""
+
+    def __init__(self, message: str, *, extra: dict[str, Any] | None = None) -> None:
+        super().__init__(422, "unsupported_engine_version", message, extra=extra)
+
+
 def normalize_field_name(raw_name: str) -> str:
     """Resolve a canonical dotted field name or known leaf name."""
     if not isinstance(raw_name, str) or not raw_name.strip():
@@ -225,6 +309,9 @@ class ReadyResponse:
     observed_generation: int | None
     applied_config_digest: str
     reason: str | None = None
+    loaded_kernel_keys: list[str] | None = None
+    dispatch_manifest_digest: str | None = None
+    kernel_load_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -235,6 +322,12 @@ class ReadyResponse:
         }
         if self.reason is not None:
             out["reason"] = self.reason
+        if self.loaded_kernel_keys is not None:
+            out["loaded_kernel_keys"] = list(self.loaded_kernel_keys)
+        if self.dispatch_manifest_digest:
+            out["dispatch_manifest_digest"] = self.dispatch_manifest_digest
+        if self.kernel_load_error:
+            out["kernel_load_error"] = self.kernel_load_error
         return out
 
 
@@ -325,15 +418,25 @@ class RankReceipt:
     membership_epoch: int
     applied_digest: str
     values: dict[str, Any] = field(default_factory=dict)
+    loaded_kernel_keys: list[str] | None = None
+    dispatch_manifest_digest: str | None = None
+    kernel_load_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "rank_id": self.rank_id,
             "boot_id": self.boot_id,
             "membership_epoch": self.membership_epoch,
             "applied_digest": self.applied_digest,
             "values": self.values,
         }
+        if self.loaded_kernel_keys is not None:
+            out["loaded_kernel_keys"] = list(self.loaded_kernel_keys)
+        if self.dispatch_manifest_digest:
+            out["dispatch_manifest_digest"] = self.dispatch_manifest_digest
+        if self.kernel_load_error:
+            out["kernel_load_error"] = self.kernel_load_error
+        return out
 
 
 def _collect_section_parameters(
@@ -427,9 +530,12 @@ class RuntimeConfigResponse:
     boot_defaults: dict[str, Any]
     ranks: list[dict[str, Any]]
     values: dict[str, Any]
+    loaded_kernel_keys: list[str] | None = None
+    dispatch_manifest_digest: str | None = None
+    kernel_load_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "engine": self.engine,
             "boot_id": self.boot_id,
             "membership_epoch": self.membership_epoch,
@@ -444,3 +550,111 @@ class RuntimeConfigResponse:
             "ranks": self.ranks,
             "values": dict(self.values),
         }
+        if self.loaded_kernel_keys is not None:
+            out["loaded_kernel_keys"] = list(self.loaded_kernel_keys)
+        if self.dispatch_manifest_digest:
+            out["dispatch_manifest_digest"] = self.dispatch_manifest_digest
+        if self.kernel_load_error:
+            out["kernel_load_error"] = self.kernel_load_error
+        return out
+
+
+@dataclass(frozen=True)
+class ProbeRequest:
+    expected_boot_id: str
+    steps: int = DEFAULT_PROBE_STEPS
+    engine_version: str | None = None
+    manufacturer: str | None = None
+    architecture: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Any) -> ProbeRequest:
+        if not isinstance(data, dict):
+            raise InvalidRequestError("Request body must be a JSON object")
+        expected_boot_id = data.get("expected_boot_id", "")
+        if not isinstance(expected_boot_id, str) or not expected_boot_id.strip():
+            raise InvalidRequestError("expected_boot_id must be a non-empty string")
+
+        raw_steps = data.get("steps", DEFAULT_PROBE_STEPS)
+        if raw_steps is None:
+            steps = DEFAULT_PROBE_STEPS
+        else:
+            steps = parse_strict_int(
+                raw_steps,
+                "steps",
+                minimum=MIN_PROBE_STEPS,
+                maximum=MAX_PROBE_STEPS,
+            )
+
+        def _opt_str(key: str) -> str | None:
+            raw = data.get(key)
+            if raw is None:
+                return None
+            if not isinstance(raw, str):
+                raise InvalidRequestError(f"{key} must be a string when provided")
+            trimmed = raw.strip()
+            return trimmed or None
+
+        raw_meta = data.get("metadata")
+        if raw_meta is None:
+            metadata: dict[str, Any] = {}
+        elif isinstance(raw_meta, dict):
+            # Preserve only non-sensitive scalar hardware/engine descriptors.
+            allowed_meta_keys = {
+                "engine_version",
+                "manufacturer",
+                "architecture",
+                "arch",
+                "tp_size",
+                "ep_size",
+                "dp_size",
+                "role",
+                "dtype",
+            }
+            metadata = {
+                str(k): v
+                for k, v in raw_meta.items()
+                if str(k) in allowed_meta_keys
+                and isinstance(v, (str, int, float, bool))
+            }
+        else:
+            raise InvalidRequestError("metadata must be an object when provided")
+
+        engine_version = _opt_str("engine_version") or (
+            str(metadata["engine_version"]).strip()
+            if isinstance(metadata.get("engine_version"), str)
+            and str(metadata["engine_version"]).strip()
+            else None
+        )
+        manufacturer = _opt_str("manufacturer") or (
+            str(metadata["manufacturer"]).strip()
+            if isinstance(metadata.get("manufacturer"), str)
+            and str(metadata["manufacturer"]).strip()
+            else None
+        )
+        architecture = (
+            _opt_str("architecture")
+            or _opt_str("arch")
+            or (
+                str(metadata["architecture"]).strip()
+                if isinstance(metadata.get("architecture"), str)
+                and str(metadata["architecture"]).strip()
+                else None
+            )
+            or (
+                str(metadata["arch"]).strip()
+                if isinstance(metadata.get("arch"), str)
+                and str(metadata["arch"]).strip()
+                else None
+            )
+        )
+
+        return cls(
+            expected_boot_id=expected_boot_id.strip(),
+            steps=steps,
+            engine_version=engine_version,
+            manufacturer=manufacturer,
+            architecture=architecture,
+            metadata=metadata,
+        )

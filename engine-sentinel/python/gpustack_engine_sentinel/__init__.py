@@ -33,9 +33,14 @@ _HOOK_TARGETS: frozenset[str] = _VLLM_API_SERVER_TARGETS | frozenset(
     {
         "vllm_omni.entrypoints.openai.api_server",
         "vllm.v1.engine.core",
+        "vllm.model_executor.custom_op",
+        "vllm.v1.worker.gpu_model_runner",
         "sglang.srt.managers.scheduler",
         "sglang.srt.managers.scheduler_components.internal_state",
         "sglang.srt.entrypoints.http_server",
+        "sglang.srt.model_executor.model_runner",
+        "sglang.srt.layers.layernorm",
+        "sglang.srt.layers.rotary_embedding",
         "uvicorn.config",
     }
 )
@@ -60,6 +65,16 @@ def _apply_target_hook(fullname: str, module: Any) -> None:
             )
 
             attach_engine_core_utility(engine_core_cls)
+    elif fullname == "vllm.model_executor.custom_op":
+        from gpustack_engine_sentinel.kernel_loader import patch_vllm_custom_op_module
+
+        patch_vllm_custom_op_module(module)
+    elif fullname == "vllm.v1.worker.gpu_model_runner":
+        from gpustack_engine_sentinel.kernel_loader import (
+            patch_vllm_gpu_model_runner_module,
+        )
+
+        patch_vllm_gpu_model_runner_module(module)
     elif fullname == "sglang.srt.managers.scheduler":
         from gpustack_engine_sentinel.sglang.hooks import (
             patch_sglang_scheduler_module,
@@ -78,6 +93,24 @@ def _apply_target_hook(fullname: str, module: Any) -> None:
         )
 
         patch_sglang_http_server_module(module)
+    elif fullname == "sglang.srt.model_executor.model_runner":
+        from gpustack_engine_sentinel.kernel_loader import (
+            patch_sglang_model_runner_module,
+        )
+
+        patch_sglang_model_runner_module(module)
+    elif fullname == "sglang.srt.layers.layernorm":
+        from gpustack_engine_sentinel.kernel_loader import (
+            patch_sglang_layernorm_module,
+        )
+
+        patch_sglang_layernorm_module(module)
+    elif fullname == "sglang.srt.layers.rotary_embedding":
+        from gpustack_engine_sentinel.kernel_loader import (
+            patch_sglang_rotary_embedding_module,
+        )
+
+        patch_sglang_rotary_embedding_module(module)
     elif fullname == "uvicorn.config":
         from gpustack_engine_sentinel.uvicorn_hook import patch_uvicorn_config_module
 

@@ -414,7 +414,7 @@ Tasks `T1`, `T2`, and `T3` start concurrently with disjoint `Owns:` globs (`T3` 
       Acceptance: Implements canonical `LocalKernelKey` formatting, parsing, deterministic per-rank `const`-axes-only SHA-256 (`signatureHash16`) hashing, normalized `engineVersion` parsing, `pkg/nodefeature` manufacturer/architecture compatibility matching, allowed single-GPU `OpFamily` registry, and strict rejection of regular dense GEMM, block-scaled GEMM (`fp8`/`mxfp8`/`nvfp4`), and multi-GPU collective ops (`all_reduce`, `all_gather`, `reduce_scatter`, `all_to_all`, `nccl`/`rccl`/`hccl`), with table-driven tests verifying TP/EP shard-change key differentiation and dynamic `var`-axis invariance (supports F1, F2).
       Verify: `CGO_ENABLED=1 go test -tags 'goccy netgo' -race -cover ./pkg/worker/kernelkey/...`
 
-- [ ] **T2 · Sentinel 3–5 step `/gpustack/v1/probe`, `/dev/shm` distillation, lazy startup kernel loader, and GPU verifier**
+- [x] **T2 · Sentinel 3–5 step `/gpustack/v1/probe`, `/dev/shm` distillation, lazy startup kernel loader, and GPU verifier**
       Blocked by: None
       Owns: `engine-sentinel/python/**`
       Gate: review
