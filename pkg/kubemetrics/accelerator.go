@@ -1,10 +1,12 @@
 package kubemetrics
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
@@ -81,6 +83,62 @@ type AcceleratorGrants struct {
 	grants map[acceleratorKey]acceleratorGrant
 }
 
+type grantClaim struct {
+	container string
+	grant     acceleratorGrant
+	deviceIDs sets.Set[string]
+}
+
+// nonSidecarInitOrder maps each non-sidecar init container name to its declaration index in
+// pod.Spec.InitContainers. Native sidecars (RestartPolicy == Always) run concurrently and are
+// excluded.
+func nonSidecarInitOrder(pod *core.Pod) map[string]int {
+	order := make(map[string]int, len(pod.Spec.InitContainers))
+	for i := range pod.Spec.InitContainers {
+		ctr := &pod.Spec.InitContainers[i]
+		if ctr.RestartPolicy != nil && *ctr.RestartPolicy == core.ContainerRestartPolicyAlways {
+			continue
+		}
+		order[ctr.Name] = i
+	}
+	return order
+}
+
+// runningInitContainers returns the set of init container names observed in Running state.
+func runningInitContainers(pod *core.Pod) sets.Set[string] {
+	running := sets.New[string]()
+	for i := range pod.Status.InitContainerStatuses {
+		st := &pod.Status.InitContainerStatuses[i]
+		if st.State.Running != nil {
+			running.Insert(st.Name)
+		}
+	}
+	return running
+}
+
+// isSequentialInitReuse reports whether every claim on a shared accelerator key belongs to a
+// non-sidecar init container and all of them carry non-empty overlapping kubelet DeviceIDs.
+func isSequentialInitReuse(claims []grantClaim, initOrder map[string]int) bool {
+	var common sets.Set[string]
+	for i := range claims {
+		if _, ok := initOrder[claims[i].container]; !ok {
+			return false
+		}
+		if claims[i].deviceIDs.Len() == 0 {
+			return false
+		}
+		if common == nil {
+			common = claims[i].deviceIDs.Clone()
+		} else {
+			common = common.Intersection(claims[i].deviceIDs)
+		}
+		if common.Len() == 0 {
+			return false
+		}
+	}
+	return common != nil && common.Len() > 0
+}
+
 // NewAcceleratorGrants indexes the Pod's allocations by accelerator, reading each logical slice's
 // compute cap off the container it was enforced on.
 func NewAcceleratorGrants(pod *core.Pod, allocations deviceplugin.PodAllocations) *AcceleratorGrants {
@@ -89,7 +147,16 @@ func NewAcceleratorGrants(pod *core.Pod, allocations deviceplugin.PodAllocations
 		grants: make(map[acceleratorKey]acceleratorGrant),
 	}
 
-	for container, allocation := range allocations {
+	containerNames := make([]string, 0, len(allocations))
+	for container := range allocations {
+		containerNames = append(containerNames, container)
+	}
+	slices.Sort(containerNames)
+
+	claimsByKey := make(map[acceleratorKey][]grantClaim)
+	for _, container := range containerNames {
+		allocation := allocations[container]
+		deviceIDs := sets.New(allocation.DeviceIDs...)
 		for _, grp := range allocation.Devices.Groups {
 			for _, accelerator := range grp.Accelerators {
 				// Visibility grants no resources at all: it lets one container see the devices a
@@ -111,27 +178,66 @@ func NewAcceleratorGrants(pod *core.Pod, allocations deviceplugin.PodAllocations
 					deviceID:     accelerator.ID,
 					partitionID:  partitionID,
 				}
-				if held, ok := grants.grants[key]; ok && held.container != container {
-					grantLogger.V(2).Info(
-						"two containers of one pod were granted the same accelerator,"+
-							" reporting no figures of its own",
-						"pod", pod.Namespace+"/"+pod.Name, "manufacturer", key.manufacturer,
-						"device", key.deviceID, "partition", key.partitionID,
-					)
-					held.ambiguous = true
-					grants.grants[key] = held
-					continue
+				claim := grantClaim{
+					container: container,
+					grant: acceleratorGrant{
+						container:      container,
+						mode:           accelerator.Mode,
+						partitionID:    partitionID,
+						allocatedUnits: accelerator.Allocated,
+						coresCapPercent: slicedCoresCapPercentOf(pod, container, grp.Manufacturer,
+							accelerator.Mode),
+					},
+					deviceIDs: deviceIDs,
 				}
-				grants.grants[key] = acceleratorGrant{
-					container:      container,
-					mode:           accelerator.Mode,
-					partitionID:    partitionID,
-					allocatedUnits: accelerator.Allocated,
-					coresCapPercent: slicedCoresCapPercentOf(pod, container, grp.Manufacturer,
-						accelerator.Mode),
+				claims := claimsByKey[key]
+				if idx := slices.IndexFunc(claims, func(c grantClaim) bool {
+					return c.container == container
+				}); idx >= 0 {
+					claims[idx] = claim
+				} else {
+					claimsByKey[key] = append(claims, claim)
 				}
 			}
 		}
+	}
+
+	initOrder := nonSidecarInitOrder(pod)
+	runningInits := runningInitContainers(pod)
+
+	for key, claims := range claimsByKey {
+		if len(claims) == 1 {
+			grants.grants[key] = claims[0].grant
+			continue
+		}
+
+		// Kubelet reuses the exact same DeviceIDs across sequential non-sidecar init containers.
+		// Attribute the single grant to the currently running init container, or fall back to the
+		// first claiming non-sidecar init container in declaration order.
+		if isSequentialInitReuse(claims, initOrder) {
+			slices.SortFunc(claims, func(a, b grantClaim) int {
+				return cmp.Compare(initOrder[a.container], initOrder[b.container])
+			})
+			winner := claims[0]
+			for i := range claims {
+				if runningInits.Has(claims[i].container) {
+					winner = claims[i]
+					break
+				}
+			}
+			grants.grants[key] = winner.grant
+			continue
+		}
+
+		grantLogger.V(2).Info(
+			"two containers of one pod were granted the same accelerator,"+
+				" reporting no figures of its own",
+			"pod", pod.Namespace+"/"+pod.Name, "manufacturer", key.manufacturer,
+			"device", key.deviceID, "partition", key.partitionID,
+		)
+		held := claims[0].grant
+		held.ambiguous = true
+		grants.grants[key] = held
 	}
 
 	return grants

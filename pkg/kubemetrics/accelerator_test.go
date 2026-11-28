@@ -550,3 +550,349 @@ func TestAcceleratorGrantsResolveNamesAnUnmeasurablePartition(t *testing.T) {
 		assert.NotNil(t, got[i].TemperatureCelsius)
 	}
 }
+
+func grantTestContainerAllocation(
+	deviceIDs []string,
+	accelerators ...workercore.AcceleratorAllocation,
+) deviceplugin.ContainerAllocation {
+	return deviceplugin.ContainerAllocation{
+		DeviceIDs: deviceIDs,
+		Devices: workercore.DevicesStatus{
+			Groups: []workercore.DevicesAllocationGroup{
+				{ID: "gpu-group", Manufacturer: grantTestVendor, Accelerators: accelerators},
+			},
+		},
+	}
+}
+
+func grantTestInitPod(
+	coresPercent int64,
+	inits []core.Container,
+	runningInit string,
+	containers ...core.Container,
+) *core.Pod {
+	limits := core.ResourceList{}
+	if coresPercent > 0 {
+		limits[nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(grantTestVendor)] = *resource.NewQuantity(coresPercent, resource.DecimalSI)
+	}
+	initCopies := make([]core.Container, len(inits))
+	for i := range inits {
+		initCopies[i] = inits[i]
+		if len(limits) > 0 && initCopies[i].Name != "forge-stage-sentinel" {
+			initCopies[i].Resources.Limits = limits.DeepCopy()
+		}
+	}
+	var statuses []core.ContainerStatus
+	if runningInit != "" {
+		statuses = append(statuses, core.ContainerStatus{
+			Name:  runningInit,
+			State: core.ContainerState{Running: &core.ContainerStateRunning{}},
+		})
+	}
+	if len(containers) == 0 {
+		containers = []core.Container{{Name: "forge-hold"}}
+	}
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Namespace: "tenant", Name: "forge-sandbox", UID: grantTestPodUID},
+		Spec: core.PodSpec{
+			InitContainers: initCopies,
+			Containers:     containers,
+		},
+		Status: core.PodStatus{
+			InitContainerStatuses: statuses,
+		},
+	}
+}
+
+func TestAcceleratorGrantsResolveSequentialInitReuse(t *testing.T) {
+	always := core.ContainerRestartPolicyAlways
+	forgeInits := []core.Container{
+		{Name: "forge-runner"},
+		{Name: "forge-stage-sentinel"},
+		{Name: "forge-verifier"},
+	}
+
+	sectionBothSliced := grantTestSection(
+		detector.SliceUsage{
+			Manufacturer: grantTestVendor, PodUID: grantTestPodUID,
+			Container: "forge-runner", DeviceID: grantTestDevice,
+			MemoryUsedMiB:           ptr.To[uint64](4096),
+			CoresUtilizationPercent: ptr.To[uint32](4),
+		},
+		detector.SliceUsage{
+			Manufacturer: grantTestVendor, PodUID: grantTestPodUID,
+			Container: "forge-verifier", DeviceID: grantTestDevice,
+			MemoryUsedMiB:           ptr.To[uint64](10240),
+			CoresUtilizationPercent: ptr.To[uint32](12),
+		},
+	)
+
+	cases := []struct {
+		name        string
+		pod         *core.Pod
+		allocations deviceplugin.PodAllocations
+		section     *detector.MonitorSliceSection
+		want        worker.InstanceAcceleratorMetrics
+	}{
+		{
+			name: "sequential exclusive init containers reuse one card without ambiguity",
+			pod:  grantTestInitPod(0, forgeInits, ""),
+			allocations: deviceplugin.PodAllocations{
+				"forge-runner": grantTestContainerAllocation(
+					[]string{grantTestDevice},
+					grantTestAllocation(workercore.DeviceAllocationModeExclusive, 0),
+				),
+				"forge-verifier": grantTestContainerAllocation(
+					[]string{grantTestDevice},
+					grantTestAllocation(workercore.DeviceAllocationModeExclusive, 0),
+				),
+			},
+			want: worker.InstanceAcceleratorMetrics{
+				ID:                       grantTestDevice,
+				Mode:                     workercore.DeviceAllocationModeExclusive.String(),
+				MemoryTotalMiB:           ptr.To(grantTestCardMiB),
+				MemoryUsedMiB:            ptr.To[uint64](61440),
+				MemoryUtilizationPercent: ptr.To[uint32](75),
+				CoresUtilizationPercent:  ptr.To[uint32](80),
+				TemperatureCelsius:       ptr.To[uint32](67),
+				PowerUsageWatts:          ptr.To[uint32](310),
+				Unhealthy:                ptr.To(false),
+			},
+		},
+		{
+			name: "sequential shared init containers reuse one token without ambiguity",
+			pod:  grantTestInitPod(0, forgeInits, "forge-verifier"),
+			allocations: deviceplugin.PodAllocations{
+				"forge-runner": grantTestContainerAllocation(
+					[]string{grantTestDevice + "::0"},
+					grantTestAllocation(workercore.DeviceAllocationModeShared, 0),
+				),
+				"forge-verifier": grantTestContainerAllocation(
+					[]string{grantTestDevice + "::0"},
+					grantTestAllocation(workercore.DeviceAllocationModeShared, 0),
+				),
+			},
+			want: worker.InstanceAcceleratorMetrics{
+				ID:                       grantTestDevice,
+				Mode:                     workercore.DeviceAllocationModeShared.String(),
+				MemoryTotalMiB:           ptr.To(grantTestCardMiB),
+				MemoryUsedMiB:            ptr.To[uint64](61440),
+				MemoryUtilizationPercent: ptr.To[uint32](75),
+				CoresUtilizationPercent:  ptr.To[uint32](80),
+				TemperatureCelsius:       ptr.To[uint32](67),
+				PowerUsageWatts:          ptr.To[uint32](310),
+				Unhealthy:                ptr.To(false),
+			},
+		},
+		{
+			name: "sequential sliced init containers attribute to running second init container",
+			pod:  grantTestInitPod(20, forgeInits, "forge-verifier"),
+			allocations: deviceplugin.PodAllocations{
+				"forge-runner": grantTestContainerAllocation(
+					[]string{grantTestDevice + "::0"},
+					grantTestAllocation(workercore.DeviceAllocationModeSliced, nodefeature.ResourceMaxUnits/4),
+				),
+				"forge-verifier": grantTestContainerAllocation(
+					[]string{grantTestDevice + "::0"},
+					grantTestAllocation(workercore.DeviceAllocationModeSliced, nodefeature.ResourceMaxUnits/4),
+				),
+			},
+			section: sectionBothSliced,
+			want: worker.InstanceAcceleratorMetrics{
+				ID:                       grantTestDevice,
+				Mode:                     workercore.DeviceAllocationModeSliced.String(),
+				MemoryTotalMiB:           ptr.To(grantTestCardMiB / 4),
+				MemoryUsedMiB:            ptr.To[uint64](10240),
+				MemoryUtilizationPercent: ptr.To[uint32](50),
+				CoresUtilizationPercent:  ptr.To[uint32](60),
+				TemperatureCelsius:       ptr.To[uint32](67),
+				PowerUsageWatts:          ptr.To[uint32](310),
+				Unhealthy:                ptr.To(false),
+			},
+		},
+		{
+			name: "sequential sliced init containers fall back to first init container in declaration order when none running",
+			pod: grantTestInitPod(20, []core.Container{
+				{Name: "z-first"},
+				{Name: "a-second"},
+			}, ""),
+			allocations: deviceplugin.PodAllocations{
+				"z-first": grantTestContainerAllocation(
+					[]string{grantTestDevice + "::0"},
+					grantTestAllocation(workercore.DeviceAllocationModeSliced, nodefeature.ResourceMaxUnits/4),
+				),
+				"a-second": grantTestContainerAllocation(
+					[]string{grantTestDevice + "::0"},
+					grantTestAllocation(workercore.DeviceAllocationModeSliced, nodefeature.ResourceMaxUnits/4),
+				),
+			},
+			section: grantTestSection(
+				detector.SliceUsage{
+					Manufacturer: grantTestVendor, PodUID: grantTestPodUID,
+					Container: "z-first", DeviceID: grantTestDevice,
+					MemoryUsedMiB:           ptr.To[uint64](4096),
+					CoresUtilizationPercent: ptr.To[uint32](4),
+				},
+				detector.SliceUsage{
+					Manufacturer: grantTestVendor, PodUID: grantTestPodUID,
+					Container: "a-second", DeviceID: grantTestDevice,
+					MemoryUsedMiB:           ptr.To[uint64](10240),
+					CoresUtilizationPercent: ptr.To[uint32](12),
+				},
+			),
+			want: worker.InstanceAcceleratorMetrics{
+				ID:                       grantTestDevice,
+				Mode:                     workercore.DeviceAllocationModeSliced.String(),
+				MemoryTotalMiB:           ptr.To(grantTestCardMiB / 4),
+				MemoryUsedMiB:            ptr.To[uint64](4096),
+				MemoryUtilizationPercent: ptr.To[uint32](20),
+				CoresUtilizationPercent:  ptr.To[uint32](20),
+				TemperatureCelsius:       ptr.To[uint32](67),
+				PowerUsageWatts:          ptr.To[uint32](310),
+				Unhealthy:                ptr.To(false),
+			},
+		},
+		{
+			name: "sequential partitioned init containers attribute to running init container",
+			pod:  grantTestInitPod(0, forgeInits, "forge-verifier"),
+			allocations: deviceplugin.PodAllocations{
+				"forge-runner": grantTestContainerAllocation(
+					[]string{grantTestDevice + "::0"},
+					grantTestPartition("MIG-aaa"),
+				),
+				"forge-verifier": grantTestContainerAllocation(
+					[]string{grantTestDevice + "::0"},
+					grantTestPartition("MIG-aaa"),
+				),
+			},
+			section: &detector.MonitorSliceSection{
+				SchemaVersion: detector.MonitorSliceSchemaVersion,
+				Partitions: []detector.SlicePartition{
+					{
+						Manufacturer: grantTestVendor, PodUID: grantTestPodUID,
+						Container: "forge-runner", DeviceID: grantTestDevice,
+						ID:             "MIG-aaa",
+						MemoryTotalMiB: ptr.To[uint64](9856),
+						MemoryUsedMiB:  ptr.To[uint64](1232),
+						CoresReason:    device.AcceleratorProcessReasonUnsupported,
+					},
+					{
+						Manufacturer: grantTestVendor, PodUID: grantTestPodUID,
+						Container: "forge-verifier", DeviceID: grantTestDevice,
+						ID:             "MIG-aaa",
+						MemoryTotalMiB: ptr.To[uint64](9856),
+						MemoryUsedMiB:  ptr.To[uint64](2464),
+						CoresReason:    device.AcceleratorProcessReasonUnsupported,
+					},
+				},
+			},
+			want: worker.InstanceAcceleratorMetrics{
+				ID:                       "MIG-aaa",
+				Mode:                     workercore.DeviceAllocationModePartitioned.String(),
+				MemoryTotalMiB:           ptr.To[uint64](9856),
+				MemoryUsedMiB:            ptr.To[uint64](2464),
+				MemoryUtilizationPercent: ptr.To[uint32](25),
+				TemperatureCelsius:       ptr.To[uint32](67),
+				PowerUsageWatts:          ptr.To[uint32](310),
+				Unhealthy:                ptr.To(false),
+			},
+		},
+		{
+			name: "two regular concurrent containers remain ambiguous even with identical device IDs",
+			pod:  grantTestInitPod(0, nil, "", core.Container{Name: "main"}, core.Container{Name: "aux"}),
+			allocations: deviceplugin.PodAllocations{
+				"main": grantTestContainerAllocation(
+					[]string{grantTestDevice},
+					grantTestAllocation(workercore.DeviceAllocationModeExclusive, 0),
+				),
+				"aux": grantTestContainerAllocation(
+					[]string{grantTestDevice},
+					grantTestAllocation(workercore.DeviceAllocationModeExclusive, 0),
+				),
+			},
+			want: worker.InstanceAcceleratorMetrics{
+				ID:                 grantTestDevice,
+				Mode:               workercore.DeviceAllocationModeExclusive.String(),
+				TemperatureCelsius: ptr.To[uint32](67),
+				PowerUsageWatts:    ptr.To[uint32](310),
+				Unhealthy:          ptr.To(false),
+			},
+		},
+		{
+			name: "two init containers with disjoint device IDs remain ambiguous",
+			pod:  grantTestInitPod(20, forgeInits, "forge-verifier"),
+			allocations: deviceplugin.PodAllocations{
+				"forge-runner": grantTestContainerAllocation(
+					[]string{grantTestDevice + "::0"},
+					grantTestAllocation(workercore.DeviceAllocationModeSliced, nodefeature.ResourceMaxUnits/4),
+				),
+				"forge-verifier": grantTestContainerAllocation(
+					[]string{grantTestDevice + "::1"},
+					grantTestAllocation(workercore.DeviceAllocationModeSliced, nodefeature.ResourceMaxUnits/4),
+				),
+			},
+			section: sectionBothSliced,
+			want: worker.InstanceAcceleratorMetrics{
+				ID:                 grantTestDevice,
+				Mode:               workercore.DeviceAllocationModeSliced.String(),
+				TemperatureCelsius: ptr.To[uint32](67),
+				PowerUsageWatts:    ptr.To[uint32](310),
+				Unhealthy:          ptr.To(false),
+			},
+		},
+		{
+			name: "two init containers with empty device IDs remain ambiguous",
+			pod:  grantTestInitPod(0, forgeInits, "forge-runner"),
+			allocations: deviceplugin.PodAllocations{
+				"forge-runner": grantTestContainerAllocation(
+					nil,
+					grantTestAllocation(workercore.DeviceAllocationModeExclusive, 0),
+				),
+				"forge-verifier": grantTestContainerAllocation(
+					nil,
+					grantTestAllocation(workercore.DeviceAllocationModeExclusive, 0),
+				),
+			},
+			want: worker.InstanceAcceleratorMetrics{
+				ID:                 grantTestDevice,
+				Mode:               workercore.DeviceAllocationModeExclusive.String(),
+				TemperatureCelsius: ptr.To[uint32](67),
+				PowerUsageWatts:    ptr.To[uint32](310),
+				Unhealthy:          ptr.To(false),
+			},
+		},
+		{
+			name: "non-sidecar init container plus native sidecar remain ambiguous",
+			pod: grantTestInitPod(0, []core.Container{
+				{Name: "forge-runner"},
+				{Name: "sidecar", RestartPolicy: &always},
+			}, "forge-runner"),
+			allocations: deviceplugin.PodAllocations{
+				"forge-runner": grantTestContainerAllocation(
+					[]string{grantTestDevice},
+					grantTestAllocation(workercore.DeviceAllocationModeExclusive, 0),
+				),
+				"sidecar": grantTestContainerAllocation(
+					[]string{grantTestDevice},
+					grantTestAllocation(workercore.DeviceAllocationModeExclusive, 0),
+				),
+			},
+			want: worker.InstanceAcceleratorMetrics{
+				ID:                 grantTestDevice,
+				Mode:               workercore.DeviceAllocationModeExclusive.String(),
+				TemperatureCelsius: ptr.To[uint32](67),
+				PowerUsageWatts:    ptr.To[uint32](310),
+				Unhealthy:          ptr.To(false),
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			grants := NewAcceleratorGrants(c.pod, c.allocations)
+			got := grants.Resolve(c.section, grantTestVendor, grantTestCard())
+			require.Len(t, got, 1)
+			assert.Equal(t, c.want, got[0])
+		})
+	}
+}

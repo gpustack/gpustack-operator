@@ -839,6 +839,79 @@ func TestParseFamilyDemands_InitContainerPartition(t *testing.T) {
 	}, parseFamilyDemands(wl), "card count and profile read from the init container")
 }
 
+func TestParseFamilyDemands_InitContainersSequentialVsSidecar(t *testing.T) {
+	gpu := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	always := core.ContainerRestartPolicyAlways
+	reqGPU := func(n string) core.ResourceRequirements {
+		return core.ResourceRequirements{
+			Requests: core.ResourceList{gpu: resource.MustParse(n)},
+			Limits:   core.ResourceList{gpu: resource.MustParse(n)},
+		}
+	}
+
+	cases := []struct {
+		name      string
+		inits     []core.Container
+		apps      []core.Container
+		wantCards int32
+	}{
+		{
+			name: "sequential ForgeSandbox initContainers take max rather than sum",
+			inits: []core.Container{
+				{Name: "forge-runner", Resources: reqGPU("1")},
+				{Name: "forge-stage-sentinel"},
+				{Name: "forge-verifier", Resources: reqGPU("1")},
+			},
+			apps:      []core.Container{{Name: "forge-hold"}},
+			wantCards: 1,
+		},
+		{
+			name: "sidecar initContainer sums with subsequent sequential initContainer and app",
+			inits: []core.Container{
+				{Name: "sidecar", RestartPolicy: &always, Resources: reqGPU("1")},
+				{Name: "setup", Resources: reqGPU("2")},
+			},
+			apps:      []core.Container{{Name: "main", Resources: reqGPU("1")}},
+			wantCards: 3,
+		},
+		{
+			name: "sidecar after sequential initContainer sums only with app",
+			inits: []core.Container{
+				{Name: "setup", Resources: reqGPU("1")},
+				{Name: "sidecar", RestartPolicy: &always, Resources: reqGPU("1")},
+			},
+			apps:      []core.Container{{Name: "main", Resources: reqGPU("1")}},
+			wantCards: 2,
+		},
+		{
+			name: "regular app containers sum concurrently",
+			apps: []core.Container{
+				{Name: "a", Resources: reqGPU("1")},
+				{Name: "b", Resources: reqGPU("2")},
+			},
+			wantCards: 3,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wl := &kueue.Workload{Spec: kueue.WorkloadSpec{PodSets: []kueue.PodSet{{
+				Name:  "main",
+				Count: 1,
+				Template: core.PodTemplateSpec{Spec: core.PodSpec{
+					InitContainers: tc.inits,
+					Containers:     tc.apps,
+				}},
+			}}}}
+			assert.Equal(t, []familyDemand{{
+				family:  nodefeature.ResourceFamilyExclusive,
+				cards:   tc.wantCards,
+				podSets: fromPodSets("main"),
+			}}, parseFamilyDemands(wl))
+		})
+	}
+}
+
 // TestParseFamilyDemands_LimitsOnly pins that accelerator keys specified only under
 // resources.limits (the conventional place for extended resources) are still parsed — a
 // requests-only scan would miss them and wrongly mark feasibility Ready.

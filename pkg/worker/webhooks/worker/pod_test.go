@@ -1004,3 +1004,282 @@ func TestPodWebhook_DefaultFrontedByAcceleratorTypeAndSharedPool(t *testing.T) {
 		assert.ErrorContains(t, err, "conflicting accelerator groups")
 	})
 }
+
+func makeContainer(name string, restartPolicy *core.ContainerRestartPolicy, requests map[core.ResourceName]string) core.Container {
+	ctr := core.Container{
+		Name:          name,
+		RestartPolicy: restartPolicy,
+	}
+	if len(requests) > 0 {
+		rl := core.ResourceList{}
+		for n, v := range requests {
+			rl[n] = resource.MustParse(v)
+		}
+		ctr.Resources = core.ResourceRequirements{
+			Requests: rl,
+			Limits:   rl.DeepCopy(),
+		}
+	}
+	return ctr
+}
+
+func sequentialInitPod(inits []core.Container, containers ...core.Container) *core.Pod {
+	if len(containers) == 0 {
+		containers = []core.Container{makeContainer("forge-hold", nil, map[core.ResourceName]string{core.ResourceCPU: "100m"})}
+	}
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: "default",
+			Name:      "forge-sandbox",
+			Labels:    map[string]string{kueuectrlconst.QueueLabel: testLocalQueueName},
+		},
+		Spec: core.PodSpec{
+			InitContainers: inits,
+			Containers:     containers,
+		},
+	}
+}
+
+func TestPodWebhook_SequentialInitContainers(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	amdBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerAMD, workercore.DeviceAllocationModeExclusive)
+	nvidiaShared := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeShared)
+	snames := logicalResourceNamesForBase(nvidiaBase)
+	pnames := partitionResourceNamesForBase(nvidiaBase)
+	profile1g := partitionKey("1g.10gb")
+	profile2g := partitionKey("2g.20gb")
+	always := core.ContainerRestartPolicyAlways
+
+	sentinel := makeContainer("forge-stage-sentinel", nil, map[core.ResourceName]string{core.ResourceCPU: "100m"})
+
+	cases := []struct {
+		name           string
+		pod            *core.Pod
+		runDefault     bool
+		wantErr        bool
+		wantErrContain string
+		wantUnitsKey   core.ResourceName
+		wantUnits      int64
+	}{
+		{
+			name: "homogeneous exclusive init containers with intervening cpu init container admitted",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{nvidiaBase: "1", core.ResourceCPU: "2"}),
+				sentinel,
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{nvidiaBase: "1", core.ResourceCPU: "4"}),
+			}),
+		},
+		{
+			name: "homogeneous shared init containers with intervening cpu init container admitted",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{nvidiaShared: "1"}),
+				sentinel,
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{nvidiaShared: "1"}),
+			}),
+		},
+		{
+			name: "homogeneous sliced percentage init containers defaulted and admitted",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{
+					snames.card: "1", snames.memPct: "60", snames.coresPct: "50",
+				}),
+				sentinel,
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{
+					snames.card: "1", snames.memPct: "60", snames.coresPct: "50",
+				}),
+			}),
+			runDefault:   true,
+			wantUnitsKey: snames.units,
+			wantUnits:    960000,
+		},
+		{
+			name: "homogeneous sliced memory-mib init containers defaulted and admitted",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{
+					snames.card: "1", snames.memMib: "10240",
+				}),
+				sentinel,
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{
+					snames.card: "1", snames.memMib: "10240",
+				}),
+			}),
+			runDefault:   true,
+			wantUnitsKey: snames.units,
+			wantUnits:    200000,
+		},
+		{
+			name: "homogeneous partitioned init containers defaulted and admitted",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{
+					pnames.card: "1", profile1g: "1",
+				}),
+				sentinel,
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{
+					pnames.card: "1", profile1g: "1",
+				}),
+			}),
+			runDefault:   true,
+			wantUnitsKey: pnames.units,
+			wantUnits:    200000,
+		},
+		{
+			name: "heterogeneous exclusive card counts rejected",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{nvidiaBase: "1"}),
+				sentinel,
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{nvidiaBase: "2"}),
+			}),
+			wantErr:        true,
+			wantErrContain: "spec.initContainers[2].resources.limits",
+		},
+		{
+			name: "heterogeneous exclusive accelerator bases rejected",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{nvidiaBase: "1"}),
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{amdBase: "1"}),
+			}),
+			wantErr:        true,
+			wantErrContain: "spec.initContainers[1].resources.limits",
+		},
+		{
+			name: "heterogeneous shared card counts rejected",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{nvidiaShared: "1"}),
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{nvidiaShared: "2"}),
+			}),
+			wantErr:        true,
+			wantErrContain: "spec.initContainers[1].resources.limits",
+		},
+		{
+			name: "heterogeneous sliced memory percentages rejected",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{
+					snames.card: "1", snames.memPct: "60", snames.coresPct: "50",
+				}),
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{
+					snames.card: "1", snames.memPct: "40", snames.coresPct: "50",
+				}),
+			}),
+			runDefault:     true,
+			wantErr:        true,
+			wantErrContain: "spec.initContainers[1].resources.limits",
+		},
+		{
+			name: "heterogeneous sliced cores percentages rejected",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{
+					snames.card: "1", snames.memPct: "60", snames.coresPct: "50",
+				}),
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{
+					snames.card: "1", snames.memPct: "60", snames.coresPct: "80",
+				}),
+			}),
+			runDefault:     true,
+			wantErr:        true,
+			wantErrContain: "spec.initContainers[1].resources.limits",
+		},
+		{
+			name: "heterogeneous sliced memory key shapes rejected",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{
+					snames.card: "1", snames.memPct: "50",
+				}),
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{
+					snames.card: "1", snames.memMib: "40960",
+				}),
+			}),
+			runDefault:     true,
+			wantErr:        true,
+			wantErrContain: "spec.initContainers[1].resources.limits",
+		},
+		{
+			name: "heterogeneous partitioned profiles rejected",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{
+					pnames.card: "1", profile1g: "1",
+				}),
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{
+					pnames.card: "1", profile2g: "1",
+				}),
+			}),
+			runDefault:     true,
+			wantErr:        true,
+			wantErrContain: "spec.initContainers[1].resources.limits",
+		},
+		{
+			name: "mixed families across sequential init containers rejected",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{nvidiaBase: "1"}),
+				makeContainer("forge-verifier", nil, map[core.ResourceName]string{nvidiaShared: "1"}),
+			}),
+			wantErr:        true,
+			wantErrContain: "one accelerator family",
+		},
+		{
+			name: "two running sliced containers still rejected by rule 6",
+			pod: sequentialInitPod(nil,
+				makeContainer("main", nil, map[core.ResourceName]string{snames.card: "1", snames.memPct: "50"}),
+				makeContainer("aux", nil, map[core.ResourceName]string{snames.card: "1", snames.memPct: "50"}),
+			),
+			wantErr:        true,
+			wantErrContain: "slicing family",
+		},
+		{
+			name: "two running partitioned containers still rejected by rule 6",
+			pod: sequentialInitPod(nil,
+				makeContainer("main", nil, map[core.ResourceName]string{pnames.card: "1", profile1g: "1"}),
+				makeContainer("aux", nil, map[core.ResourceName]string{pnames.card: "1", profile1g: "1"}),
+			),
+			wantErr:        true,
+			wantErrContain: "slicing family",
+		},
+		{
+			name: "init container plus running container still rejected by rule 1",
+			pod: sequentialInitPod(
+				[]core.Container{
+					makeContainer("forge-runner", nil, map[core.ResourceName]string{snames.card: "1", snames.memPct: "50"}),
+					makeContainer("forge-verifier", nil, map[core.ResourceName]string{snames.card: "1", snames.memPct: "50"}),
+				},
+				makeContainer("main", nil, map[core.ResourceName]string{snames.card: "1", snames.memPct: "50"}),
+			),
+			wantErr:        true,
+			wantErrContain: "spec.initContainers",
+		},
+		{
+			name: "restartable sidecar init container still rejected by rule 7",
+			pod: sequentialInitPod([]core.Container{
+				makeContainer("forge-runner", nil, map[core.ResourceName]string{snames.card: "1", snames.memPct: "50"}),
+				makeContainer("sidecar", &always, map[core.ResourceName]string{snames.card: "1", snames.memPct: "50"}),
+			}),
+			wantErr:        true,
+			wantErrContain: "restartable init container",
+		},
+	}
+
+	it := instanceTypeWithPhysicalProfiles("81920Mi", physicalProfiles()...)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := newPodWebhook(it)
+			pod := c.pod.DeepCopy()
+			if c.runDefault {
+				assert.NoError(t, w.Default(context.Background(), pod))
+			}
+
+			_, err := w.ValidateCreate(context.Background(), pod)
+			if c.wantErr {
+				assert.Error(t, err)
+				if c.wantErrContain != "" {
+					assert.ErrorContains(t, err, c.wantErrContain)
+				}
+				return
+			}
+			assert.NoError(t, err)
+			if c.wantUnitsKey != "" {
+				for _, idx := range []int{0, 2} {
+					units := pod.Spec.InitContainers[idx].Resources.Requests[c.wantUnitsKey]
+					assert.Equal(t, c.wantUnits, units.Value(), "units folded on init container %q", pod.Spec.InitContainers[idx].Name)
+				}
+			}
+		})
+	}
+}
