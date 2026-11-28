@@ -28,6 +28,7 @@ const (
 	DefaultMockSpeedupFactor = 1.25
 	defaultMockBaselineUs    = 100.0
 	maxMetadataFileBytes     = 4 << 20
+	maxLibraryFileBytes      = int64(512) << 20
 )
 
 // NewCommand returns the hidden top-level cobra command for ForgeSandbox helper subcommands.
@@ -941,7 +942,7 @@ func checkExpectedChecksum(relPath, actual, entryExpected string, manifestChecks
 		expected = strings.TrimSpace(manifestChecksums[relPath])
 	}
 	if expected == "" {
-		return nil
+		return fmt.Errorf("no expected checksum available for %q", relPath)
 	}
 	if err := ValidateSHA256Digest(expected); err != nil {
 		return fmt.Errorf("invalid expected checksum for %q: %w", relPath, err)
@@ -970,8 +971,12 @@ func loadVerifyThresholds(opts ForgeVerifyOptions) (*ForgeRequest, VerificationT
 			if parsed.MinSpeedupRatio > 0 {
 				thresholds.MinSpeedupRatio = parsed.MinSpeedupRatio
 			}
-			thresholds.Atol = parsed.Atol
-			thresholds.Rtol = parsed.Rtol
+			if parsed.Atol > 0 {
+				thresholds.Atol = parsed.Atol
+			}
+			if parsed.Rtol > 0 {
+				thresholds.Rtol = parsed.Rtol
+			}
 			req = &parsed
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, thresholds, fmt.Errorf("read %s: %w", ForgeRequestFileName, err)
@@ -1191,11 +1196,17 @@ func hashRegularSingleLinkFile(rootDir, relPath string) (string, error) {
 		return "", err
 	}
 	defer func() { _ = f.Close() }()
+	if size <= 0 || size > maxLibraryFileBytes {
+		return "", fmt.Errorf("%q size %d is out of bounds (max %d)", relPath, size, maxLibraryFileBytes)
+	}
 
 	h := sha256.New()
-	written, err := io.Copy(h, f)
+	written, err := io.Copy(h, io.LimitReader(f, maxLibraryFileBytes+1))
 	if err != nil {
 		return "", err
+	}
+	if written > maxLibraryFileBytes {
+		return "", fmt.Errorf("%q size exceeds max %d bytes during hash", relPath, maxLibraryFileBytes)
 	}
 	if written != size {
 		return "", fmt.Errorf("%q size changed during hash", relPath)
@@ -1242,9 +1253,9 @@ func openRegularSingleLinkAt(parent *os.File, name string) (*os.File, int64, err
 		_ = unix.Close(fd)
 		return nil, 0, errors.New("not a regular file")
 	}
-	if uint64(st.Nlink) != 1 {
+	if st.Nlink != 1 {
 		_ = unix.Close(fd)
-		return nil, 0, fmt.Errorf("hardlink count %d != 1", uint64(st.Nlink))
+		return nil, 0, fmt.Errorf("hardlink count %d != 1", st.Nlink)
 	}
 	return os.NewFile(uintptr(fd), name), st.Size, nil
 }

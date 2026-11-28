@@ -323,6 +323,7 @@ func canonicalizeDtypes(fieldName string, dtypes []string) ([]string, error) {
 	for _, dt := range dtypes {
 		norm := strings.ToLower(strings.TrimSpace(dt))
 		norm = strings.TrimPrefix(norm, "torch.")
+		norm = strings.TrimPrefix(norm, "c10::")
 		if norm == "" {
 			return nil, fmt.Errorf("%s contains an empty dtype", fieldName)
 		}

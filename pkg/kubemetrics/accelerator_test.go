@@ -885,6 +885,68 @@ func TestAcceleratorGrantsResolveSequentialInitReuse(t *testing.T) {
 				Unhealthy:          ptr.To(false),
 			},
 		},
+		{
+			name: "KEP-753 sequential init-to-main DeviceID reuse attributes grant to running main container",
+			pod: func() *core.Pod {
+				p := grantTestPod(0)
+				p.Spec.InitContainers = []core.Container{{Name: "init-setup"}}
+				p.Status.InitContainerStatuses = []core.ContainerStatus{{
+					Name:  "init-setup",
+					State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}},
+				}}
+				p.Status.ContainerStatuses = []core.ContainerStatus{{
+					Name:  "main",
+					State: core.ContainerState{Running: &core.ContainerStateRunning{}},
+				}}
+				return p
+			}(),
+			allocations: deviceplugin.PodAllocations{
+				"init-setup": grantTestContainerAllocation(
+					[]string{grantTestDevice},
+					grantTestAllocation(workercore.DeviceAllocationModeExclusive, 0),
+				),
+				"main": grantTestContainerAllocation(
+					[]string{grantTestDevice},
+					grantTestAllocation(workercore.DeviceAllocationModeExclusive, 0),
+				),
+			},
+			want: worker.InstanceAcceleratorMetrics{
+				ID:                       grantTestDevice,
+				Mode:                     workercore.DeviceAllocationModeExclusive.String(),
+				MemoryTotalMiB:           ptr.To(grantTestCardMiB),
+				MemoryUsedMiB:            ptr.To[uint64](61440),
+				MemoryUtilizationPercent: ptr.To[uint32](75),
+				CoresUtilizationPercent:  ptr.To[uint32](80),
+				TemperatureCelsius:       ptr.To[uint32](67),
+				PowerUsageWatts:          ptr.To[uint32](310),
+				Unhealthy:                ptr.To(false),
+			},
+		},
+		{
+			name: "two regular containers claiming the same DeviceID remain ambiguous",
+			pod: func() *core.Pod {
+				p := grantTestPod(0)
+				p.Spec.Containers = append(p.Spec.Containers, core.Container{Name: "second"})
+				return p
+			}(),
+			allocations: deviceplugin.PodAllocations{
+				"main": grantTestContainerAllocation(
+					[]string{grantTestDevice},
+					grantTestAllocation(workercore.DeviceAllocationModeExclusive, 0),
+				),
+				"second": grantTestContainerAllocation(
+					[]string{grantTestDevice},
+					grantTestAllocation(workercore.DeviceAllocationModeExclusive, 0),
+				),
+			},
+			want: worker.InstanceAcceleratorMetrics{
+				ID:                 grantTestDevice,
+				Mode:               workercore.DeviceAllocationModeExclusive.String(),
+				TemperatureCelsius: ptr.To[uint32](67),
+				PowerUsageWatts:    ptr.To[uint32](310),
+				Unhealthy:          ptr.To(false),
+			},
+		},
 	}
 
 	for _, c := range cases {

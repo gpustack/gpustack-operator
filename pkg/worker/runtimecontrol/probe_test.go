@@ -2,6 +2,7 @@ package runtimecontrol
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -268,6 +269,38 @@ func TestClient_ProbeErrorClassification(t *testing.T) {
 				var stErr *HTTPStatusError
 				require.ErrorAs(t, err, &stErr)
 				require.Equal(t, http.StatusUnauthorized, stErr.StatusCode)
+			},
+		},
+		{
+			name:   "409 unknown error with boot_id preserves HTTPStatusError instead of ErrBootIDMismatch",
+			status: http.StatusConflict,
+			body: map[string]any{
+				"error":   "custom_conflict_reason",
+				"boot_id": "boot-cur",
+				"message": "some other conflict",
+			},
+			assertErr: func(t *testing.T, err error) {
+				require.NotErrorIs(t, err, ErrBootIDMismatch)
+				var stErr *HTTPStatusError
+				require.ErrorAs(t, err, &stErr)
+				require.Equal(t, http.StatusConflict, stErr.StatusCode)
+				require.Equal(t, "custom_conflict_reason", stErr.ErrorCode)
+			},
+		},
+		{
+			name:   "429 non-cooldown error falls back to HTTPStatusError",
+			status: http.StatusTooManyRequests,
+			body: map[string]any{
+				"error":   "rate_limited",
+				"message": "too many requests",
+			},
+			assertErr: func(t *testing.T, err error) {
+				var coolErr *ProbeCooldownError
+				require.False(t, errors.As(err, &coolErr))
+				var stErr *HTTPStatusError
+				require.ErrorAs(t, err, &stErr)
+				require.Equal(t, http.StatusTooManyRequests, stErr.StatusCode)
+				require.Equal(t, "rate_limited", stErr.ErrorCode)
 			},
 		},
 	}

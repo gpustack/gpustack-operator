@@ -912,6 +912,58 @@ func TestParseFamilyDemands_InitContainersSequentialVsSidecar(t *testing.T) {
 	}
 }
 
+func TestParseFamilyDemands_SharedTieBreakPrefersWiderPerHolderDemand(t *testing.T) {
+	sharedCard := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeShared)
+	reqShared := func(q string) core.ResourceRequirements {
+		return core.ResourceRequirements{Limits: core.ResourceList{sharedCard: resource.MustParse(q)}}
+	}
+
+	cases := []struct {
+		name      string
+		inits     []core.Container
+		apps      []core.Container
+		wantNeeds []sharedNeed
+	}{
+		{
+			name: "equal-card init holder needing 2 cards beats two steady 1-card holders",
+			inits: []core.Container{
+				{Name: "setup", Resources: reqShared("2")},
+			},
+			apps: []core.Container{
+				{Name: "a", Resources: reqShared("1")},
+				{Name: "b", Resources: reqShared("1")},
+			},
+			wantNeeds: []sharedNeed{{cards: 2, containers: 1}},
+		},
+		{
+			name: "init phase with single 3-card holder beats init phase with 2+1 split",
+			inits: []core.Container{
+				{Name: "wide", Resources: reqShared("3")},
+				{Name: "sidecar", RestartPolicy: ptr.To(core.ContainerRestartPolicyAlways), Resources: reqShared("1")},
+				{Name: "narrow", Resources: reqShared("2")},
+			},
+			apps:      []core.Container{{Name: "main", Resources: reqShared("1")}},
+			wantNeeds: []sharedNeed{{cards: 3, containers: 1}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wl := &kueue.Workload{Spec: kueue.WorkloadSpec{PodSets: []kueue.PodSet{{
+				Name:  "main",
+				Count: 1,
+				Template: core.PodTemplateSpec{Spec: core.PodSpec{
+					InitContainers: tc.inits,
+					Containers:     tc.apps,
+				}},
+			}}}}
+			demands := parseFamilyDemands(wl)
+			require.Len(t, demands, 1)
+			assert.Equal(t, tc.wantNeeds, demands[0].sharedNeeds)
+		})
+	}
+}
+
 // TestParseFamilyDemands_LimitsOnly pins that accelerator keys specified only under
 // resources.limits (the conventional place for extended resources) are still parsed — a
 // requests-only scan would miss them and wrongly mark feasibility Ready.

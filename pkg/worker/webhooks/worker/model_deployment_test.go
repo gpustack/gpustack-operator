@@ -8019,4 +8019,20 @@ func TestValidateModelDeploymentForgerBoundReservedMountScope(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), modelDeploymentConfigMapKernelMountForbiddenReason)
 	})
+
+	t.Run("orphaned forger binding does not reserve /var/lib/gpustack/kernels on unrelated roles", func(t *testing.T) {
+		old := newMultiRoleMD()
+		old.Annotations = map[string]string{
+			workercore.ModelDeploymentForgerBindingAnnotationKey: `{"forgerName":"deleted-forger","forgerUID":"old-uid","term":1}`,
+		}
+		updated := old.DeepCopy()
+		updated.Spec.Roles[0].AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{{
+			MountPath: "/var/lib/gpustack/kernels",
+			Secret:    &core.LocalObjectReference{Name: "prefill-custom-data"},
+		}}
+
+		w := modelDeploymentFenceWebhookWithObjects(servingAcceleratorType("h20-8x", 8))
+		_, err := w.ValidateUpdate(modelDeploymentFenceContext("alice"), old, updated)
+		require.NoError(t, err)
+	})
 }

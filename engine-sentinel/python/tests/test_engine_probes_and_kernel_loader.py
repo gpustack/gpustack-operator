@@ -2392,3 +2392,75 @@ def test_sglang_collect_probe_waits_for_partial_trace_flush(tmp_path: Path) -> N
     assert len(r2["payload"]["bottlenecks"]) == 1
     assert r2["payload"]["bottlenecks"][0]["op_family"] == "rmsnorm"
     assert not trace_dir.exists()
+
+
+def test_probe_request_rejects_malformed_version_and_arch_and_worker_finalizer_guards_exceptions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import stat
+
+    from gpustack_engine_sentinel.probe import compute_signature_hash16
+    from gpustack_engine_sentinel.protocol import InvalidRequestError, ProbeRequest
+    from gpustack_engine_sentinel.vllm.utility import vllm_worker_probe_start
+
+    monkeypatch.setenv(ENV_PROBE_MIN_COOLDOWN_SECONDS, "0")
+
+    for bad_body in (
+        {"expected_boot_id": "boot-1", "engine_version": "abc!!"},
+        {"expected_boot_id": "boot-1", "architecture": "sm 90 x"},
+        {"expected_boot_id": "boot-1", "manufacturer": "nv/idia"},
+    ):
+        with pytest.raises(InvalidRequestError):
+            ProbeRequest.from_dict(bad_body)
+
+    # Staging directories are created with owner-only 0o700 permissions.
+    stage_dir = tmp_path / "worker_stage_0700"
+    worker = _FakeGPUWorker(
+        [
+            SimpleNamespace(
+                key="vllm::rms_norm",
+                self_device_time_total=120.0,
+                input_shapes=[[8, 4096], [4096]],
+                input_dtypes=["bfloat16", "bfloat16"],
+                count=3,
+            )
+        ],
+        rank=0,
+    )
+    res = vllm_worker_probe_start(
+        worker,
+        {
+            "probe_id": "p-err-guard",
+            "output_dir": str(stage_dir),
+            "steps": 3,
+            "engine_version": "abc!!",
+            "manufacturer": "nvidia",
+            "architecture": "sm_90a",
+        },
+    )
+    assert res["ok"] is True
+    assert stat.S_IMODE(stage_dir.stat().st_mode) == 0o700
+
+    # Even if malformed engine_version reaches the worker session directly, execute_model
+    # must NOT raise: probe finalization records status="failed" and restores execute_model.
+    for i in range(3):
+        worker.execute_model(batch=i)
+    session = worker._gpustack_probe_session
+    assert session.status == "failed"
+    assert session.error_code == "probe_distill_failed"
+    assert not stage_dir.exists()
+
+    # Cross-language hash parity: c10:: dtype prefix, whole-number float 1.0 == 1, U+2028/U+2029.
+    h1 = compute_signature_hash16(
+        {"hidden_size": 4096},
+        ["torch.float16"],
+        ["float16"],
+        constants={"scale": 1.0, "sep": "a\u2028b\u2029c"},
+    )
+    h2 = compute_signature_hash16(
+        {"hidden_size": 4096},
+        ["c10::float16"],
+        ["c10::float16"],
+        constants={"scale": 1, "sep": "a\u2028b\u2029c"},
+    )
+    assert h1 == h2

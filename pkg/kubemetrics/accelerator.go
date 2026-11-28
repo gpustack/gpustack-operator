@@ -104,8 +104,8 @@ func nonSidecarInitOrder(pod *core.Pod) map[string]int {
 	return order
 }
 
-// runningInitContainers returns the set of init container names observed in Running state.
-func runningInitContainers(pod *core.Pod) sets.Set[string] {
+// runningContainers returns the set of init and regular container names observed in Running state.
+func runningContainers(pod *core.Pod) sets.Set[string] {
 	running := sets.New[string]()
 	for i := range pod.Status.InitContainerStatuses {
 		st := &pod.Status.InitContainerStatuses[i]
@@ -113,16 +113,55 @@ func runningInitContainers(pod *core.Pod) sets.Set[string] {
 			running.Insert(st.Name)
 		}
 	}
+	for i := range pod.Status.ContainerStatuses {
+		st := &pod.Status.ContainerStatuses[i]
+		if st.State.Running != nil {
+			running.Insert(st.Name)
+		}
+	}
 	return running
 }
 
-// isSequentialInitReuse reports whether every claim on a shared accelerator key belongs to a
-// non-sidecar init container and all of them carry non-empty overlapping kubelet DeviceIDs.
-func isSequentialInitReuse(claims []grantClaim, initOrder map[string]int) bool {
+// regularContainerNames returns the set of regular (pod.Spec.Containers) container names.
+func regularContainerNames(pod *core.Pod) sets.Set[string] {
+	names := sets.New[string]()
+	for i := range pod.Spec.Containers {
+		names.Insert(pod.Spec.Containers[i].Name)
+	}
+	return names
+}
+
+// terminatedInitContainers returns the set of init container names observed in Terminated state.
+func terminatedInitContainers(pod *core.Pod) sets.Set[string] {
+	terminated := sets.New[string]()
+	for i := range pod.Status.InitContainerStatuses {
+		st := &pod.Status.InitContainerStatuses[i]
+		if st.State.Terminated != nil {
+			terminated.Insert(st.Name)
+		}
+	}
+	return terminated
+}
+
+// isSequentialDeviceReuse reports whether claims on a shared accelerator key represent KEP-753
+// sequential DeviceID reuse across non-sidecar init containers and at most one regular container,
+// with all claims sharing non-empty overlapping kubelet DeviceIDs.
+func isSequentialDeviceReuse(
+	claims []grantClaim, initOrder map[string]int, regularNames sets.Set[string],
+) bool {
 	var common sets.Set[string]
+	regularCount := 0
 	for i := range claims {
-		if _, ok := initOrder[claims[i].container]; !ok {
+		_, isInit := initOrder[claims[i].container]
+		isRegular := regularNames.Has(claims[i].container)
+		if !isInit && !isRegular {
 			return false
+		}
+		if isRegular {
+			regularCount++
+			if regularCount > 1 {
+				return false
+			}
 		}
 		if claims[i].deviceIDs.Len() == 0 {
 			return false
@@ -203,7 +242,9 @@ func NewAcceleratorGrants(pod *core.Pod, allocations deviceplugin.PodAllocations
 	}
 
 	initOrder := nonSidecarInitOrder(pod)
-	runningInits := runningInitContainers(pod)
+	regularNames := regularContainerNames(pod)
+	runningCtrs := runningContainers(pod)
+	terminatedInits := terminatedInitContainers(pod)
 
 	for key, claims := range claimsByKey {
 		if len(claims) == 1 {
@@ -211,18 +252,44 @@ func NewAcceleratorGrants(pod *core.Pod, allocations deviceplugin.PodAllocations
 			continue
 		}
 
-		// Kubelet reuses the exact same DeviceIDs across sequential non-sidecar init containers.
-		// Attribute the single grant to the currently running init container, or fall back to the
-		// first claiming non-sidecar init container in declaration order.
-		if isSequentialInitReuse(claims, initOrder) {
+		// Kubelet reuses the exact same DeviceIDs across sequential non-sidecar init containers
+		// and a regular main container. Attribute the single grant to the currently running
+		// container (preferring the regular container if init containers have already completed),
+		// or fall back to the first claiming non-sidecar init container in declaration order.
+		if isSequentialDeviceReuse(claims, initOrder, regularNames) {
+			claimOrder := func(name string) int {
+				if idx, ok := initOrder[name]; ok {
+					return idx
+				}
+				return len(pod.Spec.InitContainers)
+			}
 			slices.SortFunc(claims, func(a, b grantClaim) int {
-				return cmp.Compare(initOrder[a.container], initOrder[b.container])
+				return cmp.Compare(claimOrder(a.container), claimOrder(b.container))
 			})
 			winner := claims[0]
+			foundRunning := false
 			for i := range claims {
-				if runningInits.Has(claims[i].container) {
+				if runningCtrs.Has(claims[i].container) {
 					winner = claims[i]
+					foundRunning = true
 					break
+				}
+			}
+			if !foundRunning {
+				// If a regular container is among the claims and every claiming init container has
+				// terminated, attribute the grant to the regular container rather than a finished init.
+				last := claims[len(claims)-1]
+				if regularNames.Has(last.container) {
+					allInitsTerminated := true
+					for i := range claims {
+						if _, isInit := initOrder[claims[i].container]; isInit && !terminatedInits.Has(claims[i].container) {
+							allInitsTerminated = false
+							break
+						}
+					}
+					if allInitsTerminated {
+						winner = last
+					}
 				}
 			}
 			grants.grants[key] = winner.grant

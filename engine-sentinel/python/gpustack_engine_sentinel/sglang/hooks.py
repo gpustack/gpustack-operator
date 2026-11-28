@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import gzip
 import inspect
 import json
 import logging
 import math
+import os
 import time
 import uuid
 import zlib
@@ -1177,7 +1179,9 @@ class SGLangSentinelBackend:
             )
 
         output_dir = Path(str(spec["output_dir"]))
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            os.chmod(output_dir, 0o700)
         steps = int(spec["steps"])
         probe_id = str(spec["probe_id"])
         desired_kwargs: dict[str, Any] = {
@@ -1333,13 +1337,13 @@ class SGLangSentinelBackend:
                 "message": f"SGLang probe exceeded {wall_cap}s wall-clock cap",
             }
 
-        staged_bytes = directory_size_bytes(output_dir)
+        staged_bytes = await asyncio.to_thread(directory_size_bytes, output_dir)
         if staged_bytes > max_shm_bytes:
             try:
                 if tm is not None:
                     await self._stop_sglang_profiler_best_effort(tm)
             finally:
-                purge_probe_dir(output_dir)
+                await asyncio.to_thread(purge_probe_dir, output_dir)
                 self._active_probe = None
             return {
                 "ok": True,
@@ -1355,7 +1359,7 @@ class SGLangSentinelBackend:
         is_profiling = (
             bool(getattr(tm, "is_profiling", False)) if tm is not None else False
         )
-        trace_file = select_rank0_trace_file(output_dir)
+        trace_file = await asyncio.to_thread(select_rank0_trace_file, output_dir)
         if is_profiling or trace_file is None:
             return {"ok": True, "status": "running", "probe_id": probe_id}
 
@@ -1367,7 +1371,8 @@ class SGLangSentinelBackend:
 
         try:
             model_dims = self._extract_sglang_model_dims(tm)
-            payload = distill_probe_directory(
+            payload = await asyncio.to_thread(
+                distill_probe_directory,
                 output_dir,
                 engine="SGLang",
                 engine_version=active["engine_version"],
@@ -1383,12 +1388,12 @@ class SGLangSentinelBackend:
             # or wall_cap expires.
             return {"ok": True, "status": "running", "probe_id": probe_id}
         except Exception:
-            purge_probe_dir(output_dir)
+            await asyncio.to_thread(purge_probe_dir, output_dir)
             self._active_probe = None
             raise
 
         # Always delete ALL TP ranks' trace files immediately after distilling TP rank 0.
-        purge_probe_dir(output_dir)
+        await asyncio.to_thread(purge_probe_dir, output_dir)
         self._active_probe = None
         return {
             "ok": True,

@@ -244,7 +244,7 @@ func decodeProbeError(method, path string, resp *rawResponse) error {
 			}
 			return fmt.Errorf("%w: %s %s returned 409", ErrBootIDMismatch, method, path)
 		default:
-			if env.BootID != "" || env.ExpectedBootID != "" {
+			if env.Error == "" && (env.BootID != "" || env.ExpectedBootID != "") {
 				return fmt.Errorf("%w: current=%q expected=%q", ErrBootIDMismatch, env.BootID, env.ExpectedBootID)
 			}
 			return &HTTPStatusError{
@@ -264,6 +264,9 @@ func decodeProbeError(method, path string, resp *rawResponse) error {
 		}
 		return decodeAPIError(method, path, resp)
 	case http.StatusTooManyRequests:
+		if env.Error != "" && env.Error != "probe_cooldown" {
+			return decodeAPIError(method, path, resp)
+		}
 		retryAfter := parseProbeRetryAfter(resp.Headers, env.RetryAfterSeconds)
 		var cooldown time.Duration
 		if env.CooldownSeconds != nil && !math.IsNaN(*env.CooldownSeconds) && !math.IsInf(*env.CooldownSeconds, 0) && *env.CooldownSeconds > 0 {

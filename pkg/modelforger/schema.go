@@ -79,6 +79,7 @@ type ForgeRequest struct {
 	MinSpeedupRatio         float64            `json:"minSpeedupRatio"`
 	Atol                    float64            `json:"atol"`
 	Rtol                    float64            `json:"rtol"`
+	EvictedWorkloads        int                `json:"evictedWorkloads,omitempty"`
 }
 
 // AxisSpec describes one FlashInfer Trace Definition axis ("const" or "var").

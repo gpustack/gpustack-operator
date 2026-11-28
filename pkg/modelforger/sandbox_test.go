@@ -16,6 +16,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/modelkernelkey"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
 func sampleForger() *workercore.ModelDeploymentForger {
@@ -267,6 +268,10 @@ func TestBuildInputConfigMap_TrimsLowestDurationWorkloadsBeforeFailingSizeCap(t 
 	require.Contains(t, defBJSONL, "wl-b-70")
 	require.NotContains(t, defBJSONL, "wl-b-10")
 	require.NotContains(t, defBJSONL, "wl-b-20")
+
+	var encodedReq ForgeRequest
+	require.NoError(t, json.Unmarshal([]byte(cm1.Data[ForgeRequestFileName]), &encodedReq))
+	require.Positive(t, encodedReq.EvictedWorkloads, "forge-request.json must record evictedWorkloads count")
 
 	// Irreducible single workload exceeding 512 KiB still fails with size-cap error.
 	hugePadding := strings.Repeat("z", MaxInputConfigMapBytes)

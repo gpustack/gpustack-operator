@@ -224,6 +224,7 @@ func BuildInputConfigMap(spec InputConfigMapSpec) (*core.ConfigMap, []core.KeyTo
 		}
 	}
 
+	evictedWorkloads := 0
 	for totalBytes > MaxInputConfigMapBytes {
 		bestGroup := ""
 		bestIdx := -1
@@ -246,6 +247,49 @@ func BuildInputConfigMap(spec InputConfigMapSpec) (*core.ConfigMap, []core.KeyTo
 		}
 		totalBytes -= len(best.line) + 1
 		workloadsByDef[bestGroup] = slices.Delete(workloadsByDef[bestGroup], bestIdx, bestIdx+1)
+		evictedWorkloads++
+	}
+
+	if evictedWorkloads > 0 {
+		reqCopy.EvictedWorkloads = evictedWorkloads
+		updatedReqBytes, err := marshalCompactJSON(reqCopy)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode forge request with eviction metadata: %w", err)
+		}
+		totalBytes += len(updatedReqBytes) - len(data[ForgeRequestFileName])
+		data[ForgeRequestFileName] = string(updatedReqBytes)
+		// If adding the eviction counter pushed totalBytes just over the cap, evict once more.
+		for totalBytes > MaxInputConfigMapBytes {
+			bestGroup := ""
+			bestIdx := -1
+			var best encodedWorkload
+			for _, safeName := range wlGroupNames {
+				group := workloadsByDef[safeName]
+				if len(group) <= 1 {
+					continue
+				}
+				for idx, cand := range group {
+					if bestIdx == -1 || shouldEvictWorkloadBefore(cand, best) {
+						bestGroup = safeName
+						bestIdx = idx
+						best = cand
+					}
+				}
+			}
+			if bestIdx == -1 {
+				break
+			}
+			totalBytes -= len(best.line) + 1
+			workloadsByDef[bestGroup] = slices.Delete(workloadsByDef[bestGroup], bestIdx, bestIdx+1)
+			evictedWorkloads++
+			reqCopy.EvictedWorkloads = evictedWorkloads
+			updatedReqBytes, err = marshalCompactJSON(reqCopy)
+			if err != nil {
+				return nil, nil, fmt.Errorf("encode forge request with eviction metadata: %w", err)
+			}
+			totalBytes += len(updatedReqBytes) - len(data[ForgeRequestFileName])
+			data[ForgeRequestFileName] = string(updatedReqBytes)
+		}
 	}
 
 	for _, safeName := range wlGroupNames {

@@ -971,6 +971,7 @@ func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 	}
 
 	startedMeta := meta.NewTime(now)
+	prevPhase := rs.Phase
 	gen := rs.ActiveGeneration
 	rs.Phase = workercore.ModelDeploymentForgerRolePhaseForging
 	rs.ActiveSandbox = &workercore.ModelDeploymentForgerSandboxStatus{
@@ -986,6 +987,7 @@ func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 		_ = ctrlcli.IgnoreNotFound(r.Client.Delete(ctx, pod))
 		_ = ctrlcli.IgnoreNotFound(r.Client.Delete(ctx, cm))
 		rs.ActiveSandbox = nil
+		rs.Phase = prevPhase
 		return ctrl.Result{}, err
 	}
 	*before = *mdf.DeepCopy()

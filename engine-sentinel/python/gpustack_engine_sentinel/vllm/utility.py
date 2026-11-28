@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -610,21 +612,32 @@ def _finalize_worker_probe(
             session.error_message = error_message or error_code
             return
 
-        events = _extract_profiler_events(session.profiler, session.output_dir)
-        wall = max(0.0, time.monotonic() - session.started_monotonic)
-        model_dims = _extract_worker_model_dims(worker, session.observed_tokens)
-        session.payload = distill_trace_events(
-            events,
-            engine="vLLM",
-            engine_version=session.engine_version,
-            manufacturer=session.manufacturer,
-            architecture=session.architecture,
-            steps_captured=session.steps_completed,
-            raw_bytes_staged=raw_bytes,
-            wall_clock_seconds=wall,
-            model_dims=model_dims or None,
-        )
-        session.status = "completed"
+        try:
+            events = _extract_profiler_events(session.profiler, session.output_dir)
+            wall = max(0.0, time.monotonic() - session.started_monotonic)
+            model_dims = _extract_worker_model_dims(worker, session.observed_tokens)
+            session.payload = distill_trace_events(
+                events,
+                engine="vLLM",
+                engine_version=session.engine_version,
+                manufacturer=session.manufacturer,
+                architecture=session.architecture,
+                steps_captured=session.steps_completed,
+                raw_bytes_staged=raw_bytes,
+                wall_clock_seconds=wall,
+                model_dims=model_dims or None,
+            )
+            session.status = "completed"
+        except Exception as exc:
+            LOGGER.warning(
+                "vLLM worker probe %s finalization failed: %s",
+                session.probe_id,
+                exc,
+                exc_info=True,
+            )
+            session.status = "failed"
+            session.error_code = "probe_distill_failed"
+            session.error_message = str(exc)
     finally:
         purge_probe_dir(session.output_dir)
 
@@ -666,7 +679,9 @@ def vllm_worker_probe_start(worker: Any, spec: dict[str, Any]) -> dict[str, Any]
         min(MAX_PROBE_STEPS, int(spec.get("steps", 4))),
     )
     output_dir = Path(str(spec.get("output_dir") or ""))
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        os.chmod(output_dir, 0o700)
     session = _WorkerProbeSession(
         probe_id=str(spec["probe_id"]),
         boot_id=str(spec.get("boot_id", "")),

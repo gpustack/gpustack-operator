@@ -348,7 +348,7 @@ func (r *Reporter) report(ctx context.Context, retryConflict bool) error {
 		return nil
 	}
 
-	return nil
+	return fmt.Errorf("update status: exhausted %d conflict attempts", maxConflictAttempts)
 }
 
 // onlyProgressMoved says next differs from old in progress fields alone: an entry's

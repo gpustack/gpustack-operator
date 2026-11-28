@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -885,4 +886,37 @@ func TestForgeMock_EmitsFamilyAppropriateSignaturesAndMockMetadata(t *testing.T)
 			require.Equal(t, StatusPassed, report.OverallStatus)
 		})
 	}
+}
+
+func TestForgeVerify_FailsClosedOnMissingChecksumAndPreservesThresholdDefaults(t *testing.T) {
+	t.Parallel()
+
+	t.Run("checkExpectedChecksum fails closed when no digest is provided", func(t *testing.T) {
+		t.Parallel()
+		err := checkExpectedChecksum("kernels/op/kernel.py", "sha256:"+strings.Repeat("a", 64), "", nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no expected checksum")
+	})
+
+	t.Run("loadVerifyThresholds preserves default Atol and Rtol when unset in forge-request.json", func(t *testing.T) {
+		t.Parallel()
+		inDir := t.TempDir()
+		raw := []byte(`{"engine":"vLLM","engineVersion":"0.8.5","manufacturer":"nvidia","architecture":"sm_90a","targetKernelKeys":["k"],"minSpeedupRatio":1.2}`)
+		require.NoError(t, os.WriteFile(filepath.Join(inDir, ForgeRequestFileName), raw, 0o600))
+
+		_, th, err := loadVerifyThresholds(ForgeVerifyOptions{InputDir: inDir})
+		require.NoError(t, err)
+		require.InDelta(t, 1.2, th.MinSpeedupRatio, 1e-9)
+		require.InDelta(t, DefaultAtol, th.Atol, 1e-9)
+		require.InDelta(t, DefaultRtol, th.Rtol, 1e-9)
+	})
+
+	t.Run("hashRegularSingleLinkFile rejects empty library file", func(t *testing.T) {
+		t.Parallel()
+		outDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(outDir, "empty.so"), nil, 0o600))
+		_, err := hashRegularSingleLinkFile(outDir, "empty.so")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "out of bounds")
+	})
 }

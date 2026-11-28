@@ -62,7 +62,6 @@ func (s *ResourceServer) slicedOccupancy(ctx context.Context) (_SlicedOccupancy,
 		for name := range s.Reconciler.reservationsFor(pod.UID) {
 			holders.Insert(name)
 		}
-		seenInitDeviceIDs := sets.New[string]()
 		for _, name := range sets.List(holders) {
 			held := s.priorClaimOf(pod, name)
 			if held == nil {
@@ -72,14 +71,6 @@ func (s *ResourceServer) slicedOccupancy(ctx context.Context) (_SlicedOccupancy,
 			if nonSidecarInitIndex(pod, name) >= 0 {
 				ctr := containerByName(pod, name)
 				key := _ReservationKey{PodUID: pod.UID, Container: CanonicalSlotContainerName(pod, ctr)}
-				if len(held.DeviceIDs) > 0 {
-					overlaps := seenInitDeviceIDs.HasAny(held.DeviceIDs...)
-					seenInitDeviceIDs.Insert(held.DeviceIDs...)
-					if overlaps {
-						occupied.mergeMax(key, status)
-						continue
-					}
-				}
 				occupied.mergeMax(key, status)
 				continue
 			}

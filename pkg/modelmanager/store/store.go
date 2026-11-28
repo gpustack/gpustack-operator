@@ -83,6 +83,32 @@ type Store struct {
 	claimSem chan struct{}
 	// digestMu serializes the updates of the digest records.
 	digestMu sync.Mutex
+	// attemptMu serializes in-process per-hex attempt ownership across Materializer and ingest.
+	attemptMu      sync.Mutex
+	activeAttempts map[string]struct{}
+}
+
+// TryLockAttempt claims exclusive in-process ownership for creating and publishing an attempt for
+// hex. It returns (unlock, true) when acquired, or (nil, false) when another caller already holds
+// the attempt lock for hex.
+func (s *Store) TryLockAttempt(hex string) (func(), bool) {
+	s.attemptMu.Lock()
+	defer s.attemptMu.Unlock()
+	if s.activeAttempts == nil {
+		s.activeAttempts = make(map[string]struct{})
+	}
+	if _, busy := s.activeAttempts[hex]; busy {
+		return nil, false
+	}
+	s.activeAttempts[hex] = struct{}{}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.attemptMu.Lock()
+			delete(s.activeAttempts, hex)
+			s.attemptMu.Unlock()
+		})
+	}, true
 }
 
 // Open prepares root and returns the store over it. An empty or new root gets this layout; a root

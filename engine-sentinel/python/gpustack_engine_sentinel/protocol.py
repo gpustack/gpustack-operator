@@ -650,6 +650,30 @@ class ProbeRequest:
             )
         )
 
+        if engine_version is not None:
+            from .probe import normalize_engine_version
+
+            try:
+                normalize_engine_version(engine_version)
+            except ValueError as exc:
+                raise InvalidRequestError(f"Invalid engine_version: {exc}") from exc
+
+        if manufacturer is not None and any(
+            c.isspace() or c == "/" for c in manufacturer
+        ):
+            raise InvalidRequestError(f"Invalid manufacturer: {manufacturer!r}")
+
+        if architecture is not None:
+            from .probe import _SAFE_ARCH_RE, normalize_arch
+
+            norm_arch = normalize_arch(manufacturer, architecture)
+            if (
+                not norm_arch
+                or any(c.isspace() or c == "/" for c in norm_arch)
+                or _SAFE_ARCH_RE.match(norm_arch) is None
+            ):
+                raise InvalidRequestError(f"Invalid architecture: {architecture!r}")
+
         return cls(
             expected_boot_id=expected_boot_id.strip(),
             steps=steps,

@@ -1027,24 +1027,19 @@ func (r *ModelDeploymentReconciler) mapModelDeploymentKernelArtifact(
 }
 
 func (r *ModelDeploymentReconciler) mapModelDeploymentDeliveryWithKernels(
-	ctx context.Context, obj ctrlcli.Object,
+	ctx context.Context, _ ctrlcli.Object,
 ) ([]ctrlreconcile.Request, error) {
-	reqs, err := r.mapModelDeploymentDelivery(ctx, obj)
-	if err != nil {
-		return nil, err
-	}
 	mds := new(workercore.ModelDeploymentList)
 	if err := r.APIReader.List(ctx, mds); err != nil {
-		return nil, fmt.Errorf("list model deployments for kernel delivery change: %w", err)
+		return nil, fmt.Errorf("list model deployments for delivery change: %w", err)
 	}
+	var reqs []ctrlreconcile.Request
 	for i := range mds.Items {
-		if !modelDeploymentHasKernelArtifactRefs(&mds.Items[i]) {
+		if ModelDeploymentArtifactName(&mds.Items[i]) == "" &&
+			!modelDeploymentHasKernelArtifactRefs(&mds.Items[i]) {
 			continue
 		}
-		req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(&mds.Items[i])}
-		if !slices.Contains(reqs, req) {
-			reqs = append(reqs, req)
-		}
+		reqs = append(reqs, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(&mds.Items[i])})
 	}
 	return reqs, nil
 }
@@ -1052,22 +1047,43 @@ func (r *ModelDeploymentReconciler) mapModelDeploymentDeliveryWithKernels(
 func (r *ModelDeploymentReconciler) mapModelDeploymentNodeModelStoreWithKernels(
 	ctx context.Context, obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
-	reqs := r.mapModelDeploymentNodeModelStore(ctx, obj)
-	if _, ok := obj.(*workercore.NodeModelStore); !ok {
-		return reqs
+	nms, ok := obj.(*workercore.NodeModelStore)
+	if !ok {
+		return nil
+	}
+	hasModels := len(nms.Status.Models) > 0 ||
+		(nms.Status.ModelTransfer != nil && len(nms.Status.ModelTransfer.Generations) > 0)
+	var digests map[string]bool
+	if hasModels {
+		digests = make(map[string]bool, len(nms.Status.Models))
+		for i := range nms.Status.Models {
+			digests[nms.Status.Models[i].Digest] = true
+		}
+		if nms.Status.ModelTransfer != nil {
+			for i := range nms.Status.ModelTransfer.Generations {
+				digests[nms.Status.ModelTransfer.Generations[i].Digest] = true
+			}
+		}
 	}
 	mds := new(workercore.ModelDeploymentList)
 	if err := r.Client.List(ctx, mds); err != nil {
-		ctrllog.FromContext(ctx).Error(err, "list model deployments for kernel node model store change")
-		return reqs
+		ctrllog.FromContext(ctx).Error(err, "list model deployments for node model store change")
+		return nil
 	}
+	var reqs []ctrlreconcile.Request
 	for i := range mds.Items {
-		if !modelDeploymentHasKernelArtifactRefs(&mds.Items[i]) {
-			continue
+		md := &mds.Items[i]
+		matchModel := false
+		if hasModels {
+			if m := md.Status.Model; m != nil && digests[m.ManifestDigest] &&
+				(m.Delivery == workercore.ModelDeploymentModelDeliveryNode ||
+					m.Delivery == workercore.ModelDeploymentModelDeliveryRemote ||
+					(m.Remote != nil && m.Remote.Policy == workercore.ModelDeploymentRemotePolicyPrefer)) {
+				matchModel = true
+			}
 		}
-		req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(&mds.Items[i])}
-		if !slices.Contains(reqs, req) {
-			reqs = append(reqs, req)
+		if matchModel || modelDeploymentHasKernelArtifactRefs(md) {
+			reqs = append(reqs, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(md)})
 		}
 	}
 	return reqs

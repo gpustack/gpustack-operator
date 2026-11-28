@@ -1,9 +1,11 @@
 package worker
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
+	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
@@ -76,8 +78,10 @@ func ensureForgerMetricsRegistered() {
 		}
 		for _, c := range ForgerMetricCollectors() {
 			if err := ctrlmetrics.Registry.Register(c); err != nil {
-				// Ignore AlreadyRegisteredError so repeated controller setups in tests remain safe.
-				_ = err
+				var are prometheus.AlreadyRegisteredError
+				if !errors.As(err, &are) {
+					ctrl.Log.Error(err, "register forger metric collector")
+				}
 			}
 		}
 	})

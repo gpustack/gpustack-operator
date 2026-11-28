@@ -923,6 +923,16 @@ func (s *Server) copyAndPublish(
 }
 
 func (s *Server) publishAttemptLocked(treeHex, stagedTreeDir string, manifest modelartifact.Manifest, now time.Time) error {
+	unlock, ok := s.Store.TryLockAttempt(treeHex)
+	if !ok {
+		return &httpError{
+			code:   http.StatusServiceUnavailable,
+			reason: "AttemptInProgress",
+			msg:    "another store operation is active for this digest; retry",
+		}
+	}
+	defer unlock()
+
 	if s.Store.IsPublished(treeHex) {
 		marker, err := s.Store.ReadMarker(treeHex)
 		if err != nil {
@@ -1067,9 +1077,9 @@ func openRegularSingleLinkAt(parent *os.File, name string) (*os.File, int64, err
 		_ = unix.Close(fd)
 		return nil, 0, errors.New("not a regular file")
 	}
-	if uint64(st.Nlink) != 1 {
+	if st.Nlink != 1 {
 		_ = unix.Close(fd)
-		return nil, 0, fmt.Errorf("hardlink count %d != 1", uint64(st.Nlink))
+		return nil, 0, fmt.Errorf("hardlink count %d != 1", st.Nlink)
 	}
 	return os.NewFile(uintptr(fd), name), st.Size, nil
 }

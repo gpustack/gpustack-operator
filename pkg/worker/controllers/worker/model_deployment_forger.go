@@ -555,6 +555,10 @@ func (r *ModelDeploymentForgerReconciler) ingestClient() (ModelDeploymentForgerI
 	if _, statErr := os.Stat(forgerWorkerCertCAFile); statErr == nil {
 		opts = append(opts, modelforger.WithIngestCAFile(forgerWorkerCertCAFile))
 	} else {
+		ctrl.Log.WithName("modeldeploymentforger").Info(
+			"worker CA bundle not found; falling back to insecure TLS verification for pod-IP ingest client",
+			"caFile", forgerWorkerCertCAFile, "err", statErr.Error(),
+		)
 		opts = append(opts, modelforger.WithIngestInsecureSkipVerify(true))
 	}
 	ic, err := modelforger.NewIngestClient(opts...)

@@ -284,12 +284,14 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	}
 	if mounted {
 		if d.Store.IsPublished(hex) {
-			if marker, merr := d.Store.ReadMarker(hex); merr == nil {
-				if rule, msg := authorizeMarkerKind(artifactKind, namespace, attrs, marker); rule != "" {
-					metrics.Mounts.WithLabelValues(metrics.MountDenied).Inc()
-					klog.V(2).InfoS("mount refused", "rule", rule, "pod", namespace+"/"+vc[attrPodName], "volumeID", req.GetVolumeId())
-					return nil, status.Error(codes.PermissionDenied, msg)
-				}
+			marker, merr := d.Store.ReadMarker(hex)
+			if merr != nil {
+				return nil, status.Errorf(codes.Internal, "read the published marker: %v", merr)
+			}
+			if rule, msg := authorizeMarkerKind(artifactKind, namespace, attrs, marker); rule != "" {
+				metrics.Mounts.WithLabelValues(metrics.MountDenied).Inc()
+				klog.V(2).InfoS("mount refused", "rule", rule, "pod", namespace+"/"+vc[attrPodName], "volumeID", req.GetVolumeId())
+				return nil, status.Error(codes.PermissionDenied, msg)
 			}
 		}
 		// Only a mount this call would have made answers a repeated call: a writable one a failed

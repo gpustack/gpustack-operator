@@ -374,6 +374,12 @@ func (m *Materializer) watchWaiters(ctx context.Context, j *job) func() {
 }
 
 func (m *Materializer) attempt(ctx context.Context, j *job) error {
+	unlock, ok := m.Store.TryLockAttempt(j.hex)
+	if !ok {
+		return fmt.Errorf("another store operation is already publishing %s", j.hex)
+	}
+	defer unlock()
+
 	a, err := m.Store.NewAttempt(j.hex)
 	if err != nil {
 		return err

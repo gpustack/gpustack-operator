@@ -831,7 +831,7 @@ var nodeKernelReportChanged = ctrlpredicate.Funcs{
 		if !ok {
 			return false
 		}
-		return !kubemeta.DeepEqual(o.Status.Models, n.Status.Models) ||
+		return !kubemeta.DeepEqual(modelsWithoutProgress(o), modelsWithoutProgress(n)) ||
 			!slices.Equal(o.Spec.Pinned, n.Spec.Pinned)
 	},
 	GenericFunc: func(ctrlevent.GenericEvent) bool { return false },

@@ -872,7 +872,11 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	md := obj.(*workercore.ModelDeployment)
 
 	warnings := r.warnModelDeploymentStoreRoleWithoutInterface(ctx, nil, md)
-	errs := validateModelDeployment(md, nil, r.resolveBoundForgerTargetedRoles(ctx, md))
+	targetedRoles, err := r.resolveBoundForgerTargetedRoles(ctx, md)
+	if err != nil {
+		return nil, err
+	}
+	errs := validateModelDeployment(md, nil, targetedRoles)
 	errs = append(errs, r.validateModelDeploymentScalerFence(ctx, nil, md)...)
 	errs = append(errs, r.validateModelDeploymentForgerFence(ctx, nil, md)...)
 	errs = append(errs, r.ValidateModelDeploymentElasticEP(ctx, md, nil)...)
@@ -937,8 +941,12 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	// is the one that could: a deployment's own name is immutable, so a role whose combined name is
 	// too long could never be shortened, and every later edit -- including one that removes the
 	// offending role -- would be refused. That is worse than the reconcile failure the rule prevents.
+	targetedRoles, err := r.resolveBoundForgerTargetedRoles(ctx, md)
+	if err != nil {
+		return nil, err
+	}
 	errs := validateModelDeployment(
-		md, modelDeploymentRoleNames(oldObj), r.resolveBoundForgerTargetedRoles(ctx, md),
+		md, modelDeploymentRoleNames(oldObj), targetedRoles,
 	)
 	errs = append(errs, r.validateModelDeploymentScalerFence(ctx, old, md)...)
 	errs = append(errs, r.validateModelDeploymentForgerFence(ctx, old, md)...)
@@ -2417,29 +2425,32 @@ func kernelPathsOverlap(a, b string) bool {
 
 func (r *ModelDeploymentWebhook) resolveBoundForgerTargetedRoles(
 	ctx context.Context, md *workercore.ModelDeployment,
-) map[string]struct{} {
+) (map[string]struct{}, error) {
 	if md == nil || r.APIReader == nil {
-		return nil
+		return nil, nil
 	}
-	binding, ok, err := modelDeploymentForgerBindingOf(md)
-	if err != nil || !ok || binding.ForgerName == "" {
-		return nil
+	binding, ok, _ := modelDeploymentForgerBindingOf(md)
+	if !ok || binding.ForgerName == "" {
+		return nil, nil
 	}
 	forger := new(workercore.ModelDeploymentForger)
 	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Namespace: md.Namespace, Name: binding.ForgerName}, forger); err != nil {
-		return nil
+		if kerrors.IsNotFound(err) {
+			return map[string]struct{}{}, nil
+		}
+		return nil, kerrors.NewInternalError(fmt.Errorf("read bound ModelDeploymentForger %q: %w", binding.ForgerName, err))
 	}
 	if binding.ForgerUID != "" && forger.UID != "" && string(forger.UID) != binding.ForgerUID {
-		return nil
+		return map[string]struct{}{}, nil
 	}
 	if len(forger.Spec.Roles) == 0 {
-		return nil
+		return nil, nil
 	}
 	targeted := make(map[string]struct{}, len(forger.Spec.Roles))
 	for i := range forger.Spec.Roles {
 		targeted[forger.Spec.Roles[i].Name] = struct{}{}
 	}
-	return targeted
+	return targeted, nil
 }
 
 // validateModelDeploymentRoleReservedMountPaths refuses a role volume at, inside or around the

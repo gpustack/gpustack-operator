@@ -339,3 +339,24 @@ func TestPublishPreservesMarkerKindAndSource(t *testing.T) {
 		})
 	}
 }
+
+func TestStoreTryLockAttempt(t *testing.T) {
+	s := openTestStore(t)
+
+	unlock1, ok := s.TryLockAttempt(testHex)
+	require.True(t, ok)
+	require.NotNil(t, unlock1)
+
+	unlock2, ok := s.TryLockAttempt(testHex)
+	assert.False(t, ok)
+	assert.Nil(t, unlock2)
+
+	// Unlocking is idempotent and releases the lock for the next caller.
+	unlock1()
+	unlock1()
+
+	unlock3, ok := s.TryLockAttempt(testHex)
+	require.True(t, ok)
+	require.NotNil(t, unlock3)
+	unlock3()
+}

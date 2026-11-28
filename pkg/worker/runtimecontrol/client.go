@@ -354,7 +354,8 @@ func (c *Client) do(
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if pathWithQuery == PathProbe && strings.TrimSpace(target.ProbeAuthToken) != "" {
+	if (pathWithQuery == PathProbe || strings.HasPrefix(pathWithQuery, PathProbe+"?")) &&
+		strings.TrimSpace(target.ProbeAuthToken) != "" {
 		req.Header.Set("X-GPUStack-Probe-Token", strings.TrimSpace(target.ProbeAuthToken))
 	}
 

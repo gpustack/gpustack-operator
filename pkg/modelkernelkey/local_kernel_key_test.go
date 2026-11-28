@@ -493,9 +493,19 @@ func TestBuildAndValidateEdgeErrors(t *testing.T) {
 		})
 	}
 
+	c10Spec := valid
+	c10Spec.InputDtypes = []string{"c10::bfloat16"}
+	c10Spec.OutputDtypes = []string{"C10::BFloat16"}
+	c10Key, err := Build(c10Spec)
+	if err != nil {
+		t.Fatalf("Build(c10::bfloat16) error: %v", err)
+	}
 	baseKey, err := Build(valid)
 	if err != nil {
 		t.Fatalf("Build(valid) error: %v", err)
+	}
+	if c10Key.SignatureHash16 != baseKey.SignatureHash16 {
+		t.Fatalf("c10:: prefix dtype hash %q != torch. prefix hash %q", c10Key.SignatureHash16, baseKey.SignatureHash16)
 	}
 
 	if (LocalKernelKey{}).String() != "" {

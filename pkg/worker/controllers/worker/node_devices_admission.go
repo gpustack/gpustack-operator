@@ -341,7 +341,7 @@ func podSetFamilyDemands(ps *kueue.PodSet, count int32) []familyDemand {
 			if family == nodefeature.ResourceFamilyShared {
 				phaseShared = mergeSharedNeeds(acc.prefixSidecarNeeds, ctrShared, 1)
 			}
-			if phaseCards > acc.maxInitCards || (phaseCards == acc.maxInitCards && len(phaseShared) > len(acc.maxInitShared)) {
+			if phaseCards > acc.maxInitCards || (phaseCards == acc.maxInitCards && sharedNeedsHarder(phaseShared, acc.maxInitShared)) {
 				acc.maxInitCards = phaseCards
 				acc.maxInitShared = phaseShared
 			}
@@ -366,7 +366,7 @@ func podSetFamilyDemands(ps *kueue.PodSet, count int32) []familyDemand {
 	for _, acc := range byFamily {
 		podCards := acc.steadyCards
 		podShared := acc.steadyShared
-		if acc.maxInitCards > podCards || (acc.maxInitCards == podCards && len(acc.maxInitShared) > len(podShared)) {
+		if acc.maxInitCards > podCards || (acc.maxInitCards == podCards && sharedNeedsHarder(acc.maxInitShared, podShared)) {
 			podCards = acc.maxInitCards
 			podShared = acc.maxInitShared
 		}
@@ -388,6 +388,21 @@ func podSetFamilyDemands(ps *kueue.PodSet, count int32) []familyDemand {
 	}
 	sortDemands(out)
 	return out
+}
+
+// sharedNeedsHarder reports whether a requires strictly harder single-node per-holder placement
+// than b at equal total cards. mergeSharedNeeds sorts slices descending by cards, so the larger
+// per-holder card count (then holder count, then slice length) decides placement hardness.
+func sharedNeedsHarder(a, b []sharedNeed) bool {
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i].cards != b[i].cards {
+			return a[i].cards > b[i].cards
+		}
+		if a[i].containers != b[i].containers {
+			return a[i].containers > b[i].containers
+		}
+	}
+	return len(a) > len(b)
 }
 
 // podSetFamilyDemand reads one family's demand of a podset sized for count of its Pods. The family

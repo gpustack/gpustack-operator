@@ -10,6 +10,7 @@ import hmac
 import inspect
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -487,6 +488,20 @@ def _normalize_dtypes(dtypes: list[str] | tuple[str, ...] | None) -> list[str]:
     return out
 
 
+def _canonicalize_constant_value(value: Any) -> Any:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {
+            str(k): _canonicalize_constant_value(v) for k, v in sorted(value.items())
+        }
+    if isinstance(value, (list, tuple)):
+        return [_canonicalize_constant_value(v) for v in value]
+    return value
+
+
 def compute_signature_hash16(
     const_axes: dict[str, int],
     input_dtypes: list[str] | tuple[str, ...],
@@ -499,19 +514,26 @@ def compute_signature_hash16(
         for k, v in sorted(const_axes.items())
         if str(k).strip() and str(k).strip().lower() not in _DYNAMIC_VAR_AXES
     }
+    norm_constants = {
+        str(k).strip(): _canonicalize_constant_value(v)
+        for k, v in sorted((constants or {}).items())
+        if str(k).strip()
+    }
     payload = {
         "constAxes": filtered_axes,
-        "constants": dict(sorted((constants or {}).items())),
+        "constants": norm_constants,
         "inputDtypes": _normalize_dtypes(input_dtypes),
         "outputDtypes": _normalize_dtypes(output_dtypes),
     }
-    encoded = json.dumps(
+    encoded_str = json.dumps(
         payload,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()[:16]
+    )
+    # Match Go encoding/json escaping of U+2028/U+2029 for cross-language hash parity.
+    encoded_str = encoded_str.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    return hashlib.sha256(encoded_str.encode("utf-8")).hexdigest()[:16]
 
 
 def normalize_arch(manufacturer: str | None, arch: str | None) -> str:
@@ -1768,7 +1790,9 @@ class ProbeManager:
                         )
                     return
 
-                staged_bytes = directory_size_bytes(staging_dir)
+                staged_bytes = await asyncio.to_thread(
+                    directory_size_bytes, staging_dir
+                )
                 if staged_bytes > max_shm_bytes:
                     await self._abort_backend(probe_id, staging_dir)
                     if (
@@ -1793,7 +1817,7 @@ class ProbeManager:
                 self._record.finished_at = self._clock()
             raise
         finally:
-            purge_probe_dir(staging_dir)
+            await asyncio.to_thread(purge_probe_dir, staging_dir)
 
     async def start_probe(self, body: Any) -> tuple[int, dict[str, Any]]:
         req = ProbeRequest.from_dict(body)
@@ -1835,7 +1859,9 @@ class ProbeManager:
             max_shm_bytes = compute_shm_budget_bytes(
                 self._staging_root, shm_size_override=self._shm_size_override
             )
-            staging_dir.mkdir(parents=True, exist_ok=True)
+            staging_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with contextlib.suppress(OSError):
+                os.chmod(staging_dir, 0o700)
 
             spec = {
                 "boot_id": snap.boot_id,
