@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import math
@@ -1094,10 +1095,58 @@ class SGLangSentinelBackend:
         self._last_kernel_summary: dict[str, Any] = {}
         self._active_probe: dict[str, Any] | None = None
 
-    def get_kernel_summary(self) -> dict[str, Any]:
+    @staticmethod
+    def _extract_rank_kernel_fields(rc: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if "loaded_kernel_keys" in rc and isinstance(rc["loaded_kernel_keys"], list):
+            out["loaded_kernel_keys"] = list(rc["loaded_kernel_keys"])
+        if rc.get("dispatch_manifest_digest"):
+            out["dispatch_manifest_digest"] = str(rc["dispatch_manifest_digest"])
+        if rc.get("kernel_load_error"):
+            out["kernel_load_error"] = str(rc["kernel_load_error"])
+        return out
+
+    async def get_kernel_summary(self) -> dict[str, Any]:
+        local = get_process_kernel_report(engine="SGLang")
+        tm = self._get_tokenizer_manager()
+        get_state_fn = (
+            getattr(tm, "get_internal_state", None) if tm is not None else None
+        )
+        if callable(get_state_fn):
+            try:
+                raw_res = get_state_fn()
+                if inspect.isawaitable(raw_res):
+                    raw_states = await asyncio.wait_for(raw_res, timeout=2.0)
+                else:
+                    raw_states = raw_res
+                rank_reports = [
+                    self._extract_rank_kernel_fields(st[STATE_NAMESPACE_KEY])
+                    for st in (raw_states or ())
+                    if isinstance(st, dict)
+                    and isinstance(st.get(STATE_NAMESPACE_KEY), dict)
+                ]
+                rank_reports = [r for r in rank_reports if r]
+                if rank_reports:
+                    rank_summary = aggregate_kernel_reports(rank_reports)
+                    if rank_summary:
+                        self._last_kernel_summary = dict(rank_summary)
+                    candidates = [*rank_reports, local] if local else list(rank_reports)
+                    merged = aggregate_kernel_reports(candidates)
+                    if merged:
+                        self._last_kernel_summary = dict(merged)
+                        return merged
+            except Exception:
+                LOGGER.debug(
+                    "SGLang get_internal_state in get_kernel_summary failed",
+                    exc_info=True,
+                )
+
+        if self._last_kernel_summary and local:
+            merged = aggregate_kernel_reports([self._last_kernel_summary, local])
+            self._last_kernel_summary = dict(merged)
+            return merged
         if self._last_kernel_summary:
             return dict(self._last_kernel_summary)
-        local = get_process_kernel_report(engine="SGLang")
         if local:
             self._last_kernel_summary = dict(local)
         return local

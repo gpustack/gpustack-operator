@@ -34,6 +34,10 @@ _HOOK_TARGETS: frozenset[str] = _VLLM_API_SERVER_TARGETS | frozenset(
         "vllm_omni.entrypoints.openai.api_server",
         "vllm.v1.engine.core",
         "vllm.model_executor.custom_op",
+        "vllm.model_executor.layers.layernorm",
+        "vllm.model_executor.layers.rotary_embedding",
+        "vllm.model_executor.layers.rotary_embedding.base",
+        "vllm.model_executor.layers.activation",
         "vllm.v1.worker.gpu_model_runner",
         "sglang.srt.managers.scheduler",
         "sglang.srt.managers.scheduler_components.internal_state",
@@ -41,6 +45,7 @@ _HOOK_TARGETS: frozenset[str] = _VLLM_API_SERVER_TARGETS | frozenset(
         "sglang.srt.model_executor.model_runner",
         "sglang.srt.layers.layernorm",
         "sglang.srt.layers.rotary_embedding",
+        "sglang.srt.layers.rotary_embedding.base",
         "uvicorn.config",
     }
 )
@@ -69,6 +74,25 @@ def _apply_target_hook(fullname: str, module: Any) -> None:
         from gpustack_engine_sentinel.kernel_loader import patch_vllm_custom_op_module
 
         patch_vllm_custom_op_module(module)
+    elif fullname == "vllm.model_executor.layers.layernorm":
+        from gpustack_engine_sentinel.kernel_loader import patch_vllm_layernorm_module
+
+        patch_vllm_layernorm_module(module)
+    elif fullname in (
+        "vllm.model_executor.layers.rotary_embedding",
+        "vllm.model_executor.layers.rotary_embedding.base",
+    ):
+        from gpustack_engine_sentinel.kernel_loader import (
+            patch_vllm_rotary_embedding_module,
+        )
+
+        patch_vllm_rotary_embedding_module(module)
+    elif fullname == "vllm.model_executor.layers.activation":
+        from gpustack_engine_sentinel.kernel_loader import (
+            patch_vllm_activation_module,
+        )
+
+        patch_vllm_activation_module(module)
     elif fullname == "vllm.v1.worker.gpu_model_runner":
         from gpustack_engine_sentinel.kernel_loader import (
             patch_vllm_gpu_model_runner_module,
@@ -105,7 +129,10 @@ def _apply_target_hook(fullname: str, module: Any) -> None:
         )
 
         patch_sglang_layernorm_module(module)
-    elif fullname == "sglang.srt.layers.rotary_embedding":
+    elif fullname in (
+        "sglang.srt.layers.rotary_embedding",
+        "sglang.srt.layers.rotary_embedding.base",
+    ):
         from gpustack_engine_sentinel.kernel_loader import (
             patch_sglang_rotary_embedding_module,
         )

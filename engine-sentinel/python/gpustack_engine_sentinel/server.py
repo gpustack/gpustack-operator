@@ -215,6 +215,7 @@ class SentinelControlPlane:
         return local_report
 
     async def _resolve_ready_kernel_summary(self) -> dict[str, Any]:
+        local_report = get_process_kernel_report(engine=self.backend.engine)
         get_summary_fn = getattr(self.backend, "get_kernel_summary", None)
         if callable(get_summary_fn):
             try:
@@ -222,13 +223,21 @@ class SentinelControlPlane:
                 if inspect.isawaitable(res):
                     res = await res
                 if isinstance(res, dict) and res:
-                    self._last_kernel_summary = dict(res)
-                    return res
+                    merged = (
+                        aggregate_kernel_reports([res, local_report])
+                        if local_report
+                        else dict(res)
+                    )
+                    self._last_kernel_summary = dict(merged)
+                    return merged
             except Exception:
                 LOGGER.debug("Backend get_kernel_summary failed", exc_info=True)
+        if self._last_kernel_summary and local_report:
+            merged = aggregate_kernel_reports([self._last_kernel_summary, local_report])
+            self._last_kernel_summary = dict(merged)
+            return merged
         if self._last_kernel_summary:
             return dict(self._last_kernel_summary)
-        local_report = get_process_kernel_report(engine=self.backend.engine)
         if local_report:
             self._last_kernel_summary = dict(local_report)
         return local_report
@@ -293,6 +302,19 @@ class SentinelControlPlane:
                     observed_generation=snap.observed_generation,
                     applied_config_digest=snap.applied_config_digest,
                     reason=ready_reason or "engine_starting",
+                    **kernel_kwargs,
+                ).to_dict(),
+            )
+        kernel_load_error = kernel_kwargs.get("kernel_load_error")
+        if kernel_load_error:
+            return (
+                503,
+                ReadyResponse(
+                    ready=False,
+                    boot_id=snap.boot_id,
+                    observed_generation=snap.observed_generation,
+                    applied_config_digest=snap.applied_config_digest,
+                    reason=str(kernel_load_error),
                     **kernel_kwargs,
                 ).to_dict(),
             )
@@ -372,7 +394,13 @@ class SentinelControlPlane:
             observed_generation=snap.observed_generation,
             applied_config_digest=snap.applied_config_digest,
             last_operation_id=snap.last_operation_id,
-            ready=bool(snap.acked and alive and engine_ready and not paused),
+            ready=bool(
+                snap.acked
+                and alive
+                and engine_ready
+                and not paused
+                and not kernel_summary.get("kernel_load_error")
+            ),
             paused=paused,
             supported_fields=list(state_dict.get("supported_fields", ())),
             unsupported_fields=list(state_dict.get("unsupported_fields", ())),

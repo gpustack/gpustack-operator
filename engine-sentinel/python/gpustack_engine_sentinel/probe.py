@@ -113,6 +113,8 @@ _EXCLUDED_SUBSTRINGS: tuple[str, ...] = (
     "rccl",
     "hccl",
     "nvshmem",
+    "rocshmem",
+    "msccl",
     "fused_all_reduce",
     "all_reduce",
     "all_gather",
@@ -236,18 +238,118 @@ _OP_FAMILY_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 _OP_REFERENCES: dict[str, str] = {
-    "rmsnorm": "def run(x, weight, eps=1e-6): return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps) * weight",
-    "layernorm": "def run(x, weight, bias, eps=1e-5): return torch.nn.functional.layer_norm(x, (x.shape[-1],), weight, bias, eps)",
-    "rope_kv_append": "def run(q, k, cos, sin): return apply_rotary_pos_emb(q, k, cos, sin)",
-    "activation_quant": "def run(x): a, b = x.chunk(2, dim=-1); return torch.nn.functional.silu(a) * b",
-    "moe_router_topk": "def run(logits, top_k): probs = torch.softmax(logits, dim=-1); return torch.topk(probs, k=top_k, dim=-1)",
-    "moe_permute_unpermute": "def run(x, indices): return x.index_select(0, indices)",
-    "paged_attention": "def run(q, k_cache, v_cache, block_tables): return paged_attention_ref(q, k_cache, v_cache, block_tables)",
-    "ragged_prefill_attention": "def run(q, k, v, cu_seqlens): return ragged_prefill_attention_ref(q, k, v, cu_seqlens)",
-    "mla_local": "def run(q_nope, q_pe, kv_c, k_pe): return mla_local_ref(q_nope, q_pe, kv_c, k_pe)",
-    "speculative_verify": "def run(draft_probs, target_probs): return speculative_verify_ref(draft_probs, target_probs)",
-    "sampling_logits": "def run(logits, top_k, top_p): return sampling_logits_ref(logits, top_k, top_p)",
-    "custom_elementwise_fusion": "def run(x, y): return x + y",
+    "rmsnorm": (
+        "def run(x, weight, eps=1e-6):\n"
+        "    return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps) * weight"
+    ),
+    "layernorm": (
+        "def run(x, weight, bias=None, eps=1e-5):\n"
+        "    return torch.nn.functional.layer_norm(x, (x.shape[-1],), weight, bias, eps)"
+    ),
+    "rope_kv_append": (
+        "def run(q, k, cos, sin):\n"
+        "    c = cos.unsqueeze(-2) if cos.ndim < q.ndim else cos\n"
+        "    s = sin.unsqueeze(-2) if sin.ndim < q.ndim else sin\n"
+        "    half = q.shape[-1] // 2\n"
+        "    if half == 0:\n"
+        "        return (q * c, k * c)\n"
+        "    q_rot = torch.cat((-q[..., half : 2 * half], q[..., :half]), dim=-1)\n"
+        "    k_rot = torch.cat((-k[..., half : 2 * half], k[..., :half]), dim=-1)\n"
+        "    c_use = c[..., : 2 * half]\n"
+        "    s_use = s[..., : 2 * half]\n"
+        "    return (\n"
+        "        q[..., : 2 * half] * c_use + q_rot * s_use,\n"
+        "        k[..., : 2 * half] * c_use + k_rot * s_use,\n"
+        "    )"
+    ),
+    "activation_quant": (
+        "def run(x):\n"
+        "    half = x.shape[-1] // 2\n"
+        "    if half == 0:\n"
+        "        return torch.nn.functional.silu(x)\n"
+        "    return torch.nn.functional.silu(x[..., :half]) * x[..., half : 2 * half]"
+    ),
+    "moe_router_topk": (
+        "def run(logits, top_k=8):\n"
+        "    k = max(1, min(int(top_k), logits.shape[-1]))\n"
+        "    probs = torch.softmax(logits, dim=-1)\n"
+        "    return torch.topk(probs, k=k, dim=-1)"
+    ),
+    "moe_permute_unpermute": (
+        "def run(x, indices=None):\n"
+        "    if indices is None:\n"
+        "        indices = torch.arange(x.shape[0] - 1, -1, -1, device=x.device, dtype=torch.long)\n"
+        "    return x.index_select(0, indices)"
+    ),
+    "paged_attention": (
+        "def run(q, k_cache, v_cache):\n"
+        "    scale = q.shape[-1] ** -0.5\n"
+        "    if q.ndim == 3:\n"
+        "        qh = q.transpose(0, 1)\n"
+        "        kh = k_cache.transpose(0, 1)\n"
+        "        vh = v_cache.transpose(0, 1)\n"
+        "        scores = torch.matmul(qh, kh.transpose(-2, -1)) * scale\n"
+        "        probs = torch.softmax(scores, dim=-1)\n"
+        "        return torch.matmul(probs, vh).transpose(0, 1)\n"
+        "    scores = torch.matmul(q, k_cache.transpose(-2, -1)) * scale\n"
+        "    probs = torch.softmax(scores, dim=-1)\n"
+        "    return torch.matmul(probs, v_cache)"
+    ),
+    "ragged_prefill_attention": (
+        "def run(q, k, v):\n"
+        "    scale = q.shape[-1] ** -0.5\n"
+        "    if q.ndim == 3:\n"
+        "        qh = q.transpose(0, 1)\n"
+        "        kh = k.transpose(0, 1)\n"
+        "        vh = v.transpose(0, 1)\n"
+        "        scores = torch.matmul(qh, kh.transpose(-2, -1)) * scale\n"
+        "        t = scores.shape[-1]\n"
+        "        mask = torch.triu(torch.ones((t, t), device=q.device, dtype=torch.bool), diagonal=1)\n"
+        "        scores = scores.masked_fill(mask, float('-inf'))\n"
+        "        probs = torch.softmax(scores, dim=-1)\n"
+        "        return torch.matmul(probs, vh).transpose(0, 1)\n"
+        "    scores = torch.matmul(q, k.transpose(-2, -1)) * scale\n"
+        "    t = scores.shape[-1]\n"
+        "    mask = torch.triu(torch.ones((t, t), device=q.device, dtype=torch.bool), diagonal=1)\n"
+        "    scores = scores.masked_fill(mask, float('-inf'))\n"
+        "    probs = torch.softmax(scores, dim=-1)\n"
+        "    return torch.matmul(probs, v)"
+    ),
+    "mla_local": (
+        "def run(q_nope, q_pe, kv_c, k_pe):\n"
+        "    q = torch.cat((q_nope, q_pe), dim=-1)\n"
+        "    k = torch.cat((kv_c, k_pe), dim=-1)\n"
+        "    scale = q.shape[-1] ** -0.5\n"
+        "    if q.ndim == 3:\n"
+        "        qh = q.transpose(0, 1)\n"
+        "        kh = k.transpose(0, 1)\n"
+        "        vh = kv_c.transpose(0, 1)\n"
+        "        scores = torch.matmul(qh, kh.transpose(-2, -1)) * scale\n"
+        "        probs = torch.softmax(scores, dim=-1)\n"
+        "        return torch.matmul(probs, vh).transpose(0, 1)\n"
+        "    scores = torch.matmul(q, k.transpose(-2, -1)) * scale\n"
+        "    probs = torch.softmax(scores, dim=-1)\n"
+        "    return torch.matmul(probs, kv_c)"
+    ),
+    "speculative_verify": (
+        "def run(draft_logits, target_logits):\n"
+        "    draft_probs = torch.softmax(draft_logits, dim=-1)\n"
+        "    target_probs = torch.softmax(target_logits, dim=-1)\n"
+        "    ratio = target_probs / draft_probs.clamp_min(1e-8)\n"
+        "    return torch.clamp(ratio, max=1.0)"
+    ),
+    "sampling_logits": (
+        "def run(logits, top_k=50, top_p=0.9):\n"
+        "    k = max(1, min(int(top_k), logits.shape[-1]))\n"
+        "    top_vals, top_idx = torch.topk(logits, k=k, dim=-1)\n"
+        "    probs = torch.softmax(top_vals, dim=-1)\n"
+        "    cumprobs = torch.cumsum(probs, dim=-1)\n"
+        "    keep = (cumprobs - probs) <= float(top_p)\n"
+        "    masked = probs * keep.to(probs.dtype)\n"
+        "    norm = masked.sum(dim=-1, keepdim=True).clamp_min(1e-8)\n"
+        "    return (masked / norm, top_idx)"
+    ),
+    "custom_elementwise_fusion": "def run(x, y):\n    return x + y",
 }
 
 _VERSION_BUILD_SPLIT_RE = re.compile(r"[+]")
@@ -257,17 +359,32 @@ _VERSION_GIT_DESCRIBE_RE = re.compile(
 _VERSION_DIRTY_RE = re.compile(r"[-.]dirty$", re.IGNORECASE)
 _BARE_MAJOR_MINOR_RE = re.compile(r"^(\d+)\.(\d+)$")
 _HEX16_RE = re.compile(r"^[0-9a-f]{16}$")
+_NVIDIA_DOT_COMCAP_RE = re.compile(r"^(\d+)\.(\d+)([a-z]*)$")
+_NVIDIA_SM_OR_COMPUTE_RE = re.compile(r"^(?:sm|compute)_(\d+)([a-z]*)$")
+_SAFE_ARCH_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+_MAX_HOTSPOT_KERNEL_NAME_LEN = 256
+_MAX_TOP_RANKED_DEFINITIONS = 16
 
 _DYNAMIC_VAR_AXES: frozenset[str] = frozenset(
     {
+        "batch",
         "batch_size",
-        "seq_len",
-        "num_tokens",
-        "prompt_len",
-        "kv_len",
+        "bs",
         "context_len",
-        "total_tokens",
+        "kv_len",
+        "max_num_tokens",
+        "max_seq_len",
+        "num_decode_tokens",
+        "num_prefill_tokens",
+        "num_requests",
         "num_seqs",
+        "num_tokens",
+        "q_len",
+        "seq_len",
+        "seq_length",
+        "sequence_length",
+        "token_count",
+        "total_tokens",
     }
 )
 
@@ -386,6 +503,44 @@ def compute_signature_hash16(
     return hashlib.sha256(encoded).hexdigest()[:16]
 
 
+def normalize_arch(manufacturer: str | None, arch: str | None) -> str:
+    """Normalize accelerator architecture matching pkg/worker/kernelkey/hardware.go:NormalizeArch."""
+    manu = (manufacturer or "").strip().lower()
+    raw = (arch or "").strip().lower()
+    if not raw:
+        return ""
+
+    if manu == "nvidia" or (
+        not manu
+        and (
+            _NVIDIA_SM_OR_COMPUTE_RE.match(raw) is not None
+            or _NVIDIA_DOT_COMCAP_RE.match(raw) is not None
+        )
+    ):
+        m = _NVIDIA_SM_OR_COMPUTE_RE.match(raw)
+        if m is not None:
+            return f"sm_{m.group(1)}{m.group(2)}"
+        m = _NVIDIA_DOT_COMCAP_RE.match(raw)
+        if m is not None:
+            return f"sm_{m.group(1)}{m.group(2)}{m.group(3)}"
+        return raw
+
+    if manu in ("amd", "hygon") or (not manu and ":" in raw):
+        colon = raw.find(":")
+        if colon > 0:
+            raw = raw[:colon]
+        return raw
+
+    if manu == "ascend":
+        raw = raw.removeprefix("ascend-")
+        raw = raw.removeprefix("ascend")
+        return raw
+
+    if manu:
+        raw = raw.removeprefix(f"{manu}-")
+    return raw
+
+
 def format_local_kernel_key(
     *,
     engine: str,
@@ -404,7 +559,11 @@ def format_local_kernel_key(
     eng = canonical_engine_name(engine)
     ver = normalize_engine_version(engine_version)
     mfr = (manufacturer or "unknown").strip().lower() or "unknown"
-    architecture = (arch or "unknown").strip().lower() or "unknown"
+    architecture = normalize_arch(mfr, arch) or "unknown"
+    if any(c.isspace() or c == "/" for c in architecture) or not _SAFE_ARCH_RE.match(
+        architecture
+    ):
+        raise ValueError(f"Invalid arch {arch!r} for manufacturer {mfr!r}")
     sig = compute_signature_hash16(const_axes, input_dtypes, output_dtypes, constants)
     return f"{eng}/{ver}/{mfr}/{architecture}/{op_family}/{sig}"
 
@@ -551,6 +710,7 @@ def sweep_stale_probe_dirs(
 def _extract_shapes_and_axes(
     op_family: str,
     input_dims: list[list[int]],
+    constants: dict[str, Any] | None = None,
 ) -> tuple[dict[str, int], dict[str, int], dict[str, list[str]], dict[str, list[str]]]:
     """Separate static const axes (per-GPU shard dims) from dynamic var axes (batch/tokens/seq)."""
     primary_shape: list[int] = []
@@ -564,12 +724,7 @@ def _extract_shapes_and_axes(
             break
 
     if not primary_shape:
-        return (
-            {"hidden_size": 1},
-            {"num_tokens": 1},
-            {"x": ["num_tokens", "hidden_size"]},
-            {"out": ["num_tokens", "hidden_size"]},
-        )
+        primary_shape = [1, 1]
 
     if op_family in (
         "rmsnorm",
@@ -584,8 +739,21 @@ def _extract_shapes_and_axes(
         const_axes = {"hidden_size": hidden_size}
         var_axes = {"num_tokens": num_tokens}
         in_specs: dict[str, list[str]] = {"x": ["num_tokens", "hidden_size"]}
+        if op_family == "activation_quant":
+            half_hidden_size = max(1, hidden_size // 2)
+            const_axes["half_hidden_size"] = half_hidden_size
+            return (
+                const_axes,
+                var_axes,
+                in_specs,
+                {"out": ["num_tokens", "half_hidden_size"]},
+            )
         if op_family in ("rmsnorm", "layernorm"):
             in_specs["weight"] = ["hidden_size"]
+        if op_family == "layernorm":
+            in_specs["bias"] = ["hidden_size"]
+        if op_family == "custom_elementwise_fusion":
+            in_specs["y"] = ["num_tokens", "hidden_size"]
         return const_axes, var_axes, in_specs, {"out": ["num_tokens", "hidden_size"]}
 
     if op_family in (
@@ -606,14 +774,50 @@ def _extract_shapes_and_axes(
             }
             var_axes = {"num_tokens": num_tokens}
             shape_ref = ["num_tokens", "num_heads_local", "head_dim"]
-            return const_axes, var_axes, {"q": shape_ref}, {"out": shape_ref}
-        hidden_size = primary_shape[-1]
-        num_tokens = primary_shape[0] if len(primary_shape) > 1 else 1
+        else:
+            head_dim = primary_shape[-1]
+            num_tokens = primary_shape[0] if len(primary_shape) > 1 else 1
+            const_axes = {"head_dim": head_dim}
+            var_axes = {"num_tokens": num_tokens}
+            shape_ref = ["num_tokens", "head_dim"]
+
+        if op_family == "rope_kv_append":
+            cos_sin_shape = ["num_tokens", "head_dim"]
+            return (
+                const_axes,
+                var_axes,
+                {
+                    "q": shape_ref,
+                    "k": shape_ref,
+                    "cos": cos_sin_shape,
+                    "sin": cos_sin_shape,
+                },
+                {"q_out": shape_ref, "k_out": shape_ref},
+            )
+        if op_family == "paged_attention":
+            return (
+                const_axes,
+                var_axes,
+                {"q": shape_ref, "k_cache": shape_ref, "v_cache": shape_ref},
+                {"out": shape_ref},
+            )
+        if op_family == "ragged_prefill_attention":
+            return (
+                const_axes,
+                var_axes,
+                {"q": shape_ref, "k": shape_ref, "v": shape_ref},
+                {"out": shape_ref},
+            )
         return (
-            {"head_dim": hidden_size},
-            {"num_tokens": num_tokens},
-            {"q": ["num_tokens", "head_dim"]},
-            {"out": ["num_tokens", "head_dim"]},
+            const_axes,
+            var_axes,
+            {
+                "q_nope": shape_ref,
+                "q_pe": shape_ref,
+                "kv_c": shape_ref,
+                "k_pe": shape_ref,
+            },
+            {"out": shape_ref},
         )
 
     if op_family in ("moe_router_topk", "moe_permute_unpermute"):
@@ -621,14 +825,28 @@ def _extract_shapes_and_axes(
         num_tokens = 1
         for dim in primary_shape[:-1]:
             num_tokens *= dim
-        axis_name = (
-            "num_experts_local" if op_family == "moe_router_topk" else "hidden_size"
-        )
+        if op_family == "moe_router_topk":
+            raw_k = constants.get("top_k") if isinstance(constants, dict) else None
+            eff_k = (
+                int(raw_k)
+                if isinstance(raw_k, int) and not isinstance(raw_k, bool) and raw_k > 0
+                else 8
+            )
+            top_k = max(1, min(eff_k, last_dim))
+            return (
+                {"num_experts_local": last_dim, "top_k": top_k},
+                {"num_tokens": num_tokens},
+                {"logits": ["num_tokens", "num_experts_local"]},
+                {
+                    "values": ["num_tokens", "top_k"],
+                    "indices": ["num_tokens", "top_k"],
+                },
+            )
         return (
-            {axis_name: last_dim},
+            {"hidden_size": last_dim},
             {"num_tokens": num_tokens},
-            {"x": ["num_tokens", axis_name]},
-            {"out": ["num_tokens", axis_name]},
+            {"x": ["num_tokens", "hidden_size"]},
+            {"out": ["num_tokens", "hidden_size"]},
         )
 
     if op_family in ("sampling_logits", "speculative_verify"):
@@ -636,11 +854,31 @@ def _extract_shapes_and_axes(
         batch_size = 1
         for dim in primary_shape[:-1]:
             batch_size *= dim
+        if op_family == "speculative_verify":
+            return (
+                {"vocab_size_local": vocab_or_dim},
+                {"batch_size": batch_size},
+                {
+                    "draft_logits": ["batch_size", "vocab_size_local"],
+                    "target_logits": ["batch_size", "vocab_size_local"],
+                },
+                {"out": ["batch_size", "vocab_size_local"]},
+            )
+        raw_k = constants.get("top_k") if isinstance(constants, dict) else None
+        eff_k = (
+            int(raw_k)
+            if isinstance(raw_k, int) and not isinstance(raw_k, bool) and raw_k > 0
+            else 50
+        )
+        top_k = max(1, min(eff_k, vocab_or_dim))
         return (
-            {"vocab_size_local": vocab_or_dim},
+            {"vocab_size_local": vocab_or_dim, "top_k": top_k},
             {"batch_size": batch_size},
             {"logits": ["batch_size", "vocab_size_local"]},
-            {"out": ["batch_size"]},
+            {
+                "probs": ["batch_size", "top_k"],
+                "indices": ["batch_size", "top_k"],
+            },
         )
 
     hidden_size = primary_shape[-1]
@@ -775,9 +1013,31 @@ def _normalize_trace_event(raw: dict[str, Any]) -> dict[str, Any] | None:
 def _enforce_payload_budget(
     payload: dict[str, Any], max_bytes: int = PROBE_MAX_PAYLOAD_BYTES
 ) -> dict[str, Any]:
-    """Ensure serialized distilled payload never exceeds 512 KiB."""
-    encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    if len(encoded) <= max_bytes:
+    """Ensure serialized distilled payload never exceeds max_bytes."""
+    raw_diag = payload.get("diagnostics")
+    if isinstance(raw_diag, dict) and isinstance(
+        raw_diag.get("cuda_graph_hotspots"), list
+    ):
+        capped_hotspots: list[dict[str, Any]] = []
+        changed_hs = False
+        for item in raw_diag["cuda_graph_hotspots"]:
+            if not isinstance(item, dict):
+                continue
+            kname = str(item.get("kernel_name") or "")
+            if len(kname) > _MAX_HOTSPOT_KERNEL_NAME_LEN:
+                item = dict(item)
+                item["kernel_name"] = kname[:_MAX_HOTSPOT_KERNEL_NAME_LEN]
+                changed_hs = True
+            capped_hotspots.append(item)
+        if changed_hs:
+            diag_copy = dict(raw_diag)
+            diag_copy["cuda_graph_hotspots"] = capped_hotspots
+            payload["diagnostics"] = diag_copy
+
+    def _size() -> int:
+        return len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+
+    if _size() <= max_bytes:
         return payload
 
     diagnostics = dict(payload.get("diagnostics") or {})
@@ -788,32 +1048,78 @@ def _enforce_payload_budget(
     definitions = list(payload.get("definitions") or [])
     bottlenecks = list(payload.get("bottlenecks") or [])
 
-    # Drop lowest-duration workloads first, then definitions/bottlenecks if still over budget.
     workloads.sort(
-        key=lambda w: float(w.get("observed_duration_us", 0.0)), reverse=True
+        key=lambda w: (
+            -float(w.get("observed_duration_us", 0.0)),
+            str(w.get("uuid", "")),
+        )
     )
-    while (
-        workloads
-        and len(json.dumps(payload, separators=(",", ":")).encode("utf-8")) > max_bytes
-    ):
-        workloads.pop()
-        payload["workloads"] = workloads
+    payload["workloads"] = workloads
 
-    while (
-        len(definitions) > 1
-        and len(json.dumps(payload, separators=(",", ":")).encode("utf-8")) > max_bytes
-    ):
+    def _drop_tail_definition() -> None:
+        nonlocal workloads, bottlenecks
         removed_def = definitions.pop()
         removed_name = removed_def.get("name")
+        removed_key = removed_def.get("local_kernel_key")
         payload["definitions"] = definitions
-        workloads = [w for w in workloads if w.get("definition") != removed_name]
-        payload["workloads"] = workloads
-        bottlenecks = [
-            b
-            for b in bottlenecks
-            if b.get("local_kernel_key") != removed_def.get("local_kernel_key")
+        workloads = [
+            w
+            for w in workloads
+            if w.get("definition") != removed_name
+            and (not removed_key or w.get("local_kernel_key") != removed_key)
         ]
+        payload["workloads"] = workloads
+        if removed_key:
+            bottlenecks = [
+                b for b in bottlenecks if b.get("local_kernel_key") != removed_key
+            ]
+        elif len(bottlenecks) > len(definitions):
+            bottlenecks = bottlenecks[: len(definitions)]
         payload["bottlenecks"] = bottlenecks
+
+    # 1. Drop tail definitions and bottlenecks beyond rank 16 with their workloads.
+    while len(definitions) > _MAX_TOP_RANKED_DEFINITIONS and _size() > max_bytes:
+        _drop_tail_definition()
+
+    # 2. Trim excess workloads (lowest duration first) while keeping >= 1 workload per retained definition.
+    retained_names = {
+        str(d.get("name")) for d in definitions if isinstance(d, dict) and d.get("name")
+    }
+    wl_counts: dict[str, int] = {}
+    for w in workloads:
+        dname = str(w.get("definition") or "")
+        if dname:
+            wl_counts[dname] = wl_counts.get(dname, 0) + 1
+
+    while _size() > max_bytes:
+        evict_idx = -1
+        for idx in range(len(workloads) - 1, -1, -1):
+            dname = str(workloads[idx].get("definition") or "")
+            if dname not in retained_names or wl_counts.get(dname, 0) > 1:
+                evict_idx = idx
+                break
+        if evict_idx < 0:
+            break
+        removed_wl = workloads.pop(evict_idx)
+        dname = str(removed_wl.get("definition") or "")
+        if dname in wl_counts:
+            wl_counts[dname] -= 1
+        payload["workloads"] = workloads
+
+    # 3. Drop lowest-ranked definitions and bottlenecks down to 1 with their workloads.
+    while len(definitions) > 1 and _size() > max_bytes:
+        _drop_tail_definition()
+
+    # 4. Trim cuda_graph_hotspots down to [].
+    hotspots = list(diagnostics.get("cuda_graph_hotspots") or [])
+    while hotspots and _size() > max_bytes:
+        hotspots.pop()
+        diagnostics["cuda_graph_hotspots"] = hotspots
+
+    # 5. Last resort: trim remaining workloads.
+    while workloads and _size() > max_bytes:
+        workloads.pop()
+        payload["workloads"] = workloads
 
     return payload
 
@@ -838,21 +1144,31 @@ def distill_trace_events(
     grouped_workloads: dict[
         tuple[str, tuple[tuple[str, int], ...]], dict[str, Any]
     ] = {}
-    total_eligible_us = 0.0
+    total_gpu_us = 0.0
+
+    norm_mfr = (manufacturer or "unknown").strip().lower() or "unknown"
+    norm_arch = normalize_arch(norm_mfr, architecture) or "unknown"
 
     for raw in events:
         ev = _normalize_trace_event(raw)
         if ev is None:
             continue
+        total_gpu_us += ev["dur_us"]
         name = ev["name"]
 
         if is_excluded_operator(name):
             filtered_excluded_count += 1
             continue
 
+        capped_name = name[:_MAX_HOTSPOT_KERNEL_NAME_LEN]
         if ev["is_cuda_graph"]:
             hs = cuda_graph_hotspots.setdefault(
-                name, {"kernel_name": name, "total_duration_us": 0.0, "call_count": 0}
+                capped_name,
+                {
+                    "kernel_name": capped_name,
+                    "total_duration_us": 0.0,
+                    "call_count": 0,
+                },
             )
             hs["total_duration_us"] += ev["dur_us"]
             hs["call_count"] += ev["call_count"]
@@ -865,24 +1181,38 @@ def distill_trace_events(
         if not ev["input_dims"]:
             # CUDA-graph kernel launch without aten input shapes: record hotspot only.
             hs = cuda_graph_hotspots.setdefault(
-                name, {"kernel_name": name, "total_duration_us": 0.0, "call_count": 0}
+                capped_name,
+                {
+                    "kernel_name": capped_name,
+                    "total_duration_us": 0.0,
+                    "call_count": 0,
+                },
             )
             hs["total_duration_us"] += ev["dur_us"]
             hs["call_count"] += ev["call_count"]
             continue
 
         const_axes, var_axes, in_shape_map, out_shape_map = _extract_shapes_and_axes(
-            op_family, ev["input_dims"]
+            op_family, ev["input_dims"], ev["constants"]
         )
+        eff_output_dtypes: list[str] = []
+        for idx, out_name in enumerate(out_shape_map):
+            if out_name == "indices":
+                eff_output_dtypes.append("int64")
+            elif idx < len(ev["output_dtypes"]):
+                eff_output_dtypes.append(ev["output_dtypes"][idx])
+            else:
+                eff_output_dtypes.append(ev["output_dtypes"][0])
+
         local_key = format_local_kernel_key(
             engine=engine,
             engine_version=engine_version,
-            manufacturer=manufacturer,
-            arch=architecture,
+            manufacturer=norm_mfr,
+            arch=norm_arch,
             op_family=op_family,
             const_axes=const_axes,
             input_dtypes=ev["input_dtypes"],
-            output_dtypes=ev["output_dtypes"],
+            output_dtypes=eff_output_dtypes,
             constants=ev["constants"],
         )
         sig16 = local_key.rsplit("/", 1)[-1]
@@ -907,12 +1237,10 @@ def distill_trace_events(
 
             outputs_spec: dict[str, dict[str, Any]] = {}
             for idx, (out_name, dims_ref) in enumerate(out_shape_map.items()):
-                dtype = (
-                    ev["output_dtypes"][idx]
-                    if idx < len(ev["output_dtypes"])
-                    else ev["output_dtypes"][0]
-                )
-                outputs_spec[out_name] = {"shape": dims_ref, "dtype": dtype}
+                outputs_spec[out_name] = {
+                    "shape": dims_ref,
+                    "dtype": eff_output_dtypes[idx],
+                }
 
             grouped_defs[local_key] = {
                 "definition": {
@@ -935,7 +1263,6 @@ def distill_trace_events(
         entry = grouped_defs[local_key]
         entry["gpu_time_us"] += ev["dur_us"]
         entry["call_count"] += ev["call_count"]
-        total_eligible_us += ev["dur_us"]
 
         var_key = tuple(sorted((k, int(v)) for k, v in var_axes.items()))
         wl_key = (local_key, var_key)
@@ -970,8 +1297,8 @@ def distill_trace_events(
     bottlenecks: list[dict[str, Any]] = []
     for item in ranked_groups:
         share = (
-            round((float(item["gpu_time_us"]) / total_eligible_us) * 100.0, 2)
-            if total_eligible_us > 0.0
+            round((float(item["gpu_time_us"]) / total_gpu_us) * 100.0, 2)
+            if total_gpu_us > 0.0
             else 0.0
         )
         bottlenecks.append(
@@ -1002,8 +1329,8 @@ def distill_trace_events(
         "schema_version": "flashinfer-trace/v1",
         "engine": canonical_engine_name(engine),
         "engine_version": normalize_engine_version(engine_version),
-        "manufacturer": (manufacturer or "unknown").strip().lower() or "unknown",
-        "architecture": (architecture or "unknown").strip().lower() or "unknown",
+        "manufacturer": norm_mfr,
+        "architecture": norm_arch,
         "definitions": definitions,
         "workloads": workloads,
         "bottlenecks": bottlenecks,
@@ -1168,9 +1495,18 @@ class ProbeManager:
         self._record = _ProbeRecord()
         self._last_started_monotonic: float | None = None
         self._active_task: asyncio.Task[None] | None = None
+        self._state_lock: asyncio.Lock | None = None
+        self._state_lock_loop: asyncio.AbstractEventLoop | None = None
         self._swept_stale_dirs: list[str] = []
         if sweep_on_init:
             self._swept_stale_dirs = sweep_stale_probe_dirs(self._staging_root)
+
+    def _get_lock(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        if self._state_lock is None or self._state_lock_loop is not loop:
+            self._state_lock = asyncio.Lock()
+            self._state_lock_loop = loop
+        return self._state_lock
 
     @property
     def staging_root(self) -> Path:
@@ -1206,14 +1542,25 @@ class ProbeManager:
             "state": rec.state,
             "probe_id": rec.probe_id,
             "steps": rec.steps,
-            "diagnostics": dict(rec.diagnostics),
         }
         if rec.error is not None:
             out["error"] = rec.error
         if rec.error_code is not None:
             out["error_code"] = rec.error_code
         if rec.payload is not None:
+            placeholder = dict(out)
+            placeholder["payload"] = None
+            overhead_bytes = (
+                len(json.dumps(placeholder, separators=(",", ":")).encode("utf-8")) - 4
+            )
+            payload_budget = max(256, PROBE_MAX_PAYLOAD_BYTES - overhead_bytes)
+            rec.payload = _enforce_payload_budget(
+                dict(rec.payload), max_bytes=payload_budget
+            )
+            rec.diagnostics = dict(rec.payload.get("diagnostics") or {})
             out["payload"] = rec.payload
+        else:
+            out["diagnostics"] = dict(rec.diagnostics)
         return out
 
     async def get_probe(self) -> tuple[int, dict[str, Any]]:
@@ -1357,120 +1704,122 @@ class ProbeManager:
 
     async def start_probe(self, body: Any) -> tuple[int, dict[str, Any]]:
         req = ProbeRequest.from_dict(body)
-        self._latch.check_expected_boot_id(req.expected_boot_id)
-        snap = self._latch.snapshot()
+        async with self._get_lock():
+            self._latch.check_expected_boot_id(req.expected_boot_id)
+            snap = self._latch.snapshot()
 
-        _, engine_paused, _ = await self._backend.check_live()
-        if snap.paused or engine_paused:
-            raise RolePausedError(boot_id=snap.boot_id)
+            _, engine_paused, _ = await self._backend.check_live()
+            if snap.paused or engine_paused:
+                raise RolePausedError(boot_id=snap.boot_id)
 
-        if self._record.state == "running" and self._record.probe_id is not None:
-            raise ProbeInProgressError(
-                boot_id=snap.boot_id, probe_id=self._record.probe_id
+            if self._record.state == "running" and self._record.probe_id is not None:
+                raise ProbeInProgressError(
+                    boot_id=snap.boot_id, probe_id=self._record.probe_id
+                )
+
+            now = self._clock()
+            cooldown = self._effective_cooldown()
+            if (
+                self._last_started_monotonic is not None
+                and cooldown > 0.0
+                and (now - self._last_started_monotonic) < cooldown
+            ):
+                retry_after = cooldown - (now - self._last_started_monotonic)
+                raise ProbeCooldownError(
+                    boot_id=snap.boot_id,
+                    retry_after_seconds=retry_after,
+                    cooldown_seconds=cooldown,
+                )
+
+            start_fn = getattr(self._backend, "start_probe", None)
+            if not callable(start_fn):
+                raise UnsupportedEngineVersionError(
+                    f"Engine backend {getattr(self._backend, 'engine', 'unknown')!r} does not support probing"
+                )
+
+            probe_id = str(uuid.uuid4())
+            staging_dir = self._staging_root / probe_id
+            max_shm_bytes = compute_shm_budget_bytes(
+                self._staging_root, shm_size_override=self._shm_size_override
             )
+            staging_dir.mkdir(parents=True, exist_ok=True)
 
-        now = self._clock()
-        cooldown = self._effective_cooldown()
-        if (
-            self._last_started_monotonic is not None
-            and cooldown > 0.0
-            and (now - self._last_started_monotonic) < cooldown
-        ):
-            retry_after = cooldown - (now - self._last_started_monotonic)
-            raise ProbeCooldownError(
-                boot_id=snap.boot_id,
-                retry_after_seconds=retry_after,
-                cooldown_seconds=cooldown,
-            )
-
-        start_fn = getattr(self._backend, "start_probe", None)
-        if not callable(start_fn):
-            raise UnsupportedEngineVersionError(
-                f"Engine backend {getattr(self._backend, 'engine', 'unknown')!r} does not support probing"
-            )
-
-        probe_id = str(uuid.uuid4())
-        staging_dir = self._staging_root / probe_id
-        max_shm_bytes = compute_shm_budget_bytes(
-            self._staging_root, shm_size_override=self._shm_size_override
-        )
-        staging_dir.mkdir(parents=True, exist_ok=True)
-
-        spec = {
-            "boot_id": snap.boot_id,
-            "probe_id": probe_id,
-            "steps": req.steps,
-            "output_dir": str(staging_dir),
-            "max_shm_bytes": max_shm_bytes,
-            "wall_clock_cap_seconds": self._wall_clock_cap_seconds,
-            "engine_version": req.engine_version or "0.0.0",
-            "manufacturer": req.manufacturer or "nvidia",
-            "architecture": req.architecture or "unknown",
-            "metadata": dict(req.metadata),
-        }
-
-        try:
-            start_res = start_fn(spec)
-            if inspect.isawaitable(start_res):
-                start_res = await start_res
-        except SentinelError:
-            purge_probe_dir(staging_dir)
-            raise
-        except Exception as exc:
-            purge_probe_dir(staging_dir)
-            raise SentinelError(
-                500, "probe_start_failed", f"Failed to start probe: {exc}"
-            ) from exc
-
-        self._last_started_monotonic = now
-        self._record = _ProbeRecord(
-            probe_id=probe_id,
-            state="running",
-            steps=req.steps,
-            started_at=now,
-            staging_dir=staging_dir,
-            diagnostics={
+            spec = {
+                "boot_id": snap.boot_id,
+                "probe_id": probe_id,
+                "steps": req.steps,
+                "output_dir": str(staging_dir),
                 "max_shm_bytes": max_shm_bytes,
                 "wall_clock_cap_seconds": self._wall_clock_cap_seconds,
-            },
-        )
+                "engine_version": req.engine_version or "0.0.0",
+                "manufacturer": req.manufacturer or "nvidia",
+                "architecture": req.architecture or "unknown",
+                "metadata": dict(req.metadata),
+            }
 
-        if isinstance(start_res, dict) and str(
-            start_res.get("status") or ""
-        ).lower() in (
-            "completed",
-            "failed",
-            "aborted",
-        ):
             try:
-                self._apply_backend_result(start_res)
-            finally:
+                start_res = start_fn(spec)
+                if inspect.isawaitable(start_res):
+                    start_res = await start_res
+            except SentinelError:
                 purge_probe_dir(staging_dir)
+                raise
+            except Exception as exc:
+                purge_probe_dir(staging_dir)
+                raise SentinelError(
+                    500, "probe_start_failed", f"Failed to start probe: {exc}"
+                ) from exc
+
+            self._last_started_monotonic = now
+            self._record = _ProbeRecord(
+                probe_id=probe_id,
+                state="running",
+                steps=req.steps,
+                started_at=now,
+                staging_dir=staging_dir,
+                diagnostics={
+                    "max_shm_bytes": max_shm_bytes,
+                    "wall_clock_cap_seconds": self._wall_clock_cap_seconds,
+                },
+            )
+
+            if isinstance(start_res, dict) and str(
+                start_res.get("status") or ""
+            ).lower() in (
+                "completed",
+                "failed",
+                "aborted",
+            ):
+                try:
+                    self._apply_backend_result(start_res)
+                finally:
+                    purge_probe_dir(staging_dir)
+                return 200, self._build_response()
+
+            # Run bounded background watcher so GET /gpustack/v1/probe and DELETE /gpustack/v1/probe work asynchronously.
+            self._active_task = asyncio.create_task(
+                self._run_probe_lifecycle(probe_id, staging_dir, max_shm_bytes, now)
+            )
             return 200, self._build_response()
 
-        # Run bounded background watcher so GET /gpustack/v1/probe and DELETE /gpustack/v1/probe work asynchronously.
-        self._active_task = asyncio.create_task(
-            self._run_probe_lifecycle(probe_id, staging_dir, max_shm_bytes, now)
-        )
-        return 200, self._build_response()
-
     async def delete_probe(self) -> tuple[int, dict[str, Any]]:
-        rec = self._record
-        active_task = self._active_task
-        self._active_task = None
-        if active_task is not None and not active_task.done():
-            active_task.cancel()
-            try:
-                await active_task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                pass
+        async with self._get_lock():
+            rec = self._record
+            active_task = self._active_task
+            self._active_task = None
+            if active_task is not None and not active_task.done():
+                active_task.cancel()
+                try:
+                    await active_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
 
-        if rec.probe_id is not None and rec.state == "running":
-            await self._abort_backend(rec.probe_id, rec.staging_dir)
-            rec.state = "aborted"
-            rec.finished_at = self._clock()
-        if rec.staging_dir is not None:
-            purge_probe_dir(rec.staging_dir)
-        return 200, self._build_response()
+            if rec.probe_id is not None and rec.state == "running":
+                await self._abort_backend(rec.probe_id, rec.staging_dir)
+                rec.state = "aborted"
+                rec.finished_at = self._clock()
+            if rec.staging_dir is not None:
+                purge_probe_dir(rec.staging_dir)
+            return 200, self._build_response()

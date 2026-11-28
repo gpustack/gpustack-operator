@@ -79,12 +79,44 @@ def test_probe_module_imports_zero_heavy_ml_deps() -> None:
         "all_to_all",
         "fused_all_reduce_rmsnorm",
         "vllm::fused_all_reduce_rms_norm",
+        "mscclpp_rms_norm",
+        "msccl_rmsnorm",
+        "mscclpp_fused_add_rmsnorm",
+        "rocshmem_fused_add",
+        "rocshmem_all_to_all",
         "c10d::allreduce_",
     ],
 )
 def test_gemm_and_collective_operators_strictly_excluded(op_name: str) -> None:
     assert is_excluded_operator(op_name) is True
     assert classify_op_family(op_name) is None
+
+
+def test_msccl_and_rocshmem_collectives_excluded_from_distillation() -> None:
+    payload = distill_trace_events(
+        [
+            {
+                "name": "mscclpp_rms_norm",
+                "dur": 200.0,
+                "input_dims": [[32, 4096], [4096]],
+                "input_dtypes": ["bfloat16", "bfloat16"],
+            },
+            {
+                "name": "rocshmem_fused_add",
+                "dur": 150.0,
+                "input_dims": [[32, 4096], [32, 4096]],
+                "input_dtypes": ["bfloat16", "bfloat16"],
+            },
+        ],
+        engine="sglang",
+        engine_version="0.4.6",
+        manufacturer="amd",
+        architecture="gfx942",
+        steps_captured=3,
+    )
+    assert payload["definitions"] == []
+    assert payload["workloads"] == []
+    assert payload["diagnostics"]["filtered_excluded_count"] == 2
 
 
 @pytest.mark.parametrize(
@@ -838,3 +870,768 @@ def test_probe_edge_cases_error_paths_and_definition_trimming(
         assert st["error_code"] == "probe_collect_failed"
 
     run_sync(_run_collect_fail())
+
+
+def test_probe_manager_concurrent_start_probe_serialized_with_asyncio_lock(
+    tmp_path: Path,
+) -> None:
+    class _YieldingProbeBackend(_MockProbeBackend):
+        def __init__(self, *, complete_immediately: bool = False) -> None:
+            super().__init__(complete_immediately=complete_immediately)
+            self.start_invocations = 0
+
+        async def start_probe(self, spec: dict[str, Any]) -> dict[str, Any]:
+            self.start_invocations += 1
+            await asyncio.sleep(0)
+            return await super().start_probe(spec)
+
+    async def _run_race_in_progress() -> None:
+        staging_root = tmp_path / "race_running"
+        backend = _YieldingProbeBackend(complete_immediately=False)
+        latch = BootLatch(require_ack=False)
+        mgr = ProbeManager(
+            backend=backend,
+            latch=latch,
+            staging_root=staging_root,
+            cooldown_seconds=0.0,
+            sweep_on_init=False,
+        )
+        app = FakeFastAPIApp()
+        plane = SentinelControlPlane(backend=backend, latch=latch, probe_manager=mgr)
+        ensure_outermost_sentinel_middleware(app, control_plane=plane)
+
+        body = {"expected_boot_id": latch.boot_id, "steps": 3}
+        r1, r2 = await asyncio.gather(
+            send_asgi_request(app, "POST", "/gpustack/v1/probe", json_body=body),
+            send_asgi_request(app, "POST", "/gpustack/v1/probe", json_body=body),
+        )
+        statuses = sorted([r1.status_code, r2.status_code])
+        assert statuses == [200, 409]
+        err_resp = r1 if r1.status_code == 409 else r2
+        assert err_resp.json()["error"] == "probe_in_progress"
+        assert backend.start_invocations == 1
+        assert len(list(staging_root.iterdir())) == 1
+
+        r_del = await send_asgi_request(app, "DELETE", "/gpustack/v1/probe")
+        assert r_del.status_code == 200
+        assert list(staging_root.iterdir()) == []
+
+    async def _run_race_cooldown() -> None:
+        staging_root = tmp_path / "race_cooldown"
+        backend = _YieldingProbeBackend(complete_immediately=True)
+        latch = BootLatch(require_ack=False)
+        mgr = ProbeManager(
+            backend=backend,
+            latch=latch,
+            staging_root=staging_root,
+            cooldown_seconds=60.0,
+            sweep_on_init=False,
+        )
+        app = FakeFastAPIApp()
+        plane = SentinelControlPlane(backend=backend, latch=latch, probe_manager=mgr)
+        ensure_outermost_sentinel_middleware(app, control_plane=plane)
+
+        body = {"expected_boot_id": latch.boot_id, "steps": 3}
+        r1, r2 = await asyncio.gather(
+            send_asgi_request(app, "POST", "/gpustack/v1/probe", json_body=body),
+            send_asgi_request(app, "POST", "/gpustack/v1/probe", json_body=body),
+        )
+        statuses = sorted([r1.status_code, r2.status_code])
+        assert statuses == [200, 429]
+        err_resp = r1 if r1.status_code == 429 else r2
+        assert err_resp.json()["error"] == "probe_cooldown"
+        assert backend.start_invocations == 1
+        assert list(staging_root.iterdir()) == []
+
+    run_sync(_run_race_in_progress())
+    run_sync(_run_race_cooldown())
+
+
+class _MiniTensor:
+    """Pure-Python tensor double covering PyTorch ops used in _OP_REFERENCES."""
+
+    def __init__(self, data: Any, dtype: str = "float32") -> None:
+        self._data = data
+        self.dtype = dtype
+        self.device = "cpu"
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        dims: list[int] = []
+        cur = self._data
+        while isinstance(cur, list):
+            dims.append(len(cur))
+            cur = cur[0] if cur else None
+        return tuple(dims)
+
+    @property
+    def ndim(self) -> int:
+        return len(self.shape)
+
+    def _map(self, fn: Any, data: Any | None = None) -> Any:
+        cur = self._data if data is None else data
+        if isinstance(cur, list):
+            return [self._map(fn, item) for item in cur]
+        return fn(cur)
+
+    def _binop(self, other: Any, op: Any) -> _MiniTensor:
+        def _apply(a: Any, b: Any) -> Any:
+            if isinstance(a, list) and isinstance(b, list):
+                if len(a) == len(b):
+                    return [_apply(x, y) for x, y in zip(a, b, strict=True)]
+                if len(a) == 1:
+                    return [_apply(a[0], y) for y in b]
+                if len(b) == 1:
+                    return [_apply(x, b[0]) for x in a]
+                raise ValueError(f"Broadcast mismatch {len(a)} vs {len(b)}")
+            if isinstance(a, list):
+                return [_apply(x, b) for x in a]
+            if isinstance(b, list):
+                return [_apply(a, y) for y in b]
+            return op(a, b)
+
+        b_data = other._data if isinstance(other, _MiniTensor) else other
+        a_data = self._data
+        a_ndim = self.ndim
+        b_ndim = other.ndim if isinstance(other, _MiniTensor) else 0
+        while a_ndim < b_ndim:
+            a_data = [a_data]
+            a_ndim += 1
+        while b_ndim < a_ndim:
+            b_data = [b_data]
+            b_ndim += 1
+        return _MiniTensor(_apply(a_data, b_data), self.dtype)
+
+    def __add__(self, other: Any) -> _MiniTensor:
+        return self._binop(other, lambda a, b: a + b)
+
+    def __sub__(self, other: Any) -> _MiniTensor:
+        return self._binop(other, lambda a, b: a - b)
+
+    def __mul__(self, other: Any) -> _MiniTensor:
+        return self._binop(other, lambda a, b: a * b)
+
+    def __truediv__(self, other: Any) -> _MiniTensor:
+        return self._binop(other, lambda a, b: a / b)
+
+    def __neg__(self) -> _MiniTensor:
+        return _MiniTensor(self._map(lambda v: -v), self.dtype)
+
+    def __le__(self, other: Any) -> _MiniTensor:
+        return self._binop(other, lambda a, b: bool(a <= b))
+
+    def __getitem__(self, key: Any) -> _MiniTensor:
+        if not isinstance(key, tuple):
+            key = (key,)
+        if key and key[0] is Ellipsis:
+            rest = key[1:]
+            key = (slice(None),) * (self.ndim - len(rest)) + rest
+
+        def _slice(data: Any, idx_tuple: tuple[Any, ...]) -> Any:
+            if not idx_tuple:
+                return data
+            head, *tail = idx_tuple
+            if isinstance(head, slice):
+                return [_slice(item, tuple(tail)) for item in data[head]]
+            return _slice(data[head], tuple(tail))
+
+        return _MiniTensor(_slice(self._data, key), self.dtype)
+
+    def pow(self, exp: float) -> _MiniTensor:
+        return _MiniTensor(self._map(lambda v: v**exp), self.dtype)
+
+    def mean(self, dim: int = -1, keepdim: bool = False) -> _MiniTensor:
+        assert dim == -1
+
+        def _reduce(data: Any) -> Any:
+            if data and not isinstance(data[0], list):
+                val = sum(data) / max(len(data), 1)
+                return [val] if keepdim else val
+            return [_reduce(sub) for sub in data]
+
+        return _MiniTensor(_reduce(self._data), self.dtype)
+
+    def sum(self, dim: int = -1, keepdim: bool = False) -> _MiniTensor:
+        assert dim == -1
+
+        def _reduce(data: Any) -> Any:
+            if data and not isinstance(data[0], list):
+                val = sum(data)
+                return [val] if keepdim else val
+            return [_reduce(sub) for sub in data]
+
+        return _MiniTensor(_reduce(self._data), self.dtype)
+
+    def clamp_min(self, floor: float) -> _MiniTensor:
+        return _MiniTensor(self._map(lambda v: max(float(v), floor)), self.dtype)
+
+    def to(self, dtype: str) -> _MiniTensor:
+        if dtype in ("float32", "float16", "bfloat16", "float64"):
+            return _MiniTensor(self._map(float), dtype)
+        return _MiniTensor(self._data, dtype)
+
+    def unsqueeze(self, dim: int) -> _MiniTensor:
+        real_dim = dim if dim >= 0 else self.ndim + 1 + dim
+
+        def _ins(data: Any, cur_dim: int) -> Any:
+            if cur_dim == real_dim:
+                return [data]
+            return [_ins(sub, cur_dim + 1) for sub in data]
+
+        return _MiniTensor(_ins(self._data, 0), self.dtype)
+
+    def transpose(self, dim0: int, dim1: int) -> _MiniTensor:
+        d0 = dim0 if dim0 >= 0 else self.ndim + dim0
+        d1 = dim1 if dim1 >= 0 else self.ndim + dim1
+        if d0 == d1:
+            return _MiniTensor(self._data, self.dtype)
+        if self.ndim == 2:
+            rows = len(self._data)
+            cols = len(self._data[0])
+            return _MiniTensor(
+                [[self._data[r][c] for r in range(rows)] for c in range(cols)],
+                self.dtype,
+            )
+        if self.ndim == 3 and {d0, d1} == {0, 1}:
+            d_0, d_1 = len(self._data), len(self._data[0])
+            return _MiniTensor(
+                [[self._data[i][j] for i in range(d_0)] for j in range(d_1)],
+                self.dtype,
+            )
+        if self.ndim == 3 and {d0, d1} == {1, 2}:
+            return _MiniTensor(
+                [
+                    [[mat[r][c] for r in range(len(mat))] for c in range(len(mat[0]))]
+                    for mat in self._data
+                ],
+                self.dtype,
+            )
+        raise NotImplementedError(f"transpose({dim0}, {dim1}) for {self.shape}")
+
+    def masked_fill(self, mask: _MiniTensor, value: float) -> _MiniTensor:
+        return self._binop(mask, lambda a, m: value if m else a)
+
+    def index_select(self, dim: int, index: _MiniTensor) -> _MiniTensor:
+        assert dim == 0
+        return _MiniTensor([self._data[int(i)] for i in index._data], self.dtype)
+
+    def flatten_vals(self) -> list[float]:
+        out: list[float] = []
+
+        def _walk(cur: Any) -> None:
+            if isinstance(cur, list):
+                for item in cur:
+                    _walk(item)
+            else:
+                out.append(float(cur))
+
+        _walk(self._data)
+        return out
+
+
+def _make_mini_filled(shape: list[int], start: float = 0.1) -> _MiniTensor:
+    counter = [0]
+
+    def _build(dims: list[int]) -> Any:
+        if not dims:
+            counter[0] += 1
+            return start + (counter[0] % 7) * 0.13
+        return [_build(dims[1:]) for _ in range(dims[0])]
+
+    return _MiniTensor(_build(shape))
+
+
+def _mini_softmax_rows(data: Any) -> Any:
+    import math
+
+    if data and not isinstance(data[0], list):
+        m = max(data)
+        exps = [math.exp(v - m) if math.isfinite(v) else 0.0 for v in data]
+        s = sum(exps) or 1.0
+        return [e / s for e in exps]
+    return [_mini_softmax_rows(sub) for sub in data]
+
+
+def _mini_matmul(a: _MiniTensor, b: _MiniTensor) -> _MiniTensor:
+    def _mm2d(m1: list[list[float]], m2: list[list[float]]) -> list[list[float]]:
+        k_len = len(m2)
+        n_len = len(m2[0])
+        return [
+            [sum(row[k] * m2[k][j] for k in range(k_len)) for j in range(n_len)]
+            for row in m1
+        ]
+
+    if a.ndim == 2 and b.ndim == 2:
+        return _MiniTensor(_mm2d(a._data, b._data))
+    if a.ndim == 3 and b.ndim == 3:
+        return _MiniTensor(
+            [_mm2d(am, bm) for am, bm in zip(a._data, b._data, strict=True)]
+        )
+    raise NotImplementedError(f"matmul {a.shape} @ {b.shape}")
+
+
+def _mini_cat(tensors: tuple[_MiniTensor, ...], dim: int = -1) -> _MiniTensor:
+    assert dim == -1
+
+    def _cat_last(items: list[Any]) -> Any:
+        if items[0] and not isinstance(items[0][0], list):
+            out: list[Any] = []
+            for it in items:
+                out.extend(it)
+            return out
+        return [_cat_last(list(group)) for group in zip(*items, strict=True)]
+
+    return _MiniTensor(_cat_last([t._data for t in tensors]))
+
+
+def _mini_topk(
+    t: _MiniTensor, k: int, dim: int = -1
+) -> tuple[_MiniTensor, _MiniTensor]:
+    assert dim == -1
+
+    def _tk(data: Any) -> tuple[Any, Any]:
+        if data and not isinstance(data[0], list):
+            ranked = sorted(enumerate(data), key=lambda p: p[1], reverse=True)[:k]
+            return [v for _, v in ranked], [i for i, _ in ranked]
+        sub = [_tk(item) for item in data]
+        return [s[0] for s in sub], [s[1] for s in sub]
+
+    vals, idxs = _tk(t._data)
+    return _MiniTensor(vals), _MiniTensor(idxs, dtype="int64")
+
+
+def _mini_cumsum(t: _MiniTensor, dim: int = -1) -> _MiniTensor:
+    assert dim == -1
+
+    def _cs(data: Any) -> Any:
+        if data and not isinstance(data[0], list):
+            acc = 0.0
+            out = []
+            for v in data:
+                acc += v
+                out.append(acc)
+            return out
+        return [_cs(item) for item in data]
+
+    return _MiniTensor(_cs(t._data))
+
+
+def _mini_clamp(t: _MiniTensor, **kwargs: Any) -> _MiniTensor:
+    lo = kwargs.get("min")
+    hi = kwargs.get("max")
+
+    def _clip(v: float) -> float:
+        res = lo if lo is not None and v < lo else v
+        return hi if hi is not None and res > hi else res
+
+    return _MiniTensor(t._map(_clip), t.dtype)
+
+
+def _mini_layer_norm(
+    x: _MiniTensor,
+    normalized_shape: tuple[int, ...],
+    weight: _MiniTensor | None = None,
+    bias: _MiniTensor | None = None,
+    eps: float = 1e-5,
+) -> _MiniTensor:
+    import math
+
+    del normalized_shape
+    mean = x.mean(-1, keepdim=True)
+    diff = x - mean
+    var = diff.pow(2).mean(-1, keepdim=True)
+    normed = diff * _MiniTensor(var._map(lambda v: 1.0 / math.sqrt(v + eps)))
+    if weight is not None:
+        normed = normed * weight
+    if bias is not None:
+        normed = normed + bias
+    return normed
+
+
+def _build_mini_torch() -> Any:
+    import math
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        long="int64",
+        bool="bool",
+        rsqrt=lambda t: _MiniTensor(t._map(lambda v: 1.0 / math.sqrt(v))),
+        softmax=lambda t, dim=-1: _MiniTensor(_mini_softmax_rows(t._data)),
+        topk=_mini_topk,
+        cumsum=_mini_cumsum,
+        cat=_mini_cat,
+        matmul=_mini_matmul,
+        clamp=_mini_clamp,
+        ones=lambda shape, device=None, dtype="float32": _MiniTensor(
+            (
+                [
+                    [True if dtype == "bool" else 1.0 for _ in range(shape[1])]
+                    for _ in range(shape[0])
+                ]
+                if len(shape) == 2
+                else [1.0 for _ in range(shape[0])]
+            ),
+            dtype=dtype,
+        ),
+        triu=lambda t, diagonal=0: _MiniTensor(
+            [
+                [
+                    (t._data[r][c] if c - r >= diagonal else False)
+                    for c in range(len(t._data[0]))
+                ]
+                for r in range(len(t._data))
+            ],
+            dtype=t.dtype,
+        ),
+        arange=lambda start, end=None, step=1, device=None, dtype="int64": _MiniTensor(
+            list(range(start, end, step)) if end is not None else list(range(start)),
+            dtype=dtype,
+        ),
+        nn=SimpleNamespace(
+            functional=SimpleNamespace(
+                layer_norm=_mini_layer_norm,
+                silu=lambda t: _MiniTensor(t._map(lambda v: v / (1.0 + math.exp(-v)))),
+            )
+        ),
+    )
+
+
+def test_all_12_op_references_parse_and_execute_against_extracted_shapes() -> None:
+    import ast
+    import inspect
+    import math
+
+    from gpustack_engine_sentinel.probe import (
+        _DYNAMIC_VAR_AXES,
+        _OP_REFERENCES,
+        _extract_shapes_and_axes,
+    )
+
+    mini_torch = _build_mini_torch()
+    assert set(_OP_REFERENCES.keys()) == ALLOWED_OP_FAMILIES
+    sample_dims: dict[str, list[list[int]]] = {
+        "rmsnorm": [[3, 8]],
+        "layernorm": [[3, 8]],
+        "rope_kv_append": [[3, 2, 8]],
+        "activation_quant": [[3, 8]],
+        "moe_router_topk": [[3, 12]],
+        "moe_permute_unpermute": [[3, 8]],
+        "paged_attention": [[3, 2, 8]],
+        "ragged_prefill_attention": [[3, 2, 8]],
+        "mla_local": [[3, 2, 8]],
+        "speculative_verify": [[3, 6]],
+        "sampling_logits": [[3, 64]],
+        "custom_elementwise_fusion": [[3, 8]],
+    }
+
+    for family in sorted(ALLOWED_OP_FAMILIES):
+        ref_code = _OP_REFERENCES[family]
+        ast.parse(ref_code)
+        ns: dict[str, Any] = {"torch": mini_torch}
+        exec(ref_code, ns)
+        run_fn = ns["run"]
+        assert callable(run_fn), f"{family} reference missing run()"
+
+        const_axes, var_axes, in_specs, out_specs = _extract_shapes_and_axes(
+            family, sample_dims[family]
+        )
+        sig = inspect.signature(run_fn)
+        required_params = [
+            p
+            for p in sig.parameters.values()
+            if p.default is inspect.Parameter.empty
+            and p.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        ]
+        all_pos_params = [
+            p
+            for p in sig.parameters.values()
+            if p.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        ]
+        assert len(required_params) <= len(in_specs) <= len(all_pos_params), (
+            f"{family}: in_specs={list(in_specs)} does not match run{sig}"
+        )
+
+        axis_vals = {**const_axes, **var_axes}
+        tensors = [
+            _make_mini_filled([int(axis_vals[d]) for d in dims_ref])
+            for dims_ref in in_specs.values()
+        ]
+        out = run_fn(*tensors)
+        outputs = out if isinstance(out, tuple) else (out,)
+        assert len(outputs) == len(out_specs), (
+            f"{family}: got {len(outputs)} outputs, expected {len(out_specs)}"
+        )
+        for tensor_out, dims_ref in zip(outputs, out_specs.values(), strict=True):
+            expected_shape = tuple(int(axis_vals[d]) for d in dims_ref)
+            assert tensor_out.shape == expected_shape, (
+                f"{family}: output shape {tensor_out.shape} != {expected_shape}"
+            )
+            vals = tensor_out.flatten_vals()
+            assert vals and all(math.isfinite(v) for v in vals)
+
+    expected_go_dynamic_axes = {
+        "batch",
+        "batch_size",
+        "bs",
+        "context_len",
+        "kv_len",
+        "max_num_tokens",
+        "max_seq_len",
+        "num_decode_tokens",
+        "num_prefill_tokens",
+        "num_requests",
+        "num_seqs",
+        "num_tokens",
+        "q_len",
+        "seq_len",
+        "seq_length",
+        "sequence_length",
+        "token_count",
+        "total_tokens",
+    }
+    assert set(_DYNAMIC_VAR_AXES) == expected_go_dynamic_axes
+    assert "prompt_len" not in _DYNAMIC_VAR_AXES
+
+
+def test_distillation_schema_alignment_gpu_share_denominator_and_arch_norm() -> None:
+    events = [
+        {
+            "name": "vllm::silu_and_mul",
+            "dur": 20.0,
+            "input_dims": [[4, 16]],
+            "input_dtypes": ["bfloat16"],
+        },
+        {
+            "name": "vllm::topk_softmax",
+            "dur": 30.0,
+            "input_dims": [[4, 16]],
+            "input_dtypes": ["bfloat16"],
+        },
+        {
+            "name": "flashinfer::top_k_top_p_sampling_from_probs",
+            "dur": 50.0,
+            "input_dims": [[2, 128]],
+            "input_dtypes": ["bfloat16"],
+        },
+        {
+            "name": "cublasLtMatmul",
+            "dur": 800.0,
+            "input_dims": [[4, 4096], [4096, 4096]],
+        },
+        {
+            "name": "ncclAllReduce",
+            "dur": 50.0,
+            "input_dims": [[4, 4096]],
+        },
+        {
+            "name": "custom_unclassified_kernel",
+            "dur": 50.0,
+            "input_dims": [[4, 16]],
+        },
+    ]
+    payload = distill_trace_events(
+        events,
+        engine="vLLM",
+        engine_version="0.8.5",
+        manufacturer="NVIDIA",
+        architecture="9.0a",
+        steps_captured=4,
+    )
+    assert payload["architecture"] == "sm_90a"
+    defs_by_op = {d["op_type"]: d for d in payload["definitions"]}
+
+    act_def = defs_by_op["activation_quant"]
+    assert act_def["axes"]["half_hidden_size"] == {"type": "const", "value": 8}
+    assert act_def["outputs"] == {
+        "out": {"shape": ["num_tokens", "half_hidden_size"], "dtype": "bfloat16"}
+    }
+
+    moe_def = defs_by_op["moe_router_topk"]
+    assert moe_def["axes"]["top_k"] == {"type": "const", "value": 8}
+    assert moe_def["outputs"] == {
+        "values": {"shape": ["num_tokens", "top_k"], "dtype": "bfloat16"},
+        "indices": {"shape": ["num_tokens", "top_k"], "dtype": "int64"},
+    }
+
+    samp_def = defs_by_op["sampling_logits"]
+    assert samp_def["axes"]["top_k"] == {"type": "const", "value": 50}
+    assert samp_def["outputs"] == {
+        "probs": {"shape": ["batch_size", "top_k"], "dtype": "bfloat16"},
+        "indices": {"shape": ["batch_size", "top_k"], "dtype": "int64"},
+    }
+
+    # Total GPU duration across all normalized events is 20+30+50+800+50+50 = 1000 us.
+    shares = {
+        b["op_family"]: b["gpu_time_share_percent"] for b in payload["bottlenecks"]
+    }
+    assert shares["sampling_logits"] == pytest.approx(5.0)
+    assert shares["moe_router_topk"] == pytest.approx(3.0)
+    assert shares["activation_quant"] == pytest.approx(2.0)
+
+    # format_local_kernel_key normalizes arch across vendors consistently with Go.
+    for mfr, raw_arch, want_arch in (
+        ("nvidia", "9.0a", "sm_90a"),
+        ("nvidia", "compute_90a", "sm_90a"),
+        ("amd", "gfx942:sramecc+:xnack-", "gfx942"),
+        ("ascend", "ascend-910b", "910b"),
+    ):
+        k = format_local_kernel_key(
+            engine="vllm",
+            engine_version="0.8.5",
+            manufacturer=mfr,
+            arch=raw_arch,
+            op_family="rmsnorm",
+            const_axes={"hidden_size": 4096},
+            input_dtypes=["bfloat16"],
+            output_dtypes=["bfloat16"],
+        )
+        assert parse_local_kernel_key(k)["architecture"] == want_arch
+
+
+def test_probe_budget_eviction_order_hotspot_cap_and_envelope_ceiling(
+    tmp_path: Path,
+) -> None:
+    from gpustack_engine_sentinel.protocol import PROBE_MAX_PAYLOAD_BYTES
+
+    long_kernel = "void cutlass::Kernel<" + ("TemplateArg," * 40) + ">()"
+    assert len(long_kernel) > 256
+
+    # Build 24 distinct definitions, each with 4 workloads, plus CUDA graph hotspots.
+    events: list[dict[str, Any]] = []
+    for def_idx in range(24):
+        hidden = 1024 + def_idx * 64
+        base_dur = float((24 - def_idx) * 100)
+        for wl_idx in range(4):
+            events.append(
+                {
+                    "name": "vllm::rms_norm",
+                    "dur": base_dur + float(wl_idx + 1),
+                    "input_dims": [[(wl_idx + 1) * 8, hidden], [hidden]],
+                    "input_dtypes": ["bfloat16", "bfloat16"],
+                }
+            )
+    for hs_idx in range(10):
+        events.append(
+            {
+                "name": f"{long_kernel}_{hs_idx}",
+                "cat": "cuda_graph",
+                "dur": float(50 - hs_idx),
+            }
+        )
+
+    full = distill_trace_events(
+        events,
+        engine="vllm",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        architecture="sm_90a",
+        steps_captured=4,
+        max_payload_bytes=PROBE_MAX_PAYLOAD_BYTES,
+    )
+    assert all(
+        len(h["kernel_name"]) <= 256 for h in full["diagnostics"]["cuda_graph_hotspots"]
+    )
+
+    # Budget tight enough to drop tail definitions > 16 and trim excess workloads,
+    # while keeping >= 1 workload for every retained definition!
+    tight_budget = 14000
+    capped = distill_trace_events(
+        events,
+        engine="vllm",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        architecture="sm_90a",
+        steps_captured=4,
+        max_payload_bytes=tight_budget,
+    )
+    assert capped["diagnostics"]["truncated"] is True
+    assert (
+        len(json.dumps(capped, separators=(",", ":")).encode("utf-8")) <= tight_budget
+    )
+    assert 1 <= len(capped["definitions"]) <= 16
+    wl_defs = {w["definition"] for w in capped["workloads"]}
+    for d in capped["definitions"]:
+        assert d["name"] in wl_defs
+
+    # Even tighter budget where only 1 definition fits: hotspots trim to [] BEFORE the last workload is lost!
+    very_tight = 1600
+    min_capped = distill_trace_events(
+        events,
+        engine="vllm",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        architecture="sm_90a",
+        steps_captured=4,
+        max_payload_bytes=very_tight,
+    )
+    assert len(min_capped["definitions"]) == 1
+    assert len(min_capped["workloads"]) == 1
+    assert min_capped["diagnostics"]["cuda_graph_hotspots"] == []
+    assert (
+        len(json.dumps(min_capped, separators=(",", ":")).encode("utf-8")) <= very_tight
+    )
+
+    # Full ProbeManager GET /gpustack/v1/probe envelope omits duplicate top-level diagnostics
+    # when payload is present and stays strictly <= PROBE_MAX_PAYLOAD_BYTES (524,288 bytes).
+    huge_events: list[dict[str, Any]] = []
+    for def_idx in range(16):
+        hidden = 2048 + def_idx * 128
+        for wl_idx in range(250):
+            huge_events.append(
+                {
+                    "name": "vllm::rms_norm",
+                    "dur": float(1000 - def_idx * 10 + (wl_idx % 5)),
+                    "input_dims": [[wl_idx + 1, hidden], [hidden]],
+                    "input_dtypes": ["bfloat16", "bfloat16"],
+                }
+            )
+    for hs_idx in range(32):
+        huge_events.append(
+            {
+                "name": f"{hs_idx:02d}_{long_kernel}",
+                "cat": "cuda_graph",
+                "dur": float(100 - hs_idx),
+            }
+        )
+    near_cap_payload = distill_trace_events(
+        huge_events,
+        engine="vllm",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        architecture="sm_90a",
+        steps_captured=4,
+        max_payload_bytes=PROBE_MAX_PAYLOAD_BYTES,
+    )
+
+    class _NearCapBackend(_MockProbeBackend):
+        async def start_probe(self, spec: dict[str, Any]) -> dict[str, Any]:
+            del spec
+            return {"status": "completed", "payload": near_cap_payload}
+
+    latch = BootLatch(require_ack=False)
+    mgr = ProbeManager(
+        backend=_NearCapBackend(complete_immediately=True),
+        latch=latch,
+        staging_root=tmp_path / "env_cap",
+        cooldown_seconds=0.0,
+        sweep_on_init=False,
+    )
+    _, idle_env = run_sync(mgr.get_probe())
+    assert "diagnostics" in idle_env
+    _, completed_env = run_sync(
+        mgr.start_probe({"expected_boot_id": latch.boot_id, "steps": 4})
+    )
+    assert completed_env["state"] == "completed"
+    assert "payload" in completed_env
+    assert "diagnostics" not in completed_env
+    assert "diagnostics" in completed_env["payload"]
+    serialized_env = json.dumps(completed_env, separators=(",", ":")).encode("utf-8")
+    assert len(serialized_env) <= PROBE_MAX_PAYLOAD_BYTES

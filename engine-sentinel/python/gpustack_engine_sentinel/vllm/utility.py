@@ -10,7 +10,10 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from gpustack_engine_sentinel.kernel_loader import get_process_kernel_report
+from gpustack_engine_sentinel.kernel_loader import (
+    aggregate_kernel_reports,
+    get_process_kernel_report,
+)
 from gpustack_engine_sentinel.probe import (
     directory_size_bytes,
     distill_trace_events,
@@ -477,9 +480,10 @@ def _extract_profiler_events(prof: Any, output_dir: Path) -> list[dict[str, Any]
                     }
                 )
 
-    trace_file = select_rank0_trace_file(output_dir)
-    if trace_file is not None:
-        events.extend(load_chrome_trace_events(trace_file))
+    if not events:
+        trace_file = select_rank0_trace_file(output_dir)
+        if trace_file is not None:
+            events.extend(load_chrome_trace_events(trace_file))
     return events
 
 
@@ -719,8 +723,16 @@ def vllm_worker_probe_abort(worker: Any, probe_id: str) -> dict[str, Any]:
 
 
 def vllm_worker_kernel_report(worker: Any) -> dict[str, Any]:
-    """Rank-0 GPU worker callback: report loaded forged kernel metadata if configured."""
-    del worker
+    """GPU worker callback: report loaded forged kernel metadata if configured."""
+    worker_report_fn = getattr(worker, "_gpustack_kernel_report", None)
+    if callable(worker_report_fn):
+        res = worker_report_fn()
+        if isinstance(res, dict):
+            return res
+    worker_reg = getattr(worker, "_gpustack_kernel_registry", None)
+    if worker_reg is not None and hasattr(worker_reg, "status"):
+        st = worker_reg.status
+        return st.to_report() if st.configured else {}
     return get_process_kernel_report(engine="vLLM")
 
 
@@ -784,23 +796,65 @@ def _dispatch_rank0_worker(engine_core: Any, fn: Any, *args: Any) -> dict[str, A
     }
 
 
+def _has_kernel_report_fields(report: Any) -> bool:
+    return isinstance(report, dict) and any(
+        k in report
+        for k in (
+            "loaded_kernel_keys",
+            "dispatch_manifest_digest",
+            "kernel_load_error",
+        )
+    )
+
+
 def _collect_rank_kernel_report(engine_core: Any) -> dict[str, Any]:
     local_report = get_process_kernel_report(engine="vLLM")
-    if local_report:
-        return local_report
+    reports: list[dict[str, Any]] = []
+    if _has_kernel_report_fields(local_report):
+        reports.append(local_report)
+
     model_executor = getattr(engine_core, "model_executor", None)
     if model_executor is not None:
-        res = _dispatch_rank0_worker(engine_core, vllm_worker_kernel_report)
-        if isinstance(res, dict) and any(
-            k in res
-            for k in (
-                "loaded_kernel_keys",
-                "dispatch_manifest_digest",
-                "kernel_load_error",
-            )
-        ):
-            return res
-    return {}
+        collective_rpc = getattr(model_executor, "collective_rpc", None)
+        if callable(collective_rpc):
+            raw_res: Any = None
+            try:
+                raw_res = collective_rpc(vllm_worker_kernel_report, args=())
+            except TypeError:
+                try:
+                    raw_res = collective_rpc(vllm_worker_kernel_report)
+                except Exception:
+                    raw_res = None
+            except Exception:
+                raw_res = None
+
+            if isinstance(raw_res, (list, tuple)):
+                for item in raw_res:
+                    if _has_kernel_report_fields(item):
+                        reports.append(item)
+            elif _has_kernel_report_fields(raw_res):
+                reports.append(raw_res)
+        elif _resolve_tp_size(engine_core) == 1:
+            for container in (model_executor, engine_core):
+                if container is None:
+                    continue
+                found_local = False
+                for attr in ("driver_worker", "worker"):
+                    worker = getattr(container, attr, None)
+                    if worker is not None and callable(
+                        getattr(worker, "execute_model", None)
+                    ):
+                        w_rep = vllm_worker_kernel_report(worker)
+                        if _has_kernel_report_fields(w_rep):
+                            reports.append(w_rep)
+                        found_local = True
+                        break
+                if found_local:
+                    break
+
+    if reports:
+        return aggregate_kernel_reports(reports)
+    return local_report
 
 
 def execute_engine_core_rpc(

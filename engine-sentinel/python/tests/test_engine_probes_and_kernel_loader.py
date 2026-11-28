@@ -1204,3 +1204,872 @@ def test_kernel_loader_inprocess_module_hooks_and_manifest_validation_edges(
     assert "rmsnorm" in s2._gpustack_kernel_overrides
     assert s3._gpustack_kernel_overrides == {}
     reset_process_kernel_registry()
+
+
+@pytest.mark.parametrize(
+    "manufacturer,want_arch,have_arch,expected",
+    [
+        ("nvidia", "sm_90", "sm_90a", True),
+        ("nvidia", "sm_90a", "sm_90", True),
+        ("nvidia", "sm_90a", "9.0", True),
+        ("nvidia", "9.0", "sm_90a", True),
+        ("nvidia", "compute_90a", "9.0", True),
+        ("nvidia", "sm_90a", "sm_90f", False),
+        ("nvidia", "sm_80", "sm_90", False),
+        ("amd", "gfx942:sramecc+:xnack-", "gfx942", True),
+        ("amd", "gfx942", "gfx942:sramecc+", True),
+        ("amd", "gfx942", "gfx90a", False),
+    ],
+)
+def test_kernel_loader_arch_compatible_parity_with_go_kernelkey(
+    tmp_path: Path,
+    manufacturer: str,
+    want_arch: str,
+    have_arch: str,
+    expected: bool,
+) -> None:
+    from gpustack_engine_sentinel.kernel_loader import arch_compatible
+
+    assert arch_compatible(manufacturer, want_arch, have_arch) is expected
+
+    bundle_dir = tmp_path / f"bundle_{manufacturer}_{want_arch.replace(':', '_')}"
+    good_key, _ = _write_sample_kernel_bundle(
+        bundle_dir,
+        engine="vLLM",
+        engine_version="0.8.5",
+        manufacturer=manufacturer,
+        architecture=want_arch,
+        include_mismatch=False,
+    )
+    status = load_kernel_dispatch_manifest(
+        bundle_dir,
+        engine="vLLM",
+        engine_version="0.8.5",
+        manufacturer=manufacturer,
+        architecture=have_arch,
+    )
+    if expected:
+        assert status.kernel_load_error is None
+        assert status.loaded_kernel_keys == [good_key]
+    else:
+        assert status.kernel_load_error == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+        assert status.loaded_kernel_keys == []
+
+
+def test_kernel_loader_binds_real_vllm_custom_op_and_sglang_layers_with_shape_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import ModuleType
+
+    from gpustack_engine_sentinel.kernel_loader import (
+        patch_sglang_layernorm_module,
+        patch_sglang_rotary_embedding_module,
+        patch_vllm_custom_op_module,
+    )
+
+    class _ShapeTensor:
+        def __init__(self, shape: tuple[int, ...], tag: str = "x") -> None:
+            self.shape = shape
+            self.ndim = len(shape)
+            self.tag = tag
+
+    # 1. Build vLLM bundle with rmsnorm (hidden_size=4096) and activation_quant (hidden_size=8192).
+    vllm_dir = tmp_path / "vllm_bind_bundle"
+    (vllm_dir / "kernels" / "rmsnorm").mkdir(parents=True)
+    (vllm_dir / "kernels" / "silu").mkdir(parents=True)
+    (vllm_dir / "kernels" / "rmsnorm" / "kernel.py").write_text(
+        "def run(x, weight, eps=1e-6):\n    return ('forged_vllm_rmsnorm', x.shape, weight.shape, eps)\n",
+        encoding="utf-8",
+    )
+    (vllm_dir / "kernels" / "silu" / "kernel.py").write_text(
+        "def run(x):\n    return ('forged_vllm_silu', x.shape)\n",
+        encoding="utf-8",
+    )
+    rms_key = format_local_kernel_key(
+        engine="vLLM",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        arch="sm_90a",
+        op_family="rmsnorm",
+        const_axes={"hidden_size": 4096},
+        input_dtypes=["bfloat16"],
+        output_dtypes=["bfloat16"],
+    )
+    silu_key = format_local_kernel_key(
+        engine="vLLM",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        arch="sm_90a",
+        op_family="activation_quant",
+        const_axes={"hidden_size": 8192},
+        input_dtypes=["bfloat16"],
+        output_dtypes=["bfloat16"],
+    )
+    (vllm_dir / "dispatch-manifest.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": DISPATCH_MANIFEST_SCHEMA_VERSION,
+                "compatibility": {
+                    "engine": "vLLM",
+                    "engineVersion": "0.8.5",
+                    "manufacturer": "nvidia",
+                    "architecture": "sm_90a",
+                },
+                "entries": [
+                    {
+                        "localKernelKey": rms_key,
+                        "definition": "rmsnorm_4096",
+                        "constAxes": {"hidden_size": 4096},
+                        "libraryPath": "kernels/rmsnorm/kernel.py",
+                        "entrypoint": "run",
+                    },
+                    {
+                        "localKernelKey": silu_key,
+                        "definition": "silu_and_mul_8192",
+                        "constAxes": {"hidden_size": 8192},
+                        "libraryPath": "kernels/silu/kernel.py",
+                        "entrypoint": "run",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv(ENV_KERNEL_ARTIFACT_DIR, str(vllm_dir))
+    monkeypatch.setenv("GPUSTACK_ENGINE_VERSION", "0.8.5")
+    monkeypatch.setenv("GPUSTACK_HARDWARE_MANUFACTURER", "nvidia")
+    monkeypatch.setenv("GPUSTACK_HARDWARE_ARCHITECTURE", "sm_90")
+    reset_process_kernel_registry()
+
+    # Realistic mock vllm.model_executor.custom_op module mirroring CustomOp.register + dispatch_forward.
+    custom_op_mod = ModuleType("vllm.model_executor.custom_op")
+    op_registry: dict[str, type[Any]] = {}
+
+    class CustomOp:
+        def __init__(self) -> None:
+            self._forward_method = self.dispatch_forward()
+
+        def dispatch_forward(self) -> Any:
+            return self.forward_cuda
+
+        def forward(self, *args: Any, **kwargs: Any) -> Any:
+            return self._forward_method(*args, **kwargs)
+
+        def forward_cuda(self, *args: Any, **kwargs: Any) -> Any:
+            raise NotImplementedError
+
+        def forward_native(self, *args: Any, **kwargs: Any) -> Any:
+            raise NotImplementedError
+
+        @classmethod
+        def register(cls, name: str) -> Any:
+            def decorator(op_cls: type[Any]) -> type[Any]:
+                op_cls.name = name
+                op_registry[name] = op_cls
+                return op_cls
+
+            return decorator
+
+    custom_op_mod.op_registry = op_registry  # type: ignore[attr-defined]
+    custom_op_mod.CustomOp = CustomOp  # type: ignore[attr-defined]
+    patch_vllm_custom_op_module(custom_op_mod)
+
+    @CustomOp.register("rms_norm")
+    class VLLMRMSNorm(CustomOp):
+        def __init__(self, hidden_size: int, eps: float = 1e-6) -> None:
+            self.hidden_size = hidden_size
+            self.variance_epsilon = eps
+            self.weight = _ShapeTensor((hidden_size,), "w")
+            super().__init__()
+
+        def forward_cuda(self, x: Any, residual: Any = None) -> Any:
+            return ("stock_vllm_rmsnorm", x.shape, residual is not None)
+
+        def forward_native(self, x: Any, residual: Any = None) -> Any:
+            return ("stock_vllm_rmsnorm_native", x.shape, residual is not None)
+
+    @CustomOp.register("silu_and_mul")
+    class VLLMSiluAndMul(CustomOp):
+        def forward_cuda(self, x: Any) -> Any:
+            return ("stock_vllm_silu_cuda", x.shape)
+
+        @staticmethod
+        def forward_native(x: Any) -> Any:
+            return ("stock_vllm_silu_native", x.shape)
+
+    rms_4096 = VLLMRMSNorm(4096, eps=1e-5)
+    assert rms_4096.forward(_ShapeTensor((16, 4096))) == (
+        "forged_vllm_rmsnorm",
+        (16, 4096),
+        (4096,),
+        1e-5,
+    )
+    # Mismatched dimension falls back cleanly to stock forward_cuda.
+    assert rms_4096.forward(_ShapeTensor((16, 2048))) == (
+        "stock_vllm_rmsnorm",
+        (16, 2048),
+        False,
+    )
+    # Fused residual path falls back cleanly when forged kernel only accepts (x, weight, eps).
+    assert rms_4096.forward(
+        _ShapeTensor((16, 4096)), residual=_ShapeTensor((16, 4096))
+    ) == ("stock_vllm_rmsnorm", (16, 4096), True)
+
+    silu = VLLMSiluAndMul()
+    assert silu.forward(_ShapeTensor((8, 8192))) == ("forged_vllm_silu", (8, 8192))
+    assert silu.forward(_ShapeTensor((8, 4096))) == ("stock_vllm_silu_cuda", (8, 4096))
+    assert VLLMSiluAndMul.forward_native(_ShapeTensor((8, 8192))) == (
+        "forged_vllm_silu",
+        (8, 8192),
+    )
+    assert VLLMSiluAndMul.forward_native(_ShapeTensor((8, 4096))) == (
+        "stock_vllm_silu_native",
+        (8, 4096),
+    )
+
+    # 2. Realistic mock SGLang layernorm (RMSNorm) and rotary_embedding (RotaryEmbedding).
+    sgl_dir = tmp_path / "sglang_bind_bundle"
+    (sgl_dir / "kernels" / "rmsnorm").mkdir(parents=True)
+    (sgl_dir / "kernels" / "rope").mkdir(parents=True)
+    (sgl_dir / "kernels" / "rmsnorm" / "kernel.py").write_text(
+        "def run(x, weight, eps=1e-6):\n    return ('forged_sglang_rmsnorm', x.shape, weight.shape)\n",
+        encoding="utf-8",
+    )
+    (sgl_dir / "kernels" / "rope" / "kernel.py").write_text(
+        "def run(positions, query, key=None):\n    return ('forged_sglang_rope', query.shape, key.shape if key else None)\n",
+        encoding="utf-8",
+    )
+    sgl_rms_key = format_local_kernel_key(
+        engine="SGLang",
+        engine_version="0.4.6",
+        manufacturer="nvidia",
+        arch="sm_90a",
+        op_family="rmsnorm",
+        const_axes={"hidden_size": 4096},
+        input_dtypes=["bfloat16"],
+        output_dtypes=["bfloat16"],
+    )
+    sgl_rope_key = format_local_kernel_key(
+        engine="SGLang",
+        engine_version="0.4.6",
+        manufacturer="nvidia",
+        arch="sm_90a",
+        op_family="rope_kv_append",
+        const_axes={"num_heads_local": 8, "head_dim": 128},
+        input_dtypes=["bfloat16"],
+        output_dtypes=["bfloat16"],
+    )
+    (sgl_dir / "dispatch-manifest.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": DISPATCH_MANIFEST_SCHEMA_VERSION,
+                "compatibility": {
+                    "engine": "SGLang",
+                    "engineVersion": "0.4.6",
+                    "manufacturer": "nvidia",
+                    "architecture": "sm_90a",
+                },
+                "entries": [
+                    {
+                        "localKernelKey": sgl_rms_key,
+                        "definition": "rmsnorm_4096",
+                        "constAxes": {"hidden_size": 4096},
+                        "libraryPath": "kernels/rmsnorm/kernel.py",
+                        "entrypoint": "run",
+                    },
+                    {
+                        "localKernelKey": sgl_rope_key,
+                        "definition": "rope_8x128",
+                        "constAxes": {"num_heads_local": 8, "head_dim": 128},
+                        "libraryPath": "kernels/rope/kernel.py",
+                        "entrypoint": "run",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv(ENV_KERNEL_ARTIFACT_DIR, str(sgl_dir))
+    monkeypatch.setenv("GPUSTACK_ENGINE_VERSION", "0.4.6")
+    reset_process_kernel_registry()
+
+    class SGLangRMSNorm:
+        def __init__(self, hidden_size: int, eps: float = 1e-6) -> None:
+            self.hidden_size = hidden_size
+            self.variance_epsilon = eps
+            self.weight = _ShapeTensor((hidden_size,), "w")
+
+        def forward_cuda(self, x: Any, residual: Any = None) -> Any:
+            return ("stock_sglang_rmsnorm", x.shape, residual is not None)
+
+        def forward(self, x: Any, residual: Any = None) -> Any:
+            return self.forward_cuda(x, residual)
+
+    class SGLangRotaryEmbedding:
+        def __init__(self, head_size: int) -> None:
+            self.head_size = head_size
+
+        def forward_cuda(self, positions: Any, query: Any, key: Any = None) -> Any:
+            return ("stock_sglang_rope", query.shape, key.shape if key else None)
+
+        def forward(self, positions: Any, query: Any, key: Any = None) -> Any:
+            return self.forward_cuda(positions, query, key)
+
+    sgl_ln_mod = ModuleType("sglang.srt.layers.layernorm")
+    sgl_ln_mod.RMSNorm = SGLangRMSNorm  # type: ignore[attr-defined]
+    sgl_rope_mod = ModuleType("sglang.srt.layers.rotary_embedding")
+    sgl_rope_mod.RotaryEmbedding = SGLangRotaryEmbedding  # type: ignore[attr-defined]
+
+    patch_sglang_layernorm_module(sgl_ln_mod)
+    patch_sglang_rotary_embedding_module(sgl_rope_mod)
+
+    sgl_rms = SGLangRMSNorm(4096)
+    assert sgl_rms.forward(_ShapeTensor((32, 4096))) == (
+        "forged_sglang_rmsnorm",
+        (32, 4096),
+        (4096,),
+    )
+    assert sgl_rms.forward(_ShapeTensor((32, 1024))) == (
+        "stock_sglang_rmsnorm",
+        (32, 1024),
+        False,
+    )
+
+    sgl_rope = SGLangRotaryEmbedding(head_size=128)
+    assert sgl_rope.forward(
+        _ShapeTensor((32,)),
+        _ShapeTensor((32, 8, 128)),
+        _ShapeTensor((32, 8, 128)),
+    ) == ("forged_sglang_rope", (32, 8, 128), (32, 8, 128))
+    # Mismatched head_dim/num_heads falls back to stock forward_cuda.
+    assert sgl_rope.forward(
+        _ShapeTensor((32,)),
+        _ShapeTensor((32, 4, 64)),
+        _ShapeTensor((32, 4, 64)),
+    ) == ("stock_sglang_rope", (32, 4, 64), (32, 4, 64))
+
+    # Zero eager ML imports throughout.
+    assert "torch" not in sys.modules
+    assert "triton" not in sys.modules
+    assert "flashinfer" not in sys.modules
+    reset_process_kernel_registry()
+
+
+def test_l3_mock_solutions_are_indexed_in_loaded_keys_but_non_dispatchable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import ModuleType
+
+    from gpustack_engine_sentinel.kernel_loader import (
+        get_process_kernel_registry,
+        patch_sglang_layernorm_module,
+        patch_vllm_custom_op_module,
+    )
+
+    mock_dir = tmp_path / "mock_bundle"
+    (mock_dir / "kernels" / "layernorm_mock_v1").mkdir(parents=True)
+    (mock_dir / "solutions").mkdir(parents=True)
+    (mock_dir / "kernels" / "layernorm_mock_v1" / "kernel.py").write_text(
+        "def run(x, weight=None, eps=1e-6):\n    return ('MOCK_BODY_MUST_NEVER_RUN', x)\n",
+        encoding="utf-8",
+    )
+    (mock_dir / "solutions" / "layernorm_mock_v1.json").write_text(
+        json.dumps({"name": "layernorm_mock_v1", "mock": True}),
+        encoding="utf-8",
+    )
+    ln_key = format_local_kernel_key(
+        engine="vLLM",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        arch="sm_90a",
+        op_family="layernorm",
+        const_axes={"hidden_size": 4096},
+        input_dtypes=["bfloat16"],
+        output_dtypes=["bfloat16"],
+    )
+    silu_key = format_local_kernel_key(
+        engine="vLLM",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        arch="sm_90a",
+        op_family="activation_quant",
+        const_axes={"hidden_size": 4096},
+        input_dtypes=["bfloat16"],
+        output_dtypes=["bfloat16"],
+    )
+    (mock_dir / "solutions" / "silu_plain.json").write_text(
+        json.dumps({"name": "silu_plain"}),
+        encoding="utf-8",
+    )
+    (mock_dir / "dispatch-manifest.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": DISPATCH_MANIFEST_SCHEMA_VERSION,
+                "compatibility": {
+                    "engine": "vLLM",
+                    "engineVersion": "0.8.5",
+                    "manufacturer": "nvidia",
+                    "architecture": "sm_90a",
+                },
+                "entries": [
+                    {
+                        "localKernelKey": ln_key,
+                        "definition": "layernorm_4096",
+                        "constAxes": {"hidden_size": 4096},
+                        "solutionPath": "solutions/layernorm_mock_v1.json",
+                        "libraryPath": "kernels/layernorm_mock_v1/kernel.py",
+                        "entrypoint": "run",
+                    },
+                    {
+                        "localKernelKey": silu_key,
+                        "definition": "silu_4096",
+                        "constAxes": {"hidden_size": 4096},
+                        "solutionPath": "solutions/silu_plain.json",
+                        "libraryPath": "kernels/layernorm_mock_v1/kernel.py",
+                        "entrypoint": "run",
+                        "mock": True,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv(ENV_KERNEL_ARTIFACT_DIR, str(mock_dir))
+    monkeypatch.setenv("GPUSTACK_ENGINE_VERSION", "0.8.5")
+    monkeypatch.setenv("GPUSTACK_HARDWARE_MANUFACTURER", "nvidia")
+    monkeypatch.setenv("GPUSTACK_HARDWARE_ARCHITECTURE", "sm_90a")
+    reset_process_kernel_registry()
+
+    status = load_kernel_dispatch_manifest(
+        mock_dir,
+        engine="vLLM",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        architecture="sm_90a",
+    )
+    assert status.kernel_load_error is None
+    assert sorted(status.loaded_kernel_keys) == sorted([ln_key, silu_key])
+    assert status.overrides[ln_key].dispatchable is False
+    assert status.overrides[silu_key].dispatchable is False
+
+    custom_op_mod = ModuleType("vllm.model_executor.custom_op")
+    registered: dict[str, Any] = {}
+    custom_op_mod.register_gpustack_override = lambda fam, ov: registered.setdefault(
+        fam, ov
+    )  # type: ignore[attr-defined]
+
+    class LayerNorm:
+        def __init__(self) -> None:
+            self.hidden_size = 4096
+            self.weight = SimpleNamespace(shape=(4096,))
+            self.bias = None
+
+        def forward_cuda(self, x: Any) -> Any:
+            return ("stock_layernorm", x.shape)
+
+    custom_op_mod.LayerNorm = LayerNorm  # type: ignore[attr-defined]
+    patch_vllm_custom_op_module(custom_op_mod)
+
+    reg = get_process_kernel_registry()
+    assert sorted(reg.status.loaded_kernel_keys) == sorted([ln_key, silu_key])
+    assert reg.get_override_for_family("layernorm") is None
+    assert reg.get_override_for_family("activation_quant") is None
+    assert registered == {}
+    assert sorted(custom_op_mod._gpustack_loaded_kernel_keys) == sorted(
+        [ln_key, silu_key]
+    )
+
+    ln = LayerNorm()
+    assert ln.forward_cuda(SimpleNamespace(shape=(8, 4096))) == (
+        "stock_layernorm",
+        (8, 4096),
+    )
+
+    sgl_mod = ModuleType("sglang.srt.layers.layernorm")
+    sgl_mod.LayerNorm = LayerNorm  # type: ignore[attr-defined]
+    patch_sglang_layernorm_module(sgl_mod)
+    assert ln.forward_cuda(SimpleNamespace(shape=(8, 4096))) == (
+        "stock_layernorm",
+        (8, 4096),
+    )
+    reset_process_kernel_registry()
+
+
+def test_l4_hooked_forward_catches_runtime_exception_disables_override_and_surfaces_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+    from types import ModuleType
+
+    from gpustack_engine_sentinel.kernel_loader import patch_vllm_custom_op_module
+
+    boom_dir = tmp_path / "boom_bundle"
+    (boom_dir / "kernels" / "rmsnorm").mkdir(parents=True)
+    call_counter_file = tmp_path / "boom_calls.txt"
+    (boom_dir / "kernels" / "rmsnorm" / "kernel.py").write_text(
+        f"_CALLS = 0\n"
+        f"def run(x, weight, eps=1e-6):\n"
+        f"    global _CALLS\n"
+        f"    _CALLS += 1\n"
+        f"    with open({str(call_counter_file)!r}, 'w', encoding='utf-8') as fh:\n"
+        f"        fh.write(str(_CALLS))\n"
+        f"    raise RuntimeError('dynamic num_tokens=1 kernel launch failed')\n",
+        encoding="utf-8",
+    )
+    rms_key = format_local_kernel_key(
+        engine="vLLM",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        arch="sm_90a",
+        op_family="rmsnorm",
+        const_axes={"hidden_size": 4096},
+        input_dtypes=["bfloat16"],
+        output_dtypes=["bfloat16"],
+    )
+    (boom_dir / "dispatch-manifest.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": DISPATCH_MANIFEST_SCHEMA_VERSION,
+                "compatibility": {
+                    "engine": "vLLM",
+                    "engineVersion": "0.8.5",
+                    "manufacturer": "nvidia",
+                    "architecture": "sm_90a",
+                },
+                "entries": [
+                    {
+                        "localKernelKey": rms_key,
+                        "definition": "rmsnorm_4096",
+                        "constAxes": {"hidden_size": 4096},
+                        "libraryPath": "kernels/rmsnorm/kernel.py",
+                        "entrypoint": "run",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv(ENV_KERNEL_ARTIFACT_DIR, str(boom_dir))
+    monkeypatch.setenv("GPUSTACK_ENGINE_VERSION", "0.8.5")
+    monkeypatch.setenv("GPUSTACK_HARDWARE_MANUFACTURER", "nvidia")
+    monkeypatch.setenv("GPUSTACK_HARDWARE_ARCHITECTURE", "sm_90a")
+    reset_process_kernel_registry()
+
+    attach_engine_core_utility(_FakeVLLMEngineCore)
+    core0 = _FakeVLLMEngineCore(0, model_executor=None, tp_size=1, dp_size=1)
+    ec = SimpleNamespace(engine_core=_FakeMPClient([core0]), errored=False)
+    backend = VLLMSentinelBackend()
+    backend.bind(ec, SimpleNamespace(), SimpleNamespace())
+    latch = BootLatch(require_ack=False)
+    app = FakeFastAPIApp()
+    plane = SentinelControlPlane(
+        backend=backend,
+        latch=latch,
+        probe_manager=ProbeManager(
+            backend=backend,
+            latch=latch,
+            staging_root=tmp_path / "p_l4",
+            sweep_on_init=False,
+        ),
+    )
+    ensure_outermost_sentinel_middleware(app, control_plane=plane)
+
+    # Initial /ready and /runtime_config succeed and populate cached summaries.
+    r_ready_init = run_sync(send_asgi_request(app, "GET", "/gpustack/v1/ready"))
+    assert r_ready_init.status_code == 200
+    assert r_ready_init.json()["ready"] is True
+    r_rc_init = run_sync(send_asgi_request(app, "GET", "/gpustack/v1/runtime_config"))
+    assert r_rc_init.status_code == 200
+    assert "kernel_load_error" not in r_rc_init.json()
+
+    custom_op_mod = ModuleType("vllm.model_executor.custom_op")
+
+    class RMSNorm:
+        def __init__(self) -> None:
+            self.hidden_size = 4096
+            self.variance_epsilon = 1e-6
+            self.weight = SimpleNamespace(shape=(4096,))
+
+        def forward_cuda(self, x: Any, residual: Any = None) -> Any:
+            return ("stock_rmsnorm_ok", x.shape, residual is not None)
+
+    custom_op_mod.RMSNorm = RMSNorm  # type: ignore[attr-defined]
+    patch_vllm_custom_op_module(custom_op_mod)
+
+    layer = RMSNorm()
+    with caplog.at_level(logging.WARNING):
+        out1 = layer.forward_cuda(SimpleNamespace(shape=(1, 4096)))
+        out2 = layer.forward_cuda(SimpleNamespace(shape=(1, 4096)))
+
+    assert out1 == ("stock_rmsnorm_ok", (1, 4096), False)
+    assert out2 == ("stock_rmsnorm_ok", (1, 4096), False)
+    assert int(call_counter_file.read_text("utf-8")) == 1
+    warn_msgs = [r for r in caplog.records if rms_key in r.getMessage()]
+    assert len(warn_msgs) == 1
+
+    # Both /ready and /runtime_config immediately surface kernel_load_error for automatic rollback!
+    r_ready_after = run_sync(send_asgi_request(app, "GET", "/gpustack/v1/ready"))
+    assert r_ready_after.status_code == 503
+    ready_json = r_ready_after.json()
+    assert ready_json["ready"] is False
+    assert ready_json["kernel_load_error"] == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+
+    r_rc_after = run_sync(send_asgi_request(app, "GET", "/gpustack/v1/runtime_config"))
+    assert r_rc_after.status_code == 200
+    rc_json = r_rc_after.json()
+    assert rc_json["ready"] is False
+    assert rc_json["kernel_load_error"] == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+    assert rc_json["ranks"][0]["kernel_load_error"] == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+
+    reset_process_kernel_registry()
+
+
+def test_profiler_events_no_double_count_when_key_averages_and_trace_file_both_exist(
+    tmp_path: Path,
+) -> None:
+    from gpustack_engine_sentinel.vllm.utility import _extract_profiler_events
+
+    trace_dir = tmp_path / "prof_out"
+    trace_dir.mkdir()
+    (trace_dir / "rank-0.trace.json").write_text(
+        json.dumps(
+            {
+                "traceEvents": [
+                    {
+                        "name": "vllm::rms_norm",
+                        "dur": 100.0,
+                        "args": {"Input Dims": [[16, 4096], [4096]]},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    prof_with_events = _FakeTorchProfiler(
+        [
+            SimpleNamespace(
+                key="vllm::rms_norm",
+                self_device_time_total=100.0,
+                input_shapes=[[16, 4096], [4096]],
+                input_dtypes=["bfloat16", "bfloat16"],
+                count=2,
+            )
+        ]
+    )
+    extracted = _extract_profiler_events(prof_with_events, trace_dir)
+    assert len(extracted) == 1
+    assert extracted[0]["dur"] == 100.0
+    assert extracted[0]["count"] == 2
+
+    # Fallback to trace file still works when profiler key_averages() is empty.
+    prof_empty = _FakeTorchProfiler([])
+    fallback = _extract_profiler_events(prof_empty, trace_dir)
+    assert len(fallback) == 1
+    assert fallback[0]["name"] == "vllm::rms_norm"
+
+
+def test_vllm_tp_multirank_surfaces_nonzero_worker_kernel_load_error_on_ready_and_runtime_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gpustack_engine_sentinel.kernel_loader import KernelDispatchRegistry
+
+    monkeypatch.delenv(ENV_KERNEL_ARTIFACT_DIR, raising=False)
+    reset_process_kernel_registry()
+
+    bundle_dir = tmp_path / "tp_bundle"
+    good_key, expected_digest = _write_sample_kernel_bundle(
+        bundle_dir, include_mismatch=False
+    )
+
+    # Simulate TP=2 where rank 0 loaded cleanly and rank 1 hit a runtime kernel_load_error.
+    reg_rank0 = KernelDispatchRegistry()
+    reg_rank0._status = load_kernel_dispatch_manifest(
+        bundle_dir,
+        engine="vLLM",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        architecture="sm_90a",
+    )
+    reg_rank1 = KernelDispatchRegistry()
+    reg_rank1._status = load_kernel_dispatch_manifest(
+        bundle_dir,
+        engine="vLLM",
+        engine_version="0.8.5",
+        manufacturer="nvidia",
+        architecture="sm_90a",
+    )
+    reg_rank1.record_runtime_error(good_key)
+
+    worker0 = _FakeGPUWorker([], rank=0)
+    worker0._gpustack_kernel_registry = reg_rank0  # type: ignore[attr-defined]
+    worker1 = _FakeGPUWorker([], rank=1)
+    worker1._gpustack_kernel_registry = reg_rank1  # type: ignore[attr-defined]
+
+    exec_tp2 = _FakeModelExecutor(worker0, worker1)
+    attach_engine_core_utility(_FakeVLLMEngineCore)
+    core0 = _FakeVLLMEngineCore(0, model_executor=exec_tp2, tp_size=2, dp_size=1)
+    ec = SimpleNamespace(engine_core=_FakeMPClient([core0]), errored=False)
+
+    backend = VLLMSentinelBackend()
+    backend.bind(ec, SimpleNamespace(), SimpleNamespace())
+    latch = BootLatch(require_ack=False)
+    app = FakeFastAPIApp()
+    plane = SentinelControlPlane(
+        backend=backend,
+        latch=latch,
+        probe_manager=ProbeManager(
+            backend=backend,
+            latch=latch,
+            staging_root=tmp_path / "p_tp2",
+            sweep_on_init=False,
+        ),
+    )
+    ensure_outermost_sentinel_middleware(app, control_plane=plane)
+
+    # Poll /gpustack/v1/ready FIRST (before /runtime_config): rank 1 error must already surface!
+    r_ready = run_sync(send_asgi_request(app, "GET", "/gpustack/v1/ready"))
+    assert r_ready.status_code == 503
+    ready_body = r_ready.json()
+    assert ready_body["ready"] is False
+    assert ready_body["kernel_load_error"] == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+    assert ready_body["dispatch_manifest_digest"] == expected_digest
+    assert any(
+        c["fn"] == "vllm_worker_kernel_report" and c["unique_reply_rank"] is None
+        for c in exec_tp2.collective_calls
+    )
+
+    # Poll /gpustack/v1/runtime_config: rank 1 error surfaces on rank receipt and top-level summary.
+    r_rc = run_sync(send_asgi_request(app, "GET", "/gpustack/v1/runtime_config"))
+    assert r_rc.status_code == 200
+    rc_body = r_rc.json()
+    assert rc_body["ready"] is False
+    assert rc_body["kernel_load_error"] == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+    assert rc_body["ranks"][0]["kernel_load_error"] == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+
+
+def test_sglang_ready_queries_scheduler_subprocesses_for_kernel_load_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gpustack_engine_sentinel.sglang.hooks import STATE_NAMESPACE_KEY
+
+    bundle_dir = tmp_path / "sglang_ready_bundle"
+    good_key, expected_digest = _write_sample_kernel_bundle(
+        bundle_dir,
+        engine="SGLang",
+        engine_version="0.4.6",
+        include_mismatch=False,
+    )
+
+    # Parent HTTP process sees a structurally valid manifest on disk with kernel_load_error=None.
+    monkeypatch.setenv(ENV_KERNEL_ARTIFACT_DIR, str(bundle_dir))
+    monkeypatch.setenv("GPUSTACK_ENGINE_VERSION", "0.4.6")
+    monkeypatch.setenv("GPUSTACK_HARDWARE_MANUFACTURER", "nvidia")
+    monkeypatch.setenv("GPUSTACK_HARDWARE_ARCHITECTURE", "sm_90a")
+    reset_process_kernel_registry()
+
+    class _FakeSchedulerTM:
+        def __init__(self, *, rank1_error: str | None, fail_rpc: bool = False) -> None:
+            self.is_pause = False
+            self.gracefully_exit = False
+            self.server_status = "Up"
+            self.rank1_error = rank1_error
+            self.fail_rpc = fail_rpc
+            self.internal_state_calls = 0
+
+        def is_ready(self) -> bool:
+            return True
+
+        async def get_internal_state(self) -> list[dict[str, Any]]:
+            self.internal_state_calls += 1
+            if self.fail_rpc:
+                raise RuntimeError("scheduler internal state temporarily unavailable")
+            rank0_state: dict[str, Any] = {
+                "rank_id": 0,
+                "boot_id": "sgl-boot-0",
+                "membership_epoch": 1,
+                "applied_digest": "",
+                "supported_fields": [],
+                "unsupported_fields": [],
+                "values": {},
+                "loaded_kernel_keys": [good_key],
+                "dispatch_manifest_digest": expected_digest,
+            }
+            rank1_state: dict[str, Any] = {
+                "rank_id": 1,
+                "boot_id": "sgl-boot-1",
+                "membership_epoch": 1,
+                "applied_digest": "",
+                "supported_fields": [],
+                "unsupported_fields": [],
+                "values": {},
+                "loaded_kernel_keys": [good_key],
+                "dispatch_manifest_digest": expected_digest,
+            }
+            if self.rank1_error:
+                rank1_state["kernel_load_error"] = self.rank1_error
+            return [
+                {STATE_NAMESPACE_KEY: rank0_state},
+                {STATE_NAMESPACE_KEY: rank1_state},
+            ]
+
+    try:
+        tm_err = _FakeSchedulerTM(rank1_error=UNSUPPORTED_KERNEL_ARTIFACT_ERROR)
+        backend_err = SGLangSentinelBackend(
+            SimpleNamespace(
+                get_global_state=lambda: SimpleNamespace(tokenizer_manager=tm_err)
+            )
+        )
+        latch_err = BootLatch(require_ack=False)
+        app_err = FakeFastAPIApp()
+        plane_err = SentinelControlPlane(
+            backend=backend_err,
+            latch=latch_err,
+            probe_manager=ProbeManager(
+                backend=backend_err,
+                latch=latch_err,
+                staging_root=tmp_path / "p_sgl_err",
+                sweep_on_init=False,
+            ),
+        )
+        ensure_outermost_sentinel_middleware(app_err, control_plane=plane_err)
+
+        # Poll /gpustack/v1/ready directly without calling /gpustack/v1/runtime_config first.
+        r_ready = run_sync(send_asgi_request(app_err, "GET", "/gpustack/v1/ready"))
+        assert r_ready.status_code == 503
+        ready_body = r_ready.json()
+        assert ready_body["ready"] is False
+        assert ready_body["reason"] == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+        assert ready_body["kernel_load_error"] == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+        assert ready_body["dispatch_manifest_digest"] == expected_digest
+        assert tm_err.internal_state_calls >= 1
+
+        # Transient get_internal_state failure falls back cleanly to local report without crashing /ready.
+        tm_transient = _FakeSchedulerTM(rank1_error=None, fail_rpc=True)
+        backend_ok = SGLangSentinelBackend(
+            SimpleNamespace(
+                get_global_state=lambda: SimpleNamespace(tokenizer_manager=tm_transient)
+            )
+        )
+        latch_ok = BootLatch(require_ack=False)
+        app_ok = FakeFastAPIApp()
+        plane_ok = SentinelControlPlane(
+            backend=backend_ok,
+            latch=latch_ok,
+            probe_manager=ProbeManager(
+                backend=backend_ok,
+                latch=latch_ok,
+                staging_root=tmp_path / "p_sgl_ok",
+                sweep_on_init=False,
+            ),
+        )
+        ensure_outermost_sentinel_middleware(app_ok, control_plane=plane_ok)
+        r_fallback = run_sync(send_asgi_request(app_ok, "GET", "/gpustack/v1/ready"))
+        assert r_fallback.status_code == 200
+        assert r_fallback.json()["ready"] is True
+    finally:
+        reset_process_kernel_registry()

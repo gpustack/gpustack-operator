@@ -49,10 +49,36 @@ class VLLMSentinelBackend:
         self._last_core_identities: tuple[Any, ...] | None = None
         self._last_kernel_summary: dict[str, Any] = {}
 
-    def get_kernel_summary(self) -> dict[str, Any]:
+    async def get_kernel_summary(self) -> dict[str, Any]:
+        local = get_process_kernel_report(engine="vLLM")
+        client = self._resolve_engine_client()
+        engine_core = getattr(client, "engine_core", None)
+        if _supports_async_mp_utility(engine_core):
+            try:
+                raw_results = await engine_core.call_utility_all_async(
+                    UTILITY_METHOD_NAME, {"op": "inspect"}
+                )
+                rank_reports = [
+                    self._extract_rank_kernel_fields(res)
+                    for res in raw_results or ()
+                    if isinstance(res, dict)
+                ]
+                rank_reports = [r for r in rank_reports if r]
+                if rank_reports:
+                    candidates = [*rank_reports, local] if local else list(rank_reports)
+                    merged = aggregate_kernel_reports(candidates)
+                    if merged:
+                        self._last_kernel_summary = dict(merged)
+                        return merged
+            except Exception:
+                pass
+
+        if self._last_kernel_summary and local:
+            merged = aggregate_kernel_reports([self._last_kernel_summary, local])
+            self._last_kernel_summary = dict(merged)
+            return merged
         if self._last_kernel_summary:
             return dict(self._last_kernel_summary)
-        local = get_process_kernel_report(engine="vLLM")
         if local:
             self._last_kernel_summary = dict(local)
         return local

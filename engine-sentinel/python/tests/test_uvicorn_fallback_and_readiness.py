@@ -383,3 +383,79 @@ def test_uvicorn_config_load_skips_wsgi_interface():
     cfg.load()
     assert cfg.loaded_app is wsgi_app
     assert not is_sentinel_installed(cfg.loaded_app)
+
+
+def test_ready_returns_503_when_kernel_load_error_is_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gpustack_engine_sentinel.kernel_loader import (
+        UNSUPPORTED_KERNEL_ARTIFACT_ERROR,
+        reset_process_kernel_registry,
+    )
+    from gpustack_engine_sentinel.latch import BootLatch
+    from gpustack_engine_sentinel.probe import ProbeManager
+    from gpustack_engine_sentinel.protocol import ENV_KERNEL_ARTIFACT_DIR
+    from gpustack_engine_sentinel.server import (
+        SentinelControlPlane,
+        ensure_outermost_sentinel_middleware,
+    )
+
+    class _HealthyBackend:
+        engine = "vllm"
+
+        async def check_live(self) -> tuple[bool, bool, str | None]:
+            return True, False, None
+
+        async def check_ready(self) -> tuple[bool, str | None]:
+            return True, None
+
+        async def get_runtime_config(self) -> dict[str, Any]:
+            return {
+                "membership_epoch": 1,
+                "supported_fields": [],
+                "unsupported_fields": [],
+                "boot_defaults": {},
+                "ranks": [],
+                "values": {},
+            }
+
+        async def apply_runtime_config(
+            self, request_data: dict[str, Any]
+        ) -> dict[str, Any]:
+            del request_data
+            return await self.get_runtime_config()
+
+    # Point GPUSTACK_KERNEL_ARTIFACT_DIR to a broken/missing directory -> unsupported_kernel_artifact.
+    missing_dir = tmp_path / "broken_kernel_artifact"
+    monkeypatch.setenv(ENV_KERNEL_ARTIFACT_DIR, str(missing_dir))
+    reset_process_kernel_registry()
+    try:
+        backend = _HealthyBackend()
+        latch = BootLatch(require_ack=False)
+        app = FakeFastAPIApp()
+        plane = SentinelControlPlane(
+            backend=backend,
+            latch=latch,
+            probe_manager=ProbeManager(
+                backend=backend,
+                latch=latch,
+                staging_root=tmp_path / "probe",
+                sweep_on_init=False,
+            ),
+        )
+        ensure_outermost_sentinel_middleware(app, control_plane=plane)
+
+        r_ready = run_sync(send_asgi_request(app, "GET", "/gpustack/v1/ready"))
+        assert r_ready.status_code == 503
+        ready_body = r_ready.json()
+        assert ready_body["ready"] is False
+        assert ready_body["reason"] == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+        assert ready_body["kernel_load_error"] == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+
+        r_rc = run_sync(send_asgi_request(app, "GET", "/gpustack/v1/runtime_config"))
+        assert r_rc.status_code == 200
+        rc_body = r_rc.json()
+        assert rc_body["ready"] is False
+        assert rc_body["kernel_load_error"] == UNSUPPORTED_KERNEL_ARTIFACT_ERROR
+    finally:
+        reset_process_kernel_registry()
