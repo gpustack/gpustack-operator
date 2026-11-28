@@ -163,7 +163,7 @@ resource "null_resource" "prepare" {
               list_probe = subprocess.run(['nebius', 'billing', 'v1alpha1', 'spot-price', 'list', '--help'], capture_output=True, text=True, timeout=20)
               has_cli = probe.returncode == 0 and '--aggregation-granularity' in probe.stdout and list_probe.returncode == 0 and '--all' in list_probe.stdout
               now = dt.datetime.now(dt.timezone.utc)
-              start = now - dt.timedelta(hours=6)
+              start = now - dt.timedelta(days=7)
               start_s, end_s = (x.isoformat(timespec='seconds').replace('+00:00', 'Z') for x in (start, now))
               current = cli('billing', 'v1alpha1', 'spot-price', 'list', '--all')['items'] if has_cli else rest('', {})
               for name, group in history_groups.items():
@@ -176,17 +176,17 @@ resource "null_resource" "prepare" {
                   if str(price.get('currency', '')).upper() != 'USD' or 'gpu' not in field(price, 'unit_title', 'unitTitle').lower():
                       raise ValueError('unexpected spot currency or unit for ' + name)
                   if has_cli:
-                      series = cli('billing', 'v1alpha1', 'spot-price', 'list-series', '--filters-sku-ids', sku, '--filters-start-time', start_s, '--filters-end-time', end_s, '--aggregation-granularity', 'granularity_minute_15', '--aggregation-method', 'method_last_price', '--all').get('items', [])
+                      series = cli('billing', 'v1alpha1', 'spot-price', 'list-series', '--filters-sku-ids', sku, '--filters-start-time', start_s, '--filters-end-time', end_s, '--aggregation-granularity', 'granularity_hour_1', '--aggregation-method', 'method_last_price', '--all').get('items', [])
                   else:
-                      series = rest('/list-series', {'filters.skuIds': sku, 'filters.startTime': start_s, 'filters.endTime': end_s, 'aggregation.granularity': 'GRANULARITY_MINUTE_15', 'aggregation.method': 'METHOD_LAST_PRICE'})
+                      series = rest('/list-series', {'filters.skuIds': sku, 'filters.startTime': start_s, 'filters.endTime': end_s, 'aggregation.granularity': 'GRANULARITY_HOUR_1', 'aggregation.method': 'METHOD_LAST_PRICE'})
                   series = [x for x in series if field(x, 'sku_id', 'skuId') == sku and x.get('region') == region and field(x, 'compute_instance', 'computeInstance').get('platform') == group['platform']]
                   if len(series) != 1 or str(series[0].get('currency', '')).upper() != 'USD' or 'gpu' not in field(series[0], 'unit_title', 'unitTitle').lower():
                       raise ValueError('missing or mismatched spot price series for ' + name)
                   points = sorted((timestamp(x['timestamp']), money(x['value'])) for x in series[0].get('points', []))
-                  if not points or points[0][0] > start + dt.timedelta(minutes=15) or points[-1][0] < now - dt.timedelta(minutes=15) or any(b[0] - a[0] > dt.timedelta(minutes=15) for a, b in zip(points, points[1:])):
-                      raise ValueError('incomplete six-hour spot price series for ' + name)
+                  if not points or points[0][0] > start + dt.timedelta(hours=1) or points[-1][0] < now - dt.timedelta(hours=1) or any(b[0] - a[0] > dt.timedelta(hours=1) for a, b in zip(points, points[1:])):
+                      raise ValueError('incomplete seven-day spot price series for ' + name)
                   high = max(money(price['value']), *(v for _, v in points))
-                  bid = (high * D('1.10')).quantize(D('.001'), rounding=decimal.ROUND_CEILING)
+                  bid = (high * D('1.50')).quantize(D('.001'), rounding=decimal.ROUND_CEILING)
                   if group.get('spot_price_ceiling') is not None:
                       cap = money(group['spot_price_ceiling']).quantize(D('.001'), rounding=decimal.ROUND_FLOOR)
                       if cap <= 0:
