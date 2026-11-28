@@ -391,6 +391,7 @@ class _WorkerProbeSession:
     started_monotonic: float
     orig_execute_model: Any
     steps_completed: int = 0
+    observed_tokens: int = 0
     status: str = "running"
     profiler: Any = None
     profiler_entered: bool = False
@@ -492,6 +493,94 @@ def _restore_worker_execute_model(worker: Any, session: _WorkerProbeSession) -> 
         worker.execute_model = session.orig_execute_model
 
 
+def _extract_worker_model_dims(worker: Any, observed_tokens: int) -> dict[str, Any]:
+    """Extract static per-GPU model dimensions from a vLLM worker for CUDA-graph fallback."""
+    vllm_cfg = getattr(worker, "vllm_config", None)
+    model_cfg = getattr(worker, "model_config", None) or getattr(
+        vllm_cfg, "model_config", None
+    )
+    parallel_cfg = getattr(worker, "parallel_config", None) or getattr(
+        vllm_cfg, "parallel_config", None
+    )
+    if model_cfg is None:
+        return {}
+
+    dims: dict[str, Any] = {"num_tokens": max(1, int(observed_tokens or 1))}
+    tp_size = 1
+    if parallel_cfg is not None:
+        raw_tp = getattr(parallel_cfg, "tensor_parallel_size", None)
+        if isinstance(raw_tp, int) and not isinstance(raw_tp, bool) and raw_tp > 0:
+            tp_size = raw_tp
+
+    def _call_or_attr(obj: Any, method_name: str, attr_name: str, *args: Any) -> int:
+        fn = getattr(obj, method_name, None)
+        if callable(fn):
+            try:
+                val = fn(*args)
+                if isinstance(val, int) and not isinstance(val, bool) and val > 0:
+                    return val
+            except Exception:
+                pass
+        val = getattr(obj, attr_name, None)
+        if isinstance(val, int) and not isinstance(val, bool) and val > 0:
+            return val
+        return 0
+
+    hidden = _call_or_attr(model_cfg, "get_hidden_size", "hidden_size")
+    if hidden > 0:
+        dims["hidden_size"] = hidden
+
+    head_dim = _call_or_attr(model_cfg, "get_head_size", "head_size")
+    if head_dim > 0:
+        dims["head_dim"] = head_dim
+
+    if parallel_cfg is not None:
+        num_heads = _call_or_attr(
+            model_cfg, "get_num_attention_heads", "num_attention_heads", parallel_cfg
+        )
+        if num_heads > 0:
+            dims["num_heads_local"] = num_heads
+
+    vocab = _call_or_attr(model_cfg, "get_vocab_size", "vocab_size")
+    if vocab > 0:
+        dims["vocab_size_local"] = max(1, vocab // tp_size)
+
+    hf_cfg = getattr(model_cfg, "hf_config", None)
+    if hf_cfg is not None:
+        inter = getattr(hf_cfg, "intermediate_size", None)
+        if isinstance(inter, int) and not isinstance(inter, bool) and inter > 0:
+            dims["intermediate_size_local"] = max(1, inter // tp_size)
+        for exp_attr in ("num_local_experts", "num_experts", "n_routed_experts"):
+            n_exp = getattr(hf_cfg, exp_attr, None)
+            if isinstance(n_exp, int) and not isinstance(n_exp, bool) and n_exp > 0:
+                dims["num_experts_local"] = n_exp
+                break
+
+    dtype = getattr(model_cfg, "dtype", None)
+    if dtype is not None:
+        dims["dtype"] = str(dtype)
+    return dims
+
+
+def _extract_scheduled_tokens(args: tuple[Any, ...], kwargs: dict[str, Any]) -> int:
+    sched_out = args[0] if args else kwargs.get("scheduler_output")
+    if sched_out is None:
+        return 0
+    total = getattr(sched_out, "total_num_scheduled_tokens", None)
+    if isinstance(total, int) and not isinstance(total, bool) and total > 0:
+        return total
+    per_req = getattr(sched_out, "num_scheduled_tokens", None)
+    if isinstance(per_req, dict):
+        s = sum(
+            v
+            for v in per_req.values()
+            if isinstance(v, int) and not isinstance(v, bool)
+        )
+        if s > 0:
+            return s
+    return 0
+
+
 def _finalize_worker_probe(
     worker: Any,
     session: _WorkerProbeSession,
@@ -523,6 +612,7 @@ def _finalize_worker_probe(
 
         events = _extract_profiler_events(session.profiler, session.output_dir)
         wall = max(0.0, time.monotonic() - session.started_monotonic)
+        model_dims = _extract_worker_model_dims(worker, session.observed_tokens)
         session.payload = distill_trace_events(
             events,
             engine="vLLM",
@@ -532,6 +622,7 @@ def _finalize_worker_probe(
             steps_captured=session.steps_completed,
             raw_bytes_staged=raw_bytes,
             wall_clock_seconds=wall,
+            model_dims=model_dims or None,
         )
         session.status = "completed"
     finally:
@@ -626,6 +717,9 @@ def vllm_worker_probe_start(worker: Any, spec: dict[str, Any]) -> dict[str, Any]
                 return orig_exec(*args, **kwargs)
 
         try:
+            sched_toks = _extract_scheduled_tokens(args, kwargs)
+            if sched_toks > session.observed_tokens:
+                session.observed_tokens = sched_toks
             result = orig_exec(*args, **kwargs)
         finally:
             if session.status == "running":

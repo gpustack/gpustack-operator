@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import stat
+import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -47,6 +48,9 @@ _DISPATCH_METHOD_NAMES: tuple[str, ...] = (
     "forward_native",
 )
 _DISPATCH_GUARD = threading.local()
+_REGISTERED_CUSTOM_OPS: dict[str, Any] = {}
+_CUSTOM_OP_LOCK = threading.Lock()
+_COMPILED_FALLBACK = object()
 
 
 @dataclass(frozen=True)
@@ -870,6 +874,285 @@ def _adapt_and_call_override(
     return True, fn(*args, **kwargs)
 
 
+def _get_torch_is_compiling() -> Callable[[], bool] | None:
+    """Return torch.compiler.is_compiling if torch is already imported, without importing torch."""
+    torch_mod = sys.modules.get("torch")
+    if torch_mod is None:
+        return None
+    compiler_mod = getattr(torch_mod, "compiler", None)
+    fn = getattr(compiler_mod, "is_compiling", None)
+    if callable(fn):
+        return fn
+    dynamo_mod = getattr(torch_mod, "_dynamo", None)
+    fn = getattr(dynamo_mod, "is_compiling", None)
+    return fn if callable(fn) else None
+
+
+def _ensure_torch_custom_op(
+    override: LoadedKernelOverride,
+    op_family: str,
+    target_name: str,
+) -> Callable[..., Any] | None:
+    """Register a Dynamo/fullgraph-safe torch.library.custom_op for a forged override."""
+    if op_family not in ("rmsnorm", "layernorm", "activation_quant"):
+        return None
+    torch_mod = sys.modules.get("torch")
+    if torch_mod is None:
+        return None
+    lib_mod = getattr(torch_mod, "library", None)
+    custom_op_fn = getattr(lib_mod, "custom_op", None)
+    if not callable(custom_op_fn):
+        return None
+
+    key_hash = hashlib.sha256(override.local_kernel_key.encode("utf-8")).hexdigest()[
+        :16
+    ]
+    op_short_name = f"{op_family}_{key_hash}"
+    qualname = f"gpustack_forged::{op_short_name}"
+
+    with _CUSTOM_OP_LOCK:
+        existing = _REGISTERED_CUSTOM_OPS.get(qualname)
+        if existing is not None:
+            return existing
+
+        loaded_holder: list[Callable[..., Any] | None] = []
+        failed_holder = [False]
+
+        def _get_callable() -> Callable[..., Any] | None:
+            if failed_holder[0]:
+                return None
+            registry = get_process_kernel_registry()
+            if registry.is_override_disabled(override.local_kernel_key):
+                failed_holder[0] = True
+                return None
+            if not loaded_holder:
+                try:
+                    loaded_holder.append(override.load_callable())
+                except Exception:
+                    failed_holder[0] = True
+                    if registry.record_runtime_error(
+                        override.local_kernel_key,
+                        UNSUPPORTED_KERNEL_ARTIFACT_ERROR,
+                    ):
+                        LOGGER.warning(
+                            "Failed lazily loading forged kernel %s for %s; falling back to stock op",
+                            override.local_kernel_key,
+                            target_name,
+                            exc_info=True,
+                        )
+                    return None
+            return loaded_holder[0]
+
+        def _record_failure() -> None:
+            failed_holder[0] = True
+            registry = get_process_kernel_registry()
+            if registry.record_runtime_error(
+                override.local_kernel_key,
+                UNSUPPORTED_KERNEL_ARTIFACT_ERROR,
+            ):
+                LOGGER.warning(
+                    "Forged kernel %s raised during compiled %s call; disabling override and falling back to stock op",
+                    override.local_kernel_key,
+                    target_name,
+                    exc_info=True,
+                )
+
+        try:
+            if op_family == "rmsnorm":
+
+                def _impl(x: Any, weight: Any, eps: float) -> Any:
+                    fn = _get_callable()
+                    if fn is not None:
+                        try:
+                            return fn(x, weight, eps)
+                        except Exception:
+                            _record_failure()
+                    xf = x.float()
+                    return (
+                        xf
+                        * torch_mod.rsqrt(xf.pow(2).mean(-1, keepdim=True) + float(eps))
+                        * weight.float()
+                    ).to(x.dtype)
+
+                op = custom_op_fn(
+                    qualname,
+                    _impl,
+                    mutates_args=(),
+                    schema="(Tensor x, Tensor weight, float eps) -> Tensor",
+                )
+
+                def _fake_rms(x: Any, weight: Any, eps: float) -> Any:
+                    del weight, eps
+                    return torch_mod.empty_like(x)
+
+                op.register_fake(_fake_rms)
+
+            elif op_family == "layernorm":
+
+                def _impl_ln(x: Any, weight: Any, bias: Any, eps: float) -> Any:
+                    fn = _get_callable()
+                    if fn is not None:
+                        try:
+                            return fn(x, weight, bias, eps)
+                        except Exception:
+                            _record_failure()
+                    return torch_mod.nn.functional.layer_norm(
+                        x, (x.shape[-1],), weight, bias, float(eps)
+                    )
+
+                op = custom_op_fn(
+                    qualname,
+                    _impl_ln,
+                    mutates_args=(),
+                    schema="(Tensor x, Tensor weight, Tensor? bias, float eps) -> Tensor",
+                )
+
+                def _fake_ln(x: Any, weight: Any, bias: Any, eps: float) -> Any:
+                    del weight, bias, eps
+                    return torch_mod.empty_like(x)
+
+                op.register_fake(_fake_ln)
+
+            else:
+
+                def _impl_act(x: Any) -> Any:
+                    fn = _get_callable()
+                    if fn is not None:
+                        try:
+                            return fn(x)
+                        except Exception:
+                            _record_failure()
+                    half = x.shape[-1] // 2
+                    if half == 0:
+                        return torch_mod.nn.functional.silu(x)
+                    return (
+                        torch_mod.nn.functional.silu(x[..., :half])
+                        * x[..., half : 2 * half]
+                    )
+
+                op = custom_op_fn(
+                    qualname,
+                    _impl_act,
+                    mutates_args=(),
+                    schema="(Tensor x) -> Tensor",
+                )
+
+                def _fake_act(x: Any) -> Any:
+                    half = x.shape[-1] // 2
+                    out_shape = (*x.shape[:-1], half if half > 0 else x.shape[-1])
+                    return torch_mod.empty(out_shape, device=x.device, dtype=x.dtype)
+
+                op.register_fake(_fake_act)
+
+        except Exception:
+            LOGGER.debug(
+                "Could not register torch custom_op for %s; compiled trace will use stock op",
+                qualname,
+                exc_info=True,
+            )
+            return None
+
+        _REGISTERED_CUSTOM_OPS[qualname] = op
+        return op
+
+
+def _build_compiled_dispatcher(
+    op_family: str,
+    overrides: list[LoadedKernelOverride],
+    target_name: str,
+) -> Callable[[Any, tuple[Any, ...], dict[str, Any]], Any] | None:
+    """Build a lock-free, Dynamo/fullgraph-safe dispatcher backed by torch.library.custom_op."""
+    entries: list[tuple[int | None, Callable[..., Any]]] = []
+    for ov in overrides:
+        if not ov.dispatchable:
+            continue
+        custom_op = _ensure_torch_custom_op(ov, op_family, target_name)
+        if custom_op is None:
+            continue
+        expected_dim = ov.const_axes.get("hidden_size")
+        entries.append((expected_dim, custom_op))
+
+    if not entries:
+        return None
+
+    op_entries = tuple(entries)
+
+    if op_family == "rmsnorm":
+
+        def _dispatch_rmsnorm(
+            instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+        ) -> Any:
+            x = None
+            if (
+                (len(args) == 1 and not kwargs)
+                or (len(args) == 2 and args[1] is None and not kwargs)
+                or (
+                    len(args) == 1
+                    and len(kwargs) == 1
+                    and "residual" in kwargs
+                    and kwargs.get("residual") is None
+                )
+            ):
+                x = args[0]
+            if x is None or instance is None:
+                return _COMPILED_FALLBACK
+            weight = getattr(instance, "weight", None)
+            if weight is None:
+                return _COMPILED_FALLBACK
+            eps = float(
+                getattr(instance, "variance_epsilon", getattr(instance, "eps", 1e-6))
+            )
+            last_dim = x.shape[-1]
+            for expected_dim, custom_op in op_entries:
+                if expected_dim is None or last_dim == expected_dim:
+                    return custom_op(x, weight, eps)
+            return _COMPILED_FALLBACK
+
+        return _dispatch_rmsnorm
+
+    if op_family == "layernorm":
+
+        def _dispatch_layernorm(
+            instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+        ) -> Any:
+            if len(args) != 1 or kwargs or instance is None:
+                return _COMPILED_FALLBACK
+            x = args[0]
+            weight = getattr(instance, "weight", None)
+            if weight is None:
+                return _COMPILED_FALLBACK
+            bias = getattr(instance, "bias", None)
+            eps = float(
+                getattr(instance, "eps", getattr(instance, "variance_epsilon", 1e-5))
+            )
+            last_dim = x.shape[-1]
+            for expected_dim, custom_op in op_entries:
+                if expected_dim is None or last_dim == expected_dim:
+                    return custom_op(x, weight, bias, eps)
+            return _COMPILED_FALLBACK
+
+        return _dispatch_layernorm
+
+    if op_family == "activation_quant":
+
+        def _dispatch_act(
+            instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+        ) -> Any:
+            del instance
+            if len(args) != 1 or kwargs:
+                return _COMPILED_FALLBACK
+            x = args[0]
+            last_dim = x.shape[-1]
+            for expected_dim, custom_op in op_entries:
+                if expected_dim is None or last_dim == expected_dim:
+                    return custom_op(x)
+            return _COMPILED_FALLBACK
+
+        return _dispatch_act
+
+    return None
+
+
 def _make_forged_method_wrapper(
     orig_fn: Callable[..., Any],
     *,
@@ -879,6 +1162,12 @@ def _make_forged_method_wrapper(
     target_name: str,
 ) -> Callable[..., Any]:
     loaded_cache: dict[str, tuple[Callable[..., Any], inspect.Signature] | None] = {}
+    is_compiling_fn = _get_torch_is_compiling()
+    compiled_dispatch = (
+        _build_compiled_dispatcher(op_family, overrides, target_name)
+        if is_compiling_fn is not None
+        else None
+    )
 
     def _try_dispatch(
         instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -944,6 +1233,12 @@ def _make_forged_method_wrapper(
 
         @wraps(orig_fn)
         def _static_wrapper(*args: Any, **kwargs: Any) -> Any:
+            if is_compiling_fn is not None and is_compiling_fn():
+                if compiled_dispatch is not None:
+                    res = compiled_dispatch(None, args, kwargs)
+                    if res is not _COMPILED_FALLBACK:
+                        return res
+                return orig_fn(*args, **kwargs)
             dispatched, result = _try_dispatch(None, args, kwargs)
             if dispatched:
                 return result
@@ -954,6 +1249,12 @@ def _make_forged_method_wrapper(
 
     @wraps(orig_fn)
     def _method_wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        if is_compiling_fn is not None and is_compiling_fn():
+            if compiled_dispatch is not None:
+                res = compiled_dispatch(self, args, kwargs)
+                if res is not _COMPILED_FALLBACK:
+                    return res
+            return orig_fn(self, *args, **kwargs)
         dispatched, result = _try_dispatch(self, args, kwargs)
         if dispatched:
             return result

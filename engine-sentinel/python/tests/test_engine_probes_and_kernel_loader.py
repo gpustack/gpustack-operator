@@ -2200,3 +2200,195 @@ def test_kernel_loader_major_minor_version_sharing_and_minor_or_prerelease_skip(
     assert on_090rc1.loaded_kernel_keys == []
     assert on_090rc1.skipped_kernel_keys == sorted([key_08, key_09])
     reset_process_kernel_registry()
+
+
+def test_kernel_loader_torch_compile_fullgraph_skips_locks_and_uses_custom_op(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    from gpustack_engine_sentinel import kernel_loader
+
+    reset_process_kernel_registry()
+    kernel_loader._REGISTERED_CUSTOM_OPS.clear()
+
+    bundle_dir = tmp_path / "compile_bundle"
+    key, _ = _write_sample_kernel_bundle(
+        bundle_dir,
+        engine="vLLM",
+        engine_version="0.32.0",
+        manufacturer="nvidia",
+        architecture="sm_90",
+        include_mismatch=False,
+    )
+    # Overwrite sample kernel with deterministic recognizable output.
+    manifest = json.loads((bundle_dir / "dispatch-manifest.json").read_text("utf-8"))
+    lib_rel = manifest["entries"][0]["libraryPath"]
+    (bundle_dir / lib_rel).write_text(
+        "def run(x, weight, eps=1e-6):\n    return ('forged_rmsnorm', x.shape, weight, eps)\n",
+        encoding="utf-8",
+    )
+
+    compiling = [True]
+    registered_schemas: dict[str, str] = {}
+
+    class _FakeCustomOpHandle:
+        def __init__(self, impl: Any) -> None:
+            self._impl = impl
+            self.fake_fn: Any = None
+
+        def register_fake(self, fn: Any) -> Any:
+            self.fake_fn = fn
+            return fn
+
+        def __call__(self, *args: Any) -> Any:
+            return ("custom_op", self._impl(*args))
+
+    def _fake_custom_op(
+        qualname: str,
+        fn: Any,
+        *,
+        mutates_args: tuple[str, ...] = (),
+        schema: str = "",
+    ) -> _FakeCustomOpHandle:
+        del mutates_args
+        registered_schemas[qualname] = schema
+        return _FakeCustomOpHandle(fn)
+
+    fake_torch = SimpleNamespace(
+        compiler=SimpleNamespace(is_compiling=lambda: compiling[0]),
+        library=SimpleNamespace(custom_op=_fake_custom_op),
+        empty_like=lambda x: ("fake", x.shape),
+    )
+
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setenv(ENV_KERNEL_ARTIFACT_DIR, str(bundle_dir))
+    monkeypatch.setenv("GPUSTACK_ENGINE_VERSION", "0.32.0")
+    monkeypatch.setenv("GPUSTACK_HARDWARE_MANUFACTURER", "nvidia")
+    monkeypatch.setenv("GPUSTACK_HARDWARE_ARCHITECTURE", "sm_90")
+
+    class _FakeRMSNorm:
+        def __init__(self) -> None:
+            self.weight = "w4096"
+            self.variance_epsilon = 1e-6
+            self.stock_calls = 0
+
+        def forward_cuda(self, x: Any, residual: Any = None) -> Any:
+            self.stock_calls += 1
+            return ("stock", x.shape, residual)
+
+    fake_mod = SimpleNamespace(RMSNorm=_FakeRMSNorm)
+
+    try:
+        status = kernel_loader.patch_vllm_layernorm_module(fake_mod)
+        assert key in status.loaded_kernel_keys
+        assert len(registered_schemas) == 1
+        assert next(iter(registered_schemas.values())) == (
+            "(Tensor x, Tensor weight, float eps) -> Tensor"
+        )
+
+        # Sabotage registry.is_override_disabled during compiling trace to prove
+        # the lock-based path is NEVER entered inside torch.compile(fullgraph=True).
+        reg = kernel_loader.get_process_kernel_registry()
+        orig_is_disabled = reg.is_override_disabled
+
+        def _forbid_lock(_k: str) -> bool:
+            raise AssertionError(
+                "lock-taking is_override_disabled must not run inside compile"
+            )
+
+        norm = _FakeRMSNorm()
+        t_match = SimpleNamespace(shape=(2, 4096))
+        t_other = SimpleNamespace(shape=(2, 128))
+
+        # 1. Under torch.compile with matching hidden_size=4096 and residual=None -> dispatches via custom_op.
+        # Note: custom_op impl itself executes at runtime (outside Dynamo), so keep orig_is_disabled during impl.
+        compiling[0] = True
+        res_match = norm.forward_cuda(t_match)
+        assert res_match == ("custom_op", ("forged_rmsnorm", (2, 4096), "w4096", 1e-6))
+        assert norm.stock_calls == 0
+
+        # 2. Under torch.compile with residual!=None or non-matching hidden_size -> falls back to stock without touching lock!
+        monkeypatch.setattr(reg, "is_override_disabled", _forbid_lock)
+        res_resid = norm.forward_cuda(t_match, "res_tensor")
+        assert res_resid == ("stock", (2, 4096), "res_tensor")
+        res_other = norm.forward_cuda(t_other)
+        assert res_other == ("stock", (2, 128), None)
+        assert norm.stock_calls == 2
+
+        # 3. Outside torch.compile (eager mode) -> uses normal runtime dispatch path.
+        monkeypatch.setattr(reg, "is_override_disabled", orig_is_disabled)
+        compiling[0] = False
+        res_eager = norm.forward_cuda(t_match)
+        assert res_eager == ("forged_rmsnorm", (2, 4096), "w4096", 1e-6)
+    finally:
+        kernel_loader._REGISTERED_CUSTOM_OPS.clear()
+        reset_process_kernel_registry()
+
+
+def test_sglang_collect_probe_waits_for_partial_trace_flush(tmp_path: Path) -> None:
+    import gzip
+
+    trace_dir = tmp_path / "sglang_probe_flush"
+    trace_dir.mkdir()
+
+    class _NoIsProfilingTM:
+        async def start_profile(self, **_kwargs: Any) -> None:
+            return None
+
+    backend = SGLangSentinelBackend(
+        SimpleNamespace(
+            get_global_state=lambda: SimpleNamespace(
+                tokenizer_manager=_NoIsProfilingTM()
+            )
+        )
+    )
+    start_res = run_sync(
+        backend.start_probe(
+            {
+                "probe_id": "p-flush",
+                "output_dir": str(trace_dir),
+                "steps": 4,
+                "engine_version": "0.5.22",
+                "manufacturer": "nvidia",
+                "architecture": "sm_90",
+            }
+        )
+    )
+    assert start_res["status"] == "running"
+
+    trace_path = trace_dir / "rank-TP-0.trace.json.gz"
+
+    # 1. Newly opened 0-byte trace file stays running and does NOT purge output_dir.
+    trace_path.write_bytes(b"")
+    r0 = run_sync(backend.collect_probe({"probe_id": "p-flush"}))
+    assert r0["status"] == "running"
+    assert trace_path.exists()
+
+    # 2. Truncated partial gzip payload stays running and does NOT purge output_dir.
+    full_gz = gzip.compress(
+        json.dumps(
+            {
+                "traceEvents": [
+                    {
+                        "name": "sglang::rms_norm",
+                        "dur": 250.0,
+                        "input_dims": [[4, 4096], [4096]],
+                        "input_dtypes": ["bfloat16", "bfloat16"],
+                    }
+                ]
+            }
+        ).encode("utf-8")
+    )
+    trace_path.write_bytes(full_gz[: max(1, len(full_gz) // 2)])
+    r1 = run_sync(backend.collect_probe({"probe_id": "p-flush"}))
+    assert r1["status"] == "running"
+    assert trace_path.exists()
+
+    # 3. Once full gzip trace finishes flushing, collect_probe completes and purges output_dir.
+    trace_path.write_bytes(full_gz)
+    r2 = run_sync(backend.collect_probe({"probe_id": "p-flush"}))
+    assert r2["status"] == "completed"
+    assert len(r2["payload"]["bottlenecks"]) == 1
+    assert r2["payload"]["bottlenecks"][0]["op_family"] == "rmsnorm"
+    assert not trace_dir.exists()

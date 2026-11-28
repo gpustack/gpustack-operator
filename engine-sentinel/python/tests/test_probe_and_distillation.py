@@ -1710,3 +1710,88 @@ def test_probe_budget_eviction_order_hotspot_cap_and_envelope_ceiling(
     assert "diagnostics" in completed_env["payload"]
     serialized_env = json.dumps(completed_env, separators=(",", ":")).encode("utf-8")
     assert len(serialized_env) <= PROBE_MAX_PAYLOAD_BYTES
+
+
+def test_cuda_graph_kernels_distill_with_model_dims_fallback() -> None:
+    """CUDA-graph-captured GPU kernels lacking aten input_dims distill via engine model_dims."""
+    events = [
+        {
+            "name": "cudaGraphLaunch",
+            "dur": 1887.8,
+            "input_dims": [],
+            "count": 4,
+        },
+        {
+            "name": "triton_red_fused_fused_add_rms_norm_2",
+            "dur": 314.7,
+            "input_dims": [],
+            "count": 144,
+        },
+        {
+            "name": "triton_poi_fused_mul_silu_slice_1",
+            "dur": 202.2,
+            "input_dims": [],
+            "count": 144,
+        },
+        {
+            "name": "void vllm::reshape_and_cache_flash_kernel<__nv_bfloat16>()",
+            "dur": 320.4,
+            "input_dims": [],
+            "count": 144,
+        },
+    ]
+    # Without model_dims, empty-shape CUDA-graph kernels remain hotspots only.
+    no_dims = distill_trace_events(
+        events,
+        engine="vLLM",
+        engine_version="0.32.0",
+        manufacturer="nvidia",
+        architecture="sm_90",
+        steps_captured=4,
+    )
+    assert no_dims["bottlenecks"] == []
+    assert len(no_dims["diagnostics"]["cuda_graph_hotspots"]) == 4
+
+    # With engine model_dims, all three non-GEMM kernel families distill while preserving hotspots.
+    with_dims = distill_trace_events(
+        events,
+        engine="vLLM",
+        engine_version="0.32.0",
+        manufacturer="nvidia",
+        architecture="sm_90",
+        steps_captured=4,
+        model_dims={
+            "num_tokens": 8,
+            "hidden_size": 4096,
+            "intermediate_size_local": 12288,
+            "num_heads_local": 32,
+            "head_dim": 128,
+            "dtype": "torch.bfloat16",
+        },
+    )
+    assert len(with_dims["diagnostics"]["cuda_graph_hotspots"]) == 4
+    by_op = {d["op_type"]: d for d in with_dims["definitions"]}
+    assert set(by_op.keys()) == {"rmsnorm", "activation_quant", "rope_kv_append"}
+    assert by_op["rmsnorm"]["axes"]["hidden_size"] == {"type": "const", "value": 4096}
+    assert by_op["activation_quant"]["axes"]["hidden_size"] == {
+        "type": "const",
+        "value": 24576,
+    }
+    assert by_op["activation_quant"]["axes"]["half_hidden_size"] == {
+        "type": "const",
+        "value": 12288,
+    }
+    assert by_op["rope_kv_append"]["axes"]["num_heads_local"] == {
+        "type": "const",
+        "value": 32,
+    }
+    assert by_op["rope_kv_append"]["axes"]["head_dim"] == {
+        "type": "const",
+        "value": 128,
+    }
+    assert all(w["axes"]["num_tokens"] == 8 for w in with_dims["workloads"])
+    assert [b["op_family"] for b in with_dims["bottlenecks"]] == [
+        "rope_kv_append",
+        "rmsnorm",
+        "activation_quant",
+    ]

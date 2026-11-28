@@ -520,6 +520,11 @@ func BuildSandboxPod(spec SandboxPodSpec) (*core.Pod, error) {
 				Env: []core.EnvVar{
 					{Name: envPythonPath, Value: SentinelMountPath},
 					{Name: envEngineSentinelEnable, Value: "0"},
+					{Name: "HOME", Value: "/tmp"},
+					{Name: "TMPDIR", Value: "/tmp"},
+					{Name: "TRITON_CACHE_DIR", Value: "/tmp/triton"},
+					{Name: "TORCHINDUCTOR_CACHE_DIR", Value: "/tmp/inductor"},
+					{Name: "XDG_CACHE_HOME", Value: "/tmp/cache"},
 				},
 				Resources:       *gpuResources.DeepCopy(),
 				SecurityContext: restrictedContainerSecurityContext(),

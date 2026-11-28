@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import inspect
+import json
 import logging
 import math
 import time
 import uuid
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -1255,6 +1258,54 @@ class SGLangSentinelBackend:
             "probe_id": str(spec["probe_id"]),
         }
 
+    @staticmethod
+    def _extract_sglang_model_dims(tm: Any) -> dict[str, Any]:
+        """Extract static per-GPU model dimensions from SGLang TokenizerManager for CUDA-graph fallback."""
+        model_cfg = getattr(tm, "model_config", None) if tm is not None else None
+        if model_cfg is None:
+            return {}
+        server_args = getattr(tm, "server_args", None)
+        tp_size = 1
+        if server_args is not None:
+            raw_tp = getattr(server_args, "tp_size", None)
+            if isinstance(raw_tp, int) and not isinstance(raw_tp, bool) and raw_tp > 0:
+                tp_size = raw_tp
+
+        dims: dict[str, Any] = {"num_tokens": 1}
+
+        def _pos(obj: Any, attr: str) -> int:
+            val = getattr(obj, attr, None)
+            if isinstance(val, int) and not isinstance(val, bool) and val > 0:
+                return val
+            return 0
+
+        hidden = _pos(model_cfg, "hidden_size")
+        if hidden > 0:
+            dims["hidden_size"] = hidden
+        head_dim = _pos(model_cfg, "head_dim")
+        if head_dim > 0:
+            dims["head_dim"] = head_dim
+        num_heads = _pos(model_cfg, "num_attention_heads")
+        if num_heads > 0:
+            dims["num_heads_local"] = max(1, num_heads // tp_size)
+        vocab = _pos(model_cfg, "vocab_size")
+        if vocab > 0:
+            dims["vocab_size_local"] = max(1, vocab // tp_size)
+        hf_cfg = getattr(model_cfg, "hf_config", None)
+        if hf_cfg is not None:
+            inter = _pos(hf_cfg, "intermediate_size")
+            if inter > 0:
+                dims["intermediate_size_local"] = max(1, inter // tp_size)
+            for exp_attr in ("num_local_experts", "num_experts", "n_routed_experts"):
+                n_exp = _pos(hf_cfg, exp_attr)
+                if n_exp > 0:
+                    dims["num_experts_local"] = n_exp
+                    break
+        dtype = getattr(model_cfg, "dtype", None)
+        if dtype is not None:
+            dims["dtype"] = str(dtype)
+        return dims
+
     async def collect_probe(self, spec: dict[str, Any]) -> dict[str, Any]:
         probe_id = str(spec.get("probe_id") or "")
         active = self._active_probe
@@ -1309,6 +1360,13 @@ class SGLangSentinelBackend:
             return {"ok": True, "status": "running", "probe_id": probe_id}
 
         try:
+            if trace_file.stat().st_size == 0:
+                return {"ok": True, "status": "running", "probe_id": probe_id}
+        except OSError:
+            return {"ok": True, "status": "running", "probe_id": probe_id}
+
+        try:
+            model_dims = self._extract_sglang_model_dims(tm)
             payload = distill_probe_directory(
                 output_dir,
                 engine="SGLang",
@@ -1317,17 +1375,27 @@ class SGLangSentinelBackend:
                 architecture=active["architecture"],
                 steps_captured=active["steps"],
                 wall_clock_seconds=elapsed,
+                model_dims=model_dims or None,
             )
-            return {
-                "ok": True,
-                "status": "completed",
-                "probe_id": probe_id,
-                "payload": payload,
-            }
-        finally:
-            # Always delete ALL TP ranks' trace files immediately after distilling TP rank 0.
+        except (json.JSONDecodeError, EOFError, gzip.BadGzipFile, zlib.error, OSError):
+            # SGLang 0.5.x may open and flush/gzip the rank-0 trace over several seconds without
+            # exposing TokenizerManager.is_profiling; keep polling without purging until complete
+            # or wall_cap expires.
+            return {"ok": True, "status": "running", "probe_id": probe_id}
+        except Exception:
             purge_probe_dir(output_dir)
             self._active_probe = None
+            raise
+
+        # Always delete ALL TP ranks' trace files immediately after distilling TP rank 0.
+        purge_probe_dir(output_dir)
+        self._active_probe = None
+        return {
+            "ok": True,
+            "status": "completed",
+            "probe_id": probe_id,
+            "payload": payload,
+        }
 
     async def abort_probe(self, spec: dict[str, Any]) -> dict[str, Any]:
         probe_id = str(spec.get("probe_id") or "")

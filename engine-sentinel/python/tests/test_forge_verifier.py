@@ -2865,3 +2865,130 @@ def test_forge_verifier_major_minor_engine_version_compatibility(
             executor=_pass_exec,
         )
         assert res_bad.overall_status == "FAILED", case_name
+
+
+def test_forge_verifier_sorted_json_inputs_writable_cache_and_cuda_event_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gpustack_engine_sentinel.forge_verifier import (
+        _build_isolated_child_env,
+        _generate_synthetic_inputs,
+        _make_call_timer,
+        _resolve_trusted_reference_callable,
+    )
+
+    # 1. Alphabetically-sorted Go JSON map keys still map to canonical reference argument order.
+    class _ShapeTorch:
+        bfloat16 = "bfloat16"
+        float32 = "float32"
+
+        @staticmethod
+        def randn(
+            shape: list[int], device: str = "cpu", dtype: str = "float32"
+        ) -> tuple[tuple[int, ...], str, str]:
+            return (tuple(shape), device, dtype)
+
+        @staticmethod
+        def zeros(
+            shape: list[int], device: str = "cpu", dtype: str = "float32"
+        ) -> tuple[tuple[int, ...], str, str]:
+            return (tuple(shape), device, dtype)
+
+    rmsnorm_def = {
+        "axes": {
+            "hidden_size": {"type": "const", "value": 4096},
+            "num_tokens": {"type": "var"},
+        },
+        "inputs": {
+            "weight": {"shape": ["hidden_size"], "dtype": "bfloat16"},
+            "x": {"shape": ["num_tokens", "hidden_size"], "dtype": "bfloat16"},
+        },
+    }
+    rms_ref = _resolve_trusted_reference_callable(_ShapeTorch, "rmsnorm", rmsnorm_def)
+    rms_inputs = _generate_synthetic_inputs(
+        _ShapeTorch, rmsnorm_def, [{"axes": {"num_tokens": 4}}], "cpu", ref_fn=rms_ref
+    )[0]
+    assert [t[0] for t in rms_inputs] == [(4, 4096), (4096,)]
+
+    rope_def = {
+        "axes": {
+            "head_dim": {"type": "const", "value": 128},
+            "num_heads_local": {"type": "const", "value": 32},
+            "num_tokens": {"type": "var"},
+        },
+        "inputs": {
+            "cos": {"shape": ["num_tokens", "head_dim"], "dtype": "bfloat16"},
+            "k": {
+                "shape": ["num_tokens", "num_heads_local", "head_dim"],
+                "dtype": "bfloat16",
+            },
+            "q": {
+                "shape": ["num_tokens", "num_heads_local", "head_dim"],
+                "dtype": "bfloat16",
+            },
+            "sin": {"shape": ["num_tokens", "head_dim"], "dtype": "bfloat16"},
+        },
+    }
+    rope_ref = _resolve_trusted_reference_callable(
+        _ShapeTorch, "rope_kv_append", rope_def
+    )
+    rope_inputs = _generate_synthetic_inputs(
+        _ShapeTorch, rope_def, [{"axes": {"num_tokens": 2}}], "cpu", ref_fn=rope_ref
+    )[0]
+    assert [t[0] for t in rope_inputs] == [
+        (2, 32, 128),
+        (2, 32, 128),
+        (2, 128),
+        (2, 128),
+    ]
+
+    # 2. Unwritable HOME=/ is overridden with a writable cache root for Triton/Inductor.
+    monkeypatch.setenv("HOME", "/")
+    env_auto = _build_isolated_child_env()
+    assert env_auto["HOME"] != "/"
+    assert env_auto["TRITON_CACHE_DIR"].startswith(env_auto["HOME"])
+    assert env_auto["TORCHINDUCTOR_CACHE_DIR"].startswith(env_auto["HOME"])
+    assert env_auto["XDG_CACHE_HOME"].startswith(env_auto["HOME"])
+
+    explicit_cache = tmp_path / "child_cache"
+    env_explicit = _build_isolated_child_env(cache_root=explicit_cache)
+    assert env_explicit["HOME"] == str(explicit_cache)
+    assert env_explicit["TRITON_CACHE_DIR"] == str(explicit_cache / "triton")
+
+    # 3. CUDA timer records end event before synchronizing (no host sync inside timed window).
+    trace: list[str] = []
+
+    class _FakeEvent:
+        def __init__(self, enable_timing: bool = False) -> None:
+            del enable_timing
+            self.tag = "start" if len(trace) == 0 else "end"
+
+        def record(self) -> None:
+            trace.append(f"record:{self.tag}")
+
+        def synchronize(self) -> None:
+            trace.append(f"sync:{self.tag}")
+
+        def elapsed_time(self, other: _FakeEvent) -> float:
+            del other
+            return 0.015
+
+    class _FakeCuda:
+        Event = _FakeEvent
+
+        @staticmethod
+        def synchronize() -> None:
+            trace.append("cuda_sync")
+
+    class _FakeTorch:
+        cuda = _FakeCuda
+
+    timer = _make_call_timer(_FakeTorch, "cuda")
+    # Distinguish start vs end event tags cleanly.
+    trace.clear()
+    ms, out = timer(lambda x: (trace.append("fn"), x + 1)[1], [41])
+    assert out == 42
+    assert ms == pytest.approx(0.015)
+    assert trace.index("fn") < trace.index("sync:start")
+    assert trace.count("cuda_sync") == 1
+    assert trace[0] == "cuda_sync"

@@ -840,7 +840,19 @@ def _compare_outputs(
     return all_ok, cur_abs, cur_rel
 
 
-def _build_isolated_child_env() -> dict[str, str]:
+def _is_writable_dir(path_str: str | None) -> bool:
+    if not path_str:
+        return False
+    p = Path(path_str)
+    if str(p) == "/":
+        return False
+    try:
+        return p.is_dir() and os.access(p, os.W_OK | os.X_OK)
+    except OSError:
+        return False
+
+
+def _build_isolated_child_env(cache_root: Path | None = None) -> dict[str, str]:
     """Build sanitized subprocess environment excluding report/verified paths."""
     child_env: dict[str, str] = {}
     for key, val in os.environ.items():
@@ -855,7 +867,42 @@ def _build_isolated_child_env() -> dict[str, str]:
     if pkg_root not in parts:
         parts.append(pkg_root)
     child_env["PYTHONPATH"] = os.pathsep.join(parts)
+
+    # Non-root containers (e.g., UID 65532) default to HOME=/, causing Triton/Inductor
+    # JIT compilation to fail with PermissionError on /.triton. Ensure writable cache dirs.
+    base_cache = cache_root
+    if base_cache is None and not _is_writable_dir(child_env.get("HOME")):
+        base_cache = Path(tempfile.gettempdir())
+    if base_cache is not None:
+        child_env["HOME"] = str(base_cache)
+        child_env.setdefault("TMPDIR", str(base_cache))
+        child_env["TRITON_CACHE_DIR"] = str(base_cache / "triton")
+        child_env["TORCHINDUCTOR_CACHE_DIR"] = str(base_cache / "inductor")
+        child_env["XDG_CACHE_HOME"] = str(base_cache / "xdg-cache")
     return child_env
+
+
+def _ordered_input_names(
+    inputs_def: dict[str, Any],
+    ref_fn: Callable[..., Any] | None = None,
+) -> list[str]:
+    """Order definition input keys by canonical reference parameter order.
+
+    Go's encoding/json sorts map[string]TensorSpec keys alphabetically, which would
+    otherwise scramble positional arguments like (x, weight) into (weight, x).
+    """
+    if ref_fn is not None:
+        try:
+            sig = inspect.signature(ref_fn)
+            sig_names = [
+                p.name for p in sig.parameters.values() if p.name in inputs_def
+            ]
+            if sig_names:
+                remaining = [k for k in inputs_def if k not in sig_names]
+                return sig_names + remaining
+        except (TypeError, ValueError):
+            pass
+    return list(inputs_def.keys())
 
 
 def _generate_synthetic_inputs(
@@ -863,6 +910,8 @@ def _generate_synthetic_inputs(
     definition: dict[str, Any],
     workloads: list[dict[str, Any]],
     device: str,
+    *,
+    ref_fn: Callable[..., Any] | None = None,
 ) -> list[list[Any]]:
     dtype_map = {
         "float16": getattr(torch_mod, "float16", "float16"),
@@ -875,6 +924,7 @@ def _generate_synthetic_inputs(
     }
     axes_def = definition.get("axes") or {}
     inputs_def = definition.get("inputs") or {}
+    ordered_names = _ordered_input_names(inputs_def, ref_fn)
     active_workloads = workloads or [{"axes": {}}]
 
     all_inputs: list[list[Any]] = []
@@ -887,7 +937,8 @@ def _generate_synthetic_inputs(
             axis_vals[ax_name] = int(val)
 
         tensors: list[Any] = []
-        for in_spec in inputs_def.values():
+        for in_name in ordered_names:
+            in_spec = inputs_def[in_name]
             shape = [
                 int(axis_vals.get(d, 1)) if isinstance(d, str) else int(d)
                 for d in in_spec.get("shape", ())
@@ -925,7 +976,6 @@ def _make_call_timer(
             cuda_sync()
             rec_start()
             out = fn(*args)
-            cuda_sync()
             rec_end()
             sync_end()
             return float(elapsed_fn(end_ev)), out
@@ -950,6 +1000,7 @@ def _run_isolated_candidate_subprocess(
     entrypoint: str,
     num_workloads: int,
     child_cwd: Path,
+    child_cache_dir: Path | None = None,
     warmup_iters: int,
     bench_iters: int,
     prepare_warmup_step: Callable[[int, int], tuple[Path, Callable[[], None]]],
@@ -961,7 +1012,7 @@ def _run_isolated_candidate_subprocess(
     timeout_seconds: float = DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
 ) -> tuple[list[list[float]], list[list[float]]]:
     """Run candidate callable in an isolated session with stdout=/dev/null and SIGKILL cleanup."""
-    child_env = _build_isolated_child_env()
+    child_env = _build_isolated_child_env(cache_root=child_cache_dir)
     perf_counter = time.perf_counter
     deadline = time.monotonic() + float(timeout_seconds)
 
@@ -1177,8 +1228,15 @@ def _run_isolated_candidate_subprocess(
             )
         return ref_samples_by_wl, cand_samples_by_wl
     except Exception as exc:
+        if cmd_w_open:
+            with contextlib.suppress(OSError):
+                os.close(cmd_w)
+            cmd_w_open = False
         if proc is not None and proc.stderr is not None and not stderr_bytes:
             with contextlib.suppress(Exception):
+                if proc.poll() is None:
+                    with contextlib.suppress(subprocess.TimeoutExpired):
+                        proc.wait(timeout=2.0)
                 if proc.poll() is not None:
                     stderr_bytes = proc.stderr.read()
         detail = stderr_bytes.decode("utf-8", errors="replace").strip()
@@ -1232,7 +1290,12 @@ def _resolve_trusted_reference_callable(
         and "top_k" in inspect.signature(raw_fn).parameters
     ):
         top_k_val = int(top_k_spec["value"])
-        return lambda *args: raw_fn(*args, top_k=top_k_val)
+
+        def _bound_ref(*args: Any) -> Any:
+            return raw_fn(*args, top_k=top_k_val)
+
+        _bound_ref.__wrapped__ = raw_fn  # type: ignore[attr-defined]
+        return _bound_ref
     return raw_fn
 
 
@@ -1283,8 +1346,10 @@ def _evaluate_entry_with_isolated_candidate(
         tmp_root = Path(tmp_dir_str)
         io_dir = tmp_root / "io"
         child_cwd = tmp_root / "cwd"
+        child_cache = tmp_root / "cache"
         io_dir.mkdir(mode=0o700)
         child_cwd.mkdir(mode=0o700)
+        child_cache.mkdir(mode=0o700)
 
         captured_bench_checks: dict[int, tuple[Path, list[Any]]] = {}
         unseen_verify_checks: dict[int, tuple[Path, list[Any]]] = {}
@@ -1293,7 +1358,7 @@ def _evaluate_entry_with_isolated_candidate(
             wl_idx: int, w_iter: int
         ) -> tuple[Path, Callable[[], None]]:
             warm_in = _generate_synthetic_inputs(
-                torch, definition, [effective_workloads[wl_idx]], device
+                torch, definition, [effective_workloads[wl_idx]], device, ref_fn=ref_fn
             )[0]
             warm_path = io_dir / f"workload_{wl_idx}_warm_{w_iter}_in.bin"
             _save_tensor_payload(torch, warm_in, warm_path)
@@ -1312,7 +1377,9 @@ def _evaluate_entry_with_isolated_candidate(
             bench_inputs: list[list[Any]] = []
             bench_paths: list[Path] = []
             for b_iter in range(bench_iters):
-                b_in = _generate_synthetic_inputs(torch, definition, wl_spec, device)[0]
+                b_in = _generate_synthetic_inputs(
+                    torch, definition, wl_spec, device, ref_fn=ref_fn
+                )[0]
                 b_path = io_dir / f"workload_{wl_idx}_bench_{attempt}_{b_iter}_in.bin"
                 _save_tensor_payload(torch, b_in, b_path)
                 bench_inputs.append(b_in)
@@ -1330,7 +1397,7 @@ def _evaluate_entry_with_isolated_candidate(
 
         def _prepare_post_bench_verify(wl_idx: int) -> tuple[Path, Path]:
             unseen_in = _generate_synthetic_inputs(
-                torch, definition, [effective_workloads[wl_idx]], device
+                torch, definition, [effective_workloads[wl_idx]], device, ref_fn=ref_fn
             )[0]
             in_path = io_dir / f"workload_{wl_idx}_unseen_in.bin"
             out_path = io_dir / f"workload_{wl_idx}_unseen_out.bin"
@@ -1343,6 +1410,7 @@ def _evaluate_entry_with_isolated_candidate(
             entrypoint=entrypoint,
             num_workloads=len(effective_workloads),
             child_cwd=child_cwd,
+            child_cache_dir=child_cache,
             warmup_iters=warmup_iters,
             bench_iters=bench_iters,
             prepare_warmup_step=_prepare_warmup_step,

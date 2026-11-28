@@ -157,6 +157,8 @@ _OP_FAMILY_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "activation_quant",
             "silu_and_mul",
+            "mul_silu",
+            "silu_mul",
             "gelu_and_mul",
             "swiglu",
             "scaled_fp8_quant",
@@ -985,6 +987,7 @@ def _normalize_trace_event(raw: dict[str, Any]) -> dict[str, Any] | None:
     output_dtypes = _normalize_dtypes(
         raw_out_dtypes if isinstance(raw_out_dtypes, list) else []
     )
+    has_explicit_dtypes = bool(input_dtypes)
     if not output_dtypes and input_dtypes:
         output_dtypes = [input_dtypes[0]]
     if not input_dtypes:
@@ -1014,6 +1017,7 @@ def _normalize_trace_event(raw: dict[str, Any]) -> dict[str, Any] | None:
         "input_dims": input_dims,
         "input_dtypes": input_dtypes,
         "output_dtypes": output_dtypes,
+        "has_explicit_dtypes": has_explicit_dtypes,
         "call_count": call_count,
         "is_cuda_graph": is_cuda_graph,
         "constants": constants,
@@ -1134,6 +1138,70 @@ def _enforce_payload_budget(
     return payload
 
 
+def _positive_int(val: Any) -> int:
+    if isinstance(val, bool):
+        return 0
+    try:
+        n = int(val)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, n)
+
+
+def _synthesize_input_dims_from_model_dims(
+    op_family: str,
+    model_dims: dict[str, Any] | None,
+) -> tuple[list[list[int]], list[str]]:
+    """Derive static per-GPU tensor dims for CUDA-graph GPU kernels using engine model_config."""
+    if not isinstance(model_dims, dict) or not model_dims:
+        return [], []
+    num_tokens = max(1, _positive_int(model_dims.get("num_tokens")))
+    raw_dtype = model_dims.get("dtype")
+    dtypes = _normalize_dtypes([raw_dtype]) if raw_dtype else []
+
+    hidden_size = _positive_int(model_dims.get("hidden_size"))
+    intermediate_local = _positive_int(model_dims.get("intermediate_size_local"))
+    head_dim = _positive_int(model_dims.get("head_dim"))
+    num_heads_local = _positive_int(model_dims.get("num_heads_local"))
+    num_experts_local = _positive_int(model_dims.get("num_experts_local"))
+    vocab_size_local = _positive_int(model_dims.get("vocab_size_local"))
+
+    if op_family in (
+        "rmsnorm",
+        "layernorm",
+        "moe_permute_unpermute",
+        "custom_elementwise_fusion",
+    ):
+        if hidden_size > 0:
+            return [[num_tokens, hidden_size]], dtypes
+        return [], []
+    if op_family == "activation_quant":
+        act_width = intermediate_local * 2 if intermediate_local > 0 else hidden_size
+        if act_width > 0:
+            return [[num_tokens, act_width]], dtypes
+        return [], []
+    if op_family in (
+        "rope_kv_append",
+        "paged_attention",
+        "ragged_prefill_attention",
+        "mla_local",
+    ):
+        if head_dim > 0:
+            if num_heads_local > 0:
+                return [[num_tokens, num_heads_local, head_dim]], dtypes
+            return [[num_tokens, head_dim]], dtypes
+        return [], []
+    if op_family == "moe_router_topk":
+        if num_experts_local > 0:
+            return [[num_tokens, num_experts_local]], dtypes
+        return [], []
+    if op_family in ("sampling_logits", "speculative_verify"):
+        if vocab_size_local > 0:
+            return [[num_tokens, vocab_size_local]], dtypes
+        return [], []
+    return [], []
+
+
 def distill_trace_events(
     events: list[dict[str, Any]],
     *,
@@ -1145,6 +1213,7 @@ def distill_trace_events(
     raw_bytes_staged: int = 0,
     wall_clock_seconds: float = 0.0,
     max_payload_bytes: int = PROBE_MAX_PAYLOAD_BYTES,
+    model_dims: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Distill profiler events into privacy-safe FlashInfer Trace Definition + Workload JSON."""
     filtered_excluded_count = 0
@@ -1188,8 +1257,12 @@ def distill_trace_events(
             unclassified_count += 1
             continue
 
-        if not ev["input_dims"]:
-            # CUDA-graph kernel launch without aten input shapes: record hotspot only.
+        eff_input_dims = ev["input_dims"]
+        eff_input_dtypes = ev["input_dtypes"]
+        eff_raw_out_dtypes = ev["output_dtypes"]
+        if not eff_input_dims:
+            # CUDA-graph kernel launch without aten input shapes: record hotspot, and
+            # synthesize static per-GPU dims from engine model_config when available.
             hs = cuda_graph_hotspots.setdefault(
                 capped_name,
                 {
@@ -1200,19 +1273,27 @@ def distill_trace_events(
             )
             hs["total_duration_us"] += ev["dur_us"]
             hs["call_count"] += ev["call_count"]
-            continue
+            synth_dims, synth_dtypes = _synthesize_input_dims_from_model_dims(
+                op_family, model_dims
+            )
+            if not synth_dims:
+                continue
+            eff_input_dims = synth_dims
+            if synth_dtypes and not ev.get("has_explicit_dtypes"):
+                eff_input_dtypes = synth_dtypes
+                eff_raw_out_dtypes = list(synth_dtypes[:1])
 
         const_axes, var_axes, in_shape_map, out_shape_map = _extract_shapes_and_axes(
-            op_family, ev["input_dims"], ev["constants"]
+            op_family, eff_input_dims, ev["constants"]
         )
         eff_output_dtypes: list[str] = []
         for idx, out_name in enumerate(out_shape_map):
             if out_name == "indices":
                 eff_output_dtypes.append("int64")
-            elif idx < len(ev["output_dtypes"]):
-                eff_output_dtypes.append(ev["output_dtypes"][idx])
+            elif idx < len(eff_raw_out_dtypes):
+                eff_output_dtypes.append(eff_raw_out_dtypes[idx])
             else:
-                eff_output_dtypes.append(ev["output_dtypes"][0])
+                eff_output_dtypes.append(eff_raw_out_dtypes[0])
 
         local_key = format_local_kernel_key(
             engine=engine,
@@ -1221,7 +1302,7 @@ def distill_trace_events(
             arch=norm_arch,
             op_family=op_family,
             const_axes=const_axes,
-            input_dtypes=ev["input_dtypes"],
+            input_dtypes=eff_input_dtypes,
             output_dtypes=eff_output_dtypes,
             constants=ev["constants"],
         )
@@ -1239,9 +1320,9 @@ def distill_trace_events(
             inputs_spec: dict[str, dict[str, Any]] = {}
             for idx, (in_name, dims_ref) in enumerate(in_shape_map.items()):
                 dtype = (
-                    ev["input_dtypes"][idx]
-                    if idx < len(ev["input_dtypes"])
-                    else ev["input_dtypes"][0]
+                    eff_input_dtypes[idx]
+                    if idx < len(eff_input_dtypes)
+                    else eff_input_dtypes[0]
                 )
                 inputs_spec[in_name] = {"shape": dims_ref, "dtype": dtype}
 
@@ -1408,6 +1489,7 @@ def distill_probe_directory(
     steps_captured: int = 0,
     wall_clock_seconds: float = 0.0,
     max_payload_bytes: int = PROBE_MAX_PAYLOAD_BYTES,
+    model_dims: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Distill rank-0 trace file from probe_dir into FlashInfer Trace JSON."""
     raw_bytes = directory_size_bytes(probe_dir)
@@ -1423,6 +1505,7 @@ def distill_probe_directory(
         raw_bytes_staged=raw_bytes,
         wall_clock_seconds=wall_clock_seconds,
         max_payload_bytes=max_payload_bytes,
+        model_dims=model_dims,
     )
 
 
