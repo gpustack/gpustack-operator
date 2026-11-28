@@ -79,7 +79,7 @@ connection; see [Settings](settings.md) for what is configured through the `Sett
 | Flag | Default | Effect |
 |---|---|---|
 | `--manufacturer` | all manufacturers | which manufacturers to detect |
-| `--disable-applications` | none | applications to skip installing, or `*` for all. See [Installation Modes](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/operate/installation-modes/index.md) |
+| `--disable-applications` | none | applications to skip installing, or `*` for all. See [Installation Modes](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/operate/installation-modes/index.md) |
 | `--secure-port` | `31443` | the HTTPS port |
 | `--bind-address` | `0.0.0.0` | the address to serve on |
 | `--cert-dir` | — | where `tls.crt` and `tls.key` are |
@@ -135,6 +135,7 @@ subset of the allocation modes its hardware would otherwise offer.
 | `--no-pci-check` | `false` | skip the PCI check the detect pass makes |
 | `--no-fast-failed` | `false` | publish a first pass that found nothing rather than holding it back and detecting again. Only applies when `--manufacturer` names exactly one |
 | `--monitor-period` | `15s` | how often utilization is sampled; only the latest sample is kept |
+| `--mock-devices-file` | `$GPUSTACK_MOCK_DEVICES_FILE` | path to a YAML or JSON mock hardware specification for CPU-only testing; see [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/74aa9d360844952d0a6d400303a5e871bdc9e05a/docs/contribute/local-cluster-setup.md#mock-device-manager) |
 | `--kube-socket` | `/var/lib/kubelet/device-plugins/kubelet.sock` | the kubelet socket to register on |
 | `--secure-port` | `32443` | the HTTPS port |
 | `--bind-address`, `--cert-dir`, `--kube-conn-*`, `--informer-cache-resync-period`, `--gopool-worker-factor` | as `worker` | serving, client and cache tuning |
@@ -169,7 +170,7 @@ gpustack-operator model-manager --node-name="$(hostname)" --cache-root=/mnt/mode
 ## model-transfer
 
 The source runtime serves authorized remote weight delivery sessions and coordinates the local
-vendor transport worker. It runs in a source `DaemonSet`; see [Remote Weight Delivery](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/remote/index.md).
+vendor transport worker. It runs in a source `DaemonSet`; see [Remote Weight Delivery](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/model-delivery/remote/index.md).
 
 | Flag | Default | Effect |
 |---|---|---|
@@ -205,7 +206,7 @@ The hyphen in the prefix requires an environment launcher such as `env`.
 | `GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES` | `17179869184` | HIXL resident window limit; zero retains the default. |
 
 Both budgets require non-negative integers. Positive values are aligned down to 2 MiB and have a
-minimum of 1 GiB. See [Remote Weight Delivery](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-delivery/remote/index.md) for source setup.
+minimum of 1 GiB. See [Remote Weight Delivery](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/model-delivery/remote/index.md) for source setup.
 
 ## device-manager detect
 
@@ -220,6 +221,7 @@ cluster recorded; `kubectl get devices <node> -o yaml` beside it is a diff.
 | `--manufacturer` | all manufacturers | which manufacturers to detect |
 | `--no-pci-check` | `false` | skip the PCI check |
 | `--no-fast-failed` | `false` | publish a first pass that found nothing rather than detecting again |
+| `--mock-devices-file` | `$GPUSTACK_MOCK_DEVICES_FILE` | path to a YAML or JSON mock hardware specification for CPU-only testing; see [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/74aa9d360844952d0a6d400303a5e871bdc9e05a/docs/contribute/local-cluster-setup.md#mock-device-manager) |
 
 ```bash
 docker run --rm --privileged -v /dev:/dev -v /sys:/sys \
@@ -293,7 +295,7 @@ It answers whether the allocation modes this node's allocators offer actually wo
 cannot answer that question, because a capability can be declared and still not work.
 
 This is the only command an operator runs by hand that acts on the node. See
-[Preflight](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/preflight/index.md) for the procedure (what to mount, what it starts and
+[Preflight](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/preflight/index.md) for the procedure (what to mount, what it starts and
 removes, how to read each row).
 
 | Flag | Default | Effect |
@@ -381,7 +383,7 @@ answering.
 
 ---
 
-**See also** — [Preflight](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/preflight/index.md) for the procedure and the per-manufacturer
+**See also** — [Preflight](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/preflight/index.md) for the procedure and the per-manufacturer
 tables · [Settings](settings.md) for what is configured through the `Setting` CR ·
-[Internals](https://github.com/gpustack/gpustack-operator/blob/016fe1d2b2b20bbdaeeec4c4f15d18c349393b24/docs/contribute/internals.md) for startup order and the invariants these commands rest
+[Internals](https://github.com/gpustack/gpustack-operator/blob/74aa9d360844952d0a6d400303a5e871bdc9e05a/docs/contribute/internals.md) for startup order and the invariants these commands rest
 on.

@@ -32,7 +32,7 @@ point on the path.
 ### Gate 1: Pod webhook
 
 A `pods` CREATE webhook (objectSelector `kueue.x-k8s.io/queue-name`, `failurePolicy: Fail`) enforces the
-[normative request rules](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/requests/index.md#request-rules) and folds each family's credit
+[normative request rules](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/requests/index.md#request-rules) and folds each family's credit
 input:
 
 - **logical slice** — `.sliced.memory-percentage` / `.sliced.memory-mib` into `.sliced.units`: the
@@ -44,7 +44,7 @@ Memory thus reaches the `credits` fold-down before Kueue scores it. The webhook 
 `.sliced.cores-percentage` to 100, prefers `.sliced.memory-percentage` over `.sliced.memory-mib`, and
 always recomputes the fold, since no trusted path sets it.
 
-It then validates the [request rules](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/requests/index.md#request-rules). Each rule includes
+It then validates the [request rules](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/requests/index.md#request-rules). Each rule includes
 an accepted and a rejected example.
 
 The divisor is the pool's per-card memory, resolved from an operator-owned `AcceleratorType` or
@@ -68,7 +68,7 @@ the `Workload` with `Retry` when the fit fails.
 The worker applies the `gpustack-node-devices` `AdmissionCheck` at startup, retrying
 until Kueue's CRD is established — the chart cannot ship it, since Kueue templates its own CRDs and
 nothing orders them ahead of a custom resource in the same render (see [Install
-modes](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/operate/installation-modes/index.md#worker-managed-resources)).
+modes](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/operate/installation-modes/index.md#worker-managed-resources)).
 
 The worker keeps it `Active`; an accelerated queue references it in *`spec.admissionChecksStrategy`*
 only once it is ([Queue quota and draining](devices-scheduling.md#queue-quota-and-draining)).
@@ -120,7 +120,7 @@ node named there must host its own share of the PodSet from its own accelerators
 > - a node's free `.sliced.units` may be spread over accelerators none of which fits the slice;
 > - a node's 10 shared tokens per accelerator let a node with too few accelerators take `.shared: N`.
 >   The `Pod` webhook's card-count pin keeps such a request off those nodes and their flavors. Where the
->   pin misses ([Limitations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/requests/index.md#limitations)) it never frees, since Kueue
+>   pin misses ([Limitations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/requests/index.md#limitations)) it never frees, since Kueue
 >   restarts the flavor scan at the smallest node after every eviction.
 >
 > Left alone, TAS prefers such a node, the check answers `Retry`, and TAS places the `Workload` there
@@ -423,6 +423,6 @@ resource, so nothing is checked, the `Workload` gets no flavor, and with no flav
 
 ---
 
-**See also** — [Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/requests/index.md) (the normative request contract) ·
+**See also** — [Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/requests/index.md) (the normative request contract) ·
 [Device Discovery](devices-discovery.md#device-plugin-allocator) (gate 5 in detail) ·
-[Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/devices/scheduling/index.md) (the four views moving on a live cluster)
+[Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/walkthroughs/devices/scheduling/index.md) (the four views moving on a live cluster)

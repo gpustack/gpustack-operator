@@ -8,7 +8,7 @@ checks *remote direct memory access (RDMA)* links before publishing the labels a
 - [Interface inventory](#interface-inventory)
 - [pciRootId and pciSwitches](#pcirootid-and-pciswitches)
 - [RDMA link check](#rdma-link-check)
-- [Three node labels](#three-node-labels)
+- [RDMA node labels](#rdma-node-labels)
 - [RDMA resource keys](#rdma-resource-keys)
 - [Allocation response](#allocation-response)
 - [Scale-up fabric](#scale-up-fabric)
@@ -93,6 +93,24 @@ tree says `rdma: false` and carries an `Unverified` verdict, and the node still 
 bound device whose verdict is `Failed` does not. The key disappears only from a node where every
 endpoint is unusable, which is stricter than "every bound interface reports `Failed`".
 
+Software *RDMA* is recognized by name. Soft-RoCE (`rxe`) binds an *RDMA* device to an ordinary
+netdev, which can be a bond or a plain NIC, and that device has no PCI address. Each of its
+ports names the netdevs it serves. When the *PCI* lookup finds no device and reads the whole tree, the
+Device Manager matches the interface's own name against those tables. A match gets `rdma: true`,
+`rdmaSoftware: true` and a verdict read from that port alone.
+
+Its `rdmaDevice` stays empty on purpose. The software device is advertised under its own name, so
+naming it on the interface would move an allocation's identity when the bond's address table
+empties. A bond or *VLAN* on a hardware *RoCE* adapter is named by the adapter's port too and is not
+matched: only devices without a PCI address take part, so the adapter is never advertised twice.
+
+iWARP (`siw`) names no netdev this way, so a `siw` interface gets no record, no verdict and no label.
+
+An externally owned device is labeled on ownership evidence alone. The AWS EFA driver's device
+sits on a *PCI* function with no netdev, so no interface record names it and it contributes no
+endpoint. The Device Manager still records the device in its verbs inventory and sets
+`rdma.external=true`, the one *RDMA* label such a node can carry.
+
 A node with a broken NIC beside a working one keeps the label, because it can still serve an *RDMA*
 workload. Withholding there would let an unplugged second card take a working node out of
 scheduling, the same error as withholding on an unreadable file. A node label says nothing about
@@ -120,19 +138,36 @@ The check is not per-manufacturer: it reads the *RDMA* subsystem's own port attr
 to every *RDMA* device there is. `preflight` runs this same pass rather than reimplementing it, which
 makes the two readings interpret the host identically. The readings are not identical to each other,
 since `preflight` reads sysfs when it is invoked and the published record is as old as the last pass
-that had a reason to run. See [Preflight Checks](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/preflight/index.md).
+that had a reason to run. See [Preflight Checks](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/preflight/index.md).
 
-## Three node labels
+## RDMA node labels
 
 | Label | Value | Selectable |
 |---|---|---|
 | `feature.gpustack.ai/rdma.capable` | `true` | **yes** — the link gate, for a nodeSelector or affinity you write |
+| `feature.gpustack.ai/rdma.software` | `true` when every usable *RDMA* endpoint is software-carried | **yes** — to keep a hardware pool off software *RDMA*, for a nodeSelector or affinity you write |
+| `feature.gpustack.ai/rdma.external` | `true` when the node has an *RDMA* device under another owner's allocation, one GPUStack never allocates | no — informational |
 | `feature.gpustack.ai/rdma.distance` | the closest bus distance any accelerator has to an *RDMA*-capable interface | no — informational |
 | `feature.gpustack.ai/rdma.numa` | the *NUMA* nodes carrying one, joined with `_` | no — informational |
 
-No operator-generated `ResourceFlavor` pins any of the three: a flavor selects on accelerator and pool
+No operator-generated `ResourceFlavor` pins any of these keys: a flavor selects on accelerator and pool
 labels only, so withholding `rdma.capable` removes a node from the workloads that select on it, not
-from a queue.
+from a queue. None of the keys says whether *RDMA* traffic passes between two nodes; that is a check
+you run between them, see [Fabric check between nodes](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/rdma/operations/index.md#fabric-check-between-nodes).
+
+`rdma.software` means software ONLY. A node with a usable hardware adapter beside a software device
+does not carry it, and a node with no usable endpoint carries neither key. A software-carried
+endpoint contributes to neither informational key: the *PCI* coordinates it may have are its
+netdev's, and they place no *RDMA* hardware an accelerator can sit near.
+
+`rdma.external` answers a different question from `rdma.software`: that key says the *RDMA* GPUStack
+hands out on this node is software, this one says there is *RDMA* here GPUStack never allocates. Both
+can be true — an EFA device beside a software one publishes `capable`, `software` and `external`,
+because hiding the software fact on the strength of an unallocatable device would send a workload
+that needs hardware *RDMA* to a node whose only allocatable *RDMA* is software.
+
+An EFA-only node carries `rdma.external` alone, with no `capable`: the key needs no usable
+interface, and it never changes the other four.
 
 Only the gate key is unconditional. **`rdma.distance` is omitted on a node with no accelerator**,
 because a distance is a statement about a pair and a node with no accelerator gives the label no pair
@@ -205,6 +240,9 @@ allocation resolves to a character device, so an endpoint without one has nothin
 node whose *RDMA* tree exists but could not be read produces exactly that shape, an `Unverified`
 record with no device, and advertises zero.
 
+A software-carried interface has an empty name for a different reason. Its device is advertised
+under its own name from the verbs inventory, so the endpoint is advertised once, as `rxe0`, not zero.
+
 `ListAndWatch` marks an endpoint's tokens `Unhealthy` when its link verdict is `Failed` or its HCA
 is not selected. When selection resolves successfully, `OK`, `Unverified` and no link record
 advertise `Healthy` for selected endpoints. A missing link record does not establish failure: an
@@ -213,7 +251,7 @@ endpoint reaches this gate only when it names an *RDMA* device.
 An invalid policy, conflicting policies or unknown resolution selects no HCAs. All *RDMA* tokens
 then report `Unhealthy`. Unselected endpoints retain their advertised IDs, just like failed endpoints.
 Policy updates change subsequent advertisements and allocation calls without draining the node or
-disrupting running containers. Read [Selection policy](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/rdma/operations/index.md#selection-policy) for status
+disrupting running containers. Read [Selection policy](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/rdma/operations/index.md#selection-policy) for status
 and failure behavior.
 
 **A `Failed` endpoint keeps its tokens rather than dropping them.** The kubelet checkpoints the
@@ -240,7 +278,7 @@ The `partitioned` family is the one place an *RDMA* token publishes a hint where
 counterpart publishes none: an *RDMA* partition token names exactly one virtual function, whose
 affinity a hint can honor, while an accelerator partition token names no accelerator at all. What
 that means for a request pairing the two is stated with the request rules
-([Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/requests/index.md#numa-alignment-conditions)).
+([Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/requests/index.md#numa-alignment-conditions)).
 
 > **Why** one interface serves many shared holders — its multiple queue pairs are how the hardware
 > is meant to be used, with the isolation done by firmware and kernel, so several processes on one
@@ -277,7 +315,7 @@ local verbs observations and the active selection policy. The container receives
   were granted, and only where the host has one;
 - `GPUSTACK_RDMA_DEVICES`, the sorted, unique comma-joined HCA names without `=`, and an exact
   `NCCL_IB_HCA` filter with one leading `=`, in all modes
-  ([values and startup use](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/rdma/operations/index.md#injected-devices)).
+  ([values and startup use](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/rdma/operations/index.md#injected-devices)).
 
 When no granted endpoint remains eligible under the active selection policy, the response sets
 `GPUSTACK_RDMA_DEVICES=""` and `NCCL_IB_HCA=""` and injects no character device nodes. Existing
@@ -383,7 +421,7 @@ the `endpoints` above instead.
 > cannot change with it. A consumer assembling a communication plan derives what it needs; this
 > record's job is to make sure it has the bytes to derive it from.
 
-Two node labels sit alongside the three above:
+Two node labels sit alongside the *RDMA* labels above:
 
 | Label | Value | For |
 |---|---|---|
@@ -433,7 +471,10 @@ kubectl get devices <node> -o jsonpath='{.spec.interfaces}' | jq
 # and still counts toward the label
 kubectl get devices <node> -o json |
   jq '[.spec.interfaces[] | (., (.virtualFunctions // [])[])]
-      | map(select(.rdma or .link)) | map({name, pciBusId, rdmaDevice, link})'
+      | map(select(.rdma or .link)) | map({name, pciBusId, rdmaDevice, rdmaSoftware, link})'
+
+# every node whose usable RDMA is all software-carried
+kubectl get nodes -l feature.gpustack.ai/rdma.software=true
 
 # the three RDMA resource keys and their healthy-token counts on one node — partitioned counts
 # virtual functions; shared counts 64 per whole-function endpoint
@@ -451,7 +492,7 @@ to check when a selector on the gate stops picking a node that still has the har
 
 **See also** — [Device Discovery](devices-discovery.md) (the accelerator side of the same ledger) ·
 [Scheduling Chain](devices-scheduling.md) (how a node label reaches a flavor selector) ·
-[Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/requests/index.md) (the request rules the *RDMA* keys obey) ·
-[RDMA Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/rdma/operations/index.md) (how many endpoints a workload asks for, and the kubelet
+[Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/requests/index.md) (the request rules the *RDMA* keys obey) ·
+[RDMA Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/rdma/operations/index.md) (how many endpoints a workload asks for, and the kubelet
 policy that aligns them with its accelerators) ·
-[Preflight Checks](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/preflight/index.md) (the same link check, before anything is installed)
+[Preflight Checks](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/preflight/index.md) (the same link check, before anything is installed)

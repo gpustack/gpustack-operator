@@ -223,6 +223,9 @@ depend on the vendor API and the available hardware validation.
   `mx-smi --show-process` reported for that PID. Compute has no second source to check against:
   MXSML serves no per-process utilization query at all, the same gap Ascend's compute has, so
   *`coresUtilizationPercent`* reports `unsupported` rather than a number nobody measured.
+- **The MetaX row's `Yes` rests on the adapter read alone.** That host ran no Device Manager, so the
+  scheduled-`Instance` path (subresource, exporter, `/monitor/snapshot`) and the capability gauge
+  through a running exporter were not exercised.
 - **A partition is addressed by the identifier its allocation recorded**, and by nothing else, on
   every partitioning manufacturer. The alternative is translating the recorded profile name back into
   a driver profile id, which walks the vendor's whole profile catalog (17 ids on NVIDIA, 85 on
@@ -538,6 +541,6 @@ it is accepted and never enforced, so the port stays open.
 
 ---
 
-**See also** — [Architecture](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/getting-started/architecture/index.md) · [Device
+**See also** — [Architecture](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/getting-started/architecture/index.md) · [Device
 Discovery](devices-discovery.md) for how the Device Manager samples accelerators ·
-[Internals](https://github.com/gpustack/gpustack-operator/blob/016fe1d2b2b20bbdaeeec4c4f15d18c349393b24/docs/contribute/internals.md) for the Device Manager's subcommands and flags.
+[Internals](https://github.com/gpustack/gpustack-operator/blob/74aa9d360844952d0a6d400303a5e871bdc9e05a/docs/contribute/internals.md) for the Device Manager's subcommands and flags.

@@ -20,7 +20,7 @@ in `Devices`. These are stages 1 and 2 of the operator's discovery and schedulin
 
 The Device Manager manages `Devices`; Kubernetes consumes them as resources.
 
-![Devices and Kubernetes resources](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/assets/diagrams/device-resource.svg)
+![Devices and Kubernetes resources](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/assets/diagrams/device-resource.svg)
 
 <!--
 flowchart LR
@@ -37,12 +37,12 @@ flowchart LR
 - **card** — a manufacturer-hardware term, used only where a manufacturer's SDK models a card as
   something other than exactly one Accelerator: the Ascend DCMI card holding several devices — a level
   the [V2 DCMI API](#ascend-dcmi-generations) drops entirely — and the T-Head device-node
-  ordinal (see [T-Head MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/thead-mig/index.md)).
+  ordinal (see [T-Head MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/index.md)).
 - **manufacturer** — the company. Its native code is *the manufacturer's library, SDK or binding*.
 
 ## Stage 1: Node Feature Discovery (NFD)
 
-NFD comes from the `node-feature-discovery` subchart, or from the cluster itself (see [Installation Modes](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/operate/installation-modes/index.md)). It performs the following jobs.
+NFD comes from the `node-feature-discovery` subchart, or from the cluster itself (see [Installation Modes](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/operate/installation-modes/index.md)). It performs the following jobs.
 
 ### PCI vendor labels
 
@@ -123,7 +123,7 @@ corrects false negatives.
 
 The worker applies the `gpustack-cpu-info` `NodeFeatureRule` at startup in every installation mode.
 It publishes [CPU identity](#cpu-identity) and the [non-accelerated marker](#non-accelerated-marker);
-see [Installation Modes](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/operate/installation-modes/index.md#worker-managed-resources).
+see [Installation Modes](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/operate/installation-modes/index.md#worker-managed-resources).
 
 The rule marks PCI vendors managed by the worker as acceleratable. The chart's
 `global.manufacturers` map registers each manufacturer for labeling, detection and its Device
@@ -139,7 +139,7 @@ with a node selector on the NFD PCI label: a node labeled
 The Helm chart normally renders them (`deviceManager.enabled=true`, the default). With
 `deviceManager.enabled=false` it renders none and does not hand the install back to the worker: a
 worker deployed by this chart never installs applications at runtime. The worker installs them only
-where no chart deploys it, see [Installation Modes](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/operate/installation-modes/index.md).
+where no chart deploys it, see [Installation Modes](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/operate/installation-modes/index.md).
 
 ### Detection and accelerator labels
 
@@ -193,18 +193,25 @@ The Device Manager re-detects whenever the device set or health changes, and the
 `gpustack.ai/managed` mark from the `Node` onto the same-named `Devices`, so the per-node Device
 Manager never asserts a node-management decision it does not own.
 
-> **A pass that failed is not a manufacturer with no accelerators** — every detector answers an absent
-> driver, a library that will not initialise and a bus holding no card with an empty list and no error.
-> So an error means that pass could not measure, and carries no claim about the hardware. The loop
-> reports such a manufacturer as it was **last detected**: its allocator keeps serving, the `Devices`
-> keeps its group and the node keeps that family's capacity keys. A manufacturer that has never
-> answered is still absent, and a pass that ran and found nothing is what undetects one, which also
-> drops whatever was held for it, so a later failure cannot resurrect a card that was pulled.
+> **A pass that failed is not a manufacturer with no accelerators** — a detector answers an absent
+> driver (with no matching PCI devices) or a clean empty bus with an empty list and no error. A
+> library initialization failure, a non-card-specific error, or a pass where every enumerated card
+> fails to query returns an error instead and retries initialization on later passes.
+>
+> An error carries no claim about the hardware, so the loop reports that manufacturer as it was
+> **last detected**: its allocator keeps serving, `Devices` keeps its group, and the node keeps that
+> family's capacity keys. A manufacturer that has never answered stays absent. A clean empty pass
+> drops what was held so a later failure cannot resurrect a removed card.
+>
+> When a previously detected card becomes unqueryable while at least one sibling succeeds, the
+> detector retains that card in place with `status.unhealthy: true` (and `unhealthy: true` in
+> monitor samples) while keeping healthy siblings' `index` values. The card recovers once it answers
+> again; a clean shrink, zero count, or intentional skip prunes the cached entry.
 >
 > The monitor pass cannot be carried forward the same way, because a sample is worth what its
-> timestamp claims. A manufacturer it could not measure is simply absent from the sample, and is named
-> as unmeasured so that its absence is not read as accelerators that went away — which would take the
-> loop round again on no evidence.
+> timestamp claims. A manufacturer it could not measure is simply absent from the sample, and is
+> named as unmeasured so its absence is not read as accelerators that went away — which would take
+> the loop round again on no evidence.
 
 > **Before the first detection, a Device Manager asked for one manufacturer reports nothing at
 > all**: no
@@ -264,7 +271,7 @@ For most manufacturers the injection is the device-visibility env (`NVIDIA_VISIB
 `ASCEND_VISIBLE_DEVICES` / …), which their container runtime turns into device nodes. AMD, Cambricon,
 MetaX and Hygon inject the nodes themselves, so a node of theirs needs the vendor driver alone.
 
-A shared grant of N is N [distinct accelerators on one node](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/requests/index.md#resource-keys):
+A shared grant of N is N [distinct accelerators on one node](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/requests/index.md#resource-keys):
 the allocation hint offers one token per accelerator, and the ledger charges one share per accelerator.
 `Allocate` refuses a grant the kubelet put two tokens of on one accelerator (`FailedPrecondition`), rather
 than hand the container fewer accelerators than it asked for. The response is the same visibility
@@ -321,9 +328,9 @@ differs by vendor: device nodes for T-Head, which has no container-runtime hook,
 own registry file bind-mounted at its host path for Hygon, whose runtime scans that directory by
 absolute path.
 
-See [Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/requests/index.md), [NVIDIA MIG](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/nvidia-mig/index.md),
-[T-Head MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/thead-mig/index.md) and [Hygon MIG
-Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/hygon-mig/index.md).
+See [Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/requests/index.md), [NVIDIA MIG](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/index.md),
+[T-Head MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/index.md) and [Hygon MIG
+Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/index.md).
 
 ### Sliced (logical slicing)
 
@@ -406,7 +413,7 @@ than only a correctness one, because the files predate the allocation being retr
 `device-manager preflight` reads, on a bare host, the allocation-time preconditions the allocator
 reads when a workload lands. It drives each manufacturer's own responder with a synthetic
 allocation request rather than a copy of it, so a preflight answer and the allocation it predicts
-cannot disagree. The runbook is [Preflight Checks](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/preflight/index.md).
+cannot disagree. The runbook is [Preflight Checks](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/preflight/index.md).
 
 It asks the following questions per manufacturer, in order, and each is answerable on its own:
 
@@ -649,8 +656,8 @@ CDI request appears here as well.
 
 For a partition-backed owner, the allocator reads the owner's `.partitioned.<kind>-<profile>`
 request and verifies that its durable node-local ownership record still names a live partition.
-See [NVIDIA MIG](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/nvidia-mig/index.md#partition-requests), [T-Head
-MIG](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/thead-mig/index.md#partition-requests) and [Hygon MIG](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/hygon-mig/index.md#partition-requests).
+See [NVIDIA MIG](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/index.md#partition-requests), [T-Head
+MIG](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/index.md#partition-requests) and [Hygon MIG](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/index.md#partition-requests).
 
 A responder lacking that capability, or unable to substantiate the identity, fails the admission
 closed rather than widening the grant back to the accelerator.
@@ -766,7 +773,7 @@ hint when total available cards are insufficient.
 On `Sliced` requests, cards lacking the requested per-accelerator units also enter the unselected
 fallback list, so `GetPreferredAllocation` may still hint one when no card fits and `Allocate`
 enforces the final room check. See
-[Preferred accelerator placement](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/requests/index.md#preferred-accelerator-placement) for
+[Preferred accelerator placement](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/requests/index.md#preferred-accelerator-placement) for
 the operator example.
 
 ### Fungible partition tokens
@@ -786,7 +793,7 @@ CPU and memory to an accelerator the plugin may not use.
 
 One residual remains: a partition an administrator carves out of band is invisible to every
 annotation-derived key, so hand-carving on a managed node is unsupported (see
-[Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/requests/index.md#limitations)).
+[Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/requests/index.md#limitations)).
 
 ## Driver stack per node
 
@@ -807,7 +814,7 @@ allocation loudly instead of silently mounting an incompatible library.
 
 ---
 
-**See also** — [Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/requests/index.md) (the resource keys these families
-serve) · [NVIDIA MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/nvidia-mig/index.md) · [T-Head MIG
-Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/thead-mig/index.md) · [Hygon MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/hygon-mig/index.md) ·
+**See also** — [Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/requests/index.md) (the resource keys these families
+serve) · [NVIDIA MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/index.md) · [T-Head MIG
+Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/index.md) · [Hygon MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/index.md) ·
 [Settings](settings.md)

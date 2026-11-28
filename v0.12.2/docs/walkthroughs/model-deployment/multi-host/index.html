@@ -1,0 +1,1503 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.12.2/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  
+  <title>Multi-Host Serving Walkthrough · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/multi-host/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.12.2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.2/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.2/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.12.2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.12.2/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.12.2"
+    data-home="/gpustack-operator/v0.12.2/" data-page="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/multi-host/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.12.2</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.12.2</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.12.2/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <a class="nav-home" href="/gpustack-operator/v0.12.2/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/v0.12.2/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/v0.12.2/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/v0.12.2/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/multi-host/" aria-current="page">Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/v0.12.2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/v0.12.2/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/v0.12.2/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/v0.12.2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/v0.12.2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.12.2/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/leader/" >Leader Election</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/remote/" >Remote Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Configuration" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/v0.12.2/docs/modules/instances/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="GPU Instance Configuration" href="/gpustack-operator/v0.12.2/docs/modules/instances/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="GPU Instance Operations" href="/gpustack-operator/v0.12.2/docs/modules/instances/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/v0.12.2/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/v0.12.2/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.12.2/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.12.2/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.12.2/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/v0.12.2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.12.2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/">Model Deployment Walkthroughs</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Multi-Host Serving Walkthrough</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="multi-host-serving-walkthrough">Multi-Host Serving Walkthrough</h1>
+<p>Span a single serving instance across multiple physical GPU hosts when a model&rsquo;s memory footprint
+exceeds one node, using gang admission and operator-injected leader coordinates.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#summary">Summary</a>
+</li>
+<li><a href="#step-1-deploy-distributed-model">Step 1: Deploy distributed model</a>
+</li>
+<li><a href="#verification">Verification</a>
+</li>
+<li><a href="#step-4-scale-replica-groups">Step 4: Scale replica groups</a>
+</li>
+<li><a href="#cleanup">Cleanup</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+<li><a href="#troubleshooting">Troubleshooting</a>
+</li>
+</ul>
+<h2 id="summary">Summary</h2>
+<p>Setting <em><code>spec.roles[].size</code></em> above <code>1</code> groups <em><code>size</code></em> fate-sharing member <code>Pod</code>s into each serving
+replica under Kueue gang scheduling. Member <code>m0</code> runs the Ray head and receives all <code>Service</code> HTTP
+traffic, while subordinate members (<code>m1</code>..<code>mN</code>) join <code>m0</code> using injected discovery variables:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Object</th>
+					<th>Scope</th>
+					<th>Creator</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ModelArtifact</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Resolves <code>deepseek-v2-lite-chat</code> weights warmed onto both GPU hosts</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td>cluster</td>
+					<td>operator</td>
+					<td>Discovered whole-GPU H100 pool requested by every member</td>
+			</tr>
+			<tr>
+					<td><code>ModelDeployment</code></td>
+					<td>namespace</td>
+					<td>user</td>
+					<td>Two-node (<code>size: 2</code>, 16-GPU) Ray serving group</td>
+			</tr>
+	</tbody>
+</table>
+<p>This 16-GPU layout (<em>tensor parallelism (TP)</em> = 8 within each node, <em>pipeline parallelism (PP)</em> = 2 across two nodes) is an illustrative configuration example.
+Complete <a href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/#cluster-preparation">Cluster preparation</a>
+, <a href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/#gpu-pool-selection">GPU pool selection</a>
+, and <a href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-delivery/prefetch/">Model Prefetch</a>
+ in namespace <code>gpustack-elastic</code> with <code>minReady: 2</code> across both GPU hosts so both <code>m0</code> and <code>m1</code> mount warm local weights.</p>
+<h3 id="environment">Environment</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Item</th>
+					<th>Value</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Nodes</td>
+					<td>Two physical GPU hosts (<code>8</code> GPUs each, <code>16</code> GPUs total)</td>
+			</tr>
+			<tr>
+					<td>Fabric</td>
+					<td>High-speed inter-node network (InfiniBand, RoCE, or AWS EFA)</td>
+			</tr>
+			<tr>
+					<td><code>AcceleratorType</code></td>
+					<td><code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
+			</tr>
+			<tr>
+					<td>Namespace and model</td>
+					<td><code>gpustack-elastic</code> with <code>ModelArtifact</code> <code>deepseek-v2-lite-chat</code></td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="step-1-deploy-distributed-model">Step 1: Deploy distributed model</h2>
+<p>Because the operator does not synthesize multi-node Ray startup commands, multi-host roles use the
+take-over tier (<em><code>roles[].command</code></em>, which sets <code>status.roles[].unmanaged: true</code>; see
+<a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/#engine-overrides">Engine overrides</a>
+). Save
+<code>multi-host.yaml</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-multi-host</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-elastic</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.29.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.29.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;8&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/bin/bash</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- -<span class="l">c</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="p">|</span><span class="sd">
+</span></span></span><span class="line"><span class="cl"><span class="sd">          set -euo pipefail
+</span></span></span><span class="line"><span class="cl"><span class="sd">          if [ &#34;${GPUSTACK_MEMBER_INDEX}&#34; -eq 0 ]; then
+</span></span></span><span class="line"><span class="cl"><span class="sd">            ray start --head --port=6379 --disable-usage-stats
+</span></span></span><span class="line"><span class="cl"><span class="sd">            exec vllm serve /var/lib/gpustack/model --served-model-name deepseek-v2-lite-chat \
+</span></span></span><span class="line"><span class="cl"><span class="sd">              --host 0.0.0.0 --port 8000 \
+</span></span></span><span class="line"><span class="cl"><span class="sd">              --tensor-parallel-size 8 \
+</span></span></span><span class="line"><span class="cl"><span class="sd">              --pipeline-parallel-size &#34;${GPUSTACK_REPLICA_SIZE}&#34; \
+</span></span></span><span class="line"><span class="cl"><span class="sd">              --distributed-executor-backend ray
+</span></span></span><span class="line"><span class="cl"><span class="sd">          else
+</span></span></span><span class="line"><span class="cl"><span class="sd">            exec ray start --address=&#34;${GPUSTACK_REPLICA_LEADER_ADDRESS}:6379&#34; --block
+</span></span></span><span class="line"><span class="cl"><span class="sd">          fi</span></span></span></code></pre></div>
+</div>
+<p>Apply <code>multi-host.yaml</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f multi-host.yaml
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic get modeldeployment deepseek-multi-host</span></span></code></pre></div>
+</div>
+<h2 id="verification">Verification</h2>
+<h3 id="step-2-verify-gang-admission">Step 2: Verify gang admission</h3>
+<p>Confirm that Kueue admitted both members (<code>deepseek-multi-host-server-r0-m0</code> and <code>r0-m1</code>) together and
+inspect the injected <code>GPUSTACK_*</code> coordinates on <code>m1</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic get pods -l app.kubernetes.io/instance<span class="o">=</span>deepseek-multi-host -o wide
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic <span class="nb">exec</span> deepseek-multi-host-server-r0-m1 -- env <span class="p">|</span> grep <span class="s1">&#39;^GPUSTACK_&#39;</span> <span class="p">|</span> sort</span></span></code></pre></div>
+</div>
+<p>Example output (illustrative):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">GPUSTACK_MEMBER_INDEX=1
+</span></span><span class="line"><span class="cl">GPUSTACK_REPLICA_LEADER_ADDRESS=deepseek-multi-host-server-r0-m0.deepseek-multi-host-server-r0
+</span></span><span class="line"><span class="cl">GPUSTACK_REPLICA_SIZE=2</span></span></code></pre></div>
+</div>
+<p>Verify that <code>Service/deepseek-multi-host-server</code> selects only leader <code>m0</code> (<code>member-index: &quot;0&quot;</code>):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic get svc deepseek-multi-host-server -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.selector}{&#34;\n&#34;}&#39;</span></span></span></code></pre></div>
+</div>
+<p>If either member stays <code>Pending</code>, inspect <code>QuotaReserved</code> and <code>Workload</code> conditions in
+<a href="#troubleshooting">Troubleshooting</a>
+.</p>
+<h3 id="step-3-verify-distributed-inference">Step 3: Verify distributed inference</h3>
+<p>Once <code>m0</code> is serving on <code>:8000</code> (take-over roles omit operator health probes unless configured in your
+entrypoint), send a completion request to <code>Service/deepseek-multi-host-server</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic run test-client --rm -i --restart<span class="o">=</span>Never <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --image<span class="o">=</span>curlimages/curl -- <span class="se">\
+</span></span></span><span class="line"><span class="cl">  curl -fsS http://deepseek-multi-host-server:8000/v1/chat/completions <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -H <span class="s2">&#34;Content-Type: application/json&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -d <span class="s1">&#39;{
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;model&#34;: &#34;deepseek-v2-lite-chat&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;messages&#34;: [{&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: &#34;Hello distributed inference!&#34;}],
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;max_tokens&#34;: 16
+</span></span></span><span class="line"><span class="cl"><span class="s1">  }&#39;</span> <span class="p">|</span> jq <span class="s1">&#39;{model, finish_reason: .choices[0].finish_reason, tokens: .usage.completion_tokens}&#39;</span></span></span></code></pre></div>
+</div>
+<p>Confirm <code>&quot;model&quot;: &quot;deepseek-v2-lite-chat&quot;</code> and positive <code>tokens</code>. If <code>curl</code> fails to connect, inspect
+<code>m0</code> and <code>m1</code> container logs to confirm <code>m1</code> joined the Ray head on <code>:6379</code>.</p>
+<h2 id="step-4-scale-replica-groups">Step 4: Scale replica groups</h2>
+<p>Increase <em><code>replicas</code></em> to add a second independent 16-GPU two-node group (requiring 32 GPUs total):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeployment
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: deepseek-multi-host
+</span></span><span class="line"><span class="cl">   namespace: gpustack-elastic
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   roles:
+</span></span><span class="line"><span class="cl">     - name: server
+</span></span><span class="line"><span class="cl"><span class="gd">-      replicas: 1
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      replicas: 2
+</span></span></span><span class="line"><span class="cl">       size: 2
+</span></span></code></pre></div>
+</div>
+<p>Editing <em><code>size</code></em>, <em><code>resources</code></em>, or <em><code>acceleratorType</code></em> replaces whole replica groups one slot per pass
+rather than resizing Ray in place: the operator deletes an old replica and its <code>Workload</code> before
+admitting its replacement, so a <code>replicas: 1</code> deployment experiences downtime during replacement
+(<a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/#rollout-behavior">Rollout behavior</a>
+). Keep
+<code>--tensor-parallel-size</code> aligned with per-member <code>resources.accelerator</code>.</p>
+<h2 id="cleanup">Cleanup</h2>
+<p>Delete <code>deepseek-multi-host</code> and verify all 16 GPUs return full <code>remaining</code> credits:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic delete modeldeployment deepseek-multi-host
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic get pods -l app.kubernetes.io/instance<span class="o">=</span>deepseek-multi-host
+</span></span><span class="line"><span class="cl">kubectl get devices -o json <span class="p">|</span> jq <span class="s1">&#39;[.items[].status.groups[].accelerators[] |
+</span></span></span><span class="line"><span class="cl"><span class="s1">  {mode, remaining, allocatedSlices: (.allocatedSlices // 0)}]&#39;</span></span></span></code></pre></div>
+</div>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li><strong>All-or-nothing gang scheduling</strong>: all <em><code>size</code></em> members must reserve pool capacity together, or the
+entire replica waits <code>Pending</code>.</li>
+<li><strong>Leader-only HTTP ingress</strong>: under <em>internal load balancing (Internal LB)</em>, only <code>m0</code> serves HTTP
+traffic.</li>
+<li><strong>Full-replica replacement on <em><code>size</code></em> edits</strong>: changing <em><code>size</code></em> tears down and recreates each
+replica group rather than expanding live.</li>
+</ul>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<table>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ModelDeployment</code> stuck in <code>Starting</code>, missing <code>Workload</code></td>
+					<td><code>QuotaReserved=False/PodGroupIncomplete</code></td>
+					<td>Read <code>QuotaReserved</code> on <code>ModelDeployment</code> and inspect missing or rejected member <code>Pod</code>s.</td>
+			</tr>
+			<tr>
+					<td>Entire replica tears down and rebuilds</td>
+					<td><code>ReplicasUpToDate=False/ReplacementInProgress</code></td>
+					<td>One member <code>Pod</code> was evicted, drained, or deleted; because members share fate, the operator rebuilds the whole <code>size</code>-member replica. Check node and Kueue events.</td>
+			</tr>
+			<tr>
+					<td>Replica stays <code>Pending</code> for quota</td>
+					<td><code>QuotaReserved=False/Pending</code></td>
+					<td><code>ClusterQueue</code> lacks <code>size × accelerator</code> free GPUs across distinct hosts; free capacity or reduce <em><code>replicas</code></em> / <em><code>size</code></em>.</td>
+			</tr>
+			<tr>
+					<td><code>m1</code> cannot join <code>m0</code> Ray head</td>
+					<td>Connection errors in <code>m1</code> logs</td>
+					<td>Verify headless <code>Service</code> DNS resolution for <code>GPUSTACK_REPLICA_LEADER_ADDRESS</code> and allow port <code>6379</code> plus Ray/NCCL ephemeral ports in <code>NetworkPolicy</code>.</td>
+			</tr>
+			<tr>
+					<td>vLLM exits on invalid parallel world size</td>
+					<td>Startup error in <code>m0</code> logs</td>
+					<td>Ensure <code>--tensor-parallel-size</code> equals per-member <code>resources.accelerator</code> (<code>8</code>) and <code>--pipeline-parallel-size</code> equals <code>GPUSTACK_REPLICA_SIZE</code> (<code>2</code>).</td>
+			</tr>
+	</tbody>
+</table>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/">Configuration</a>
+ (multi-member roles and
+override tiers)</li><li><a href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/prefill-decode/">Prefill and Decode Walkthrough</a>
+ (disaggregated serving)</li><li><a href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/elastic-ep/">Elastic EP Walkthrough</a>
+ (in-place collective expansion)</li><li><a href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
+ (fixed per-rank serving)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/">Model Deployment</a>
+ — review serving contracts, routers, and benchmarks.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#summary">Summary</a>
+      <ul>
+        <li><a href="#environment">Environment</a></li>
+      </ul>
+    </li>
+    <li><a href="#step-1-deploy-distributed-model">Step 1: Deploy distributed model</a></li>
+    <li><a href="#verification">Verification</a>
+      <ul>
+        <li><a href="#step-2-verify-gang-admission">Step 2: Verify gang admission</a></li>
+        <li><a href="#step-3-verify-distributed-inference">Step 3: Verify distributed inference</a></li>
+      </ul>
+    </li>
+    <li><a href="#step-4-scale-replica-groups">Step 4: Scale replica groups</a></li>
+    <li><a href="#cleanup">Cleanup</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.12.2/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
+</body>
+</html>

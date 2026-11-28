@@ -116,7 +116,7 @@ than ignored, so a manifest written against an escape hatch that does not exist 
 can see it.
 
 That is a provisioning contract, **not an isolation boundary**. What a Binding does and does not
-bound is stated in [Limitations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/pool/index.md#limitations), with
+bound is stated in [Limitations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/index.md#limitations), with
 issue #168 for the gap. The tenant value is Binding-owned too: on SGLang the webhook replaces every
 container declaration of `MOONCAKE_TENANT_ID` with the Binding's domain.
 
@@ -136,7 +136,7 @@ supply the `Pod`'s IP through a *`fieldRef`* the kubelet resolves at container s
 
 Every engine is also given `--kv-cache-dtype` with the Binding's `dtype`, verbatim. Why, and which
 spellings each engine accepts, is under
-[Engine cache precision](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/pool/index.md#engine-cache-precision).
+[Engine cache precision](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/index.md#engine-cache-precision).
 
 The file is a `downwardAPI` projection of the `Pod`'s own `kvcache.gpustack.ai/client-config`
 annotation. No `ConfigMap` is created, so the configuration's lifetime is exactly the `Pod`'s.
@@ -196,7 +196,7 @@ renders an RDMA or EFA resource limit on its engine `Pod` according to the effec
 The backend's member `Pod`s configure their own host network and device access separately.
 
 The one exception is the Ascend *prefill*/*decode* path, whose engine `Pod`s mount a host driver
-tree read-only. See [Role links and connectors](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/prefill-decode/index.md#role-links-and-connectors).
+tree read-only. See [Role links and connectors](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/index.md#role-links-and-connectors).
 
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
 when the container does not already set them. A value you set yourself is left alone.
@@ -238,7 +238,7 @@ under [Refusals and fixes](#refusals-and-fixes).
 
 A flag is refused in every spelling the engine's own parser reads as it (a unique prefix, and on
 the vLLM family an underscored or dotted form) by the rule under
-[Operator-owned keys](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/index.md#operator-owned-keys).
+[Operator-owned keys](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/index.md#operator-owned-keys).
 
 This applies only to *`env`*: a value supplied through *`envFrom`* is invisible to the check and **will
 be overwritten with no symptom**, so declare Mooncake variables in *`env`*.
@@ -254,7 +254,7 @@ container that starts normally and does not use the cache. That result is invisi
 | a `/` in the binding value | there is no cross-namespace form; a Binding is resolved in the `Pod`'s own namespace | use a plain name |
 | a Binding that does not exist, and the namespace | without it there is nothing to resolve the provisioned domain and endpoint from | create the Binding, or fix the name |
 | a pool or backend that does not exist | the Binding points at something missing | fix the *`poolRef`*, or create the pool |
-| the pool and `QuotaLedgerAvailable`, with the controller's own reason | the pool has not reported the condition, reports it `Unknown`, or reports it `False` for a reason other than `MultiTenancyDisabled` — `LedgerUnreachable`, for one, means a request to the master failed, which is an outage rather than a setting. `False` with `MultiTenancyDisabled` is **not** refused: it is a declared single-tenant store, and the `Pod` is injected with no tenant id — see [Limitations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/pool/index.md#limitations) | restore the master, or wait if the condition is not reported yet or is `Unknown` |
+| the pool and `QuotaLedgerAvailable`, with the controller's own reason | the pool has not reported the condition, reports it `Unknown`, or reports it `False` for a reason other than `MultiTenancyDisabled` — `LedgerUnreachable`, for one, means a request to the master failed, which is an outage rather than a setting. `False` with `MultiTenancyDisabled` is **not** refused: it is a declared single-tenant store, and the `Pod` is injected with no tenant id — see [Limitations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/index.md#limitations) | restore the master, or wait if the condition is not reported yet or is `Unknown` |
 | the *`engine`* or `manufacturer` annotation | the engine is required and never guessed from an image; `manufacturer` selects the Ascend vLLM runtime | set `vLLM` or `SGLang`; for vLLM-Ascend, set `engine: vLLM` and `manufacturer: ascend` |
 | the container count and their names | several containers and none named; the first is never chosen | set `kvcache.gpustack.ai/container` |
 | a named container that is an init container | it finishes before the workload starts, so configuring it caches nothing | name an app container |
@@ -336,7 +336,7 @@ first write, or silently with no error at all.
   `mooncake-transfer-engine-npu`, and the plain name is absent, so check both spellings.
 - For the `KVCacheBackend`: the store version is the one in the member image its *`spec`* names, so
   read it from that image tag.
-- The compatibility rule is [the store version](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/backend/index.md#version-compatibility).
+- The compatibility rule is [the store version](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/index.md#version-compatibility).
 
 **For a non-`default` domain the engine's library must also be `0.3.13` or later.** That is the line
 that carries `tenant_id` in `setup()`. Below it the engine has no such parameter, so a non-default
@@ -398,8 +398,10 @@ The record is JSON. Its keys mean:
   could not identify as an engine entry point.
 
 `Pod`s admitted by an older operator may also carry `engineVersion`. New records omit it because it
-described the upstream source used when the injector was written, not the image in the `Pod`. Readers
-must ignore that legacy field and must not infer image compatibility from it.
+described the upstream source used when the injector was written, not the image in the `Pod`.
+Standalone `Pod` injection does not require an engine version annotation and renders on the shared
+store baseline; `ModelDeployment` version-gated connectors (`MooncakeConnectorV2`, `ECCPUConnector`
+env defaults, and KV events) are covered in [Parameters](model-deployment-parameters.md).
 
 `vehicle` is on the record so a reader can tell which shape was written without decoding the
 container: `"file"` means a projected configuration document plus its volume, `"environment"` means
@@ -518,8 +520,8 @@ copied and nothing is allocated twice, so the two are not competing. Disabling p
 no memory back and loses the engine's own reuse.
 
 Host DRAM is where an overlap could happen, and neither engine puts KV there unless asked. vLLM's
-`--swap-space` is deprecated and ignored, and `kv_offloading_size` defaults off, so on vLLM the only
-host DRAM this injection adds is the staging buffer above. SGLang's host tier needs
+`--swap-space` was removed in vLLM `0.30+`, and `kv_offloading_size` defaults off, so on vLLM the
+only host DRAM this injection adds is the staging buffer above. SGLang's host tier needs
 `--enable-hierarchical-cache`, which this injection renders because the store hangs off that tier.
 Its [host pool](#sglang-host-memory-tier) is the one host allocation it adds there.
 
@@ -534,6 +536,6 @@ Its [host pool](#sglang-host-memory-tier) is the one host allocation it adds the
 ---
 
 
-**See also** — [KV Cache Pools and Bindings](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/pool/index.md) (namespace grants and reuse domains) ·
-[KV Cache Backend](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/backend/index.md) (the store the pool draws from) ·
+**See also** — [KV Cache Pools and Bindings](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/index.md) (namespace grants and reuse domains) ·
+[KV Cache Backend](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/index.md) (the store the pool draws from) ·
 [Admission](devices-admission.md) (where this webhook sits relative to the admission gates)

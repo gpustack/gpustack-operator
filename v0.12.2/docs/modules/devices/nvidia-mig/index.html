@@ -1,0 +1,1564 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.12.2/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  
+  <title>NVIDIA MIG Operations · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.12.2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.2/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.2/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.12.2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.12.2/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.12.2"
+    data-home="/gpustack-operator/v0.12.2/" data-page="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.12.2</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.12.2</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.12.2/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <a class="nav-home" href="/gpustack-operator/v0.12.2/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/v0.12.2/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/v0.12.2/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/v0.12.2/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/v0.12.2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/v0.12.2/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/v0.12.2/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/" aria-current="page">NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/v0.12.2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/v0.12.2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.12.2/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/leader/" >Leader Election</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/remote/" >Remote Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Configuration" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/v0.12.2/docs/modules/instances/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="GPU Instance Configuration" href="/gpustack-operator/v0.12.2/docs/modules/instances/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="GPU Instance Operations" href="/gpustack-operator/v0.12.2/docs/modules/instances/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/v0.12.2/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/v0.12.2/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.12.2/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.12.2/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.12.2/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/v0.12.2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.12.2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.12.2/docs/modules/devices/">Heterogeneous Devices</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">NVIDIA MIG Operations</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="nvidia-mig-operations">NVIDIA MIG Operations</h1>
+<p>Administrators toggle NVIDIA <em>Multi-Instance GPU (MIG)</em> <strong>mode</strong> per GPU with <code>nvidia-smi</code> (or GPU
+Operator&rsquo;s MIG Manager) and restart the node&rsquo;s Device Manager <code>DaemonSet</code> to re-detect. Once MIG
+mode is active, GPUStack dynamically creates and destroys GPU/Compute Instance pairs for scheduled
+workloads.</p>
+<p>MIG-enabled GPUs advertise <code>nvidia.com/gpu.partitioned*</code> keys exclusively, while unpartitioned GPUs
+on the same <code>Node</code> continue serving whole-GPU, shared, and logical-slice requests
+(<a href="/gpustack-operator/v0.12.2/docs/modules/devices/requests/">Accelerator Requests</a>
+).</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#prerequisites">Prerequisites</a>
+</li>
+<li><a href="#partition-profile-discovery">Partition profile discovery</a>
+</li>
+<li><a href="#partition-requests">Partition requests</a>
+</li>
+<li><a href="#operations">Operations</a>
+</li>
+<li><a href="#mig-capacity-scenarios">MIG capacity scenarios</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+</ul>
+<h2 id="prerequisites">Prerequisites</h2>
+<p>The chart configures <code>gpustack-operator-device-manager-nvidia</code> with <code>runtimeClassName: nvidia</code> and
+<code>NVIDIA_MIG_CONFIG_DEVICES</code> / <code>NVIDIA_MIG_MONITOR_DEVICES</code> so NVML exposes MIG management (do not
+override these in <code>deviceManager.env</code>; see
+<a href="/gpustack-operator/v0.12.2/docs/getting-started/vendor-prerequisites/#nvidia">Vendor Prerequisites</a>
+).</p>
+<p>Before toggling MIG mode on or off:</p>
+<ul>
+<li><strong>Drain workloads and driver handles</strong>: Stop all <code>Pod</code>s on target GPUs and stop host daemons
+holding NVML handles (such as DCGM or <code>nvsm</code>) so the switch does not stay pending.</li>
+<li><strong>Unload <code>nvidia_drm</code> and run with <code>CAP_SYS_ADMIN</code></strong>: Loaded <code>nvidia_drm</code> blocks GPU resets.</li>
+<li><strong>Generation reset rule</strong>: <strong>Ampere (<code>A100</code>/<code>A30</code>)</strong> requires a GPU reset (or VM reboot on
+passthrough hypervisors) after toggling MIG mode; <strong>Hopper (<code>H100</code>) and newer</strong> switch without a
+reset.</li>
+</ul>
+<h2 id="partition-profile-discovery">Partition profile discovery</h2>
+<p>Unlike <a href="/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/#partition-profile-discovery">T-Head</a>
+ and
+<a href="/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/#partition-profile-discovery">Hygon</a>
+, NVIDIA MIG profiles come from a fixed per-product
+catalog matching NVIDIA&rsquo;s
+<a href="https://docs.nvidia.com/datacenter/tesla/mig-user-guide/supported-mig-profiles.html">Supported MIG Profiles</a>
+
+(for example, <code>3g.20gb</code> on <code>A100-40GB</code> and <code>3g.40gb</code> on <code>H100-80GB</code>):</p>
+<ul>
+<li><strong>Excluded variants</strong>: Profiles containing <code>+</code> (<code>+me</code>, <code>+me.all</code>, <code>+gfx</code>) or lacking legal
+placement slots are omitted from the inventory.</li>
+<li><strong>Whole GPU instances only</strong>: GPUStack creates one Compute Instance spanning the full GPU
+Instance; manually subdivided instances (<code>nvidia-smi mig -cci</code>) are refused.</li>
+<li><strong>Placement-aware <code>Remaining</code></strong>: Because profiles compete for fixed memory-slice intervals (for
+example, one <code>3g.40gb</code> at <code>0–3</code> blocks the single <code>4g.40gb</code> slot at <code>0–3</code> while leaving <code>4–7</code>
+free), <code>Devices</code> tracks both static profile ceilings and live <code>Remaining</code> counts.</li>
+</ul>
+<h2 id="partition-requests">Partition requests</h2>
+<p>Request one partitioned GPU and one exact profile on a Kueue-labeled <code>Pod</code> (<code>.partitioned.units</code> is
+derived automatically by the webhook):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia-partition</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;local-queue&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;86400&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># always &#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned.mig-1g.10gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># always &#34;1&#34;</span></span></span></code></pre></div>
+</div>
+<p>Or request the profile on an <code>Instance</code> via <em><code>spec.resources.acceleratorPartitionedProfile</code></em> (mutually
+exclusive with slice percentages; host CPU/RAM scale by the profile&rsquo;s VRAM share):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mig-instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;86400&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratorPartitionedProfile</span><span class="p">:</span><span class="w"> </span><span class="l">3g.40gb</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">volume</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ephemeral</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="l">1Gi</span></span></span></code></pre></div>
+</div>
+<ul>
+<li><strong>Packing and reclaim</strong>: Device Manager bin-packs onto the most-occupied MIG GPU with a valid
+slot, keeping sibling GPUs free for wider profiles. On <code>Pod</code> exit, the reclaimer destroys the
+Compute Instance then the GPU Instance (retrying <code>NVML_ERROR_IN_USE</code> with bounded backoff).</li>
+<li><strong>SSH sidecar isolation</strong>: On SSH-enabled <code>Instance</code>s, the <code>sshd</code> sidecar verifies the on-disk
+ownership marker and MIG UUID under the GPU lock and receives <strong>only</strong> <code>main</code>&rsquo;s MIG instance,
+never the parent GPU.</li>
+</ul>
+<h2 id="operations">Operations</h2>
+<h3 id="enabling-partitioning">Enabling partitioning</h3>
+<ol>
+<li>
+<p>Satisfy <a href="#prerequisites">Prerequisites</a>
+, enable MIG mode per GPU or across all GPUs, and reset on
+Ampere:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">nvidia-smi -i &lt;id&gt; -mig <span class="m">1</span>  <span class="c1"># or: nvidia-smi -mig 1</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># On Ampere (A100/A30) only: nvidia-smi -i &lt;id&gt; -r</span></span></span></code></pre></div>
+</div>
+</li>
+<li>
+<p>Restart the NVIDIA Device Manager <code>DaemonSet</code> so the detector updates <code>Devices</code> in place (do not
+delete <code>Devices</code> or pre-carve instances):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system rollout restart ds/gpustack-operator-device-manager-nvidia
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-system rollout status ds/gpustack-operator-device-manager-nvidia</span></span></code></pre></div>
+</div>
+</li>
+</ol>
+<h3 id="fleet-wide-mig-manager">Fleet-wide MIG Manager</h3>
+<p>To toggle MIG mode declaratively through NVIDIA GPU Operator, enable <code>--set migManager.enabled=true</code>
+and label target <code>Node</code>s with <strong><code>all-enabled</code></strong> (which enables MIG mode without pre-creating
+instances; never use <code>all-balanced</code> or <code>all-1g.*</code>):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl label node &lt;node&gt; nvidia.com/mig.config<span class="o">=</span>all-enabled --overwrite</span></span></code></pre></div>
+</div>
+<ul>
+<li><strong>Default <code>all-disabled</code> caution</strong>: Unlabeled <code>Node</code>s default to <code>all-disabled</code> when MIG Manager
+starts, turning off hand-enabled MIG GPUs; ensure <code>nvidia.com/mig.capable=true</code> is present so MIG
+Manager schedules.</li>
+<li><strong>Manual Device Manager restart still required</strong>: Restart <code>gpustack-operator-device-manager-nvidia</code>
+after MIG Manager finishes switching a <code>Node</code> (check <code>nvidia-smi</code> directly if masked DCGM causes
+<code>nvidia.com/mig.config.state=failed</code>).</li>
+</ul>
+<h3 id="disabling-partitioning">Disabling partitioning</h3>
+<p>Drain partition <code>Pod</code>s so instances reclaim (or destroy remaining instances manually), disable MIG
+mode, apply any Ampere reset, and restart <code>gpustack-operator-device-manager-nvidia</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">nvidia-smi -i &lt;id&gt; -mig <span class="m">0</span>  <span class="c1"># or: nvidia-smi -mig 0</span></span></span></code></pre></div>
+</div>
+<h3 id="node-reboot-recovery">Node reboot recovery</h3>
+<p>After an unplanned reboot, re-run <a href="#enabling-partitioning">Enabling partitioning</a>
+ (including the
+Device Manager <code>DaemonSet</code> restart), then delete and recreate pre-reboot partition <code>Pod</code>s so fresh
+MIG instances materialize.</p>
+<h2 id="mig-capacity-scenarios">MIG capacity scenarios</h2>
+<p>Partitioning GPUs shifts capacity from <code>EX</code>/<code>SH</code>/<code>SL</code> to <code>PT</code> on <code>InstanceType</code> (<code>SH</code> below shows
+legacy <code>10</code>-share display; current builds display card count <code>8/80</code> and <code>5/50</code>, see
+<a href="/gpustack-operator/v0.12.2/docs/modules/devices/requests/#legacy-request-migration">Legacy request migration</a>
+). An 8-GPU <code>H100-80GB</code> <code>Node</code>
+reports these capacity views across three layouts:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Configuration</th>
+					<th>Partitioned GPUs</th>
+					<th><code>EX/SH/SL/PT</code></th>
+					<th>Advertised node keys</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>All-logical</td>
+					<td><code>0</code> of <code>8</code></td>
+					<td><code>8/8 80/80 100/800 0/0</code></td>
+					<td>Whole/shared + <code>.sliced.*</code> (<code>1024</code> slices, <code>12800k</code> units); <code>.partitioned: 0</code></td>
+			</tr>
+			<tr>
+					<td>All-physical</td>
+					<td><code>8</code> of <code>8</code></td>
+					<td><code>0/0 0/0 0/0 1/56</code></td>
+					<td><code>.partitioned: 56</code> + <code>.partitioned.mig-*</code> (<code>12800k</code> units); logical keys <code>0</code></td>
+			</tr>
+			<tr>
+					<td>Mixed</td>
+					<td><code>3</code> of <code>8</code></td>
+					<td><code>5/5 50/50 100/500 1/21</code></td>
+					<td><code>5</code> GPUs under logical/whole (<code>640</code> slices); <code>3</code> GPUs under <code>.partitioned.*</code> (<code>21</code>)</td>
+			</tr>
+	</tbody>
+</table>
+<h3 id="verification">Verification</h3>
+<p>Wait for <code>gpustack-operator-device-manager-nvidia</code> to be <code>Ready</code> and <code>.partitioned</code> keys to register
+on the <code>Node</code> before submitting <code>Pod</code>s, then verify carved UUIDs:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64 -o wide
+</span></span><span class="line"><span class="cl">kubectl get node &lt;node&gt; -o json <span class="p">|</span> jq <span class="s1">&#39;.status.allocatable | with_entries(select(.key|test(&#34;nvidia.com/gpu&#34;)))&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl <span class="nb">exec</span> &lt;partition-pod&gt; -- nvidia-smi -L
+</span></span><span class="line"><span class="cl">kubectl get pod &lt;partition-pod&gt; -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.metadata.annotations.device\.gpustack\.ai/accelerator\.allocated}{&#34;\n&#34;}&#39;</span></span></span></code></pre></div>
+</div>
+<p>Captured output (<code>1 × 3g.40gb</code> carved on GPU 0):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-950792bf-a01c-3f1a-e122-3473e67f54b2)
+</span></span><span class="line"><span class="cl">  MIG 3g.40gb     Device  0: (UUID: MIG-b3061c09-2a4c-5026-a575-79f86a5bb12c)</span></span></code></pre></div>
+</div>
+<h3 id="capacity-accounting">Capacity accounting</h3>
+<p>When one live <code>3g.40gb</code> occupies slices <code>0–3</code> on an 8-slice H100 (<code>4–7</code> free), free start slots per
+profile on that GPU are:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Profile</th>
+					<th>Slice width</th>
+					<th>Legal starts</th>
+					<th>Free starts</th>
+					<th>Node key contribution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>1g.10gb</code></td>
+					<td><code>1</code></td>
+					<td><code>0 1 2 3 4 5 6</code></td>
+					<td><code>4, 5, 6</code></td>
+					<td><code>3</code></td>
+			</tr>
+			<tr>
+					<td><code>1g.20gb</code></td>
+					<td><code>2</code></td>
+					<td><code>0 2 4 6</code></td>
+					<td><code>4, 6</code></td>
+					<td><code>2</code></td>
+			</tr>
+			<tr>
+					<td><code>2g.20gb</code></td>
+					<td><code>2</code></td>
+					<td><code>0 2 4</code></td>
+					<td><code>4</code></td>
+					<td><code>1</code></td>
+			</tr>
+			<tr>
+					<td><code>3g.40gb</code></td>
+					<td><code>4</code></td>
+					<td><code>0 4</code></td>
+					<td><code>4</code></td>
+					<td><code>1</code> allocated + <code>1</code> free</td>
+			</tr>
+			<tr>
+					<td><code>4g.40gb</code></td>
+					<td><code>4</code></td>
+					<td><code>0</code></td>
+					<td>—</td>
+					<td><code>0</code></td>
+			</tr>
+			<tr>
+					<td><code>7g.80gb</code></td>
+					<td><code>8</code></td>
+					<td><code>0</code></td>
+					<td>—</td>
+					<td><code>0</code></td>
+			</tr>
+	</tbody>
+</table>
+<p>Across 7 empty GPUs plus that 1 carved GPU:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Surface</th>
+					<th>Value</th>
+					<th>Formula</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>.partitioned.mig-&lt;profile&gt;</code></td>
+					<td><code>1g.10gb: 52</code>, <code>3g.40gb: 16</code></td>
+					<td>Sum of <code>allocated + remaining</code> (scheduler subtracts live <code>Pod</code>s)</td>
+			</tr>
+			<tr>
+					<td><code>nvidia.com/gpu.partitioned</code></td>
+					<td><code>53</code></td>
+					<td>Sum of <code>allocated + max(free profile count)</code> per GPU</td>
+			</tr>
+			<tr>
+					<td><code>InstanceType</code> <code>PT</code> (<code>onceMaxRequest/remaining</code>)</td>
+					<td><code>1/52</code></td>
+					<td><code>1</code> while any slot is free; sum of <code>max(free profile count)</code> without allocated</td>
+			</tr>
+	</tbody>
+</table>
+<p><em><code>status.detail.slicedDetail</code></em> reflects static empty-pool capability from <code>Devices.spec</code>; read <code>PT</code>
+and <code>PARTITIONS</code> (<code>-o wide</code>) for live remaining slots.</p>
+<h2 id="limitations">Limitations</h2>
+<p>GPUStack creates and reclaims single-CI MIG instances for scheduled workloads and cleans idle
+untracked instances. It never toggles MIG mode, resets GPUs, evicts <code>Pod</code>s on mode switches, or
+serves subdivided <code>-cci</code> instances.</p>
+<ul>
+<li><strong>No manual <code>nvidia-smi mig -cgi</code> or <code>-cci</code></strong>: Hand-carved instances desynchronize node capacity
+keys and are destroyed as orphans once idle; subdivided <code>-cci</code> instances halt node-wide reclaim
+until removed.</li>
+<li><strong>Immediate replacement race</strong>: Node capacity keys free on <code>Pod</code> deletion slightly ahead of
+debounced hardware destroy; leave a brief gap before submitting an identical replacement or allow
+it to restart once.</li>
+<li><strong>Reboot persistence</strong>: MIG <strong>instances</strong> never survive a host reboot on any generation, and MIG
+<strong>mode</strong> persists across reboots on Ampere (InfoROM) but resets to disabled on Hopper and newer.</li>
+<li><strong>Provider NVLink health checks</strong>: Some managed cloud agents cordon/reboot <code>Node</code>s when MIG drops
+GPUs out of full NVLink pair checks; inspect provider node conditions if a MIG <code>Node</code> reboots.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.12.2/docs/modules/devices/requests/">Accelerator Requests</a>
+ (keys and request rules)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/">Hygon MIG Operations</a>
+ (node-wide MIG on Hygon DCUs)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/">T-Head MIG Operations</a>
+ (MIG partitioning on T-Head PPUs)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/devices/preflight/">Preflight Checks</a>
+ (bare-host MIG checks)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.12.2/docs/walkthroughs/devices/scheduling/">Heterogeneous Devices Walkthrough</a>
+ — trace logical slicing and scheduling on a live cluster.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#prerequisites">Prerequisites</a></li>
+    <li><a href="#partition-profile-discovery">Partition profile discovery</a></li>
+    <li><a href="#partition-requests">Partition requests</a></li>
+    <li><a href="#operations">Operations</a>
+      <ul>
+        <li><a href="#enabling-partitioning">Enabling partitioning</a></li>
+        <li><a href="#fleet-wide-mig-manager">Fleet-wide MIG Manager</a></li>
+        <li><a href="#disabling-partitioning">Disabling partitioning</a></li>
+        <li><a href="#node-reboot-recovery">Node reboot recovery</a></li>
+      </ul>
+    </li>
+    <li><a href="#mig-capacity-scenarios">MIG capacity scenarios</a>
+      <ul>
+        <li><a href="#verification">Verification</a></li>
+        <li><a href="#capacity-accounting">Capacity accounting</a></li>
+      </ul>
+    </li>
+    <li><a href="#limitations">Limitations</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.12.2/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
+</body>
+</html>

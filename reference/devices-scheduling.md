@@ -2,7 +2,7 @@
 
 Evidence: contract. The worker turns `Node` and `Devices` signals into capacity labels, Kueue queues, `AcceleratorType` and `InstanceType`
 resources. These are stages 3 and 4 of the chain introduced in
-[Architecture](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/getting-started/architecture/index.md); [Admission](devices-admission.md) covers the checks
+[Architecture](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/getting-started/architecture/index.md); [Admission](devices-admission.md) covers the checks
 a workload then passes.
 
 ## Contents
@@ -76,7 +76,7 @@ and in the per-profile ledgers.
 Below that boundary every layer keeps the manufacturer's spelling — the `Devices` record, the on-disk
 ownership markers, every call into its library — since a name the library does not report cannot create
 a partition. See [T-Head MIG
-Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/thead-mig/index.md#partition-profile-discovery).
+Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/index.md#partition-profile-discovery).
 
 ### Per-accelerator slice counts
 
@@ -114,19 +114,20 @@ Enabling or disabling hardware partitioning is manual, through the manufacturer'
 `ppu-smi mig` for T-Head), and the operator sees it only on the next Device Manager detection.
 
 The [three-configuration
-walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/nvidia-mig/index.md#mig-capacity-scenarios) in [NVIDIA MIG
-Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/nvidia-mig/index.md) shows the disjoint populations on a recorded 8-accelerator node,
+walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/index.md#mig-capacity-scenarios) in [NVIDIA MIG
+Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/index.md) shows the disjoint populations on a recorded 8-accelerator node,
 including a **mixed** one advertising both families;
-[T-Head](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/thead-mig/index.md) covers the same procedure.
+[T-Head](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/index.md) covers the same procedure.
 
 ### RDMA feature labels
 
-A node with a usable RDMA link also carries `feature.gpustack.ai/rdma.capable=true`, and
-conditionally two informational keys. No operator-generated flavor pins any of them; `rdma.capable`
-is the one meant for a workload's own nodeSelector, and withholding it is how a node with no usable
-link stops being selected by one.
+A node with a usable RDMA link also carries `feature.gpustack.ai/rdma.capable=true`, and the
+informational keys listed there. No operator-generated flavor pins any of them. `rdma.capable`
+and `rdma.software` are the keys meant for a workload's own nodeSelector: withholding the first
+is how a node with no usable link stops being selected, and excluding the second keeps a workload
+off software-only RDMA.
 
-See [Network Topology](rdma-network-topology.md#three-node-labels) for
+See [Network Topology](rdma-network-topology.md#rdma-node-labels) for
 which link states count as usable, when each informational key is present, and why the accelerator
 interconnect gets no label at all.
 
@@ -229,7 +230,7 @@ Two discriminators keep the pools clean, and one annotation carries the raw CPU 
 
 The worker keeps five sets of objects converged:
 
-![Device scheduling chain](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/assets/diagrams/devices-scheduling-chain.svg)
+![Device scheduling chain](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/assets/diagrams/devices-scheduling-chain.svg)
 
 <!--
 flowchart TD
@@ -354,5 +355,5 @@ The per-accelerator **`AdmissionCheck`**, part of the admission chain; its behav
 
 **See also** — [Device Discovery](devices-discovery.md) (where the capacity signals come from) ·
 [Topology-Aware Scheduling](topology-scheduling.md) (how topology profiles enter this chain) ·
-[Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/devices/scheduling/index.md) (the same objects on a live cluster) ·
+[Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/walkthroughs/devices/scheduling/index.md) (the same objects on a live cluster) ·
 [Settings](settings.md#settings)

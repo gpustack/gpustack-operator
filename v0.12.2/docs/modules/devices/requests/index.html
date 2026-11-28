@@ -1,0 +1,1992 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.12.2/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  
+  <title>Accelerator Requests · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.12.2/docs/modules/devices/requests/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.12.2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.2/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.2/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.12.2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.12.2/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.12.2"
+    data-home="/gpustack-operator/v0.12.2/" data-page="/gpustack-operator/v0.12.2/docs/modules/devices/requests/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.12.2</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.12.2</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.12.2/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <a class="nav-home" href="/gpustack-operator/v0.12.2/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/v0.12.2/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/v0.12.2/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/v0.12.2/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/v0.12.2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/v0.12.2/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/v0.12.2/docs/modules/devices/requests/" aria-current="page">Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/v0.12.2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/v0.12.2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.12.2/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/leader/" >Leader Election</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/remote/" >Remote Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Configuration" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/v0.12.2/docs/modules/instances/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="GPU Instance Configuration" href="/gpustack-operator/v0.12.2/docs/modules/instances/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="GPU Instance Operations" href="/gpustack-operator/v0.12.2/docs/modules/instances/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/v0.12.2/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/v0.12.2/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.12.2/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.12.2/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.12.2/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/v0.12.2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.12.2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.12.2/docs/modules/devices/">Heterogeneous Devices</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Accelerator Requests</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="accelerator-requests">Accelerator Requests</h1>
+<p><code>Pod</code> admission webhooks validate accelerator requests and compute quota units at creation for every
+<code>Pod</code> carrying <code>kueue.x-k8s.io/queue-name</code>. Unlabeled <code>Pod</code>s bypass these checks and credit folds.
+See <a href="#pool-troubleshooting">Pool troubleshooting</a>
+ to inspect pool capacity and <code>Pending</code> workloads.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#accelerator-resource-families">Accelerator resource families</a>
+</li>
+<li><a href="#request-rules">Request rules</a>
+</li>
+<li><a href="#rdma-resource-requests">RDMA resource requests</a>
+</li>
+<li><a href="#legacy-request-migration">Legacy request migration</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+<li><a href="#pool-troubleshooting">Pool troubleshooting</a>
+</li>
+</ul>
+<h2 id="accelerator-resource-families">Accelerator resource families</h2>
+<p>GPUStack separates software slicing and hardware partitioning into disjoint resource families:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Family</th>
+					<th>Mechanism</th>
+					<th>Isolation</th>
+					<th>Example</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><strong>Logical slicing</strong> (<code>.sliced*</code>)</td>
+					<td>Software sharing of an unpartitioned card</td>
+					<td>Vendor runtime or preload shim caps VRAM and compute (<a href="#isolation-mode-selection">Isolation mode selection</a>
+)</td>
+					<td><code>50%</code> of an NVIDIA A10G</td>
+			</tr>
+			<tr>
+					<td><strong>Physical partitioning</strong> (<code>.partitioned*</code>)</td>
+					<td>Hardware instance on a MIG-enabled card</td>
+					<td>Hardware partition materialized by Device Manager</td>
+					<td>NVIDIA <code>mig-3g.40gb</code>, T-Head <code>mig-4g.48gb</code>, Hygon <code>mig-2g.15gb</code></td>
+			</tr>
+	</tbody>
+</table>
+<p>A partitioned card advertises <strong>only</strong> <code>.partitioned*</code> keys; an unpartitioned card advertises
+<strong>only</strong> <code>&lt;base&gt;</code>, <code>.shared</code>, and <code>.sliced*</code> keys. Those populations map to the four <code>InstanceType</code>
+views (<code>EX</code>, <code>SH</code>, <code>SL</code>, and <code>PT</code>).</p>
+<h3 id="resource-keys">Resource keys</h3>
+<p><code>&lt;base&gt;</code> is the vendor extended resource (<code>nvidia.com/gpu</code>, <code>huawei.com/npu</code>, <code>amd.com/gpu</code>, and
+others in <a href="https://github.com/gpustack/gpustack-operator/blob/74aa9d360844952d0a6d400303a5e871bdc9e05a/README.md#accelerator-support">Accelerator Support</a>
+):</p>
+<table>
+	<thead>
+			<tr>
+					<th>Key</th>
+					<th>Provider</th>
+					<th>Eligible cards</th>
+					<th>Request value</th>
+					<th><code>Node</code> capacity</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>&lt;base&gt;</code></td>
+					<td>Device plugin (<code>Exclusive</code>)</td>
+					<td>Unpartitioned</td>
+					<td>Whole card count</td>
+					<td>Healthy tokens</td>
+			</tr>
+			<tr>
+					<td><code>&lt;base&gt;.shared</code></td>
+					<td>Device plugin (<code>Shared</code>)</td>
+					<td>Unpartitioned</td>
+					<td>Distinct cards on one <code>Node</code> (<code>1</code> of <code>10</code> shares per card)</td>
+					<td>Healthy tokens</td>
+			</tr>
+			<tr>
+					<td><code>&lt;base&gt;.sliced</code></td>
+					<td>Device plugin (<code>Sliced</code>)</td>
+					<td>Logically sliceable</td>
+					<td>Always <code>1</code></td>
+					<td>Healthy tokens</td>
+			</tr>
+			<tr>
+					<td><code>&lt;base&gt;.sliced.units</code></td>
+					<td>Node capacity</td>
+					<td>Logically sliceable</td>
+					<td><strong>Webhook-derived</strong> (never set manually)</td>
+					<td>Cards × <code>1,600,000</code></td>
+			</tr>
+			<tr>
+					<td><code>&lt;base&gt;.sliced.cores-percentage</code></td>
+					<td>Node capacity</td>
+					<td>Logically sliceable</td>
+					<td><code>(0, 100]</code> (defaults to <code>100</code>)</td>
+					<td>Sum of card budgets</td>
+			</tr>
+			<tr>
+					<td><code>&lt;base&gt;.sliced.memory-percentage</code></td>
+					<td>Node capacity</td>
+					<td>Logically sliceable</td>
+					<td><code>(0, 100]</code></td>
+					<td>Sum of card budgets</td>
+			</tr>
+			<tr>
+					<td><code>&lt;base&gt;.sliced.memory-mib</code></td>
+					<td>Node capacity</td>
+					<td>Logically sliceable</td>
+					<td>Positive MiB <code>&lt;=</code> card VRAM</td>
+					<td>Sum of card budgets</td>
+			</tr>
+			<tr>
+					<td><code>&lt;base&gt;.partitioned</code></td>
+					<td>Device plugin (<code>Partitioned</code>)</td>
+					<td>Partitioned</td>
+					<td>Always <code>1</code></td>
+					<td>Healthy tokens</td>
+			</tr>
+			<tr>
+					<td><code>&lt;base&gt;.partitioned.units</code></td>
+					<td>Node capacity</td>
+					<td>Partitioned</td>
+					<td><strong>Webhook-derived</strong> (never set manually)</td>
+					<td>Cards × <code>1,600,000</code></td>
+			</tr>
+			<tr>
+					<td><code>&lt;base&gt;.partitioned.&lt;kind&gt;-&lt;profile&gt;</code></td>
+					<td>Node capacity</td>
+					<td>Partitioned</td>
+					<td>Always <code>1</code></td>
+					<td><code>allocated + remaining</code></td>
+			</tr>
+			<tr>
+					<td><code>device.gpustack.ai/&lt;manufacturer&gt;.visibility</code></td>
+					<td>Device plugin (<code>Visibility</code>)</td>
+					<td>Any card</td>
+					<td>Workload container&rsquo;s card count</td>
+					<td>Healthy tokens</td>
+			</tr>
+	</tbody>
+</table>
+<ul>
+<li><strong>Webhook-owned <code>.units</code> keys</strong>: The <code>Pod</code> webhook overwrites <code>.units</code> from slice memory or
+partition VRAM to charge Kueue <code>credits.gpustack.ai/&lt;manufacturer&gt;</code>.</li>
+<li><strong>Token binding</strong>: <code>&lt;base&gt;</code>, <code>.shared</code>, and <code>.sliced</code> tokens bind specific cards in kubelet, while
+<code>.partitioned</code> and <code>.visibility</code> tokens are fungible counts resolved by Device Manager at
+<code>Allocate</code>.</li>
+</ul>
+<h3 id="pod-request-examples">Pod request examples</h3>
+<p>Submit <code>Pod</code>s on a pool&rsquo;s namespace <code>LocalQueue</code> (<code>ENTRANCE</code> on <code>kubectl get instancetypes</code>).</p>
+<p><strong>Exclusive</strong> (two whole cards):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">exclusive-pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;local-queue&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;3600&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span></span></span></code></pre></div>
+</div>
+<p><strong>Shared</strong> (one unisolated <code>1/10</code> share on each of two distinct cards on one <code>Node</code>; for <code>&gt;= 2</code>
+cards, the webhook injects <code>acceleratable.feature.gpustack.ai/&lt;group&gt;.count Gt N-1</code>):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;local-queue&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;3600&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.shared</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span></span></span></code></pre></div>
+</div>
+<p><strong>Logical slice</strong> (<code>50%</code> VRAM and <code>40%</code> compute on one card):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sliced-pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;local-queue&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;3600&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># always &#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced.memory-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">  </span><span class="c"># or .sliced.memory-mib, never both</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced.cores-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;40&#34;</span><span class="w">  </span><span class="c"># optional, default: &#34;100&#34;</span></span></span></code></pre></div>
+</div>
+<p><strong>Physical partition</strong> (one <code>3g.40gb</code> MIG instance):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">partitioned-pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;local-queue&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;3600&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># always &#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned.mig-3g.40gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># always &#34;1&#34;</span></span></span></code></pre></div>
+</div>
+<p><strong>SSH visibility sidecar</strong> (sits outside the four families to share <code>main</code>&rsquo;s device grant):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">ssh-sidecar</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sshd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/ssh-server:v1.4.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">device.gpustack.ai/nvidia.visibility</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div>
+<h3 id="instance-api-requests">Instance API requests</h3>
+<p>An <code>Instance</code> declares whole cards, one logical slice, or one hardware partition in
+<em><code>spec.resources</code></em> (<a href="/gpustack-operator/v0.12.2/docs/modules/instances/configuration/#resource-requests">GPU Instance Configuration</a>
+):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">partitioned-instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">infinity</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># integer whole cards, or &#34;1&#34; for sliced/partitioned requests</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># acceleratorSlicedMemoryPercentage: 50</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># acceleratorSlicedCoresPercentage: 50</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratorPartitionedProfile</span><span class="p">:</span><span class="w"> </span><span class="l">3g.40gb </span><span class="w"> </span><span class="c"># mutually exclusive with slice percentages</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">volume</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ephemeral</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="l">10Gi</span></span></span></code></pre></div>
+</div>
+<p>Admission rejects unknown partition profiles (listing offered profiles), partitioning on unsupported
+vendors or unpartitioned pools, slice percentages on pools without logical slicing, non-<code>1</code> card
+counts on slice/partition requests, and whole-card counts exceeding <em><code>status.accelerator.capacity</code></em>.
+Host CPU and RAM scale by card count or slice/partition VRAM share.</p>
+<h3 id="preferred-accelerator-placement">Preferred accelerator placement</h3>
+<p>Steer kubelet&rsquo;s intra-node device selection to specific cards by setting a <code>Pod</code> annotation for
+whole, shared, or logical-slice requests:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">preferred-card-pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;local-queue-name&gt; </span><span class="w"> </span><span class="c"># required; selects the pool LocalQueue and Pod webhook</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">annotations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">device.gpustack.ai/accelerator.preferred-index</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;3,1&#34;</span><span class="w">  </span><span class="c"># comma-separated Devices index order</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># device.gpustack.ai/accelerator.preferred-id: &#34;GPU-...,GPU-...&#34;  # takes precedence over preferred-index</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">  </span><span class="c"># optional; annotations select cards inside one node, so constrain the node separately</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/hostname</span><span class="p">:</span><span class="w"> </span><span class="l">gpu-node-0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span></span></span></code></pre></div>
+</div>
+<ul>
+<li><strong>Annotation precedence</strong>: Presence of <code>device.gpustack.ai/accelerator.preferred-id</code> (even when
+empty) overrides <code>device.gpustack.ai/accelerator.preferred-index</code>.</li>
+<li><strong>Value matching</strong>: Match comma-separated IDs or indices against the node&rsquo;s
+<code>Devices.spec.groups[].accelerators[]</code> (<code>id</code> or <code>index</code>); whitespace and duplicates are ignored.</li>
+<li><strong>Advisory intra-node hint</strong>: Applies only inside the scheduled <code>Node</code> via
+<code>GetPreferredAllocation</code>; unavailable, cross-node, or insufficient cards fall back to other
+node cards. For logical slices, if every card lacks the requested units, a fallback hint can still
+be returned and <code>Allocate</code> rejects overcommitment.</li>
+<li><strong>Selection order</strong>: Over-specified lists take the highest-priority available cards up to the
+request size, returned in ascending hardware order.</li>
+<li><strong>Unsupported modes</strong>: Hardware partitioning (<code>Partitioned</code> / MIG) and SSH visibility sidecars
+ignore preferred-card annotations.</li>
+<li><strong>Pod scope</strong>: Both annotations apply at <code>Pod</code> scope across all containers requesting accelerators.</li>
+</ul>
+<h2 id="request-rules">Request rules</h2>
+<p>Admission groups containers by lifetime: standard <em><code>spec.initContainers</code></em> (without
+<code>restartPolicy: Always</code>), <em><code>spec.containers</code></em>, and <strong>native sidecars</strong> (<em><code>spec.initContainers</code></em> with
+<code>restartPolicy: Always</code>). Include full container <code>image</code> and <code>queue-name</code> labels when applying.</p>
+<h3 id="rule-1-family-and-container-group">Rule 1: Family and container group</h3>
+<p>All accelerator requests in a <code>Pod</code> must use <strong>one family</strong> and sit in <strong>one container group</strong>
+(either init containers or app containers, never both, because kubelet holds init devices for the
+<code>Pod</code>&rsquo;s life while the scheduler charges <code>max(init, app)</code>):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mixed-family-pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced.memory-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span></span></span></code></pre></div>
+</div>
+<blockquote>
+<p><code>spec: Forbidden: a Pod may request only one accelerator family, found [exclusive sliced]</code></p>
+</blockquote>
+<h3 id="rule-2-logical-slice-count">Rule 2: Logical slice count</h3>
+<p>A logical slice request must set <code>&lt;base&gt;.sliced</code> to <code>&quot;1&quot;</code> and specify <strong>exactly one</strong> of
+<code>.sliced.memory-percentage</code> (<code>(0, 100]</code>) or <code>.sliced.memory-mib</code> (<code>(0, card VRAM]</code>). Use multiple
+<code>Pod</code>s or whole cards for multi-GPU workloads:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">invalid-slice-count</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced.memory-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span></span></span></code></pre></div>
+</div>
+<blockquote>
+<p><code>spec.containers[0].resources.limits[nvidia.com/gpu.sliced]: Invalid value: &quot;2&quot;: a logical slice request is always a single accelerator; multi-accelerator logical slicing is not supported yet</code></p>
+</blockquote>
+<h3 id="rule-3-partition-count">Rule 3: Partition count</h3>
+<p>A partition request must set <code>&lt;base&gt;.partitioned</code> to <code>&quot;1&quot;</code> and name a <code>.partitioned.&lt;kind&gt;-&lt;profile&gt;</code>
+key:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">invalid-partition-count</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned.mig-1g.10gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div>
+<blockquote>
+<p><code>spec.containers[0].resources.limits[nvidia.com/gpu.partitioned]: Invalid value: &quot;2&quot;: a partition request is always a single accelerator; request one Pod per instance</code></p>
+</blockquote>
+<h3 id="rule-4-partition-profile">Rule 4: Partition profile</h3>
+<p>A <code>Pod</code> may request only <strong>one</strong> partition profile across all containers:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">invalid-partition-profiles</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned.mig-1g.10gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned.mig-3g.40gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div>
+<blockquote>
+<p><code>spec: Forbidden: a Pod may request only one partition profile, found [1g.10gb 3g.40gb]</code></p>
+</blockquote>
+<h3 id="rule-5-profile-instance-count">Rule 5: Profile instance count</h3>
+<p>Each <code>.partitioned.&lt;kind&gt;-&lt;profile&gt;</code> key must equal <code>&quot;1&quot;</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">invalid-profile-count</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned.mig-3g.40gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span></span></span></code></pre></div>
+</div>
+<blockquote>
+<p><code>spec.containers[0].resources.limits[nvidia.com/gpu.partitioned.mig-3g.40gb]: Invalid value: &quot;2&quot;: a partition profile request must be exactly 1 instance</code></p>
+</blockquote>
+<h3 id="rule-6-slicing-container-count">Rule 6: Slicing container count</h3>
+<p>At most <strong>one</strong> container per <code>Pod</code> may request <code>.sliced*</code> or <code>.partitioned*</code> keys
+(<code>.visibility</code> sidecars are exempt):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">multi-sliced-pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced.memory-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced.memory-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span></span></span></code></pre></div>
+</div>
+<blockquote>
+<p><code>spec: Forbidden: at most one container may request a slicing family, found 2</code></p>
+</blockquote>
+<h3 id="rule-7-native-sidecar-requests">Rule 7: Native sidecar requests</h3>
+<p>Restartable init containers (<code>restartPolicy: Always</code>) must not request accelerators because they
+overlap both later init containers and app containers:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">rejected-sidecar-pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">initContainers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">log-shipper</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">restartPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">Always</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span></span></span></code></pre></div>
+</div>
+<blockquote>
+<p><code>spec.initContainers[0].resources.limits: Forbidden: a restartable init container (a native sidecar) may not request an accelerator; move the request to an app container</code></p>
+</blockquote>
+<h2 id="rdma-resource-requests">RDMA resource requests</h2>
+<p>Node-level RDMA keys (<code>device.gpustack.ai/rdma</code>, <code>rdma.shared</code> at <code>64</code> tokens/endpoint, and
+<code>rdma.partitioned</code> for <em>SR-IOV</em> VFs) sit outside accelerator families, carry no <code>.units</code> keys, and
+are unmetered by Kueue (<a href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/#rdma-resource-requests">RDMA Operations</a>
+ and
+<a href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/#nic-record-inspection">NIC record inspection</a>
+):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-rdma-pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;local-queue&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.shared</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">device.gpustack.ai/rdma.shared</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div>
+<h3 id="numa-alignment-conditions">NUMA alignment conditions</h3>
+<p>Kubelet aligns an accelerator and an RDMA interface onto the same <em>NUMA</em> node only when all four
+conditions hold:</p>
+<ul>
+<li><strong>Same container</strong>: Both resource requests sit in the same container (<code>topologyManagerScope: container</code>).</li>
+<li><strong>NUMA hints present</strong>: Whole, shared, and logical-slice accelerator tokens publish <em>NUMA</em> hints;
+fungible <code>.partitioned</code> tokens publish none.</li>
+<li><strong>Enforcing kubelet policy</strong>: The <code>Node</code> runs <code>restricted</code> or <code>single-numa-node</code>
+(<a href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/#enabling-numa-alignment">Enabling NUMA alignment</a>
+ and
+<a href="/gpustack-operator/v0.12.2/docs/modules/devices/preflight/#result-format">Result format</a>
+).</li>
+<li><strong>Node-level capacity fit</strong>: Kube-scheduler sees only node totals; if a <code>Node</code>&rsquo;s free GPU and HCA
+sit on different sockets, kubelet rejects the <code>Pod</code> without rescheduling.</li>
+</ul>
+<h2 id="legacy-request-migration">Legacy request migration</h2>
+<ul>
+<li>
+<p><strong>Legacy <code>.sliced.mig-*</code> keys removed</strong>: Replace legacy <code>&lt;base&gt;.sliced.mig-&lt;profile&gt;</code> requests
+with <code>&lt;base&gt;.partitioned: &quot;1&quot;</code> and <code>&lt;base&gt;.partitioned.mig-&lt;profile&gt;: &quot;1&quot;</code>. Remove stale capacity
+entries on development <code>Node</code>s (<code>/</code> escaped as <code>~1</code>):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get node &lt;node&gt; -o json <span class="p">|</span> jq -r <span class="s1">&#39;.status.capacity | keys[] | select(contains(&#34;mig-&#34;))&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl patch node &lt;node&gt; --subresource<span class="o">=</span>status --type<span class="o">=</span>json <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;remove&#34;,&#34;path&#34;:&#34;/status/capacity/&lt;escaped-key&gt;&#34;}]&#39;</span></span></span></code></pre></div>
+</div>
+</li>
+<li>
+<p><strong>Per-container allocation annotation</strong>: <code>device.gpustack.ai/accelerator.allocated</code> uses a
+per-container map; drain accelerator <code>Pod</code>s before upgrading Device Manager from legacy flat
+builds.</p>
+</li>
+<li>
+<p><strong><code>.shared: N</code> counts distinct cards</strong>: <code>InstanceType</code> <code>SH</code> <code>onceMaxRequest</code> now counts cards with
+a free share (<code>1/10</code> on one free card instead of legacy <code>10/10</code>).</p>
+</li>
+</ul>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li><strong>Excluded MIG variants</strong>: Profiles containing <code>+</code> (<code>+me</code>, <code>+me.all</code>, <code>+gfx</code>) are omitted because
+Kubernetes resource names forbid <code>+</code>.</li>
+<li><strong>Pool-wide whole-card cap</strong>: Whole-card requests above a single <code>Node</code>&rsquo;s card count but within
+pool <em><code>status.accelerator.capacity</code></em> are admitted and remain queued.</li>
+<li><strong>No manual <code>nvidia-smi mig -cgi</code> carving</strong>: Hand-carved instances lack <code>Pod</code> annotations, skewing
+node capacity until reclaimed when idle.</li>
+<li><strong>Manual MIG mode toggle</strong>: Switching hardware partitioning mode requires draining workloads,
+running the vendor tool, and restarting the Device Manager <code>DaemonSet</code> (<a href="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/#enabling-partitioning">NVIDIA</a>
+,
+<a href="/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/#enabling-partitioning">T-Head</a>
+, <a href="/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/#enabling-partitioning">Hygon</a>
+).</li>
+<li><strong>Shared card-count pin gaps</strong>: Unqueued <code>.shared</code> <code>Pod</code>s on too few cards fail with
+<code>UnexpectedAdmissionError</code>, and template-derived <code>Job</code> / <code>JobSet</code> / <code>RayJob</code> <code>Workload</code>s or mixed
+partitioned <code>Node</code>s are not narrowed by the <code>Pod</code> webhook&rsquo;s <code>.count</code> affinity.</li>
+<li><strong>Partition NUMA alignment</strong>: Under <code>single-numa-node</code>, CPU/memory may lock to one socket while
+the only free MIG slot sits on another socket.</li>
+</ul>
+<h2 id="pool-troubleshooting">Pool troubleshooting</h2>
+<h3 id="isolation-mode-selection">Isolation mode selection</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get instancetypes -o wide
+</span></span><span class="line"><span class="cl">kubectl get devices &lt;node&gt; -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.groups[*].accelerators[*].status}&#39;</span></span></span></code></pre></div>
+</div>
+<table>
+	<thead>
+			<tr>
+					<th>Mode</th>
+					<th>Request key</th>
+					<th>Expected signal</th>
+					<th>Next action</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Exclusive</td>
+					<td><code>&lt;base&gt;</code></td>
+					<td>Non-zero <code>EX</code> on <code>InstanceType</code></td>
+					<td>Request integer cards on unpartitioned <code>Node</code>s.</td>
+			</tr>
+			<tr>
+					<td>Shared</td>
+					<td><code>&lt;base&gt;.shared</code></td>
+					<td>Non-zero <code>SH</code> (<code>10</code> shares/card)</td>
+					<td>Request <code>N</code> distinct cards on one <code>Node</code> (no VRAM cap).</td>
+			</tr>
+			<tr>
+					<td>Logical slice</td>
+					<td><code>&lt;base&gt;.sliced</code></td>
+					<td>Non-zero <code>SL</code>; <code>logicalSliced</code> in <code>Devices</code></td>
+					<td>Set <code>.sliced: &quot;1&quot;</code> and one memory budget.</td>
+			</tr>
+			<tr>
+					<td>Physical partition</td>
+					<td><code>&lt;base&gt;.partitioned.&lt;kind&gt;-&lt;profile&gt;</code></td>
+					<td>Non-zero <code>PT</code>; <code>PARTITIONS</code> in <code>-o wide</code></td>
+					<td>Set <code>.partitioned: &quot;1&quot;</code> and <code>.partitioned.&lt;kind&gt;-&lt;profile&gt;: &quot;1&quot;</code>.</td>
+			</tr>
+	</tbody>
+</table>
+<p>Logical slicing mechanism and slice limits per manufacturer:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Manufacturer</th>
+					<th>Enforcer</th>
+					<th>Compute overcommit</th>
+					<th>Max slices</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>NVIDIA, Iluvatar</td>
+					<td>HAMi-core <code>libvgpu.so</code></td>
+					<td>Yes</td>
+					<td><code>128</code> (<code>100</code> Iluvatar)</td>
+			</tr>
+			<tr>
+					<td>AMD</td>
+					<td><code>libvrocm.so</code> + <code>HSA_CU_MASK</code></td>
+					<td>Yes</td>
+					<td><code>128</code></td>
+			</tr>
+			<tr>
+					<td>T-Head</td>
+					<td><code>hggc_quota.so</code> + <code>hgml_dlsym_hook.so</code></td>
+					<td>Yes</td>
+					<td><code>128</code></td>
+			</tr>
+			<tr>
+					<td>Ascend</td>
+					<td>vcann-rt <code>libvruntime.so</code></td>
+					<td>Yes</td>
+					<td><code>63</code></td>
+			</tr>
+			<tr>
+					<td>Cambricon</td>
+					<td>cnDev sMLU profile</td>
+					<td>No</td>
+					<td><code>16</code></td>
+			</tr>
+			<tr>
+					<td>MetaX</td>
+					<td>sysfs <code>sgpu</code> subdevice</td>
+					<td>No</td>
+					<td><code>16</code></td>
+			</tr>
+			<tr>
+					<td>MThreads</td>
+					<td>Host sGPU kmod</td>
+					<td>No</td>
+					<td><code>16</code></td>
+			</tr>
+			<tr>
+					<td>Hygon</td>
+					<td>Host DTK <code>vdev.conf</code></td>
+					<td>No</td>
+					<td><code>4</code></td>
+			</tr>
+	</tbody>
+</table>
+<h3 id="inspecting-pools-and-quota">Inspecting pools and quota</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get instancetypes
+</span></span><span class="line"><span class="cl">kubectl -n &lt;namespace&gt; get localqueues
+</span></span><span class="line"><span class="cl">kubectl get clusterqueue &lt;cluster-queue&gt; -o yaml
+</span></span><span class="line"><span class="cl">kubectl get resourceflavors -l resource.gpustack.ai/type<span class="o">=</span>nodes</span></span></code></pre></div>
+</div>
+<p>Confirm <code>InstanceType</code> <code>PHASE</code> is <code>Active</code>, <code>ENTRANCE</code> exists in your namespace, and <code>ClusterQueue</code>
+has <code>spec.stopPolicy: None</code>, <code>gpustack-node-devices</code> in <code>admissionChecksStrategy</code>, and
+<code>credits.gpustack.ai/&lt;manufacturer&gt;</code> (<code>1,600,000</code> per card) in <code>resourceGroups</code>. If <code>ClusterQueue</code>
+is on <code>Hold</code> (<code>empty-plan-hold</code> or <code>spec.inactive: true</code>), verify <code>ResourceFlavor</code>s and
+<code>gpustack.ai/managed=true</code> <code>Node</code> labels.</p>
+<h3 id="diagnosing-pending-workloads">Diagnosing Pending workloads</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Stage</th>
+					<th>Command</th>
+					<th>Expected signal</th>
+					<th>Next action</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Webhook refusal</td>
+					<td><code>kubectl apply</code> or <code>kubectl -n &lt;ns&gt; get events</code></td>
+					<td><code>Forbidden</code>, <code>Invalid value</code>, or <code>Required value</code> (no <code>Pod</code> created)</td>
+					<td>Fix manifest against <a href="#request-rules">Request rules</a>
+ or offered pool profiles.</td>
+			</tr>
+			<tr>
+					<td>Queued demand</td>
+					<td><code>kubectl -n &lt;ns&gt; describe workload &lt;name&gt;</code></td>
+					<td><code>Pod</code> gated by <code>kueue.x-k8s.io/admission</code>; <code>QuotaReserved=False</code></td>
+					<td>Wait for quota, add <code>Node</code>s, or reduce requested resources.</td>
+			</tr>
+			<tr>
+					<td>Card fragmentation (affinity)</td>
+					<td><code>kubectl -n &lt;ns&gt; describe workload &lt;name&gt;</code></td>
+					<td><code>excluded: affinity</code> despite free aggregate pool credits</td>
+					<td>Wait for a contiguous card or request a smaller slice.</td>
+			</tr>
+			<tr>
+					<td>Card fragmentation (check / kubelet)</td>
+					<td><code>kubectl -n &lt;ns&gt; get workload &lt;name&gt; -o jsonpath='{.status.admissionChecks}'</code></td>
+					<td><code>gpustack-node-devices</code> in <code>Retry</code>, or <code>Pod</code> <code>Failed</code> (<code>UnexpectedAdmissionError</code>)</td>
+					<td>Inspect <code>Devices</code> <code>remaining</code> / <code>allocatedSlices</code> and <code>fit.gpustack.ai</code> labels below; delete failed unqueued <code>Pod</code>s.</td>
+			</tr>
+	</tbody>
+</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get devices &lt;node&gt; -o yaml
+</span></span><span class="line"><span class="cl">kubectl get node &lt;node&gt; -o json <span class="p">|</span> jq <span class="s1">&#39;.metadata.labels | with_entries(select(.key | contains(&#34;fit.gpustack.ai&#34;)))&#39;</span></span></span></code></pre></div>
+</div>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
+ (per-GPU MIG setup and capacity accounting)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/">Hygon MIG Operations</a>
+ (node-wide MIG on Hygon DCUs)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/">T-Head MIG Operations</a>
+ (MIG partitioning on T-Head PPUs)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/devices/preflight/">Preflight Checks</a>
+ (bare-host detection and slicing verification)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/">RDMA Operations</a>
+ (RDMA endpoint pairing and <em>NUMA</em> alignment)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.12.2/docs/walkthroughs/devices/scheduling/">Heterogeneous Devices Walkthrough</a>
+ — trace queued accelerator requests on a live cluster.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#accelerator-resource-families">Accelerator resource families</a>
+      <ul>
+        <li><a href="#resource-keys">Resource keys</a></li>
+        <li><a href="#pod-request-examples">Pod request examples</a></li>
+        <li><a href="#instance-api-requests">Instance API requests</a></li>
+        <li><a href="#preferred-accelerator-placement">Preferred accelerator placement</a></li>
+      </ul>
+    </li>
+    <li><a href="#request-rules">Request rules</a>
+      <ul>
+        <li><a href="#rule-1-family-and-container-group">Rule 1: Family and container group</a></li>
+        <li><a href="#rule-2-logical-slice-count">Rule 2: Logical slice count</a></li>
+        <li><a href="#rule-3-partition-count">Rule 3: Partition count</a></li>
+        <li><a href="#rule-4-partition-profile">Rule 4: Partition profile</a></li>
+        <li><a href="#rule-5-profile-instance-count">Rule 5: Profile instance count</a></li>
+        <li><a href="#rule-6-slicing-container-count">Rule 6: Slicing container count</a></li>
+        <li><a href="#rule-7-native-sidecar-requests">Rule 7: Native sidecar requests</a></li>
+      </ul>
+    </li>
+    <li><a href="#rdma-resource-requests">RDMA resource requests</a>
+      <ul>
+        <li><a href="#numa-alignment-conditions">NUMA alignment conditions</a></li>
+      </ul>
+    </li>
+    <li><a href="#legacy-request-migration">Legacy request migration</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+    <li><a href="#pool-troubleshooting">Pool troubleshooting</a>
+      <ul>
+        <li><a href="#isolation-mode-selection">Isolation mode selection</a></li>
+        <li><a href="#inspecting-pools-and-quota">Inspecting pools and quota</a></li>
+        <li><a href="#diagnosing-pending-workloads">Diagnosing Pending workloads</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.12.2/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
+</body>
+</html>

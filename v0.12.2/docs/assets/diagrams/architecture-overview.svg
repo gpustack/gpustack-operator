@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 716" role="img" aria-labelledby="title desc">
+<title id="title">Architecture Overview</title>
+<desc id="desc">Workload &amp; API Entry · worker.gpustack.ai/v1; Control Plane &amp; Kueue Scheduling Chain · Worker; Optional Data &amp; State Services; Node Hardware &amp; Runtime Plane · Per Node.</desc>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--card:#fff;--text:#0f172a;--muted:#334155;--blue:#2563eb;--purple:#7c3aed;--teal:#0f766e;--amber:#b45309;--blue-bg:#eff6ff;--purple-bg:#f5f3ff;--teal-bg:#f0fdfa;--amber-bg:#fffbeb;--border:#94a3b8}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--text:#f8fafc;--muted:#e2e8f0;--blue:#60a5fa;--purple:#a78bfa;--teal:#2dd4bf;--amber:#fbbf24;--blue-bg:#172554;--purple-bg:#1e1b4b;--teal-bg:#042f2e;--amber-bg:#451a03;--border:#94a3b8}}
+.layer{fill:var(--tint);stroke:var(--accent);stroke-width:1.5;stroke-dasharray:6 4}
+.card{fill:var(--card);stroke:var(--accent);stroke-width:1.4}
+.layer-title{font:700 14px system-ui,-apple-system,sans-serif;fill:var(--accent)}
+.card-title{font:700 14px system-ui,-apple-system,sans-serif;fill:var(--text)}
+.detail{font:12px system-ui,-apple-system,sans-serif;fill:var(--muted)}
+.legend{font:600 11.5px system-ui,-apple-system,sans-serif;fill:var(--muted)}
+.link{stroke:var(--blue);stroke-width:2;fill:none}
+.sublink{stroke:var(--accent);stroke-width:1.8;fill:none}
+.pulse{fill:var(--blue)}
+.subpulse{fill:var(--accent)}
+@media(prefers-reduced-motion:reduce){.pulse,.subpulse{display:none}}
+</style>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0.5 L9 5 L0 9.5z" fill="var(--blue)"/></marker>
+</defs>
+<g style="--accent:var(--blue);--tint:var(--blue-bg)">
+<rect class="layer" x="18" y="12.0" width="924" height="124" rx="12"/>
+<text class="layer-title" x="34" y="35.0">Workload &amp; API Entry · worker.gpustack.ai/v1</text>
+<rect class="card" x="32.0" y="46.0" width="288.0" height="76" rx="8"/>
+<text class="card-title" x="50.0" y="71.0">ModelDeployment &amp; Scaler</text>
+<text class="detail" x="50.0" y="90.0">Aggregated, PD or EPD inference</text>
+<text class="detail" x="50.0" y="107.0">Optional metric-based replica scaling</text>
+<rect class="card" x="336.0" y="46.0" width="288.0" height="76" rx="8"/>
+<text class="card-title" x="354.0" y="71.0">GPU Instance &amp; SSH Key</text>
+<text class="detail" x="354.0" y="90.0">Interactive accelerator workspaces</text>
+<text class="detail" x="354.0" y="107.0">Optional SSH access and NodePort services</text>
+<rect class="card" x="640.0" y="46.0" width="288.0" height="76" rx="8"/>
+<text class="card-title" x="658.0" y="71.0">Direct Pod Requests</text>
+<text class="detail" x="658.0" y="90.0">Whole, shared, sliced or partitioned</text>
+<text class="detail" x="658.0" y="107.0">Accelerator and optional RDMA limits</text>
+</g>
+<path class="link" d="M 480 136.0 V 190.0" marker-end="url(#arrow)"/>
+<circle class="pulse" cx="0" cy="0" r="3.5"><animateMotion path="M 480 136.0 V 190.0" dur="1.8s" begin="-0.0s" repeatCount="indefinite"/></circle>
+<text class="legend" x="494" y="167.0">Submits requests</text>
+<g style="--accent:var(--purple);--tint:var(--purple-bg)">
+<rect class="layer" x="18" y="192.0" width="924" height="124" rx="12"/>
+<text class="layer-title" x="34" y="215.0">Control Plane &amp; Kueue Scheduling Chain · Worker</text>
+<rect class="card" x="32.0" y="226.0" width="280.0" height="76" rx="8"/>
+<text class="card-title" x="50.0" y="251.0">Capacity &amp; Pool Controllers</text>
+<text class="detail" x="50.0" y="270.0">Derive InstanceType and ResourceFlavor</text>
+<text class="detail" x="50.0" y="287.0">Group compatible node hardware</text>
+<path class="sublink" d="M 312.0 264.0 H 338.0" marker-end="url(#arrow)"/>
+<circle class="subpulse" cx="0" cy="0" r="3"><animateMotion path="M 312.0 264.0 H 338.0" dur="1.8s" begin="-0.0s" repeatCount="indefinite"/></circle>
+<rect class="card" x="340.0" y="226.0" width="280.0" height="76" rx="8"/>
+<text class="card-title" x="358.0" y="251.0">Isolated Kueue Queues</text>
+<text class="detail" x="358.0" y="270.0">ClusterQueue → namespace LocalQueue</text>
+<text class="detail" x="358.0" y="287.0">Pools do not borrow across cohorts</text>
+<path class="sublink" d="M 620.0 264.0 H 646.0" marker-end="url(#arrow)"/>
+<circle class="subpulse" cx="0" cy="0" r="3"><animateMotion path="M 620.0 264.0 H 646.0" dur="1.8s" begin="-0.4s" repeatCount="indefinite"/></circle>
+<rect class="card" x="648.0" y="226.0" width="280.0" height="76" rx="8"/>
+<text class="card-title" x="666.0" y="251.0">Topology &amp; Admission</text>
+<text class="detail" x="666.0" y="270.0">Topology profiles and Kueue TAS domains</text>
+<text class="detail" x="666.0" y="287.0">Webhook → quota → fit → kubelet → plugin</text>
+</g>
+<path class="link" d="M 480 316.0 V 370.0" marker-end="url(#arrow)"/>
+<circle class="pulse" cx="0" cy="0" r="3.5"><animateMotion path="M 480 316.0 V 370.0" dur="1.8s" begin="-0.5s" repeatCount="indefinite"/></circle>
+<text class="legend" x="494" y="347.0">Coordinates services</text>
+<g style="--accent:var(--teal);--tint:var(--teal-bg)">
+<rect class="layer" x="18" y="372.0" width="924" height="124" rx="12"/>
+<text class="layer-title" x="34" y="395.0">Optional Data &amp; State Services</text>
+<rect class="card" x="32.0" y="406.0" width="440.0" height="76" rx="8"/>
+<text class="card-title" x="50.0" y="431.0">Model Weight Delivery · ModelArtifact</text>
+<text class="detail" x="50.0" y="450.0">Hub, image and PVC sources</text>
+<text class="detail" x="50.0" y="467.0">Node cache, prefetch and remote delivery</text>
+<rect class="card" x="488.0" y="406.0" width="440.0" height="76" rx="8"/>
+<text class="card-title" x="506.0" y="431.0">Shared KV Cache · KVCachePool</text>
+<text class="detail" x="506.0" y="450.0">Mooncake memory and optional disk tiers</text>
+<text class="detail" x="506.0" y="467.0">Namespace bindings grant quota and reuse</text>
+</g>
+<path class="link" d="M 480 496.0 V 550.0" marker-end="url(#arrow)"/>
+<circle class="pulse" cx="0" cy="0" r="3.5"><animateMotion path="M 480 496.0 V 550.0" dur="1.8s" begin="-1.0s" repeatCount="indefinite"/></circle>
+<text class="legend" x="494" y="527.0">Executes on nodes</text>
+<g style="--accent:var(--amber);--tint:var(--amber-bg)">
+<rect class="layer" x="18" y="552.0" width="924" height="124" rx="12"/>
+<text class="layer-title" x="34" y="575.0">Node Hardware &amp; Runtime Plane · Per Node</text>
+<rect class="card" x="32.0" y="586.0" width="288.0" height="76" rx="8"/>
+<text class="card-title" x="50.0" y="611.0">NFD &amp; Topology Sources</text>
+<text class="detail" x="50.0" y="630.0">Discover hardware and topology labels</text>
+<text class="detail" x="50.0" y="647.0">Publish or validate node capabilities</text>
+<rect class="card" x="336.0" y="586.0" width="288.0" height="76" rx="8"/>
+<text class="card-title" x="354.0" y="611.0">Device Manager &amp; Plugin</text>
+<text class="detail" x="354.0" y="630.0">Discover accelerators and RDMA interfaces</text>
+<text class="detail" x="354.0" y="647.0">Maintain Devices inventory and allocate Pods</text>
+<rect class="card" x="640.0" y="586.0" width="288.0" height="76" rx="8"/>
+<text class="card-title" x="658.0" y="611.0">Model Manager CSI</text>
+<text class="detail" x="658.0" y="630.0">NodeModelStore tracks verified node cache</text>
+<text class="detail" x="658.0" y="647.0">Mounts node-delivered weights read-only</text>
+</g>
+<path class="link" d="M 32 700 h 36" marker-end="url(#arrow)"/>
+<text class="legend" x="78" y="704">Layer relationship / runtime flow</text>
+<path d="M 310 700 h 36" fill="none" stroke="var(--border)" stroke-width="1.8" stroke-dasharray="6 4"/>
+<text class="legend" x="356" y="704">Layered plane boundary (optional capabilities noted in cards)</text>
+</svg>

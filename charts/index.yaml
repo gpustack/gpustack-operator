@@ -5,6 +5,59 @@ entries:
       artifacthub.io/license: Apache-2.0
       artifacthub.io/operator: "true"
     apiVersion: v2
+    appVersion: 0.12.2
+    created: "2026-11-28T01:05:35.832962751Z"
+    dependencies:
+    - condition: kueue.enabled
+      name: kueue
+      repository: ""
+      version: 0.18.11
+    - condition: node-feature-discovery.enabled
+      name: node-feature-discovery
+      repository: ""
+      version: 0.19.0
+    - condition: csi-driver-nfs.enabled
+      name: csi-driver-nfs
+      repository: ""
+      version: 4.13.4
+    - condition: csi-driver-s3.enabled
+      name: csi-driver-s3
+      repository: ""
+      version: 0.43.7
+    - condition: topograph.enabled
+      name: topograph
+      repository: ""
+      version: 1.0.0
+    description: A Kubernetes operator that turns raw node hardware into a Kueue-based
+      scheduling chain for accelerators (GPU/NPU/TPU), built on Node Feature Discovery
+      (NFD) and Kueue.
+    digest: 0724789e396bf9638b889d465130852a6ba0028ed14372339fe5a2891deae793
+    home: https://github.com/gpustack/gpustack-operator
+    icon: https://raw.githubusercontent.com/gpustack/gpustack/main/docs/assets/logo.png
+    keywords:
+    - gpustack-operator
+    - operator
+    - kueue
+    - node-feature-discovery
+    - gpu
+    - npu
+    - accelerator
+    kubeVersion: '>=1.23.0-0'
+    maintainers:
+    - name: GPUStack Authors
+      url: https://github.com/gpustack
+    name: gpustack-operator
+    sources:
+    - https://github.com/gpustack/gpustack
+    - https://github.com/gpustack/gpustack-operator
+    type: application
+    urls:
+    - https://docs.gpustack.ai/gpustack-operator/charts/gpustack-operator-0.12.2.tgz
+    version: 0.12.2
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/operator: "true"
+    apiVersion: v2
     appVersion: 0.12.1
     created: "2026-11-23T04:20:51.95183103Z"
     dependencies:
@@ -1508,4 +1561,4 @@ entries:
     urls:
     - https://gpustack.github.io/gpustack-operator/charts/gpustack-operator-0.5.1.tgz
     version: 0.5.1
-generated: "2026-11-23T04:20:51.935837483Z"
+generated: "2026-11-28T01:05:35.814766003Z"

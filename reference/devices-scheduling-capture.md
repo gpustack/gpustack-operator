@@ -292,4 +292,4 @@ gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4   intel-xeon-platinum-8259
 
 ---
 
-**See also** — [Heterogeneous Devices Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/walkthroughs/devices/scheduling/index.md) (reproducible step-by-step walkthrough) · [Scheduling Chain](devices-scheduling.md) (controller ownership and naming) · [Instance Type Unit Resources Reference](instance-type-unit-resources.md) (per-product CPU and RAM presets)
+**See also** — [Heterogeneous Devices Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/walkthroughs/devices/scheduling/index.md) (reproducible step-by-step walkthrough) · [Scheduling Chain](devices-scheduling.md) (controller ownership and naming) · [Instance Type Unit Resources Reference](instance-type-unit-resources.md) (per-product CPU and RAM presets)

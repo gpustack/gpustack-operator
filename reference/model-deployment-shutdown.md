@@ -74,7 +74,7 @@ sample the hook cannot parse.
 
 Adding the hook and the grace changed every replica's `Pod` spec, so upgrading to the release that
 carries them turns each existing replica over once; see
-[Rollout behavior](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/index.md#rollout-behavior).
+[Rollout behavior](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/index.md#rollout-behavior).
 
 Changing a role's *`terminationGracePeriodSeconds`* turns its replicas over the same way, and each
 replica that leaves in that rollout leaves with the grace it was created with. Writing 30 onto a
@@ -253,7 +253,7 @@ ordinary retirement instead.
 
 ---
 
-**See also** — [Model Deployment](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/configuration/index.md) for what turns a replica over ·
-[Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/model-deployment/scaling/index.md) for the count changes that start a retirement ·
+**See also** — [Model Deployment](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/index.md) for what turns a replica over ·
+[Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling/index.md) for the count changes that start a retirement ·
 [Model Deployment Metrics](model-deployment-metrics.md) for the scrape endpoints the hook
 reads.

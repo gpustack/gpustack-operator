@@ -1,0 +1,1638 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.12.2/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  
+  <title>Engine Compatibility · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.12.2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.2/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.2/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.12.2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.12.2/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.12.2"
+    data-home="/gpustack-operator/v0.12.2/" data-page="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.12.2</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.12.2</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.12.2/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <a class="nav-home" href="/gpustack-operator/v0.12.2/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/v0.12.2/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/v0.12.2/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/v0.12.2/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/v0.12.2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/v0.12.2/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/v0.12.2/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/v0.12.2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/v0.12.2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.12.2/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/leader/" >Leader Election</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/remote/" >Remote Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Configuration" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/" aria-current="page">Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/v0.12.2/docs/modules/instances/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="GPU Instance Configuration" href="/gpustack-operator/v0.12.2/docs/modules/instances/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="GPU Instance Operations" href="/gpustack-operator/v0.12.2/docs/modules/instances/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/v0.12.2/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/v0.12.2/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.12.2/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.12.2/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.12.2/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/v0.12.2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.12.2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Engine Compatibility</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="engine-compatibility">Engine Compatibility</h1>
+<p>Verify engine, Mooncake and transport compatibility before choosing container images.
+<strong>Engines below the listed minimums are unsupported.</strong> Upgrade before diagnosing failures on an
+older engine release.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#minimum-versions">Minimum versions</a>
+</li>
+<li><a href="#engine-version-resolution">Engine version resolution</a>
+</li>
+<li><a href="#transport-compatibility">Transport compatibility</a>
+</li>
+<li><a href="#remote-weight-loading">Remote weight loading</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+</ul>
+<h2 id="minimum-versions">Minimum versions</h2>
+<p>The matrix covers aggregated serving, <em>prefill/decode (PD)</em> and <em>encode/prefill/decode (EPD)</em>
+configurations.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Engine</th>
+					<th>Configuration</th>
+					<th>Minimum</th>
+					<th>Mooncake client</th>
+					<th>Store members</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>vLLM</td>
+					<td>alone</td>
+					<td><code>0.29.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0</code>+</td>
+					<td><code>0.3.13.post1</code>, on the <code>cuda12.9</code> and the <code>cuda13.0</code> tag</td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>vLLM</td>
+					<td><em>prefill/decode</em>, direct transfer over <code>tcp</code></td>
+					<td><code>0.29.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0</code>+</td>
+					<td><code>0.3.13.post1</code></td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>vLLM</td>
+					<td>with a Mooncake store, alone or as a pair</td>
+					<td><code>0.29.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0</code>+</td>
+					<td><code>0.3.13.post1</code></td>
+					<td>the 0.3.13 line; the <a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/#backend-images">default store image</a>
+ is one</td>
+			</tr>
+			<tr>
+					<td>vLLM-Ascend</td>
+					<td>alone</td>
+					<td><code>0.23.0</code>; behind <code>llm-d-router</code>, <code>--enable-scale-out</code> is also required on <code>0.30.0rc1</code>+</td>
+					<td><code>0.3.11.post1</code>, the NPU build</td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>vLLM-Ascend</td>
+					<td><em>prefill/decode</em>, direct transfer</td>
+					<td><code>0.23.0</code>, behind <code>llm-d-router</code>; <code>--enable-scale-out</code> is also required on <code>0.30.0rc1</code>+</td>
+					<td><code>0.3.11.post1</code>, the NPU build</td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>SGLang</td>
+					<td>alone</td>
+					<td><code>0.5.18</code>, run as the halves of a pair</td>
+					<td><code>0.3.12.post1</code></td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>SGLang</td>
+					<td><em>prefill/decode</em>, direct transfer over <code>tcp</code></td>
+					<td><code>0.5.18</code></td>
+					<td><code>0.3.12.post1</code></td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>SGLang</td>
+					<td>with a Mooncake store</td>
+					<td><code>0.5.18</code>, run as a pair</td>
+					<td><code>0.3.12.post1</code></td>
+					<td>the 0.3.12 line, such as <code>kvcacheai/mooncake:0.3.12.post1</code></td>
+			</tr>
+			<tr>
+					<td>vLLM</td>
+					<td><em>encode/prefill/decode</em>, direct transfer over NIXL (<code>ECCPUConnector</code>)</td>
+					<td><code>0.30.0</code>, behind <code>llm-d-router</code> or <code>vllm-router</code>: NVIDIA CUDA or AMD ROCm</td>
+					<td>compiles its own</td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>vLLM-Ascend</td>
+					<td><em>encode/prefill/decode</em>, direct transfer (<code>ECExampleConnector</code>)</td>
+					<td><code>0.30.0rc1</code>, behind <code>llm-d-router</code></td>
+					<td><code>0.3.11.post1</code>, the NPU build</td>
+					<td>—</td>
+			</tr>
+			<tr>
+					<td>SGLang</td>
+					<td><em>encode/prefill/decode</em>, transfer by address (<code>encoder-urls</code>)</td>
+					<td><code>0.5.10</code>, behind <code>sgl-router</code>, <code>llm-d-router</code>, or deprecated <code>sglang-gateway</code></td>
+					<td><code>0.3.12.post1</code></td>
+					<td>—</td>
+			</tr>
+	</tbody>
+</table>
+<h3 id="engine-image-requirements">Engine image requirements</h3>
+<ul>
+<li><strong>Render flag</strong>: Non-<em>Encode</em> vLLM deployments behind <code>llm-d-router</code> need <code>--enable-scale-out</code>
+starting at vLLM <code>0.30.0</code> or vLLM-Ascend <code>0.30.0rc1</code>
+(<a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/#router-token-counting">Router token counting</a>
+). Earlier <code>0.29.0</code>/<code>0.23.0</code>
+floors predate that dependency.</li>
+<li><strong>Mooncake client and store</strong>: Each runner image embeds its Mooncake client (ROCm images compile
+their own). Match <code>KVCacheBackend</code> members to the client&rsquo;s minor line
+(<a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/#version-compatibility">Version compatibility</a>
+).</li>
+<li><strong>Direct transport defaults</strong>: Listed runs moved KV over <code>tcp</code>, or <code>ascend</code> on vLLM-Ascend (which
+does not support direct <code>tcp</code>; see <a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/#role-links-and-connectors">Role links and connectors</a>
+).</li>
+<li><strong>Encoder floor</strong>: Pick an image meeting the <a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode/#supported-serving-configurations">supported serving configurations</a>
+
+floor (<code>0.30.0</code> for NVIDIA/AMD <code>ECCPUConnector</code>, <code>0.30.0rc1</code> for Ascend <code>ECExampleConnector</code>,
+<code>0.5.10</code> for SGLang); admission does not enforce it.</li>
+<li><strong>Group-forward probe</strong>: Verified on vLLM <code>0.25.1</code>/<code>0.29.0</code> (<code>cmpl-</code> + <code>request_id</code>) and SGLang
+<code>0.5.18</code>/<code>0.5.21</code> (<code>meta_info.id</code> = rid). On other releases, the probe still runs: <code>Verified</code>
+admits a member, <code>Unknown</code> keeps prior eligibility, and only a failed health check withdraws it
+(<a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/routing/#endpoint-status">Endpoint status</a>
+).</li>
+</ul>
+<h3 id="router-image-floors">Router image floors</h3>
+<p>When overriding <em><code>spec.router.image</code></em> or pinning router/sidecar settings, meet these minimum
+image floors:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Component</th>
+					<th>Minimum image</th>
+					<th>Compatibility notes</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Managed routers (<code>llm-d-router</code>, <code>vllm-router</code>, <code>sgl-router</code>)</td>
+					<td><code>gpustack/llm-router &gt;= v0.6.1</code></td>
+					<td>Required for <code>llm-d-router</code> <a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/routing/#fault-resilience">Fault resilience</a>
+; earlier <code>v0.6.0</code> images crash-loop on <code>epp.yaml</code>.</td>
+			</tr>
+			<tr>
+					<td><code>llm-d-router</code> <em>Decode</em> sidecar</td>
+					<td><code>gpustack/mirrored-llm-d-router-disagg-sidecar &gt;= v1.0.0</code></td>
+					<td>Standing <code>v0.11.0</code> <em>Decode</em> <code>Pod</code>s stay compatible on basic <em>PD</em>/<em>EPD</em> and adopt <code>v1.0.0</code> on next trigger.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="engine-version-resolution">Engine version resolution</h2>
+<p>Managed roles (<em><code>roles[].command</code></em> empty) resolve an engine version from <em><code>spec.roles[].engineVersion</code></em>
+or fall back to <em><code>spec.engine.version</code></em>. Admission backfills empty version fields automatically from
+standard <code>gpustack/runner</code> image tags on both creation and update.</p>
+<ul>
+<li><strong>Custom or digest-only images</strong>: Set <em><code>spec.engine.version</code></em> or <em><code>roles[].engineVersion</code></em>
+explicitly. Admission fails closed when a managed role uses an unparseable image without a version,
+including when a role overrides <em><code>roles[].image</code></em> with a different unparseable image while leaving
+<em><code>roles[].engineVersion</code></em> empty.</li>
+<li><strong>Runner tag agreement</strong>: If you update a <code>gpustack/runner</code> image while leaving a stale explicit
+version, admission refuses the update. Update or clear the version field alongside the image.</li>
+<li><strong>Milestone comparison</strong>: Gates compare <code>(major, minor, patch)</code> tuples, so pre-release tags such
+as <code>0.30.0rc1</code> or <code>0.34.0rc0</code> satisfy their release line (<code>0.30.0</code> or <code>0.34.0</code>).</li>
+<li><strong>Empty stored version baseline</strong>: In controller rendering, an empty stored version falls back to
+the <code>&lt; 0.30.0</code> baseline without re-parsing container image tags.</li>
+</ul>
+<h3 id="version-gates">Version gates</h3>
+<table>
+	<thead>
+			<tr>
+					<th>Version gate</th>
+					<th>Engine</th>
+					<th>Before</th>
+					<th>At/after</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>0.30.0</code></td>
+					<td><code>vLLM-Ascend</code></td>
+					<td><em>PD</em> renders <code>MooncakeConnectorV1</code> (<code>prefill tp_size &gt;= decode tp_size</code>)</td>
+					<td><em>PD</em> renders <code>MooncakeConnectorV2</code> Pull mode (<code>max(tp_p, tp_d) % min(tp_p, tp_d) == 0</code>); mixed V1/V2 pairs refused</td>
+			</tr>
+			<tr>
+					<td><code>0.31.0</code></td>
+					<td><code>vLLM</code>, <code>vLLM-Ascend</code></td>
+					<td><code>vllm-router</code> <code>kv_aware</code> policy refused at admission</td>
+					<td><code>vllm-router</code> <code>kv_aware</code> admitted; emits KV events and <code>sha256_cbor</code> hash alignment</td>
+			</tr>
+			<tr>
+					<td><code>0.34.0</code></td>
+					<td><code>vLLM</code></td>
+					<td><code>ECCPUConnector</code> defaults <code>VLLM_USE_V2_MODEL_RUNNER=1</code> and <code>VLLM_EC_SIDE_CHANNEL_PORT=5601</code></td>
+					<td><code>VLLM_USE_V2_MODEL_RUNNER</code> omitted; <code>VLLM_EC_SIDE_CHANNEL_PORT=5601</code> remains defaulted (overridable, including <code>0</code>)</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="transport-compatibility">Transport compatibility</h2>
+<p>The shared-store path uses <code>KVCacheBackend.spec.transport.protocol</code>. The direct <em>PD</em> path selects
+<code>Mooncake</code>, <code>NIXL</code> or <code>HIXL</code> through <em><code>spec.kvTransfer.backend</code></em>
+(<a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/#direct-kv-transports">Direct KV transports</a>
+). Admission refuses
+deployments whose store and direct paths request incompatible fabrics. A cell reads <strong>Admitted</strong> when
+admission does not refuse the combination.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Transport (API/Mooncake)</th>
+					<th>Engine</th>
+					<th>Store path</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>TCP</code> / <code>tcp</code></td>
+					<td>vLLM</td>
+					<td><strong>Works</strong>, default images; beside a direct path it keeps its store connections open and did not <a href="#limitations">run out of ports</a>
+ where measured</td>
+			</tr>
+			<tr>
+					<td><code>TCP</code> / <code>tcp</code></td>
+					<td>SGLang</td>
+					<td><strong>Works</strong>, with a store image on <a href="#minimum-versions">its client&rsquo;s line</a>
+; beside a direct path, <a href="#limitations">it runs out of ports</a>
+ unless <a href="#limitations"><code>model-deployment-tcp-tw-reuse</code></a>
+ is on</td>
+			</tr>
+			<tr>
+					<td><code>TCP</code> / <code>tcp</code></td>
+					<td>vLLM-Ascend</td>
+					<td><strong>Not supported</strong>: refused at admission; store client accepts <code>CANN</code> only</td>
+			</tr>
+			<tr>
+					<td><code>RDMA</code> / <code>rdma</code></td>
+					<td>vLLM</td>
+					<td><strong>Admitted</strong></td>
+			</tr>
+			<tr>
+					<td><code>RDMA</code> / <code>rdma</code></td>
+					<td>SGLang</td>
+					<td><strong>Admitted</strong></td>
+			</tr>
+			<tr>
+					<td><code>RDMA</code> / <code>rdma</code></td>
+					<td>vLLM-Ascend</td>
+					<td><strong>Not supported</strong>: refused at admission, as for <code>TCP</code></td>
+			</tr>
+			<tr>
+					<td><code>EFA</code> / <code>efa</code></td>
+					<td>vLLM</td>
+					<td><strong>Own image</strong>: requires an <a href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/#efa-engine-images">EFA build of Mooncake</a>
+ in the engine; default store image</td>
+			</tr>
+			<tr>
+					<td><code>EFA</code> / <code>efa</code></td>
+					<td>SGLang</td>
+					<td><strong>Not supported</strong>: <a href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/#sglang-and-efa">no EFA build serves SGLang</a>
+</td>
+			</tr>
+			<tr>
+					<td><code>EFA</code> / <code>efa</code></td>
+					<td>vLLM-Ascend</td>
+					<td><strong>Not supported</strong>: refused at admission, as for <code>TCP</code></td>
+			</tr>
+			<tr>
+					<td><code>CANN</code> / <code>ascend</code></td>
+					<td>vLLM</td>
+					<td><strong>Not supported</strong>: CUDA client has no Ascend transport</td>
+			</tr>
+			<tr>
+					<td><code>CANN</code> / <code>ascend</code></td>
+					<td>SGLang</td>
+					<td><strong>Admitted</strong></td>
+			</tr>
+			<tr>
+					<td><code>CANN</code> / <code>ascend</code></td>
+					<td>vLLM-Ascend</td>
+					<td><strong>Admitted</strong>; members need <a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/#backend-images">an image carrying CANN</a>
+</td>
+			</tr>
+			<tr>
+					<td><code>ROCM</code> / <code>hip</code></td>
+					<td>vLLM, SGLang</td>
+					<td><strong>Admitted</strong></td>
+			</tr>
+			<tr>
+					<td><code>ROCM</code> / <code>hip</code></td>
+					<td>vLLM-Ascend</td>
+					<td><strong>Not supported</strong>: refused at admission, as for <code>TCP</code></td>
+			</tr>
+			<tr>
+					<td><code>MUSA</code>, <code>MACA</code> / <code>musa</code>, <code>maca</code></td>
+					<td>vLLM, SGLang, vLLM-Ascend</td>
+					<td><strong>Admitted</strong></td>
+			</tr>
+	</tbody>
+</table>
+<p>Direct-path observations apply only to the named configurations:</p>
+<ul>
+<li><strong>Mooncake TCP</strong>: Verified on default vLLM and SGLang images. SGLang can
+<a href="#limitations">exhaust ephemeral ports</a>
+ unless <code>model-deployment-tcp-tw-reuse</code> is enabled.</li>
+<li><strong>Mooncake RDMA</strong>: Verified with vLLM on InfiniBand H100 SXM5 in
+<a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode-benchmark/#infiniband-rdma-comparison">Prefill and Decode Benchmark</a>
+ and
+<a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode-benchmark/#infiniband-rdma-comparison">Encode, Prefill and Decode Benchmark</a>
+.</li>
+<li><strong>EFA</strong>: Requires an <a href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/#efa-engine-images">EFA engine build</a>
+ (default store
+image includes EFA).</li>
+<li><strong>vLLM-Ascend direct</strong>: Verified on <code>cann9.1-910b-vllm0.23.0</code> behind <code>llm-d-router</code>. Stores on
+Ascend require CANN members (<a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/#backend-images">image carrying CANN</a>
+).</li>
+</ul>
+<h2 id="remote-weight-loading">Remote weight loading</h2>
+<p><code>--load-format model-transfer</code> loads verified tensors from a prepared remote source while keeping
+each engine&rsquo;s parameter mapping and sharding. vLLM and vLLM-Ascend use the vLLM general load-format
+plugin; SGLang uses <code>.pth</code> CLI and <code>LoadFormat</code> hooks. See
+<a href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/remote/">Remote Weight Delivery</a>
+ for configuration.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Engine</th>
+					<th>Adapter entry</th>
+					<th>Qualification state</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>vLLM</td>
+					<td><code>NativeModelTransferLoader</code>, <code>--load-format model-transfer</code> on CUDA</td>
+					<td>H100 loading and inference observed for full-resident and paged 80B sources and full-resident 235B broadcast; production qualification remains open</td>
+			</tr>
+			<tr>
+					<td>vLLM-Ascend</td>
+					<td><code>NativeModelTransferLoader</code> through vLLM general plugin with <code>vllm_ascend</code> (requires CANN 9.2+ image with Python <code>hixl</code>, e.g. <code>cann9.2-910b-vllm0.30.0</code>)</td>
+					<td>Loading and inference measured on two Ascend 910B2 nodes for Qwen3-8B, Qwen3.6-35B-A3B and Qwen3-235B-A22B-W8A8; managed HIXL admitted by default; production qualification remains open</td>
+			</tr>
+			<tr>
+					<td>SGLang</td>
+					<td><code>NativeSGLangModelTransferLoader</code>, <code>--load-format model-transfer</code> via <code>.pth</code> CLI and <code>LoadFormat</code> hooks (requires CANN 9.2+ image on Ascend for Python <code>hixl</code>)</td>
+					<td>H100 80B loading and inference observed; Ascend covers CLI, <code>LoadFormat</code>, probe and session-open, with full loading qualification open</td>
+			</tr>
+	</tbody>
+</table>
+<p>A CUDA capture does not qualify Ascend or ROCm. Under delivery policy <code>Require</code>, an unqualified
+engine and pool combination blocks instead of falling back.</p>
+<h3 id="ascend-hixl">Ascend (HIXL)</h3>
+<p>See <a href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/remote/#ascend-hixl">Ascend benchmark</a>
+ for same-node and cross-node load
+times. CANN 9.2 adds Python <code>hixl</code> (<code>/usr/local/Ascend/cann-9.2.0/python/site-packages/hixl</code>)
+beside <code>libcann_hixl.so</code>; CANN 9.0 images lack Python <code>hixl</code>, so <code>load_runtime()</code> fails closed with
+<code>RuntimeUnavailableError</code>.</p>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li><strong>SGLang store RAM</strong>: SGLang with a store enables <code>--enable-hierarchical-cache</code> (or
+<code>--disaggregation-decode-retraction-backup cpu_tensor</code> on <em>Decode</em>) and allocates pinned host
+RAM. Size node RAM above the engine heap plus that pool
+(<a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/">KV Cache Pools and Bindings</a>
+).</li>
+<li><strong>SGLang <em>PD</em> TCP port exhaustion</strong>: SGLang <em>Prefill</em> opens a new TCP connection per transfer to
+<em>Decode</em> and each store member. Ephemeral sockets left in <code>TIME-WAIT</code> exhaust container ports,
+after which requests fail (<code>503</code> <code>No available prefill workers</code> without a store) until engine
+<code>Pod</code>s restart.</li>
+<li><strong>Mitigation (<code>model-deployment-tcp-tw-reuse</code>)</strong>: Prevented exhaustion across 1,905 sequential
+requests on SGLang <code>0.5.18</code> with a store (~19,500 <code>TIME-WAIT</code> sockets). First add
+<code>allowedUnsafeSysctls: [&quot;net.ipv4.tcp_tw_reuse&quot;]</code> to <code>KubeletConfiguration</code> on every eligible
+node (otherwise <em>Prefill</em> <code>Pod</code>s fail with <code>SysctlForbidden</code>), then patch the <code>Setting</code>:</li>
+</ul>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-deployment-tcp-tw-reuse <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;true&#34;}}&#39;</span></span></span></code></pre></div>
+</div>
+<ul>
+<li><strong>Port range</strong>: Widening <code>ip_local_port_range</code> only delays exhaustion.</li>
+<li><strong>vLLM comparison</strong>: vLLM reuses transfer connections and held at most 9 <code>TIME-WAIT</code> sockets
+without a store and at most 16 with a <code>TCP</code> store.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/">Model Deployment Configuration</a>
+ (fields that reference these images)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/">Prefill and Decode</a>
+ (pairing <em>prefill</em> and <em>decode</em> roles)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode/">Encode, Prefill and Decode</a>
+ (<em>encode</em>, <em>prefill</em> and <em>decode</em> disaggregation)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/">KV Cache Backend</a>
+ (store version alignment)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/">RDMA Operations</a>
+ (fabric devices and EFA engine images)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/">Prefill and Decode</a>
+ — pair <em>prefill</em> and <em>decode</em> roles behind a router.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#minimum-versions">Minimum versions</a>
+      <ul>
+        <li><a href="#engine-image-requirements">Engine image requirements</a></li>
+        <li><a href="#router-image-floors">Router image floors</a></li>
+      </ul>
+    </li>
+    <li><a href="#engine-version-resolution">Engine version resolution</a>
+      <ul>
+        <li><a href="#version-gates">Version gates</a></li>
+      </ul>
+    </li>
+    <li><a href="#transport-compatibility">Transport compatibility</a></li>
+    <li><a href="#remote-weight-loading">Remote weight loading</a>
+      <ul>
+        <li><a href="#ascend-hixl">Ascend (HIXL)</a></li>
+      </ul>
+    </li>
+    <li><a href="#limitations">Limitations</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.12.2/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
+</body>
+</html>

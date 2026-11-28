@@ -25,7 +25,7 @@ not member groups:
 | `LocalDisk` | Tier on members already holding a memory replica | `members[].localDisks` |
 | `NoF` | NVMe-oF target coordinate registered once with no `Pod` | No API surface |
 | `CXL` | DAX device allocated by the leader process | Refused (`enable_cxl`, `cxl_path`, `cxl_size` rejected in *`leader.extraArgs`*) |
-| `DFS` | Distributed filesystem configured in leader env | Not rendered by this API |
+| `DFS` | Distributed filesystem configured in leader env | Refused in `leader.extraEnv` |
 
 ### CRD validation ratcheting
 
@@ -168,4 +168,4 @@ management port (`8080 + index`).
 
 ---
 
-**See also** — [KV Cache Backend](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/backend/index.md) (operator configuration and troubleshooting) · [KV Cache Election and Failover](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/leader/index.md) (leader probes and Lease election) · [KV Cache Local Disk Tier](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/kv-cache/local-disk-tier/index.md) (disk buckets and eviction) · [Ascend A5 Matrix](ascend-a5-matrix.md#kvcachebackend-matrix) (Ascend A5 CANN scenarios)
+**See also** — [KV Cache Backend](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/index.md) (operator configuration and troubleshooting) · [KV Cache Election and Failover](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/kv-cache/leader/index.md) (leader probes and Lease election) · [KV Cache Local Disk Tier](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/kv-cache/local-disk-tier/index.md) (disk buckets and eviction) · [Ascend A5 Matrix](ascend-a5-matrix.md#kvcachebackend-matrix) (Ascend A5 CANN scenarios)

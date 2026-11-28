@@ -1,0 +1,1614 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.12.2/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  
+  <title>KV Cache Backend · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.12.2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.2/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.2/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.12.2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.12.2/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.12.2"
+    data-home="/gpustack-operator/v0.12.2/" data-page="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.12.2</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.12.2</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.12.2/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <a class="nav-home" href="/gpustack-operator/v0.12.2/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/v0.12.2/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/v0.12.2/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/v0.12.2/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/v0.12.2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/v0.12.2/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/v0.12.2/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/v0.12.2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/v0.12.2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.12.2/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/" aria-current="page">Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/leader/" >Leader Election</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/remote/" >Remote Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Configuration" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/v0.12.2/docs/modules/instances/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="GPU Instance Configuration" href="/gpustack-operator/v0.12.2/docs/modules/instances/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="GPU Instance Operations" href="/gpustack-operator/v0.12.2/docs/modules/instances/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/v0.12.2/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/v0.12.2/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.12.2/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.12.2/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.12.2/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/v0.12.2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.12.2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/">KV Cache</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">KV Cache Backend</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="kv-cache-backend">KV Cache Backend</h1>
+<p>A <code>KVCacheBackend</code> configures shared KV cache storage for inference workloads. On a managed backend,
+the operator runs a metadata leader and one store member per selected <code>Node</code> in each member group.
+An external backend connects to an existing service.</p>
+<p>Mooncake calls the leader a <code>master</code>, and its flags, environment variables, and metrics retain that
+name.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#configuration">Configuration</a>
+</li>
+<li><a href="#backend-images">Backend images</a>
+</li>
+<li><a href="#hardware-requirements">Hardware requirements</a>
+</li>
+<li><a href="#status-and-conditions">Status and conditions</a>
+</li>
+<li><a href="#group-resizing">Group resizing</a>
+</li>
+<li><a href="#operations">Operations</a>
+</li>
+</ul>
+<h2 id="configuration">Configuration</h2>
+<h3 id="connections-and-storage-media">Connections and storage media</h3>
+<p><em><code>spec.connection</code></em> selects either operator-managed workloads or an external endpoint pair. On
+managed backends, <em><code>members[].medium</code></em> selects host memory (<code>DRAM</code>) or device memory (<code>VRAM</code>).</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend </span><span class="w"> </span><span class="c"># cluster-scoped, short name kvcb</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mooncake-dram</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Mooncake </span><span class="w"> </span><span class="c"># required; enum: Mooncake</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">docker.io/kvcacheai/mooncake:0.3.13 </span><span class="w"> </span><span class="c"># optional; defaults from kv-cache-backend-image Setting</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">  </span><span class="c"># required: set exactly one of managed or external</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">leader</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">electionBackend</span><span class="p">:</span><span class="w"> </span><span class="l">None </span><span class="w"> </span><span class="c"># upstream image lacks Kubernetes Lease support</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">DRAM </span><span class="w"> </span><span class="c"># required, immutable; enum: DRAM, VRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">4Gi </span><span class="w"> </span><span class="c"># required per-node segment size</span></span></span></code></pre></div>
+</div>
+<ul>
+<li><strong>Cluster scope</strong>: <code>KVCacheBackend</code> is cluster-scoped because it claims host memory, host paths,
+and fabric devices. Multiple <code>KVCachePool</code>s can share one backend (<a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/#limitations">Limitations</a>
+).</li>
+<li><strong>Member groups</strong>: Declare one or more groups; at most one group can configure a
+<a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
+.</li>
+<li><strong>Medium immutability</strong>: <em><code>members[].medium</code></em> cannot change in place; add a separate group to mix
+host and device memory.</li>
+</ul>
+<table>
+	<thead>
+			<tr>
+					<th>Value</th>
+					<th>Meaning</th>
+					<th>Constraints</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>DRAM</code></td>
+					<td>Host RAM segment</td>
+					<td>Adds <code>capacityPerMember + localBufferSize</code> to <code>Pod</code> <code>requests.memory</code> and sets <code>void</code> device visibility.</td>
+			</tr>
+			<tr>
+					<td><code>VRAM</code></td>
+					<td>Device memory segment</td>
+					<td>Accounting-only for custom <code>USE_VRAM_SEGMENT=ON</code> images; charges only <em><code>localBufferSize</code></em> and omits <code>void</code> hiding.</td>
+			</tr>
+	</tbody>
+</table>
+<h3 id="metadata-discovery">Metadata discovery</h3>
+<p>The metadata plane always uses peer-to-peer handshakes (<code>P2PHANDSHAKE</code>) and needs no external etcd
+or Redis service (<em><code>spec.metadata</code></em> does not exist). Configure leader election separately through
+<a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/leader/#high-availability"><code>leader.electionBackend</code></a>
+ (default <code>Kubernetes</code>).</p>
+<h3 id="member-groups">Member groups</h3>
+<p>Each <em><code>members[]</code></em> entry reconciles one <code>OnDelete</code> <code>DaemonSet</code> matching <em><code>members[].nodeSelector</code></em>.
+Two groups can select the same <code>Node</code> when their network identities do not collide.</p>
+<p><em><code>spec.transport.protocol</code></em> accepts <code>Auto</code> (default, resolving to <code>TCP</code>), <code>TCP</code>, <code>RDMA</code>, <code>EFA</code>,
+<code>CANN</code>, <code>ROCM</code>, <code>MUSA</code>, and <code>MACA</code>. <em><code>members[].transport.protocol</code></em> overrides the protocol for one
+group; see <a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/#transport-compatibility">Engine Compatibility</a>
+.</p>
+<ul>
+<li><strong>TCP</strong>: Needs no host privileges, but copies payloads through the kernel network stack.</li>
+<li><strong>Host fabrics (<code>RDMA</code>, <code>EFA</code>)</strong>: Enable <code>hostNetwork: true</code>, <code>IPC_LOCK</code>, <code>SYS_RESOURCE</code>, and
+fabric resource requests (<code>device.gpustack.ai/rdma.shared</code> for <code>1</code>, <code>device.gpustack.ai/rdma</code> for
+<code>&gt; 1</code>, or <code>vpc.amazonaws.com/efa</code>) sized by <em><code>members[].fabricInterfaceCount</code></em> (default <code>1</code>). Do
+not mount <code>/dev/infiniband</code> manually.</li>
+<li><strong>Ports</strong>: Group <code>&lt;i&gt;</code> serves HTTP on <code>8080 + &lt;i&gt;</code> (bound on the host network when <code>hostNetwork</code>
+is active). Data transfers use ephemeral ports negotiated via <code>P2PHANDSHAKE</code>, so open ephemeral
+port ranges in firewalls and <code>NetworkPolicy</code> rules.</li>
+<li><strong>Extra flags</strong>: <em><code>members[].extraArgs</code></em> renders as <code>-D key=value</code> and <em><code>leader.extraArgs</code></em>
+renders as <code>-key=value</code>; CXL flags are refused. Never place secrets in <em><code>extraArgs</code></em>.</li>
+<li><strong>Disk offload retries</strong>: Clients writing to a <a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
+ must retry
+when a memory segment fills ahead of asynchronous bucket eviction.</li>
+</ul>
+<h3 id="external-mooncake-endpoints">External Mooncake endpoints</h3>
+<p><em><code>connection.external</code></em> attaches to an existing Mooncake service without creating workloads. Supply
+both <code>Client</code> and <code>Admin</code> endpoints as <code>host:port</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">external-mooncake</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">external</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">endpoints</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Client </span><span class="w"> </span><span class="c"># engine RPC endpoint</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">mooncake.example:50051</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Admin </span><span class="w"> </span><span class="c"># operator health, metrics, and tenant API endpoint</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">mooncake.example:9003</span></span></span></code></pre></div>
+</div>
+<ul>
+<li><strong>Immediate error state</strong>: Unreachable external endpoints report <code>phase: Error</code> immediately (never
+<code>Provisioning</code>), and HTTP <code>3xx</code> redirects from <code>Admin</code> are refused.</li>
+<li><strong>Single-backend ownership</strong>: Never point two <code>KVCacheBackend</code> objects at the same external leader
+with overlapping <em><code>domain.name</code></em> bindings; ceilings will oscillate and mismatched <em><code>blockSize</code></em> or
+<em><code>dtype</code></em> values corrupt tensors.</li>
+</ul>
+<h2 id="backend-images">Backend images</h2>
+<p><em><code>members[].image</code></em> overrides <em><code>spec.image</code></em>, which falls back to the <code>kv-cache-backend-image</code>
+<code>Setting</code> (defaulting to the project&rsquo;s <code>-cpu</code> build). Admission refuses create when all three are
+empty; clearing the <code>Setting</code> later does not block unrelated updates or deletion.</p>
+<p>Set <em><code>spec.imagePullSecrets</code></em> and <em><code>spec.imagePullPolicy</code></em> on the backend to apply registry pull
+settings across the leader and all member groups.</p>
+<h3 id="gpustack-build-variants">GPUStack build variants</h3>
+<p>GPUStack publishes <code>mirrored-mooncake</code> variants tagged <code>&lt;mooncake-version&gt;-&lt;variant&gt;&lt;toolchain&gt;</code>
+(such as <code>0.3.13.post1-cuda13.0</code>). All official builds set <code>USE_VRAM_SEGMENT=OFF</code>, allocate Host RAM
+(<code>DRAM</code>) only, and compile Kubernetes <code>Lease</code> <a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/leader/#high-availability">high availability</a>
+:</p>
+<ul>
+<li><strong><code>-cpu</code> default</strong>: Bundles <code>libibverbs</code> and AWS <code>libfabric</code> for <code>TCP</code>, <code>RDMA</code>, and <code>EFA</code> Host-RAM
+stores on NVIDIA and AMD <code>Node</code>s.</li>
+<li><strong><code>-cann</code> variant</strong>: Required on Ascend because <code>vllm-ascend</code> uses HIXL (<code>protocol: ascend</code>) over
+ACL/HIXL Host RAM.</li>
+<li><strong><code>-rocm</code> variant</strong>: Adds ROCm transport support alongside Host-RAM storage.</li>
+<li><strong><code>0.3.10.post2</code> variant</strong>: Supports legacy engines below the
+<a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/">supported floor</a>
+; set <code>leader.electionBackend: None</code> and
+<code>leader.multiTenancy: false</code>.</li>
+</ul>
+<h3 id="version-compatibility">Version compatibility</h3>
+<p><strong>Match the store image and the engine&rsquo;s embedded Mooncake client to the same minor line.</strong> The wire
+handshake reports <code>2.0.0</code> across <code>0.3.x</code> releases, so mismatched lines (such as <code>0.3.12</code> and
+<code>0.3.13</code>) pass probes and fail transfers with <code>RPC_FAIL (-900)</code>. Check runner pairings in
+<a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
+.</p>
+<p>Direct <em>prefill/decode (PD)</em> transfer (<code>MooncakeConnector</code> without <em><code>spec.kvCache</code></em>) runs engine to
+engine and does not use a store. Leader <code>Lease</code> election requires Mooncake <code>0.3.12</code> or newer.</p>
+<h2 id="hardware-requirements">Hardware requirements</h2>
+<h3 id="ascend">Ascend</h3>
+<p><code>vllm-ascend</code> requires <code>protocol: CANN</code> and a <code>-cann</code> member image (<code>USE_ASCEND_DIRECT</code>) with
+<code>medium: DRAM</code>. Starting a <code>-cann</code> image on <code>TCP</code> or <code>RDMA</code> fails with
+<code>cannot allocate local segment, ret: -1</code>. Idle <code>CANN</code> members use zero AICore compute.</p>
+<ul>
+<li><strong>Ascend A2/A3 and A5 UB/UBG/UBoE</strong>: Omit <em><code>fabricInterfaceCount</code></em>. For A5 UBG or UBoE, set
+<code>ASCEND_GLOBAL_RESOURCE_CONFIG</code> in <em><code>members[].extraEnv</code></em> with <code>&quot;comm_resource_config.protocol_desc&quot;</code>
+set to <code>[&quot;ub_rtp:device&quot;]</code> or <code>[&quot;uboe:device&quot;]</code>.</li>
+<li><strong>Ascend A5 Host RoCE (<code>roce:host</code>)</strong>: Set <code>fabricInterfaceCount: 1</code> (or higher) on
+<code>protocol: CANN</code> after preparing
+<a href="/gpustack-operator/v0.12.2/docs/getting-started/vendor-prerequisites/#ascend">Ascend host prerequisites</a>
+. The operator
+grants <code>hostNetwork</code>, <code>IPC_LOCK</code>, <code>SYS_RESOURCE</code>, <code>device.gpustack.ai/rdma*</code>, read-only
+<code>/etc/hixlep</code>, and defaulted <code>ASCEND_LOCAL_COMM_RES=&quot;&quot;</code> plus <code>ASCEND_GLOBAL_RESOURCE_CONFIG</code>.</li>
+</ul>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">ascend-shared-cache</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">transport</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">CANN</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">leader</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># uses default replicas, allocationStrategy, and multiTenancy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kvcache-ascend</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">DRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/mirrored-mooncake:0.3.14-cann9.1-910b </span><span class="w"> </span><span class="c"># match 910B, 910C, or A5 SoC</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">32Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="c"># fabricInterfaceCount: 1  # enable for Ascend A5 Host RoCE (roce:host)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">hostPaths</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/Ascend/driver</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/Ascend/driver</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Directory</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/dcmi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/dcmi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Directory</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/bin/npu-smi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/bin/npu-smi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">File</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span></span></span></code></pre></div>
+</div>
+<h3 id="aws-efa">AWS EFA</h3>
+<p>Verify EFA support on the instance type with <code>fi_info -p efa</code> before deploying an <code>EFA</code> group, and
+never mount <code>/dev/infiniband</code> (partial device visibility causes <code>No available EFA devices</code>). Place
+all members and engines in one AWS cluster placement group and build an EFA-capable engine image per
+<a href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/#efa-engine-images">RDMA Operations</a>
+.</p>
+<h3 id="custom-vram-builds">Custom VRAM builds</h3>
+<p><code>medium: VRAM</code> is accounting-only for user-built <code>USE_VRAM_SEGMENT=ON</code> images. Grant user-space
+driver access via <em><code>runtimeClassName</code></em>, <em><code>extraEnv</code></em>, or <em><code>hostPaths</code></em>, and deduct
+<em><code>capacityPerMember</code></em> from the engine&rsquo;s <code>gpu_memory_utilization</code> budget:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-cache</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">leader</span><span class="p">:</span><span class="w"> </span>{}<span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kvcache-vram</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">VRAM </span><span class="w"> </span><span class="c"># custom USE_VRAM_SEGMENT=ON image required</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">custom-registry.example/mooncake-vram:0.3.14-cuda13.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">8Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">extraEnv</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">NVIDIA_VISIBLE_DEVICES</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">all </span><span class="w"> </span><span class="c"># requires accept-nvidia-visible-devices-envvar-when-unprivileged or runtimeClassName: nvidia</span></span></span></code></pre></div>
+</div>
+<h2 id="status-and-conditions">Status and conditions</h2>
+<p>Inspect backend phase, client endpoint, observed capacity, and conditions:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get kvcb
+</span></span><span class="line"><span class="cl">kubectl describe kvcb &lt;name&gt;</span></span></code></pre></div>
+</div>
+<p>Captured output:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NAME            TYPE       PHASE   ENDPOINT                                        CAPACITY
+</span></span><span class="line"><span class="cl">mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051  12Gi</span></span></code></pre></div>
+</div>
+<p>Phases are <code>Provisioning</code>, <code>Ready</code>, <code>Degraded</code>, <code>Error</code>, and <code>Deleting</code>. Status polls the leader
+every <code>15 s</code>; <em><code>status.capacity</code></em> comes from live leader metrics once <code>service_ready</code> is <code>true</code>,
+never from multiplying <em><code>capacityPerMember</code></em>.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Condition</th>
+					<th>Moves phase</th>
+					<th>Meaning and action</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>LeaderAvailable</code></td>
+					<td>Yes</td>
+					<td>Leader health check passed. If <code>False</code>, inspect leader <code>Deployment</code> <code>Pod</code>s or external <code>Admin</code> reachability.</td>
+			</tr>
+			<tr>
+					<td><code>MembersMounted</code></td>
+					<td>Yes</td>
+					<td>Ready member <code>Pod</code>s match listed segments. On <code>AmbiguousMemberIdentity</code>, move host-network groups onto disjoint <code>Node</code>s; pre-<code>0.3.12</code> masters report <code>Unknown/SegmentListingNotServed</code>.</td>
+			</tr>
+			<tr>
+					<td><code>CapacityObserved</code></td>
+					<td>Yes</td>
+					<td>Leader <code>:9003/metrics</code> scraped while ready. If <code>False</code>, check leader admin port reachability.</td>
+			</tr>
+			<tr>
+					<td><code>PoolWrites</code></td>
+					<td>Yes</td>
+					<td><code>True</code> after a put completes or <code>allocator_used_bytes &gt; 0</code>; <code>False</code> if puts revoke with zero allocated bytes (retry initial writes after tenant ledger propagation).</td>
+			</tr>
+			<tr>
+					<td><code>Deletable</code></td>
+					<td>Yes</td>
+					<td><code>False</code> while <em><code>status.usedBy</code></em> names live <code>KVCachePool</code> or <code>KVCachePoolBinding</code> objects; delete those consumers first.</td>
+			</tr>
+			<tr>
+					<td><code>RolloutComplete</code></td>
+					<td>No</td>
+					<td>Informational: <code>False</code> while an <code>OnDelete</code> member <code>DaemonSet</code> rollout is incomplete.</td>
+			</tr>
+			<tr>
+					<td><code>ElectionObserved</code></td>
+					<td>No</td>
+					<td>Informational (under <code>electionBackend: Kubernetes</code>): confirms <code>Lease</code> holder observation.</td>
+			</tr>
+			<tr>
+					<td><code>TierWasEmpty</code></td>
+					<td>No</td>
+					<td>Informational (when <em><code>localDisks</code></em> is set): records whether the disk directory started empty.</td>
+			</tr>
+	</tbody>
+</table>
+<p>Pool and binding usage fields lag leader <code>:9003/metrics</code> and <code>/api/v1/tenant_quotas</code> by one
+reconcile pass. For disk-tier write checks, see <a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/local-disk-tier/#bucket-writes">Bucket writes</a>
+.</p>
+<h2 id="group-resizing">Group resizing</h2>
+<p>Widening <em><code>members[].nodeSelector</code></em> adds member <code>Pod</code>s without restarting existing ones; existing keys
+do not rebalance (<code>allocationStrategy: FreeRatioFirst</code> steers new writes toward emptier members).
+Editing image, argv, environment, resources, or fabric settings updates the <code>OnDelete</code> <code>DaemonSet</code>,
+requiring manual <code>Pod</code> deletion to roll each <code>Node</code>.</p>
+<p>Shrinking a group or narrowing <em><code>nodeSelector</code></em> <strong>discards</strong> cached keys on removed <code>Node</code>s. Member
+groups are indexed by list position:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Edit</th>
+					<th>Outcome</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Reordering entries or deleting an entry before the tail</td>
+					<td>Refused at admission</td>
+			</tr>
+			<tr>
+					<td>Appending or removing at the end of <em><code>members</code></em></td>
+					<td>Allowed</td>
+			</tr>
+			<tr>
+					<td>Editing in place (including narrowing <em><code>nodeSelector</code></em> to zero <code>Node</code>s)</td>
+					<td>Allowed</td>
+			</tr>
+	</tbody>
+</table>
+<p>To retire a middle group without shifting later indices, narrow its <em><code>nodeSelector</code></em> to match zero
+<code>Node</code>s. Before shrinking a group with <em><code>localDisks</code></em>, set <em><code>scaleIn.gracePeriodSeconds</code></em> (<code>0</code> to
+<code>3600</code>, setting <code>Pod</code> termination grace to <code>gracePeriodSeconds + 60</code>) and roll the <code>Pod</code>s so the
+<code>preStop</code> hook deregisters segments cleanly:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: KVCacheBackend
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: mooncake-dram
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   connection:
+</span></span><span class="line"><span class="cl">     managed:
+</span></span><span class="line"><span class="cl"><span class="gi">+      scaleIn:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        gracePeriodSeconds: 30  # 0..3600; applies to localDisks groups
+</span></span></span></code></pre></div>
+</div>
+<h2 id="operations">Operations</h2>
+<ul>
+<li><strong>Benign client warning</strong>: <code>E transfer_metadata.cpp:991] Local segment descriptor not found</code> logs
+once on engine startup and is harmless.</li>
+<li><strong>Reserved metrics env</strong>: <code>MC_TE_METRIC=1</code> is rendered on every member group and refused in
+<em><code>members[].extraEnv</code></em>. Configure <code>replica_num</code> on the engine client, not on <code>KVCacheBackend</code>.</li>
+<li><strong>Consumer holds</strong>: While <em><code>status.usedBy</code></em> is non-empty, deletion waits in <code>Deleting</code> (leaving
+workloads running) and disabling <em><code>leader.multiTenancy</code></em> is refused.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/leader/">KV Cache Election and Failover</a>
+ (metadata leader, probes, and <code>Lease</code> election)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/local-disk-tier/">KV Cache Local Disk Tier</a>
+ (disk buckets, cleanup, and disk-heavy <code>Node</code>s)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/">KV Cache Pools and Bindings</a>
+ (namespace grants and reuse domains)</li><li><a href="/gpustack-operator/v0.12.2/docs/operate/installation-modes/">Installation Modes</a>
+ (chart and worker CRD ownership)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/local-disk-tier/">KV Cache Local Disk Tier</a>
+ — add local NVMe offload to a member group.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#configuration">Configuration</a>
+      <ul>
+        <li><a href="#connections-and-storage-media">Connections and storage media</a></li>
+        <li><a href="#metadata-discovery">Metadata discovery</a></li>
+        <li><a href="#member-groups">Member groups</a></li>
+        <li><a href="#external-mooncake-endpoints">External Mooncake endpoints</a></li>
+      </ul>
+    </li>
+    <li><a href="#backend-images">Backend images</a>
+      <ul>
+        <li><a href="#gpustack-build-variants">GPUStack build variants</a></li>
+        <li><a href="#version-compatibility">Version compatibility</a></li>
+      </ul>
+    </li>
+    <li><a href="#hardware-requirements">Hardware requirements</a>
+      <ul>
+        <li><a href="#ascend">Ascend</a></li>
+        <li><a href="#aws-efa">AWS EFA</a></li>
+        <li><a href="#custom-vram-builds">Custom VRAM builds</a></li>
+      </ul>
+    </li>
+    <li><a href="#status-and-conditions">Status and conditions</a></li>
+    <li><a href="#group-resizing">Group resizing</a></li>
+    <li><a href="#operations">Operations</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.12.2/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
+</body>
+</html>

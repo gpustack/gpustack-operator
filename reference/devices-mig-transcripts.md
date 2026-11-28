@@ -467,4 +467,4 @@ gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   
 
 ---
 
-**See also** — [NVIDIA MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.1/docs/modules/devices/nvidia-mig/index.md) (operational runbook and capacity accounting) · [Device Discovery](devices-discovery.md) (`Devices` ledger and partitioned allocation) · [Scheduling Chain](devices-scheduling.md) (Kueue capacity projections)
+**See also** — [NVIDIA MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/index.md) (operational runbook and capacity accounting) · [Device Discovery](devices-discovery.md) (`Devices` ledger and partitioned allocation) · [Scheduling Chain](devices-scheduling.md) (Kueue capacity projections)

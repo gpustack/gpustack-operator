@@ -1,0 +1,1943 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.12.2/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  
+  <title>Vendor Prerequisites · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.12.2/docs/getting-started/vendor-prerequisites/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.12.2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.2/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.12.2/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.12.2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.12.2/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.12.2"
+    data-home="/gpustack-operator/v0.12.2/" data-page="/gpustack-operator/v0.12.2/docs/getting-started/vendor-prerequisites/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.12.2</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.12.2</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.12.2/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <a class="nav-home" href="/gpustack-operator/v0.12.2/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" open>
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/v0.12.2/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/v0.12.2/docs/getting-started/vendor-prerequisites/" aria-current="page">Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/v0.12.2/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/v0.12.2/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/v0.12.2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/v0.12.2/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/v0.12.2/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/v0.12.2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/v0.12.2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/v0.12.2/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/v0.12.2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.12.2/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/leader/" >Leader Election</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.12.2/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/remote/" >Remote Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Configuration" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/v0.12.2/docs/modules/instances/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="GPU Instance Configuration" href="/gpustack-operator/v0.12.2/docs/modules/instances/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="GPU Instance Operations" href="/gpustack-operator/v0.12.2/docs/modules/instances/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/v0.12.2/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/v0.12.2/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.12.2/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.12.2/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.12.2/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/v0.12.2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.12.2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.12.2/docs/getting-started/">Getting Started</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Vendor Prerequisites</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="vendor-prerequisites">Vendor Prerequisites</h1>
+<p>Install the manufacturer driver and any required container toolkit before installing GPUStack. If a
+vendor GPU Operator runs on the same nodes, disable competing device plugins, node labellers, and
+duplicate NFD instances first. Vendor chart keys vary by release, so check the version cited in each
+section.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#third-party-dependencies">Third-party dependencies</a>
+</li>
+<li><a href="#vendor-setup-requirements">Vendor setup requirements</a>
+</li>
+<li><a href="#shared-cluster-requirements">Shared cluster requirements</a>
+</li>
+</ul>
+<h2 id="third-party-dependencies">Third-party dependencies</h2>
+<p>Review these cluster dependencies before installing GPUStack. Ownership rules for chart mode and
+image mode are in <a href="/gpustack-operator/v0.12.2/docs/operate/installation-modes/">Installation Modes</a>
+.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Dependency</th>
+					<th>Role</th>
+					<th>Configuration</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Node Feature Discovery (NFD)</td>
+					<td>Labels <code>Node</code>s and publishes hardware features.</td>
+					<td>Run one NFD master per cluster. See <a href="#single-nfd-per-cluster">Single NFD per cluster</a>
+.</td>
+			</tr>
+			<tr>
+					<td>Kueue</td>
+					<td>Manages workload quota and gang admission.</td>
+					<td>Bundled in the chart; see <a href="/gpustack-operator/v0.12.2/docs/operate/installation-modes/">Installation Modes</a>
+.</td>
+			</tr>
+			<tr>
+					<td>Topograph</td>
+					<td>Publishes topology domains from a provider.</td>
+					<td>Optional and disabled by default. See <a href="/gpustack-operator/v0.12.2/docs/modules/topology/operations/">Topology-Aware Scheduling Operations</a>
+.</td>
+			</tr>
+			<tr>
+					<td>Mooncake</td>
+					<td>Provides KV cache storage and transfer transport.</td>
+					<td>Optional. Match engine, client, store, and transport in <a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
+.</td>
+			</tr>
+			<tr>
+					<td>ModelExpress</td>
+					<td>Coordinates NVIDIA peer weight transfer and cache sharing.</td>
+					<td>Optional; the operator creates a per-deployment metadata service. See <a href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/remote/#nvidia-modelexpress">ModelExpress</a>
+.</td>
+			</tr>
+			<tr>
+					<td>CSI drivers</td>
+					<td>Mount NFS or S3 volumes, or mount cached weights.</td>
+					<td>NFS and S3 ship as bundled subcharts; node model delivery uses Model Manager CSI (<a href="/gpustack-operator/v0.12.2/docs/modules/model-delivery/operations/">Model Store Operations</a>
+).</td>
+			</tr>
+			<tr>
+					<td>Serving engines</td>
+					<td>Run inference containers.</td>
+					<td>Select a compatible runner image from <a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
+.</td>
+			</tr>
+			<tr>
+					<td>Vendor drivers and toolkits</td>
+					<td>Expose accelerators to node workloads.</td>
+					<td>Install host prerequisites from <a href="#vendor-setup-requirements">Vendor setup requirements</a>
+.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="vendor-setup-requirements">Vendor setup requirements</h2>
+<h3 id="amd">AMD</h3>
+<p>Checked against <strong>AMD GPU Operator v1.5.1</strong> (<a href="https://instinct.docs.amd.com/projects/gpu-operator/en/latest/index.html">Overview</a>
+ ·
+<a href="https://instinct.docs.amd.com/projects/gpu-operator/en/latest/installation/kubernetes-helm.html">Helm Chart Install</a>
+ ·
+<a href="https://instinct.docs.amd.com/projects/container-toolkit/en/latest/index.html">Toolkit Install</a>
+).</p>
+<p><strong>Install before GPUStack</strong> — install only the ROCm kernel driver. Per
+<a href="#container-toolkit-requirements">Container toolkit requirements</a>
+, GPUStack injects <code>/dev/kfd</code> and each granted card&rsquo;s DRM
+nodes directly, so neither AMD Container Toolkit nor <code>amd-container-runtime</code> is needed.</p>
+<p>If a workload runs as non-root, add <code>video</code> and <code>render</code> to its container <em><code>securityContext</code></em>
+supplementary groups. Kubernetes device plugins cannot grant supplementary groups. Without those
+groups, ROCm enumerates zero agents without raising an error; verify inside the container with
+<code>rocminfo</code> rather than sysfs-based <code>rocm-smi</code>.</p>
+<p><strong>Vendor GPU Operator</strong> — AMD GPU Operator reconciles a <code>DeviceConfig</code> custom resource created by its
+Helm chart. Disable its device plugin and node labeller on <code>DeviceConfig</code>, and disable bundled NFD
+and Kernel Module Management (when drivers are pre-installed) in Helm values:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">amd.com/v1alpha1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">DeviceConfig</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">kube-amd-gpu</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">driver</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">metricsExporter</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">devicePlugin</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableDevicePlugin</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: conflicts with GPUStack amd.com/gpu plugin</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableNodeLabeller</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: GPUStack publishes capacity labels</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">draDriver</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># optional: mutually exclusive with devicePlugin on one DeviceConfig</span></span></span></code></pre></div>
+</div>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">node-feature-discovery</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: run one NFD per cluster</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kmm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable when ROCm driver is pre-installed on the host</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">watch</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span></span></span></code></pre></div>
+</div>
+<p><strong>Install it</strong> — install the chart with NFD and KMM disabled, then patch the chart-created
+<code>DeviceConfig</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm repo add rocm https://rocm.github.io/gpu-operator
+</span></span><span class="line"><span class="cl">helm repo update
+</span></span><span class="line"><span class="cl">helm install amd-gpu-operator rocm/gpu-operator-charts <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --namespace kube-amd-gpu --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --version<span class="o">=</span>v1.5.1 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set node-feature-discovery.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set kmm.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set kmm.watch<span class="o">=</span><span class="nb">false</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">kubectl -n kube-amd-gpu patch deviceconfig &lt;name&gt; --type merge -p <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="s1">&#39;{&#34;spec&#34;:{&#34;devicePlugin&#34;:{&#34;enableDevicePlugin&#34;:false,&#34;enableNodeLabeller&#34;:false},&#34;metricsExporter&#34;:{&#34;enable&#34;:true}}}&#39;</span></span></span></code></pre></div>
+</div>
+<p>The patch applies this change to the existing <code>DeviceConfig</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: amd.com/v1alpha1
+</span></span><span class="line"><span class="cl"> kind: DeviceConfig
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: &lt;name&gt;
+</span></span><span class="line"><span class="cl">   namespace: kube-amd-gpu
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   devicePlugin:
+</span></span><span class="line"><span class="cl"><span class="gd">-    enableDevicePlugin: true
+</span></span></span><span class="line"><span class="cl"><span class="gd">-    enableNodeLabeller: true
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enableDevicePlugin: false
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enableNodeLabeller: false
+</span></span></span><span class="line"><span class="cl">   metricsExporter:
+</span></span><span class="line"><span class="cl"><span class="gd">-    enable: false
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enable: true
+</span></span></span></code></pre></div>
+</div>
+<p><strong>Already installed</strong> — both plugins advertise <code>amd.com/gpu</code>. Stop the vendor plugin before
+installing GPUStack:</p>
+<ol>
+<li><strong>Device plugin and Node Labeller</strong>: patch the existing <code>DeviceConfig</code> as shown above. Do not
+delete the <code>DaemonSet</code> directly, because the operator recreates it from <code>DeviceConfig</code>.</li>
+<li><strong>Bundled NFD</strong>: if the release enabled NFD, run <code>helm upgrade</code> with its existing values plus
+<code>--set node-feature-discovery.enabled=false</code>.</li>
+<li><strong>Verify</strong>: wait until <code>kubectl get node &lt;node&gt; -o jsonpath='{.status.allocatable}'</code> no longer
+lists <code>amd.com/gpu</code> before installing GPUStack.</li>
+</ol>
+<h3 id="ascend">Ascend</h3>
+<p>Checked against the <strong>Ascend NPU driver and firmware</strong> (<a href="https://www.hiascend.com/hardware/firmware-drivers">Driver Install</a>
+)
+and <a href="https://www.hiascend.com/eng/developer/software/mindcluster"><code>ascend-docker-runtime</code></a>
+ <strong>26.1.0</strong>
+on Atlas A5 (<code>950</code> series).</p>
+<p><strong>Install before GPUStack</strong> — install the Ascend NPU driver, firmware, and Ascend Docker Runtime. Per
+<a href="#container-toolkit-requirements">Container toolkit requirements</a>
+, GPUStack sets <code>ASCEND_VISIBLE_DEVICES</code> without <code>/dev</code>
+nodes, so the runtime hook must mount the devices. Register the runtime under handler <code>ascend</code> (matching
+the chart&rsquo;s <code>RuntimeClass</code>), or set <code>deviceManager.createRuntimeClasses=false</code> and supply your own.</p>
+<p>On Atlas A5 (<code>950</code>), install <code>ascend-docker-runtime</code> newer than <code>26.0.x</code><sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup>. Releases <code>7.3.x</code> and
+earlier support 910B and older generations only. On A5, an older runtime does not recognize
+<code>Ascend950</code>, falls back to legacy manager devices, and fails container creation on missing
+<code>/dev/devmm_svm</code>.</p>
+<p>Do not rely on <code>ascend-docker-runtime --version</code>; the wrapper forwards <code>--version</code> to host <code>runc</code>.
+Read the installer metadata file instead:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">grep <span class="s1">&#39;^version=&#39;</span> /usr/local/Ascend/Ascend-Docker-Runtime/ascend_docker_runtime_install.info
+</span></span><span class="line"><span class="cl"><span class="c1"># version=v7.3.0    &lt;- predates A5 support</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># version=v26.1.0   &lt;- serves A5</span></span></span></code></pre></div>
+</div>
+<p><code>gpustack-operator device-manager preflight</code> checks the same file and reports it as
+<a href="/gpustack-operator/v0.12.2/docs/modules/devices/preflight/#ascend-a5-host-checks"><code>ascend-docker-runtime</code></a>
+ on each A5 NPU.</p>
+<p><strong>A5 host ranktable</strong> — on Atlas A5 (<code>950</code>), <code>/etc/hccl_rootinfo.json</code> must be absent (default) or at
+version <code>&quot;2.0&quot;</code>. Prefer <code>ascend-docker-runtime</code> <code>26.2+</code> so the runtime does not mount it
+unconditionally. If an A2 (<code>&quot;1.0&quot;</code>) or A3 (<code>&quot;1.2&quot;</code>) ranktable remains on the host, <code>libhccl_v2</code> fails
+multi-card jobs with <code>Config_Error_Ranktable</code> (<code>EI0014</code>):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># absent is healthy; HCCL negotiates through rootInfo</span>
+</span></span><span class="line"><span class="cl"><span class="nb">test</span> -e /etc/hccl_rootinfo.json <span class="o">&amp;&amp;</span> grep -o <span class="s1">&#39;&#34;version&#34;[^,]*&#39;</span> /etc/hccl_rootinfo.json
+</span></span><span class="line"><span class="cl"><span class="c1"># &#34;version&#34;: &#34;1.0&#34;   &lt;- breaks multi-card HCCL on A5; remove or regenerate as 2.0</span></span></span></code></pre></div>
+</div>
+<p>Preflight reports this state as <a href="/gpustack-operator/v0.12.2/docs/modules/devices/preflight/#ascend-a5-host-checks"><code>hccl-ranktable</code></a>
+.</p>
+<p><strong>A5 conditional host mounts</strong> — on Ascend A5 (<code>status.detail.family</code> <code>&quot;950&quot;</code>), <code>device-manager</code> inspects <code>/etc/hccl_rootinfo.json</code> (regular non-symlink file <code>&lt;= 1 MiB</code> at version <code>&quot;2.0&quot;</code>) and <code>/lib/route.conf</code> (regular non-symlink file) through <code>/host</code> during <code>Allocate</code> and mounts valid files read-only.
+Absent, symlinked, invalid, or colliding paths are skipped cleanly, non-A5 hosts never receive either mount, and <a href="#device-manager-host-mount"><code>deviceManager.hostRootMount.enabled=false</code></a>
+ disables both.</p>
+<p><strong>A5 Host RoCE endpoints</strong> — for Ascend A5 <em>Host RoCE</em> (<code>roce:host</code>) <code>vLLM</code> workloads, create per-NPU
+endpoint files at <code>/etc/hixlep/ub_endpoint_npu_&lt;physical_id&gt;.json</code> on every Host RoCE node. Managed
+Host RoCE <code>Pod</code>s mount <code>/etc/hixlep</code> read-only (<code>HostPathDirectory</code>); a missing directory blocks
+kubelet volume setup, and a missing file fails <code>vllm-ascend</code> with <code>FileNotFoundError</code>. See
+<a href="/gpustack-operator/v0.12.2/docs/modules/model-deployment/prefill-decode/#ascend-a5-topologies">Ascend A5 topologies</a>
+.</p>
+<h3 id="cambricon">Cambricon</h3>
+<p>Checked against <strong>Cambricon driver 5.10.22</strong> (Neuware SDK 1.15.0,
+<a href="https://www.cambricon.com/docs/sdk_1.15.0/driver_5.10.22/user_guide/index.html">Driver Install</a>
+).</p>
+<p><strong>Install before GPUStack</strong> — install only the Cambricon MLU driver. Per
+<a href="#container-toolkit-requirements">Container toolkit requirements</a>
+, GPUStack injects card and host control <code>/dev</code> nodes on
+both whole-card and sliced allocations and sets <code>CAMBRICON_VISIBLE_DEVICES</code> for compatibility with
+<code>cambricon-container-runtime</code>, so <code>cntoolkit</code> is not required.</p>
+<h3 id="hygon">Hygon</h3>
+<p>Checked against <strong>Hygon DCU Operator</strong> (<code>latest</code> unversioned vendor docs,
+<a href="https://developer.sourcefind.cn/document/7541efc4-54b1-11f1-8265-0242ac150003">Overview</a>
+).</p>
+<p><strong>Install before GPUStack</strong> — install the Hygon DCU driver and firmware so <code>/dev/kfd</code>, <code>/dev/mkfd</code>,
+<code>/dev/dri/card*</code>, and <code>/dev/dri/renderD*</code> exist on the host. Per
+<a href="#container-toolkit-requirements">Container toolkit requirements</a>
+, GPUStack injects those device nodes directly without a
+container toolkit.</p>
+<p><strong>Vendor GPU Operator</strong> — Hygon DCU Operator configures all components on one <code>DeviceConfig</code> custom
+resource (<code>kubectl explain deviceconfig.spec</code>). Substitute the cluster&rsquo;s installed <code>apiVersion</code> and
+object name:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;existing-api-version&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">DeviceConfig</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">device-config</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">kube-system</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">metricsExporter</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">dcgm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">devicePlugin</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableDevicePlugin</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: conflicts with GPUStack hygon.com/dcu plugin</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableNodeLabeller</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: DCU-Label-Node conflicts with GPUStack labels</span></span></span></code></pre></div>
+</div>
+<p><strong>Install it</strong> — after installing the operator from Hygon&rsquo;s portal, patch its <code>DeviceConfig</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n kube-system patch deviceconfig &lt;name&gt; --type merge -p <span class="se">\
+</span></span></span><span class="line"><span class="cl">  <span class="s1">&#39;{&#34;spec&#34;:{&#34;devicePlugin&#34;:{&#34;enableDevicePlugin&#34;:false,&#34;enableNodeLabeller&#34;:false},&#34;metricsExporter&#34;:{&#34;enable&#34;:true},&#34;dcgm&#34;:{&#34;enable&#34;:true}}}&#39;</span></span></span></code></pre></div>
+</div>
+<p>Read <code>apiVersion</code> and <code>metadata.name</code> from <code>kubectl get deviceconfig -n kube-system -o yaml</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: &lt;existing-api-version&gt;
+</span></span><span class="line"><span class="cl"> kind: DeviceConfig
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: &lt;name&gt;
+</span></span><span class="line"><span class="cl">   namespace: kube-system
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   devicePlugin:
+</span></span><span class="line"><span class="cl"><span class="gd">-    enableDevicePlugin: &lt;current-value&gt;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enableDevicePlugin: false
+</span></span></span><span class="line"><span class="cl"><span class="gd">-    enableNodeLabeller: &lt;current-value&gt;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enableNodeLabeller: false
+</span></span></span><span class="line"><span class="cl">   metricsExporter:
+</span></span><span class="line"><span class="cl"><span class="gd">-    enable: &lt;current-value&gt;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enable: true
+</span></span></span><span class="line"><span class="cl">   dcgm:
+</span></span><span class="line"><span class="cl"><span class="gd">-    enable: &lt;current-value&gt;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    enable: true
+</span></span></span></code></pre></div>
+</div>
+<p><strong>Already installed</strong> — both plugins advertise <code>hygon.com/dcu</code>. Stop the vendor plugin first:</p>
+<ol>
+<li><strong>Device plugin and DCU-Label-Node</strong>: apply the <code>DeviceConfig</code> patch above. Do not delete the
+<code>DaemonSet</code>s directly.</li>
+<li><strong>Verify</strong>: wait until <code>hygon.com/dcu</code> disappears from <code>Node</code> allocatable capacity before
+installing GPUStack.</li>
+</ol>
+<h3 id="iluvatar">Iluvatar</h3>
+<p>Checked against <strong>ix-GPU-Operator v4.4.0</strong> and <strong>ix-Container-Toolkit v1.1.0</strong>
+(<a href="https://developer.iluvatar.com/docs/generaldocs_ix_gpu_operator?category=%E4%BA%91%E5%8E%9F%E7%94%9F%E4%B8%8E%E9%9B%86%E7%BE%A4%E9%83%A8%E7%BD%B2&amp;manual=generaldocs_k8stools_all">Helm Chart Install</a>
+ ·
+<a href="https://developer.iluvatar.com/docs/generaldocs_ix_container_toolkit?category=%E4%BA%91%E5%8E%9F%E7%94%9F%E4%B8%8E%E9%9B%86%E7%BE%A4%E9%83%A8%E7%BD%B2&amp;manual=generaldocs_k8stools_all">Toolkit Install</a>
+).</p>
+<p><strong>Install before GPUStack</strong> — install matching versions of the Iluvatar driver and
+ix-Container-Toolkit (for example, driver v4.4.0 with toolkit v1.1.0). Per
+<a href="#container-toolkit-requirements">Container toolkit requirements</a>
+, GPUStack sets <code>IX_VISIBLE_DEVICES</code> without <code>/dev</code> nodes.
+Register the runtime as <code>iluvatar</code>, or set <code>deviceManager.createRuntimeClasses=false</code> and supply your
+own <code>RuntimeClass</code>.</p>
+<p><strong>Vendor GPU Operator</strong> — ix-GPU-Operator exposes one Helm value per component:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">ixDriver</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># default: false; keep off when driver is pre-installed</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">ixExporter</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">ixDevicePlugin</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: conflicts with GPUStack iluvatar.com/gpu plugin</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">ixfd</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: bundles upstream NFD</span></span></span></code></pre></div>
+</div>
+<p><strong>Install it</strong> — install the OCI chart with the competing components disabled:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm install --wait ix-gpu-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl">  oci://registry.iluvatar.com.cn:10443/k8s/ix-gpu-operator --version 1.0.0 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --create-namespace --namespace ix-gpu-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --insecure-skip-tls-verify <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set global.repository<span class="o">=</span><span class="s2">&#34;registry.iluvatar.com.cn/k8s&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set global.version<span class="o">=</span>4.4.0 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set ixDriver.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set ixDevicePlugin.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set ixfd.enabled<span class="o">=</span>false</span></span></code></pre></div>
+</div>
+<p><strong>Already installed</strong> — both plugins advertise <code>iluvatar.com/gpu</code>. Stop ix-Device-Plugin first:</p>
+<ol>
+<li><strong>ix-Device-Plugin and ix-Feature-Discovery</strong>: run <code>helm upgrade</code> with existing values plus
+<code>--set ixDevicePlugin.enabled=false --set ixfd.enabled=false</code>.</li>
+<li><strong>Verify</strong>: wait until <code>iluvatar.com/gpu</code> leaves <code>Node</code> allocatable capacity before installing
+GPUStack.</li>
+</ol>
+<p>On software stacks older than v4.3.0, ix-GPU-Operator ships as static YAML without component switches.
+Delete that manifest and install the host driver and ix-Container-Toolkit directly.</p>
+<h3 id="metax">MetaX</h3>
+<p>Checked against <strong>MetaX Kubernetes GPU Operator v0.15.3</strong>
+(<a href="https://developer.metax-tech.com/api/client/document/preview/1411/k8s/00_overview.html">Overview</a>
+ ·
+<a href="https://developer.metax-tech.com/api/client/document/preview/1411/k8s/02_start.html">Helm Chart Install</a>
+ ·
+<a href="https://developer.metax-tech.com/api/client/document/preview/1411/k8s/03_component.html">Components</a>
+).</p>
+<p><strong>Install before GPUStack</strong> — install the MetaX driver and MXMACA SDK on the host. Per
+<a href="#container-toolkit-requirements">Container toolkit requirements</a>
+, GPUStack injects <code>/dev/mxcd</code>, <code>/dev/mxnd</code>, <code>/dev/mxgd</code>,
+and card DRM nodes directly, so no container toolkit is required.</p>
+<p><strong>Vendor GPU Operator</strong> — MetaX GPU Operator marks <code>gpu-device</code> and <code>gpu-label</code> mandatory in every
+mode, including <code>minimalMode</code>:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Component</th>
+					<th>Action</th>
+					<th>Mechanism</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Kernel driver and MXMACA SDK</td>
+					<td>Keep on host</td>
+					<td><code>--set minimalMode=true</code> leaves both to the host</td>
+			</tr>
+			<tr>
+					<td><code>mx-exporter</code></td>
+					<td>Optional</td>
+					<td>Optional under <code>minimalMode</code></td>
+			</tr>
+			<tr>
+					<td><code>controller-exporter</code></td>
+					<td>Optional</td>
+					<td>Optional under <code>minimalMode</code></td>
+			</tr>
+			<tr>
+					<td><code>gpu-device</code> (device plugin)</td>
+					<td><strong>Cannot disable</strong></td>
+					<td>Mandatory in every vendor install mode</td>
+			</tr>
+			<tr>
+					<td><code>gpu-label</code> (NFD-equivalent)</td>
+					<td><strong>Cannot disable</strong></td>
+					<td>Mandatory in every vendor install mode</td>
+			</tr>
+			<tr>
+					<td><code>gpu-scheduler</code></td>
+					<td>Disable</td>
+					<td>Leave undeployed</td>
+			</tr>
+			<tr>
+					<td><code>topo-discovery</code></td>
+					<td>Disable</td>
+					<td>Leave undeployed</td>
+			</tr>
+	</tbody>
+</table>
+<p><strong>Install it</strong> — <code>minimalMode</code> is fixed at install time and only fits nodes that GPUStack does <strong>not</strong>
+manage:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm install oci://DOMAIN/PROJECT/metax-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --version VERSION <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --create-namespace -n metax-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --generate-name <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --wait <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set <span class="nv">registry</span><span class="o">=</span>DOMAIN/PROJECT <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set <span class="nv">minimalMode</span><span class="o">=</span>true</span></span></code></pre></div>
+</div>
+<p><strong>Already installed</strong> — because <code>gpu-device</code> cannot be disabled and advertises <code>metax-tech.com/gpu</code>,
+the vendor operator and GPUStack cannot share a node:</p>
+<ol>
+<li><strong>Host driver and MXMACA SDK</strong>: confirm both are installed on the host outside the operator so
+uninstalling the chart does not remove them.</li>
+<li><strong>Uninstall release</strong>: run <code>helm uninstall</code> on the MetaX operator release.</li>
+<li><strong>Verify</strong>: wait until <code>metax-tech.com/gpu</code> leaves <code>Node</code> allocatable capacity before installing
+GPUStack.</li>
+</ol>
+<h3 id="moore-threads">Moore Threads</h3>
+<p>Checked against <strong>MT GPU Operator v2.1.0</strong> (KUAE Cloud Native,
+<a href="https://docs.mthreads.com/cloud-native/cloud-native-doc-online/introduction/">Overview</a>
+ ·
+<a href="https://docs.mthreads.com/cloud-native/cloud-native-doc-online/install_guide#mt-gpu-operator">Helm Chart Install</a>
+).</p>
+<p><strong>Install before GPUStack</strong> — install the Moore Threads driver and MT Container Toolkit. Per
+<a href="#container-toolkit-requirements">Container toolkit requirements</a>
+, GPUStack sets <code>MTHREADS_VISIBLE_DEVICES</code> without <code>/dev</code>
+nodes.</p>
+<p><strong>Vendor GPU Operator</strong> — MT GPU Operator ships two modes: <code>full</code> (two Helm charts whose controller
+always reconciles the vendor device plugin with no disable switch) and <code>core</code> (plain YAML manifests
+containing only the device plugin and exporter):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">mtGpuClusterPolicyClusterpolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">driverToolkit</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containerToolkit</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">dcgm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">dcgmExporter</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nfd</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: run one NFD per cluster</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">gpuScheduler</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># default: false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">gpuWebhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># default: false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kured</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeProblemDetector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">aiOps</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span></span></span></code></pre></div>
+</div>
+<p><strong>Install it</strong> — <code>full</code> mode below suits nodes left to the vendor plugin; for nodes managed by
+GPUStack, install host drivers and MT Container Toolkit directly and apply <code>core</code> manifests with the
+device plugin removed:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm install --wait mt-gpu-operator mt-gpu-operator
+</span></span><span class="line"><span class="cl">helm install --wait mt-gpu-operator-custom-resources mt-gpu-operator-custom-resources <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set mtGpuClusterPolicyClusterpolicy.nfd.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set mtGpuClusterPolicyClusterpolicy.kured.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set mtGpuClusterPolicyClusterpolicy.nodeProblemDetector.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set mtGpuClusterPolicyClusterpolicy.aiOps.enabled<span class="o">=</span>false</span></span></code></pre></div>
+</div>
+<p><strong>Already installed</strong> — both plugins advertise <code>mthreads.com/gpu</code>. Stop the vendor plugin before
+installing GPUStack:</p>
+<ol>
+<li><strong>Cluster add-ons</strong>: in <code>full</code> mode, upgrade <code>mt-gpu-operator-custom-resources</code> with the <code>false</code>
+flags above (<code>core</code> mode deploys none of them).</li>
+<li><strong>Device plugin</strong>:
+<ul>
+<li><strong><code>full</code> mode</strong>: uninstall both Helm charts, ensure the driver and MT Container Toolkit remain on
+the host, and switch to <code>core</code> mode if you still want the exporter.</li>
+<li><strong><code>core</code> mode</strong>: remove the device plugin from <code>deployments.yaml</code>, keep the exporter, and
+re-apply.</li>
+</ul>
+</li>
+<li><strong>Verify</strong>: wait until <code>mthreads.com/gpu</code> leaves <code>Node</code> allocatable capacity before installing
+GPUStack.</li>
+</ol>
+<h3 id="nvidia">NVIDIA</h3>
+<p>Checked against <strong>NVIDIA GPU Operator v26.3.3</strong>
+(<a href="https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/overview.html">Overview</a>
+ ·
+<a href="https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html">Helm Chart Install</a>
+).</p>
+<p><strong>Install before GPUStack</strong> — install the NVIDIA driver and NVIDIA Container Toolkit (either on the
+host or via NVIDIA GPU Operator). Per <a href="#container-toolkit-requirements">Container toolkit requirements</a>
+, GPUStack sets
+<code>NVIDIA_VISIBLE_DEVICES</code> by default or emits CDI annotations; both paths require the toolkit.</p>
+<p>Device Manager also relies on the toolkit for MIG management (<code>NVIDIA_MIG_CONFIG_DEVICES</code> and
+<code>NVIDIA_MIG_MONITOR_DEVICES</code>); see <a href="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/#prerequisites">MIG prerequisites</a>
+.</p>
+<p><strong>Vendor GPU Operator</strong> — keep the driver, toolkit, DCGM exporter, and GPU Feature Discovery, and
+disable components that conflict with GPUStack:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">driver</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">toolkit</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">dcgmExporter</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">devicePlugin</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: conflicts with GPUStack nvidia.com/gpu plugin</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">gfd</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># default: true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">nfd</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable, or keep and disable GPUStack bundled NFD</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">migManager</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># disable: conflicts with Allocate-time MIG actuation</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">cdi</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># default: true from v25.10; disable on MIG nodes</span></span></span></code></pre></div>
+</div>
+<p>For the single-profile exception where fleet-wide MIG Manager can stay enabled, see
+<a href="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/#fleet-wide-mig-manager">Fleet-wide MIG Manager</a>
+. Also verify that
+managed nodes do not carry <code>nvidia.com/gpu.deploy.operands=false</code>; that label suppresses all operands
+while <code>ClusterPolicy</code> still reports <code>ready</code>.</p>
+<p><strong>Install it</strong> — install the chart with the competing components disabled:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
+</span></span><span class="line"><span class="cl">helm repo update
+</span></span><span class="line"><span class="cl">helm install --wait --generate-name <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -n gpu-operator --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl">  nvidia/gpu-operator --version<span class="o">=</span>v26.3.3 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set devicePlugin.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set nfd.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set migManager.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --set cdi.enabled<span class="o">=</span>false</span></span></code></pre></div>
+</div>
+<p><strong>Already installed</strong> — run one <code>helm upgrade</code> preserving existing values plus the switches below (do
+not delete <code>DaemonSet</code>s manually, or <code>ClusterPolicy</code> recreates them):</p>
+<ol>
+<li><strong>Device plugin</strong>: pass <code>--set devicePlugin.enabled=false</code>.</li>
+<li><strong>MIG Manager</strong>: pass <code>--set migManager.enabled=false</code>. Existing geometry stays intact until
+GPUStack reconfigures partitions at <code>Allocate</code> time.</li>
+<li><strong>Bundled NFD</strong>: pass <code>--set nfd.enabled=false</code> (GPUStack&rsquo;s bundled NFD already publishes the
+<code>system-os_release.*</code> labels NVIDIA&rsquo;s operator expects), or see
+<a href="#single-nfd-per-cluster">Single NFD per cluster</a>
+ to keep NVIDIA&rsquo;s NFD instead.</li>
+<li><strong>CDI on MIG nodes</strong>: pass <code>--set cdi.enabled=false</code> on nodes serving MIG.</li>
+<li><strong>Verify</strong>: wait until <code>nvidia.com/gpu</code> leaves <code>Node</code> allocatable capacity before installing
+GPUStack.</li>
+</ol>
+<p><strong>CDI mode</strong> — <code>--set cdi.enabled=false</code> gives GPUStack end-to-end control; leaving CDI on works only
+for non-MIG whole-GPU nodes.</p>
+<blockquote>
+<p><strong>Why</strong> — GPU Operator v25.10+ defaults <code>cdi.enabled: true</code> (ignoring deprecated <code>cdi.default</code>). In
+CDI mode, the runtime resolves <code>NVIDIA_VISIBLE_DEVICES</code> against static <code>/etc/cdi</code> or <code>/var/run/cdi</code>
+specs, which never list MIG instances created dynamically at <code>Allocate</code> time.</p>
+</blockquote>
+<p><strong>Device injection channel</strong> — leave <code>GPUSTACK_NVIDIA_DEVICE_INJECTION_STRATEGY</code> at <code>auto</code>.</p>
+<blockquote>
+<p><strong>Why</strong> — <code>auto</code> selects <code>cdi-annotations</code> only when the <code>Pod</code> sets no <em><code>runtimeClassName</code></em>, the
+runtime config enables CDI on a non-vendor default handler, and CDI specs list every granted GPU;
+otherwise it falls back to <code>envvar</code> (<code>NVIDIA_VISIBLE_DEVICES</code>). When a <code>Pod</code> or <code>Instance</code> sets
+<code>runtimeClassName: nvidia</code>, that runtime handler performs injection directly.</p>
+</blockquote>
+<h3 id="t-head">T-Head</h3>
+<p>Checked against <strong>T-Head SAIL SDK</strong> (PPU SDK, HGGCRT v3,
+<a href="https://developer.t-head.cn/docs_center/doc_detail/index.html?projectId=39&amp;chapterId=194">Driver Install</a>
+ ·
+<a href="https://developer.t-head.cn/docs_center/doc_detail/index.html?projectId=33&amp;chapterId=118">Overview</a>
+).</p>
+<p><strong>Install before GPUStack</strong> — install the PPU SDK Runfile (<code>/usr/local/PPU_SDK</code> by default) using
+HGGCRT v3 (backward compatible with v2), and verify with <code>ppu-smi</code> and <code>hgcc --version</code>. Per
+<a href="#container-toolkit-requirements">Container toolkit requirements</a>
+, GPUStack injects <code>/dev/alixpu</code>, <code>/dev/alixpu_ctl</code>, and
+<code>/dev/alixpu_ppu&lt;N&gt;</code> (plus MIG partition nodes) directly without a vendor container runtime.</p>
+<h2 id="shared-cluster-requirements">Shared cluster requirements</h2>
+<h3 id="container-toolkit-requirements">Container toolkit requirements</h3>
+<p>Whether a host needs a vendor container toolkit depends on what GPUStack&rsquo;s allocator returns to
+kubelet:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Manufacturer</th>
+					<th>Allocator injection</th>
+					<th>Toolkit required</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>AMD</td>
+					<td><code>/dev</code> nodes (<code>/dev/kfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
+					<td>No</td>
+			</tr>
+			<tr>
+					<td>Ascend</td>
+					<td><code>ASCEND_VISIBLE_DEVICES</code></td>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>Cambricon</td>
+					<td><code>/dev</code> nodes (<code>/dev/cambricon_dev*</code> and control nodes) plus <code>CAMBRICON_VISIBLE_DEVICES</code></td>
+					<td>No</td>
+			</tr>
+			<tr>
+					<td>Hygon</td>
+					<td><code>/dev</code> nodes (<code>/dev/kfd</code>, <code>/dev/mkfd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
+					<td>No</td>
+			</tr>
+			<tr>
+					<td>Iluvatar</td>
+					<td><code>IX_VISIBLE_DEVICES</code></td>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>MetaX</td>
+					<td><code>/dev</code> nodes (<code>/dev/mxcd</code>, <code>/dev/mxnd</code>, <code>/dev/mxgd</code>, <code>/dev/dri/card*</code>, <code>/dev/dri/renderD*</code>)</td>
+					<td>No</td>
+			</tr>
+			<tr>
+					<td>Moore Threads</td>
+					<td><code>MTHREADS_VISIBLE_DEVICES</code></td>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>NVIDIA</td>
+					<td><code>NVIDIA_VISIBLE_DEVICES</code> by default, or CDI annotations (<a href="#nvidia">NVIDIA</a>
+)</td>
+					<td>Yes</td>
+			</tr>
+			<tr>
+					<td>T-Head</td>
+					<td><code>/dev</code> nodes (<code>/dev/alixpu</code>, <code>/dev/alixpu_ctl</code>, <code>/dev/alixpu_ppu&lt;N&gt;</code>)</td>
+					<td>No</td>
+			</tr>
+	</tbody>
+</table>
+<blockquote>
+<p><strong>Why</strong> — <code>runc</code> mounts returned <code>/dev</code> nodes directly, whereas an environment variable requires a
+vendor runtime hook to mount devices. Without that toolkit, the container starts with the variable
+set and zero accelerators visible.</p>
+</blockquote>
+<h3 id="device-plugin-name-collisions">Device plugin name collisions</h3>
+<p>Kubelet allows a second device plugin to overwrite an existing registration for the same resource key.
+Node capacity then oscillates between both plugins, and <code>Allocate</code> calls fail when kubelet sends one
+plugin&rsquo;s device IDs to the other. Stop competing vendor plugins before deploying GPUStack.</p>
+<h3 id="single-nfd-per-cluster">Single NFD per cluster</h3>
+<p>Run exactly one NFD master per cluster. Two masters garbage-collect each other&rsquo;s
+<code>feature.node.kubernetes.io/*</code> labels, which can remove <code>pci-&lt;vendor&gt;.present</code> labels and unschedule
+Device Manager <code>DaemonSet</code>s.</p>
+<p>GPUStack&rsquo;s bundled NFD evaluates cluster-scoped <code>NodeFeatureRule</code>s (such as AMD&rsquo;s) and publishes
+<code>system-os_release.*</code> labels (required by NVIDIA GPU Operator).</p>
+<p><strong>Bringing your own NFD</strong> — disable GPUStack&rsquo;s bundled NFD with
+<code>--set node-feature-discovery.enabled=false</code> in chart mode or
+<code>--disable-applications=node-feature-discovery</code> in image mode
+(<a href="/gpustack-operator/v0.12.2/docs/operate/installation-modes/#chart-and-image-modes">Installation Modes</a>
+). The worker still
+applies <code>gpustack-cpu-info</code>, so the existing NFD installation must satisfy six rules:</p>
+<ol>
+<li>Enable <code>pci</code> worker discovery with <code>vendor</code> in <code>deviceLabelFields</code> and PCI classes <code>02</code>, <code>03</code>,
+<code>0b</code>, and <code>12</code> whitelisted<sup id="fnref:2"><a href="#fn:2" class="footnote-ref" role="doc-noteref">2</a></sup>.</li>
+<li>Enable <code>system</code> worker discovery (<code>system-os_release.*</code>) if NVIDIA GPU Operator runs on the
+cluster.</li>
+<li>Evaluate <code>NodeFeature</code> objects from <strong>all</strong> namespaces so <code>&lt;node&gt;-gpustack-*</code> objects reach <code>Node</code>s.</li>
+<li>Set <code>restrictions.denyNodeFeatureLabels: false</code> and <code>disableExtendedResources: false</code>.</li>
+<li>Allow <code>acceleratable.feature.gpustack.ai</code> and <code>general.feature.gpustack.ai</code> in <code>denyLabelNs</code>.</li>
+<li>Keep a single Helm release owning the NFD CRDs (both GPUStack and NVIDIA vendor NFD 0.19.0).</li>
+</ol>
+<h3 id="resource-removal-lag">Resource removal lag</h3>
+<p>Disabling a vendor device plugin does not clear its extended resource from <code>Node.status.allocatable</code>
+instantaneously. Wait until kubelet reconverges and removes the vendor key before installing GPUStack.</p>
+<h3 id="device-manager-host-mount">Device Manager host mount</h3>
+<p><code>deviceManager.hostRootMount.enabled</code> defaults to <code>true</code> and mounts host <code>/</code> read-only
+(<code>HostPathDirectory</code>) at <code>/host</code> on the <code>device-manager</code> <code>main</code> container only (never on <code>stage-libs</code>).
+The host reader enforces three boundaries:</p>
+<ul>
+<li><strong>Root confinement</strong>: <code>os.OpenRoot</code> confines lookups under <code>etc</code>, <code>proc</code>, and <code>usr</code>.</li>
+<li><strong>Read-only access</strong>: files open with <code>O_RDONLY</code> and <code>os.SameFile</code> checks, with zero write or exec paths.</li>
+<li><strong>Symlink safety</strong>: intermediate symlinks resolve inside <code>/host</code>, while A5 regular-file checks reject leaf symlinks.</li>
+</ul>
+<p>Set <code>deviceManager.hostRootMount.enabled=false</code> when cluster policy forbids <code>hostPath: /</code> mounts or
+when custom <a href="https://www.hiascend.com/eng/developer/software/mindcluster"><code>ascend-docker-runtime</code></a>
+
+setups should skip A5 conditional host mounts under <a href="#ascend">Ascend</a>
+.</p>
+<div class="footnotes" role="doc-endnotes">
+<hr>
+<ol>
+<li id="fn:1">
+<p>Basic Atlas A5 support first shipped in <code>ascend-docker-runtime</code> <code>26.0.0</code> (noted as Atlas 350 PCIe support), after version numbers jumped directly from <code>7.3.x</code> to <code>26.x</code>.&#160;<a href="#fnref:1" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
+<li id="fn:2">
+<p>NVIDIA GPU Operator&rsquo;s bundled NFD whitelists only <code>0300</code> and <code>0302</code> under <code>node-feature-discovery.worker.config.sources.pci</code>, omitting <code>0b</code> and <code>12</code> NPUs unless extended.&#160;<a href="#fnref:2" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
+</ol>
+</div>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.12.2/docs/modules/devices/preflight/">Preflight Checks</a>
+ (verify driver paths and runtime
+isolation on a node)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/devices/">Heterogeneous Devices</a>
+ (device families and
+requests)</li><li><a href="/gpustack-operator/v0.12.2/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
+ (MIG prerequisites and mode
+lifecycle)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.12.2/docs/operate/installation-modes/">Installation Modes</a>
+ — choose chart or image ownership and runtime settings precedence.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#third-party-dependencies">Third-party dependencies</a></li>
+    <li><a href="#vendor-setup-requirements">Vendor setup requirements</a>
+      <ul>
+        <li><a href="#amd">AMD</a></li>
+        <li><a href="#ascend">Ascend</a></li>
+        <li><a href="#cambricon">Cambricon</a></li>
+        <li><a href="#hygon">Hygon</a></li>
+        <li><a href="#iluvatar">Iluvatar</a></li>
+        <li><a href="#metax">MetaX</a></li>
+        <li><a href="#moore-threads">Moore Threads</a></li>
+        <li><a href="#nvidia">NVIDIA</a></li>
+        <li><a href="#t-head">T-Head</a></li>
+      </ul>
+    </li>
+    <li><a href="#shared-cluster-requirements">Shared cluster requirements</a>
+      <ul>
+        <li><a href="#container-toolkit-requirements">Container toolkit requirements</a></li>
+        <li><a href="#device-plugin-name-collisions">Device plugin name collisions</a></li>
+        <li><a href="#single-nfd-per-cluster">Single NFD per cluster</a></li>
+        <li><a href="#resource-removal-lag">Resource removal lag</a></li>
+        <li><a href="#device-manager-host-mount">Device Manager host mount</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.12.2/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
+</body>
+</html>
