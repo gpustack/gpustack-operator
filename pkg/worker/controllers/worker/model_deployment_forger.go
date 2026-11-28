@@ -40,13 +40,14 @@ const (
 	forgerWorkerCertCAFile     = "/var/run/gpustack/certs/ca.crt"
 	forgerDefaultOperatorImage = "gpustack/gpustack-operator:latest"
 
-	forgerDefaultProbeSteps             = 4
-	forgerDefaultCooldownSeconds        = 600
-	forgerMinCooldownSeconds            = 60
-	forgerDefaultMaxKernels             = 4
-	forgerDefaultSandboxTimeoutSeconds  = 1800
-	forgerDefaultMaxRetainedGenerations = 3
-	forgerDefaultFailureTimeoutSeconds  = 600
+	forgerDefaultProbeSteps                   = 4
+	forgerDefaultCooldownSeconds              = 600
+	forgerMinCooldownSeconds                  = 60
+	forgerDefaultMinActiveRequests      int32 = 1
+	forgerDefaultMaxKernels                   = 4
+	forgerDefaultSandboxTimeoutSeconds        = 1800
+	forgerDefaultMaxRetainedGenerations       = 3
+	forgerDefaultFailureTimeoutSeconds        = 600
 )
 
 var defaultForgerProbeClient = runtimecontrol.NewClient()
@@ -816,10 +817,13 @@ func effectiveProbeCooldown(mdf *workercore.ModelDeploymentForger) time.Duration
 }
 
 func effectiveMinActiveRequests(mdf *workercore.ModelDeploymentForger) int32 {
-	if mdf == nil || mdf.Spec.Probe.MinActiveRequests < 0 {
+	if mdf == nil || mdf.Spec.Probe.MinActiveRequests == nil {
+		return forgerDefaultMinActiveRequests
+	}
+	if *mdf.Spec.Probe.MinActiveRequests < 0 {
 		return 0
 	}
-	return mdf.Spec.Probe.MinActiveRequests
+	return *mdf.Spec.Probe.MinActiveRequests
 }
 
 func effectiveMaxKernelsPerGeneration(roleSpec *workercore.ModelDeploymentForgerRoleSpec) int {

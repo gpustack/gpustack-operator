@@ -7454,13 +7454,14 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeploymentForger() *v1.CustomResource
 													Minimum: ptr.To[float64](60),
 												},
 												"minActiveRequests": {
-													Description: "MinActiveRequests is the minimum running request count observed on a leader replica before\narming a short-window probe.",
+													Description: "MinActiveRequests is the minimum running request count observed on a leader replica before\narming a short-window probe. Set explicitly to 0 to allow probing idle replicas (default 1).",
 													Type:        "integer",
 													Format:      "int32",
 													Default: &v1.JSON{
 														Raw: []byte(`1`),
 													},
-													Minimum: ptr.To[float64](0),
+													Minimum:  ptr.To[float64](0),
+													Nullable: true,
 												},
 												"steps": {
 													Description: "Steps is the number of execution steps captured per probe window (3 to 5, default 4).",

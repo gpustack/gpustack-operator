@@ -36,11 +36,12 @@ const (
 
 	modelDeploymentForgerDefaultMinSpeedupRatio = "1.05"
 
-	modelDeploymentForgerDefaultProbeSteps      = 4
-	modelDeploymentForgerMinProbeSteps          = 3
-	modelDeploymentForgerMaxProbeSteps          = 5
-	modelDeploymentForgerDefaultCooldownSeconds = 600
-	modelDeploymentForgerMinCooldownSeconds     = 60
+	modelDeploymentForgerDefaultProbeSteps              = 4
+	modelDeploymentForgerMinProbeSteps                  = 3
+	modelDeploymentForgerMaxProbeSteps                  = 5
+	modelDeploymentForgerDefaultCooldownSeconds         = 600
+	modelDeploymentForgerMinCooldownSeconds             = 60
+	modelDeploymentForgerDefaultMinActiveRequests int32 = 1
 
 	modelDeploymentForgerDefaultActiveDeadlineSeconds int64 = 1800
 	modelDeploymentForgerMinActiveDeadlineSeconds     int64 = 60
@@ -216,6 +217,9 @@ func defaultModelDeploymentForger(mdf *workercore.ModelDeploymentForger) {
 	if mdf.Spec.Probe.CooldownSeconds == 0 {
 		mdf.Spec.Probe.CooldownSeconds = modelDeploymentForgerDefaultCooldownSeconds
 	}
+	if mdf.Spec.Probe.MinActiveRequests == nil {
+		mdf.Spec.Probe.MinActiveRequests = ptr.To(modelDeploymentForgerDefaultMinActiveRequests)
+	}
 	if mdf.Spec.Sandbox.RunnerMode == "" {
 		mdf.Spec.Sandbox.RunnerMode = workercore.ModelDeploymentForgerRunnerModeExternal
 	}
@@ -246,7 +250,7 @@ func (r *ModelDeploymentForgerWebhook) validateModelDeploymentForger(
 	errs = append(errs, validateModelDeploymentForgerMode(effective)...)
 	errs = append(errs, validateModelDeploymentForgerRoles(effective)...)
 	errs = append(errs, validateModelDeploymentForgerProbe(&effective.Spec.Probe)...)
-	errs = append(errs, r.validateModelDeploymentForgerSandbox(ctx, &effective.Spec.Sandbox)...)
+	errs = append(errs, r.validateModelDeploymentForgerSandbox(ctx, effective.Spec.Mode, &effective.Spec.Sandbox)...)
 	errs = append(errs, validateModelDeploymentForgerRollout(&effective.Spec.Rollout)...)
 
 	if len(errs) > 0 {
@@ -418,8 +422,8 @@ func validateModelDeploymentForgerProbe(probe *workercore.ModelDeploymentForgerP
 		errs = append(errs, field.Invalid(probePath.Child("cooldownSeconds"), probe.CooldownSeconds,
 			fmt.Sprintf("must be at least %d seconds", modelDeploymentForgerMinCooldownSeconds)))
 	}
-	if probe.MinActiveRequests < 0 {
-		errs = append(errs, field.Invalid(probePath.Child("minActiveRequests"), probe.MinActiveRequests,
+	if probe.MinActiveRequests != nil && *probe.MinActiveRequests < 0 {
+		errs = append(errs, field.Invalid(probePath.Child("minActiveRequests"), *probe.MinActiveRequests,
 			"must be greater than or equal to 0"))
 	}
 
@@ -427,7 +431,9 @@ func validateModelDeploymentForgerProbe(probe *workercore.ModelDeploymentForgerP
 }
 
 func (r *ModelDeploymentForgerWebhook) validateModelDeploymentForgerSandbox(
-	ctx context.Context, sandbox *workercore.ModelDeploymentForgerSandboxSpec,
+	ctx context.Context,
+	mode workercore.ModelDeploymentForgerMode,
+	sandbox *workercore.ModelDeploymentForgerSandboxSpec,
 ) field.ErrorList {
 	sandboxPath := field.NewPath("spec", "sandbox")
 	var errs field.ErrorList
@@ -435,8 +441,10 @@ func (r *ModelDeploymentForgerWebhook) validateModelDeploymentForgerSandbox(
 	switch sandbox.RunnerMode {
 	case workercore.ModelDeploymentForgerRunnerModeExternal:
 		if sandbox.Runner == nil {
-			errs = append(errs, field.Required(sandboxPath.Child("runner"),
-				"runner is required when runnerMode is External"))
+			if mode != workercore.ModelDeploymentForgerModeObserveOnly {
+				errs = append(errs, field.Required(sandboxPath.Child("runner"),
+					"runner is required when runnerMode is External"))
+			}
 		} else {
 			errs = append(errs, r.validateModelDeploymentForgerSandboxRunner(ctx, sandbox.Runner, sandboxPath.Child("runner"))...)
 		}

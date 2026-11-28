@@ -48,7 +48,7 @@ spec:
   probe:
     steps: 4              # 3..5 steps (default: 4)
     cooldownSeconds: 600  # minimum 60 s between passes
-    minActiveRequests: 1  # wait for live traffic before probing
+    minActiveRequests: 1  # default 1; set explicitly to 0 to probe idle replicas
   sandbox:
     runnerMode: External  # External | Mock (default: External)
     runner:
@@ -138,8 +138,9 @@ stages run inside the `Pod` in `External` mode (three in `Mock` mode):
 ### Runner container isolation
 
 Configure synthesis container overrides under *`sandbox.runner`* (`image`, `imagePullPolicy`,
-`command`, `args`, `env`, and `envFrom`) when *`sandbox.runnerMode`* is `External` (`Mock` mode
-rejects *`sandbox.runner`*):
+`command`, `args`, `env`, and `envFrom`) when *`sandbox.runnerMode`* is `External` in `Shadow` or
+`Active` mode (`ObserveOnly` does not require *`sandbox.runner`* because it never launches
+sandboxes, while `Mock` mode rejects *`sandbox.runner`*):
 
 - **Strict container boundary**: *`sandbox.runner`* (`command`, `args`, `env`, `envFrom`, and
   `imagePullPolicy`) applies strictly to `initContainer: forge-runner` and is never exposed to

@@ -15,7 +15,7 @@ type ModelDeploymentForgerProbeSpecApplyConfiguration struct {
 	//
 	CooldownSeconds *int32 `json:"cooldownSeconds,omitempty"`
 	// MinActiveRequests is the minimum running request count observed on a leader replica before
-	// arming a short-window probe.
+	// arming a short-window probe. Set explicitly to 0 to allow probing idle replicas (default 1).
 	//
 	MinActiveRequests *int32 `json:"minActiveRequests,omitempty"`
 }

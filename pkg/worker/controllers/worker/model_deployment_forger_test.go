@@ -141,7 +141,7 @@ func newTestModelDeploymentForger(mutate ...func(*workercore.ModelDeploymentForg
 			Probe: workercore.ModelDeploymentForgerProbeSpec{
 				Steps:             4,
 				CooldownSeconds:   600,
-				MinActiveRequests: 1,
+				MinActiveRequests: ptr.To[int32](1),
 			},
 			Sandbox: workercore.ModelDeploymentForgerSandboxSpec{
 				RunnerMode:            workercore.ModelDeploymentForgerRunnerModeMock,
@@ -1000,7 +1000,7 @@ func TestModelDeploymentForger_ObserveOnlyShadowAndSkipModes(t *testing.T) {
 		})
 		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
 			f.Spec.Mode = workercore.ModelDeploymentForgerModeObserveOnly
-			f.Spec.Probe.MinActiveRequests = 2
+			f.Spec.Probe.MinActiveRequests = ptr.To[int32](2)
 		})
 		cli := newForgerTestFakeClient(node0, md, mdf)
 
@@ -2297,7 +2297,7 @@ func TestModelDeploymentForger_ProbingEdgeCases(t *testing.T) {
 		})
 		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
 			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
-			f.Spec.Probe.MinActiveRequests = 0
+			f.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
 			if mdfMutate != nil {
 				mdfMutate(f)
 			}
@@ -2763,8 +2763,13 @@ func TestModelDeploymentForger_DefaultsResolversAndHistoryBounds(t *testing.T) {
 	assert.Equal(t, workercore.ModelDeploymentForgerModeShadow, effectiveForgerMode(nil))
 	assert.Equal(t, workercore.ModelDeploymentForgerRunnerModeExternal, effectiveRunnerMode(nil))
 	assert.Equal(t, forgerDefaultProbeSteps, effectiveProbeSteps(nil))
+	assert.Equal(t, forgerDefaultMinActiveRequests, effectiveMinActiveRequests(nil))
+	assert.Equal(t, forgerDefaultMinActiveRequests, effectiveMinActiveRequests(&workercore.ModelDeploymentForger{}))
 	assert.Equal(t, int32(0), effectiveMinActiveRequests(&workercore.ModelDeploymentForger{
-		Spec: workercore.ModelDeploymentForgerSpec{Probe: workercore.ModelDeploymentForgerProbeSpec{MinActiveRequests: -1}},
+		Spec: workercore.ModelDeploymentForgerSpec{Probe: workercore.ModelDeploymentForgerProbeSpec{MinActiveRequests: ptr.To[int32](0)}},
+	}))
+	assert.Equal(t, int32(0), effectiveMinActiveRequests(&workercore.ModelDeploymentForger{
+		Spec: workercore.ModelDeploymentForgerSpec{Probe: workercore.ModelDeploymentForgerProbeSpec{MinActiveRequests: ptr.To[int32](-1)}},
 	}))
 	assert.Equal(t, forgerDefaultMaxKernels, effectiveMaxKernelsPerGeneration(nil))
 	assert.Equal(t, modelforger.DefaultMinSpeedupRatio, effectiveMinSpeedupRatio(nil))
@@ -2897,7 +2902,7 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 		})
 		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
 			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
-			f.Spec.Probe.MinActiveRequests = 0
+			f.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
 		})
 		var collideNextPodCreate atomic.Bool
 		const hijackedPodUID = types.UID("tenant-hijack-pod-uid")
@@ -3133,7 +3138,7 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
 			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
 			f.Spec.Probe.CooldownSeconds = 600
-			f.Spec.Probe.MinActiveRequests = 0
+			f.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
 			f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
 				Name:                 "decode",
 				Phase:                workercore.ModelDeploymentForgerRolePhaseIdle,
@@ -3766,7 +3771,7 @@ func TestModelDeploymentForger_SandboxStatusFailureCleanupAndOrphanSweep(t *test
 				mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
 					f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
 					f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
-					f.Spec.Probe.MinActiveRequests = 0
+					f.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
 					f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
 						Name:             "decode",
 						Phase:            startPhase,
@@ -4019,7 +4024,7 @@ func TestModelDeploymentForger_ForeignKernelArtifactNeverAdopted(t *testing.T) {
 		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
 			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
 			f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
-			f.Spec.Probe.MinActiveRequests = 0
+			f.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
 		})
 		foreignGen1 := newForeignHFArtifact("qwen-decode-forger-decode-gen-1", md.Namespace)
 
@@ -4475,7 +4480,7 @@ func TestModelDeploymentForger_QuarantineScopedByForgerRoleAndRunner(t *testing.
 			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
 			f.Spec.TargetRef.Name = mdB.Name
 			f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
-			f.Spec.Probe.MinActiveRequests = 0
+			f.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
 			f.Spec.Roles = []workercore.ModelDeploymentForgerRoleSpec{
 				{Name: "prefill", MaxKernelsPerGeneration: 4, MinSpeedupRatio: "1.05"},
 				{Name: "decode", MaxKernelsPerGeneration: 4, MinSpeedupRatio: "1.05"},
@@ -4582,7 +4587,7 @@ func TestModelDeploymentForger_QuarantineScopedByForgerRoleAndRunner(t *testing.
 		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
 			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
 			f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
-			f.Spec.Probe.MinActiveRequests = 0
+			f.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
 			f.Spec.Sandbox.RunnerMode = workercore.ModelDeploymentForgerRunnerModeExternal
 			f.Spec.Sandbox.Runner = &workercore.ModelDeploymentForgerSandboxRunner{
 				Image: "registry.local/forge-runner:v1",
@@ -5814,7 +5819,7 @@ func TestModelDeploymentForger_LaunchForgeSandboxPodSpecRendering(t *testing.T) 
 			mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
 				f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
 				f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
-				f.Spec.Probe.MinActiveRequests = 0
+				f.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
 				f.Spec.Sandbox = workercore.ModelDeploymentForgerSandboxSpec{
 					RunnerMode:            workercore.ModelDeploymentForgerRunnerModeExternal,
 					ActiveDeadlineSeconds: 900,
@@ -6052,7 +6057,7 @@ func TestModelDeploymentForger_RunnerFingerprintQuarantineReforge(t *testing.T) 
 				mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
 					f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
 					f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
-					f.Spec.Probe.MinActiveRequests = 0
+					f.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
 					f.Spec.Sandbox.RunnerMode = workercore.ModelDeploymentForgerRunnerModeExternal
 					f.Spec.Sandbox.Runner = &workercore.ModelDeploymentForgerSandboxRunner{
 						Image: "registry.local/forge-runner:v1",
@@ -6196,7 +6201,7 @@ func TestModelDeploymentForger_PatchUpgradeReusesArtifactWhileMinorUpgradeReforg
 			mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
 				f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
 				f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
-				f.Spec.Probe.MinActiveRequests = 0
+				f.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
 			})
 			coveredMKA := newNodeStoreKernelArtifact("qwen-decode-forger-decode-gen-1", "team-a", "1", "2", func(k *workercore.ModelKernelArtifact) {
 				k.Labels = map[string]string{
@@ -6295,7 +6300,7 @@ func TestModelDeploymentForgerReconcileUsesLiveAPIReaderForFreshSandbox(t *testi
 	staleMDF := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
 		f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
 		f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
-		f.Spec.Probe.MinActiveRequests = 0
+		f.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
 		f.Status.Binding = &workercore.ModelDeploymentForgerBindingStatus{
 			TargetUID: string(md.UID),
 		}

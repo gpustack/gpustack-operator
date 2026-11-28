@@ -41,7 +41,7 @@ func newTestModelDeploymentForger(mutate ...func(*workercore.ModelDeploymentForg
 			Probe: workercore.ModelDeploymentForgerProbeSpec{
 				Steps:             4,
 				CooldownSeconds:   600,
-				MinActiveRequests: 1,
+				MinActiveRequests: ptr.To[int32](1),
 			},
 			Sandbox: workercore.ModelDeploymentForgerSandboxSpec{
 				RunnerMode: workercore.ModelDeploymentForgerRunnerModeExternal,
@@ -128,7 +128,7 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				m.Spec.Roles[0].MinSpeedupRatio = "1.01"
 				m.Spec.Probe.Steps = 3
 				m.Spec.Probe.CooldownSeconds = 60
-				m.Spec.Probe.MinActiveRequests = 0
+				m.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
 				m.Spec.Sandbox.ActiveDeadlineSeconds = 60
 				m.Spec.Sandbox.OutputSizeLimit = ptr.To(resource.MustParse("64Mi"))
 				m.Spec.Sandbox.ImagePullSecrets = []core.LocalObjectReference{{Name: "regcred"}}
@@ -179,6 +179,25 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 				m.Spec.Rollout.MaxRetainedGenerations = 1
 				m.Spec.Rollout.FailureTimeoutSeconds = 1
 			}),
+		},
+		{
+			name: "valid ObserveOnly mode with omitted sandbox runner under default External runnerMode",
+			in: &workercore.ModelDeploymentForger{
+				ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen-observe"},
+				Spec: workercore.ModelDeploymentForgerSpec{
+					TargetRef: core.LocalObjectReference{Name: "qwen-pd"},
+					Mode:      workercore.ModelDeploymentForgerModeObserveOnly,
+					Roles:     []workercore.ModelDeploymentForgerRoleSpec{{Name: "decode"}},
+				},
+			},
+		},
+		{
+			name: "rejects ObserveOnly mode with invalid sandbox runner when provided",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Mode = workercore.ModelDeploymentForgerModeObserveOnly
+				m.Spec.Sandbox.Runner.Image = ""
+			}),
+			wantField: "spec.sandbox.runner.image",
 		},
 		{
 			name: "valid Shadow mode with upper boundary values and partitioned profile",
@@ -288,7 +307,7 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 		{
 			name: "rejects negative probe minActiveRequests",
 			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
-				m.Spec.Probe.MinActiveRequests = -1
+				m.Spec.Probe.MinActiveRequests = ptr.To[int32](-1)
 			}),
 			wantField: "spec.probe.minActiveRequests",
 		},
@@ -1580,4 +1599,34 @@ func TestModelDeploymentForgerRunnerImageSecurity(t *testing.T) {
 			assert.Equal(t, c.want, runnerImageMatchesPrefix(c.image, c.prefix), "prefix=%q image=%q", c.prefix, c.image)
 		}
 	})
+}
+
+func TestModelDeploymentForgerWebhookDefaultAndObserveOnlyTransition(t *testing.T) {
+	wh := newTestForgerWebhook()
+
+	// Omitted minActiveRequests defaults to 1; explicit 0 is preserved.
+	omitted := &workercore.ModelDeploymentForger{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen-default"},
+		Spec: workercore.ModelDeploymentForgerSpec{
+			TargetRef: core.LocalObjectReference{Name: "qwen-pd"},
+			Mode:      workercore.ModelDeploymentForgerModeObserveOnly,
+			Roles:     []workercore.ModelDeploymentForgerRoleSpec{{Name: "decode"}},
+		},
+	}
+	require.NoError(t, wh.Default(context.Background(), omitted))
+	require.NotNil(t, omitted.Spec.Probe.MinActiveRequests)
+	assert.Equal(t, int32(1), *omitted.Spec.Probe.MinActiveRequests)
+
+	explicitZero := omitted.DeepCopy()
+	explicitZero.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
+	require.NoError(t, wh.Default(context.Background(), explicitZero))
+	require.NotNil(t, explicitZero.Spec.Probe.MinActiveRequests)
+	assert.Equal(t, int32(0), *explicitZero.Spec.Probe.MinActiveRequests)
+
+	// Transitioning ObserveOnly (without runner) to Shadow under External runnerMode must require runner.
+	promoted := omitted.DeepCopy()
+	promoted.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
+	_, err := wh.ValidateUpdate(context.Background(), omitted, promoted)
+	require.Error(t, err)
+	assertInvalidField(t, err, "spec.sandbox.runner")
 }

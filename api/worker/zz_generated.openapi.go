@@ -10778,7 +10778,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerProbeSpec(ref comm
 					},
 					"minActiveRequests": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MinActiveRequests is the minimum running request count observed on a leader replica before arming a short-window probe.",
+							Description: "MinActiveRequests is the minimum running request count observed on a leader replica before arming a short-window probe. Set explicitly to 0 to allow probing idle replicas (default 1).",
 							Minimum:     ptr.To[float64](0),
 							Type:        []string{"integer"},
 							Format:      "int32",

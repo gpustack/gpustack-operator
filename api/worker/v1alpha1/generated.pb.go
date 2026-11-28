@@ -6954,9 +6954,11 @@ func (m *ModelDeploymentForgerProbeSpec) MarshalToSizedBuffer(dAtA []byte) (int,
 	_ = i
 	var l int
 	_ = l
-	i = encodeVarintGenerated(dAtA, i, uint64(m.MinActiveRequests))
-	i--
-	dAtA[i] = 0x18
+	if m.MinActiveRequests != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.MinActiveRequests))
+		i--
+		dAtA[i] = 0x18
+	}
 	i = encodeVarintGenerated(dAtA, i, uint64(m.CooldownSeconds))
 	i--
 	dAtA[i] = 0x10
@@ -17177,7 +17179,9 @@ func (m *ModelDeploymentForgerProbeSpec) Size() (n int) {
 	_ = l
 	n += 1 + sovGenerated(uint64(m.Steps))
 	n += 1 + sovGenerated(uint64(m.CooldownSeconds))
-	n += 1 + sovGenerated(uint64(m.MinActiveRequests))
+	if m.MinActiveRequests != nil {
+		n += 1 + sovGenerated(uint64(*m.MinActiveRequests))
+	}
 	return n
 }
 
@@ -21854,7 +21858,7 @@ func (this *ModelDeploymentForgerProbeSpec) String() string {
 	s := strings.Join([]string{`&ModelDeploymentForgerProbeSpec{`,
 		`Steps:` + fmt.Sprintf("%v", this.Steps) + `,`,
 		`CooldownSeconds:` + fmt.Sprintf("%v", this.CooldownSeconds) + `,`,
-		`MinActiveRequests:` + fmt.Sprintf("%v", this.MinActiveRequests) + `,`,
+		`MinActiveRequests:` + valueToStringGenerated(this.MinActiveRequests) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -44555,7 +44559,7 @@ func (m *ModelDeploymentForgerProbeSpec) Unmarshal(dAtA []byte) error {
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field MinActiveRequests", wireType)
 			}
-			m.MinActiveRequests = 0
+			var v int32
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowGenerated
@@ -44565,11 +44569,12 @@ func (m *ModelDeploymentForgerProbeSpec) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.MinActiveRequests |= int32(b&0x7F) << shift
+				v |= int32(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
+			m.MinActiveRequests = &v
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

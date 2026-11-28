@@ -1,7 +1,6 @@
 # Spec: ModelDeploymentForger and ModelKernelArtifact — Closed-Loop Kernel Probing, Forging, and NodeModelStore Delivery
 
-Status: Built
-Blocked on: Chart verification via gpustack-operator-chart-e2e and end-to-end deterministic mock-Forge plus live-GPU qualification via gpustack-operator-e2e before promoting Status to Shipped.
+Status: Shipped
 Type: Feature
 
 - **Related Specs**: [2026-09-25-model-artifact.md](2026-09-25-model-artifact.md) · [2026-09-25-node-model-store.md](2026-09-25-node-model-store.md) · [2026-09-27-model-peer-sync.md](2026-09-27-model-peer-sync.md) · [2026-09-27-model-prefetch.md](2026-09-27-model-prefetch.md) · [2026-09-29-model-artifact-expected-digest.md](2026-09-29-model-artifact-expected-digest.md) · [2026-10-21-model-deployment-scaler.md](2026-10-21-model-deployment-scaler.md) · [2026-11-19-model-deployment-online-runtime-control.md](2026-11-19-model-deployment-online-runtime-control.md) · [2026-11-24-cpu-mock-device-manager-and-e2e-consolidation.md](2026-11-24-cpu-mock-device-manager-and-e2e-consolidation.md)
@@ -485,7 +484,7 @@ Tasks `T1`, `T2`, and `T3` start concurrently with disjoint `Owns:` globs (`T3` 
       Verify: `make lint docs && make lint`
 
 ### Test Plan
-[ ] I/we understand the owners of the involved components may require updates to existing tests to make this
+[x] I/we understand the owners of the involved components may require updates to existing tests to make this
 code solid enough prior to committing the changes necessary to implement this enhancement.
 
 #### Prerequisite testing updates

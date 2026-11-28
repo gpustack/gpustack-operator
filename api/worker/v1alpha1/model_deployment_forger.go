@@ -302,12 +302,12 @@ type ModelDeploymentForgerProbeSpec struct {
 	CooldownSeconds int32 `json:"cooldownSeconds,omitempty" protobuf:"varint,2,opt,name=cooldownSeconds"`
 
 	// MinActiveRequests is the minimum running request count observed on a leader replica before
-	// arming a short-window probe.
+	// arming a short-window probe. Set explicitly to 0 to allow probing idle replicas (default 1).
 	//
 	// +optional
 	// +k8s:validation:default=1
 	// +k8s:validation:minimum=0
-	MinActiveRequests int32 `json:"minActiveRequests,omitempty" protobuf:"varint,3,opt,name=minActiveRequests"`
+	MinActiveRequests *int32 `json:"minActiveRequests,omitempty" protobuf:"varint,3,opt,name=minActiveRequests"`
 }
 
 // ModelDeploymentForgerSandboxSpec configures Kueue-admitted single-GPU ForgeSandbox execution.

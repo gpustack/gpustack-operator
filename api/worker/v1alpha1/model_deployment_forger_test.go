@@ -39,6 +39,10 @@ func TestModelDeploymentForgerCRDSchemaBoundsAndDefaults(t *testing.T) {
 	assert.InDelta(t, 5, *probe.Properties["steps"].Maximum, 0)
 	assert.Equal(t, `600`, string(probe.Properties["cooldownSeconds"].Default.Raw))
 	assert.InDelta(t, 60, *probe.Properties["cooldownSeconds"].Minimum, 0)
+	require.NotNil(t, probe.Properties["minActiveRequests"].Default)
+	assert.Equal(t, `1`, string(probe.Properties["minActiveRequests"].Default.Raw))
+	require.NotNil(t, probe.Properties["minActiveRequests"].Minimum)
+	assert.InDelta(t, 0, *probe.Properties["minActiveRequests"].Minimum, 0)
 
 	sandbox := spec.Properties["sandbox"]
 	require.NotNil(t, sandbox.Default)

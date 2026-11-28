@@ -109,7 +109,7 @@ func fullDeploymentForgerFixture() *ModelDeploymentForger {
 			Probe: workercore.ModelDeploymentForgerProbeSpec{
 				Steps:             4,
 				CooldownSeconds:   600,
-				MinActiveRequests: 1,
+				MinActiveRequests: ptr.To[int32](1),
 			},
 			Sandbox: workercore.ModelDeploymentForgerSandboxSpec{
 				RunnerMode: workercore.ModelDeploymentForgerRunnerModeExternal,
@@ -264,6 +264,16 @@ func TestForgerAndKernelArtifactJSONProtobufAndConversionRoundTrip(t *testing.T)
 		var roundTrip ModelDeploymentForger
 		require.NoError(t, Convert_v1alpha1_ModelDeploymentForger_To_v1_ModelDeploymentForger(&storage, &roundTrip, nil))
 		assert.True(t, equality.Semantic.DeepEqual(v1Obj, &roundTrip))
+
+		zeroObj := fullDeploymentForgerFixture()
+		zeroObj.Spec.Probe.MinActiveRequests = ptr.To[int32](0)
+		zeroRaw, err := json.Marshal(zeroObj)
+		require.NoError(t, err)
+		assert.Contains(t, string(zeroRaw), `"minActiveRequests":0`)
+		var gotZero ModelDeploymentForger
+		require.NoError(t, json.Unmarshal(zeroRaw, &gotZero))
+		require.NotNil(t, gotZero.Spec.Probe.MinActiveRequests)
+		assert.Equal(t, int32(0), *gotZero.Spec.Probe.MinActiveRequests)
 	})
 
 	t.Run("ModelDeployment kernelArtifactRef and role status kernelArtifact round-trip", func(t *testing.T) {

@@ -3752,7 +3752,7 @@ message ModelDeploymentForgerProbeSpec {
   optional int32 cooldownSeconds = 2;
 
   // MinActiveRequests is the minimum running request count observed on a leader replica before
-  // arming a short-window probe.
+  // arming a short-window probe. Set explicitly to 0 to allow probing idle replicas (default 1).
   //
   // +optional
   // +k8s:validation:default=1
