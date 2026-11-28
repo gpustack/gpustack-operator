@@ -53,6 +53,8 @@ func (f *fakeDetector) MonitorAccelerator(bool) (device.MetricsGroupList, error)
 // latest sample: the stored value must advance past the first tick (old value replaced) and carry
 // a store timestamp for staleness checks.
 func TestMonitorSnapshotStoredPerTick(t *testing.T) {
+	t.Setenv("KUBERNETES_NODE_NAME", "")
+
 	det := &Detector{
 		detectors:     []device.Detector{&fakeDetector{name: "fake"}},
 		monitorPeriod: 10 * time.Millisecond,
@@ -60,12 +62,17 @@ func TestMonitorSnapshotStoredPerTick(t *testing.T) {
 	assert.Nil(t, det.MonitorSnapshot(), "no snapshot before the first tick")
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		// NB: reporting devices fails without KUBERNETES_NODE_NAME and a loopback client,
 		// which the detector logs and tolerates — the monitor loop still runs.
 		_ = det.Start(ctx)
 	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
 
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		s := det.MonitorSnapshot()
