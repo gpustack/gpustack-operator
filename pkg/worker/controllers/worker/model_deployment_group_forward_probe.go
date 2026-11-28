@@ -121,6 +121,7 @@ var modelDeploymentGroupForwardEngines = map[string]modelDeploymentGroupForwardE
 				"prompt":      modelDeploymentQualifyPrompt,
 				"max_tokens":  1,
 				"temperature": 0,
+				"ignore_eos":  true,
 				"request_id":  rid,
 			})
 		},
@@ -1510,14 +1511,16 @@ func modelDeploymentRoutingProxyKVConnector(pod *core.Pod) (string, bool) {
 }
 
 // modelDeploymentGroupForwardPairRequestFields are the fields every leg of a directed pair carries
-// besides the engine's own handshake: the model, the identifier, a minimal warmup prompt, and a
-// 2-token budget.
+// besides the engine's own handshake: the model, the identifier, a minimal warmup prompt, a
+// 2-token budget, and ignore_eos so vLLM prefill always finishes length-capped rather than stopping
+// on token 1 (which causes MooncakeConnector to drop the KV transfer and hang Decode).
 func modelDeploymentGroupForwardPairRequestFields(in modelDeploymentGroupForwardPairInput) map[string]any {
 	fields := map[string]any{
 		"model":       in.Model,
 		"prompt":      modelDeploymentQualifyPrompt,
 		"max_tokens":  modelDeploymentGroupForwardPairMaxTokens,
 		"temperature": 0,
+		"ignore_eos":  true,
 		"stream":      false,
 	}
 	if in.RequestIDField != "" {
