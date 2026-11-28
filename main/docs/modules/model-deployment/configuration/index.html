@@ -765,6 +765,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -805,6 +808,8 @@
         
       
     
+  
+
   
 
   
@@ -967,6 +972,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Forger" href="/gpustack-operator/main/docs/modules/model-deployment/forger/" >Forger</a>
+          
+          
+        
       
     
       
@@ -1475,9 +1490,13 @@ SGLang roles behind <code>sgl-router</code> render <code>--kv-events-config</cod
 <code>llm-d-router</code> or deprecated <code>sglang-gateway</code> reports <code>KVEventsPublishing=True/NotApplicable</code>.</p>
 <h2 id="rollout-behavior">Rollout behavior</h2>
 <p>A change to <em><code>replicas</code></em> adds or removes instances and leaves survivors running. An edit to any field
-that changes the rendered <code>Pod</code> rolls that role&rsquo;s replicas. These fields are <em><code>size</code></em>,
-<em><code>acceleratorType</code></em>, <em><code>resources</code></em>, <em><code>command</code></em>, <em><code>image</code></em>, <em><code>extraArgs</code></em>, <em><code>env</code></em>, <em><code>ports</code></em>,
-<em><code>additionalVolumes</code></em>, <em><code>shmSize</code></em>, <em><code>terminationGracePeriodSeconds</code></em> and <em><code>startupTimeoutSeconds</code></em>.</p>
+that changes the rendered <code>Pod</code> rolls that role&rsquo;s replicas.</p>
+<p>These fields are <em><code>size</code></em>, <em><code>acceleratorType</code></em>, <em><code>resources</code></em>, <em><code>command</code></em>, <em><code>image</code></em>,
+<em><code>extraArgs</code></em>, <em><code>env</code></em>, <em><code>ports</code></em>, <em><code>additionalVolumes</code></em>, <em><code>shmSize</code></em>,
+<em><code>terminationGracePeriodSeconds</code></em>, <em><code>startupTimeoutSeconds</code></em>, and <em><code>kernelArtifactRef</code></em>
+(<a href="/gpustack-operator/main/docs/modules/model-deployment/forger/">Model Deployment Forger</a>
+, mounting verified kernels read-only at
+<code>/var/lib/gpustack/kernels</code>).</p>
 <p>Each rollout deletes and recreates <strong>one replica per role per pass</strong>. It waits for fresh Kueue
 admission before it deletes the next healthy replica.</p>
 <p>A user spec edit changes <code>pod-spec-hash</code> and rolls at once. An operator rendering upgrade changes
@@ -1547,7 +1566,8 @@ editable:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">example/engine:tag </span><span class="w"> </span><span class="c"># Editable</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">shmSize</span><span class="p">:</span><span class="w"> </span><span class="l">32Gi </span><span class="w"> </span><span class="c"># Editable</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">terminationGracePeriodSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">  </span><span class="c"># Editable</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">startupTimeoutSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">1800</span><span class="w">  </span><span class="c"># Editable</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">startupTimeoutSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">1800</span><span class="w">  </span><span class="c"># Editable</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kernelArtifactRef</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># Editable; mounts verified kernels at /var/lib/gpustack/kernels</span></span></span></code></pre></div>
 </div>
 <blockquote>
 <p><strong>Use JSON patch for one role field.</strong> <code>kubectl patch --type=merge</code> replaces the whole <em><code>roles</code></em>
@@ -1589,7 +1609,7 @@ or restate the full role:</p>
 			<tr>
 					<td>Owned keys and ports</td>
 					<td>Owned arguments/env on managed roles (including conditional <code>--kv-cache-dtype</code>; see <a href="#operator-owned-keys">Operator-owned keys</a>
-), <code>--port</code> mismatching first <code>ports</code> entry, reserved listener ports (<code>5557</code>/<code>5558</code>, <code>8998</code>), unparseable parallel flags or per-member width exceeding cards</td>
+), <code>--port</code> mismatching first <code>ports</code> entry, reserved listener ports (<code>5557</code>/<code>5558</code>, <code>8998</code>), unparseable parallel flags or per-member width exceeding cards, <code>ConfigMap</code> mounts overlapping <code>/var/lib/gpustack/kernels</code> (<code>ConfigMapKernelMountForbidden</code>)</td>
 			</tr>
 	</tbody>
 </table>

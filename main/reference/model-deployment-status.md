@@ -8,6 +8,7 @@ fields and its conditions to diagnose a deployment that is still starting or has
 - [Status](#status)
 - [Conditions](#conditions)
 - [Scaler annotations](#scaler-annotations)
+- [Forger annotations](#forger-annotations)
 - [Group status](#group-status)
 
 ## Status
@@ -17,8 +18,11 @@ fields and its conditions to diagnose a deployment that is still starting or has
 *`status.phase`* is the field to read first: `Starting`, `Ready`, `Degraded` or `Deleting`. `Degraded`
 means some required serving capacity is ready and some is not: either some role replicas are down, or
 all role replicas are ready but a declared router has no ready replica.
+
 *`status.roles[]`* carries `name`, *`kind`*, `desired`, `ready`, *`quotaReserved`*, `unmanaged`,
-*`assignedFlavors`*, *`parallelism`* and `endpoints` per role.
+*`assignedFlavors`*, *`parallelism`*, `endpoints`, and optional `kernelArtifact` (`artifact`,
+`manifestDigest`, `dispatchManifestDigest`, `delivery` `Node|Image`, `loadedKernels`, and
+`quarantined`) per role.
 
 `kubectl get modeldeployments` shows *`status.roleSummary`* in its `ROLES` column. It counts current
 Ready instances by kind: `R` is managed router `Pod`s, `S` is ordinary servers, `E` is encoders,
@@ -518,6 +522,20 @@ levels back to `True` on its own once a later pass proves the live world again.
 
 Reports live convergence across answering `Pod`s and per-role status (`observedGeneration`, `synced`, `reason`, `message`, `paused`, `appliedConfigDigest`, `convergedPods`, `totalAnsweringPods`, `unsupportedFields`) in *`status.roles[*].runtimeControl`*; see [Online Runtime Control](../docs/modules/model-deployment/runtime-control/index.md#step-3-verify-runtime-settings) for condition reasons and troubleshooting.
 
+### KernelsReady
+
+Reports whether every role's referenced `ModelKernelArtifact` is resolved, unquarantined, and deliverable (`Node` CSI or `Image`).
+
+| Value | Reason | Meaning |
+|---|---|---|
+| `True` | `NotApplicable` | no role sets *`spec.roles[*].kernelArtifactRef`* |
+| `True` | `KernelsReady` | every referenced `ModelKernelArtifact` is `Resolved=True`, unquarantined, and deliverable |
+| `False` | `KernelArtifactNotFound` | a referenced `ModelKernelArtifact` does not exist in the deployment namespace |
+| `False` | `KernelArtifactNotResolved` | a referenced `ModelKernelArtifact` is not `Resolved=True` |
+| `False` | `KernelArtifactQuarantined` | a referenced `ModelKernelArtifact` has `status.quarantined: true` |
+| `False` | `NodeDeliveryUnavailable` | a node-delivered `ModelKernelArtifact` requires `model.csi.gpustack.ai`, which is absent |
+| `False` | `PeerSyncDisabled` | a `nodeStore` `ModelKernelArtifact` needs Peer Sync on consumer `Node`s where Peer Sync is disabled |
+
 ## Scaler annotations
 
 Two annotations on the `ModelDeployment` — `modeldeployment.gpustack.ai/scaler-binding` and
@@ -533,6 +551,16 @@ ignores the fields the scaler owns.
 
 The scaler's own `status` reports what it observed, what it recommends and what blocks it;
 [Scaler status](../docs/modules/model-deployment/scaling/index.md#status) owns that contract.
+
+## Forger annotations
+
+Two annotations on the `ModelDeployment` — `modeldeployment.gpustack.ai/forger-binding`
+(`{forgerName, forgerUID, term}`) and `modeldeployment.gpustack.ai/forger-decision`
+(`{decisionID, term, kernelArtifacts}`) — record which `ModelDeploymentForger` owns
+*`spec.roles[*].kernelArtifactRef`* and the last kernel decision committed.
+
+They coexist orthogonally with `scaler-binding` and are fenced at admission to the operator worker
+identity ([Model Deployment Forger Internals](model-deployment-forger-internals.md#bindings-and-metrics)).
 
 ## Group status
 

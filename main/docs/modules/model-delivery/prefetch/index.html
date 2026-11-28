@@ -765,6 +765,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -805,6 +808,8 @@
         
       
     
+  
+
   
 
   
@@ -967,6 +972,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Forger" href="/gpustack-operator/main/docs/modules/model-deployment/forger/" >Forger</a>
+          
+          
+        
       
     
       
@@ -1362,7 +1377,9 @@ also rejects projected footprints (<code>resolved size × widest node count</cod
 <p><em><code>spec.retention.pinned</code></em> (requires <code>allowPinned: true</code>) protects digests from eviction while still
 counting toward disk usage (<a href="/gpustack-operator/main/docs/modules/model-delivery/operations/#cache-collection-rules">Cache collection rules</a>
 ). The
-controller merges pins across all namespaces into each <code>NodeModelStore.spec.pinned</code> list.</p>
+prefetch controller is the sole writer of <code>NodeModelStore.spec.pinned</code>, merging <code>ModelTransfer</code>
+source digests, active/rollback <code>ModelKernelArtifact</code> digests, and <code>ModelPrefetch</code> retention pins
+under a per-node <code>256</code>-entry cap.</p>
 <p><em><code>spec.retention.ttlAfterLastUse</code></em> unpins a <code>Node</code>&rsquo;s copy once unmounted past that duration
 (evaluated at the 1-hour granularity of <em><code>lastUsedTime</code></em>).</p>
 <h2 id="prefetch-status">Prefetch status</h2>
@@ -1438,9 +1455,9 @@ callers; add scrapers under <code>modelManager.networkPolicy.scrapers</code>.</p
 <em><code>manifestDigest</code></em> (skipping older manifestless trees). Downloads stream HTTP byte ranges from one
 peer and checkpoint hashes every <code>64 MiB</code>, resuming on another peer or the hub if a seed fails.</p>
 <ul>
-<li><strong>Source tracking</strong>: <code>NodeModelStore.status.models[].source</code> reports <code>Hub</code> or <code>Peer</code> (majority
-bytes), and plugin <code>:32444/metrics</code> exposes <code>gpustack_model_manager_download_bytes_total</code> split by
-the <code>source</code> label (<code>hub</code> or <code>peer</code>).</li>
+<li><strong>Source tracking</strong>: <code>NodeModelStore.status.models[].source</code> reports <code>Hub</code>, <code>Peer</code>, or <code>Forge</code>
+(for ingested kernel bundles), and plugin <code>:32444/metrics</code> exposes
+<code>gpustack_model_manager_download_bytes_total</code> split by the <code>source</code> label (<code>hub</code> or <code>peer</code>).</li>
 <li><strong>Trade-offs</strong>: Peer sync cuts hub egress and hub dependency rather than fan-out time on slower
 east-west fabrics. Each concurrent puller uses <code>~0.25 vCPU</code> on 2-vCPU seed <code>Node</code>s.</li>
 </ul>

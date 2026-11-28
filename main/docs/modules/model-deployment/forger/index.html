@@ -1,0 +1,1572 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_c3a4ab394c37ecda.b5741ebf9b174108af7308b4c46a130da0d4880f26ef21ef1fb0d18784f543cb.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Model Deployment Forger · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/forger/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_a437ff499ee4e378.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/model-deployment/forger/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">main</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">main</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/main/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Getting Started">Getting Started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Vendor Prerequisites</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Walkthroughs">Walkthroughs</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Walkthroughs" href="/gpustack-operator/main/docs/walkthroughs/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Heterogeneous Devices Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/" >Heterogeneous Devices</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="RDMA Networking Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/" >RDMA Networking</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hierarchical Placement Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/" >Topology</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Shared Cache Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/" >KV Cache</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/" >Model Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Deployment Walkthroughs">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment Walkthroughs" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/" >Preparation and Choices</a>
+    
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="External DP Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/" >External DP</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Multi-Host Serving Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/" >Multi-Host Serving</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Heterogeneous Devices</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Heterogeneous Devices" href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Preflight Checks" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight Checks</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Requests</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Networking</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="RDMA Networking" href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+
+
+  
+
+<details class="nav-section" >
+  <summary title="Topology">Topology</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Topology" href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="KV Cache" href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Pools and Bindings" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and Bindings</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local Disk Tier</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Delivery" href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifact</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/main/docs/modules/model-delivery/remote/" >Remote Delivery</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
+
+  
+
+  
+    
+      
+      
+        
+        
+      
+    
+  
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="Model Deployment" href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Encode, Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/" >Encode, Prefill and Decode</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Encode, Prefill and Decode Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Elastic EP" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/" >Elastic EP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Elastic EP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="External DP" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/" >External DP</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="External DP Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Scaling" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/" >Scaling</a>
+          
+          
+            <div class="nav-children">
+              
+                
+                  <a title="Model Deployment Scaling Benchmark" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/" >Benchmark</a>
+                
+              
+            </div>
+          
+        
+      
+    
+      
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Forger" href="/gpustack-operator/main/docs/modules/model-deployment/forger/" aria-current="page">Forger</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="GPU Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      
+      
+      <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+      
+      
+        
+        
+          <a title="GPU Instance Configuration" href="/gpustack-operator/main/docs/modules/instances/configuration/" >Configuration</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="GPU Instance Operations" href="/gpustack-operator/main/docs/modules/instances/operations/" >Operations</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation Modes</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High Availability</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          
+
+
+
+
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+
+
+  
+
+  
+
+  
+
+  
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        
+        
+          <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5.x</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+          
+          
+        
+      
+    
+  </div>
+</details>
+
+        
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Deployment Forger</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-deployment-forger">Model Deployment Forger</h1>
+<p>A <code>ModelDeploymentForger</code> (<code>mdf</code>) automates closed-loop single-GPU kernel specialization for a
+running <code>ModelDeployment</code>. It runs 3–5 step sentinel probes, builds and verifies candidate kernels
+in a Kueue-admitted <code>ForgeSandbox</code> <code>Pod</code>, stores verified bundles in <code>NodeModelStore</code> as
+<code>ModelKernelArtifact</code> (<code>mkart</code>) objects, and rolls them out with readiness-gated canary checks.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#workflow-and-modes">Workflow and modes</a>
+</li>
+<li><a href="#scope-and-exclusions">Scope and exclusions</a>
+</li>
+<li><a href="#runner-and-verifier-contract">Runner and verifier contract</a>
+</li>
+<li><a href="#runtime-coexistence">Runtime coexistence</a>
+</li>
+<li><a href="#canary-rollout-and-rollback">Canary rollout and rollback</a>
+</li>
+<li><a href="#upgrade-and-downgrade">Upgrade and downgrade</a>
+</li>
+<li><a href="#troubleshooting">Troubleshooting</a>
+</li>
+</ul>
+<h2 id="workflow-and-modes">Workflow and modes</h2>
+<p>Each <code>ModelDeploymentForger</code> targets one <code>ModelDeployment</code> in the same namespace and drives a
+six-phase loop per role: <code>Idle</code> → <code>Probing</code> → <code>Forging</code> → <code>Verifying</code> → <code>Publishing</code> → <code>Promoting</code>.
+Select the autonomy level with <em><code>spec.mode</code></em>:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Mode</th>
+					<th>Probe</th>
+					<th><code>ForgeSandbox</code> and <code>mkart</code></th>
+					<th>Target <code>ModelDeployment</code></th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>ObserveOnly</code></td>
+					<td>Runs 3–5 step probe</td>
+					<td>Skipped</td>
+					<td>Unchanged</td>
+			</tr>
+			<tr>
+					<td><code>Shadow</code> (default)</td>
+					<td>Runs 3–5 step probe</td>
+					<td>Builds, verifies, and pins</td>
+					<td>Unchanged</td>
+			</tr>
+			<tr>
+					<td><code>Active</code></td>
+					<td>Runs 3–5 step probe</td>
+					<td>Builds, verifies, and pins</td>
+					<td>Promotes <em><code>kernelArtifactRef</code></em></td>
+			</tr>
+	</tbody>
+</table>
+<p>Start in <code>ObserveOnly</code> or <code>Shadow</code> to confirm bottleneck detection and sandbox verification before
+switching to <code>Active</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentForger</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-decode-forger</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-pd </span><span class="w"> </span><span class="c"># immutable; ModelDeployment in this namespace</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Active  </span><span class="w"> </span><span class="c"># ObserveOnly | Shadow | Active (default: Shadow)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">suspend</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode </span><span class="w"> </span><span class="c"># target role: Server, Prefill, or Decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxKernelsPerGeneration</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">  </span><span class="c"># 1..16; top non-GEMM bottlenecks</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minSpeedupRatio</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1.05&#34;</span><span class="w">     </span><span class="c"># &gt;= 1.01 required by forge-verifier</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">probe</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">steps</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">              </span><span class="c"># 3..5 steps (default: 4)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">cooldownSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">600</span><span class="w">  </span><span class="c"># minimum 60 s between passes</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">minActiveRequests</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># default 1; set explicitly to 0 to probe idle replicas</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sandbox</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">runnerMode</span><span class="p">:</span><span class="w"> </span><span class="l">External </span><span class="w"> </span><span class="c"># External | Mock (default: External)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">runner</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/forge-runner:v0.1.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">IfNotPresent</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">loopwright-forger</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">args</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">budget</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;4&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">LOOPWRIGHT_MODEL</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">gpt-5</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">LOOPWRIGHT_PROVIDER_TOKEN</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">valueFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">secretKeyRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-creds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">token</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">envFrom</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">configMapRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">forger-config</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">priorityClassName</span><span class="p">:</span><span class="w"> </span><span class="l">forge-batch</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">activeDeadlineSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">1800</span><span class="w">  </span><span class="c"># 60..14400 (default: 1800)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">outputSizeLimit</span><span class="p">:</span><span class="w"> </span><span class="l">2Gi        </span><span class="w"> </span><span class="c"># 64Mi..16Gi (default: 2Gi)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">imagePullSecrets</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">runner-regcred</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;8&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ram</span><span class="p">:</span><span class="w"> </span><span class="l">32Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">localStorage</span><span class="p">:</span><span class="w"> </span><span class="l">20Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">rollout</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxRetainedGenerations</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">   </span><span class="c"># 1..16; prunes older unreferenced mkart</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">failureTimeoutSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">600</span><span class="w">  </span><span class="c"># auto-rollback deadline on canary failure</span></span></span></code></pre></div>
+</div>
+<p>Set <em><code>spec.suspend</code></em> to <code>true</code> to pause probing, sandbox creation, and promotion while releasing
+the target binding without deleting the forger.</p>
+<h3 id="immutable-kernel-artifacts">Immutable kernel artifacts</h3>
+<p>In <code>Shadow</code> and <code>Active</code> modes, the worker creates an immutable <code>ModelKernelArtifact</code>
+(<code>&lt;forger&gt;-&lt;role&gt;-gen-&lt;N&gt;</code>) backed by <em><code>spec.source.nodeStore</code></em>. Only the operator worker identity
+can create <code>nodeStore</code> artifacts, and binary kernel bundles never use <code>ConfigMap</code>s or <code>Secret</code>s.</p>
+<p>Tenants can also import pre-built kernel bundles into <code>ModelKernelArtifact</code> using a 40-character
+hex commit SHA under <em><code>spec.source.huggingFace</code></em> or a digest-pinned <em><code>spec.source.image</code></em>
+(<code>registry/repo@sha256:...</code>), then bind them via <em><code>spec.roles[*].kernelArtifactRef</code></em> when no
+<code>ModelDeploymentForger</code> owns the target.</p>
+<h2 id="scope-and-exclusions">Scope and exclusions</h2>
+<p><code>ModelDeploymentForger</code> targets memory-bound and irregular single-GPU operators on <code>vLLM</code> and
+<code>SGLang</code> roles running <code>Server</code>, <code>Prefill</code>, or <code>Decode</code> kinds.</p>
+<table>
+	<thead>
+			<tr>
+					<th>Category</th>
+					<th>Status</th>
+					<th>Details</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Allowed single-GPU operators</td>
+					<td>Supported</td>
+					<td><code>rmsnorm</code>, <code>layernorm</code>, <code>rope_kv_append</code>, <code>activation_quant</code>, <code>moe_router_topk</code>, <code>moe_permute_unpermute</code>, <code>paged_attention</code>, <code>ragged_prefill_attention</code>, <code>mla_local</code>, <code>speculative_verify</code>, <code>sampling_logits</code>, <code>custom_elementwise_fusion</code></td>
+			</tr>
+			<tr>
+					<td>Dense and block-scaled GEMM</td>
+					<td>Excluded</td>
+					<td><code>cublas*</code>/<code>hipblas*</code>/<code>rocblas*</code>, <code>aten::mm</code>, <code>fp8_blockwise_gemm</code>, <code>mxfp8_gemm</code>, <code>nvfp4_gemm</code>, <code>deep_gemm*</code></td>
+			</tr>
+			<tr>
+					<td>Multi-GPU collectives</td>
+					<td>Excluded</td>
+					<td><code>nccl*</code>/<code>rccl*</code>/<code>hccl*</code>, <code>all_reduce</code>, <code>all_gather</code>, <code>reduce_scatter</code>, <code>all_to_all</code>, <code>fused_all_reduce*</code></td>
+			</tr>
+			<tr>
+					<td>Unsupported role shapes</td>
+					<td>Rejected</td>
+					<td><em>Encode</em> roles, CPU-only roles, unmanaged <em><code>roles[].command</code></em> roles, SGLang-Ray roles, and <em>Elastic EP</em> roles</td>
+			</tr>
+	</tbody>
+</table>
+<p>Each target key encodes static per-rank shard dimensions after <em>tensor parallelism (TP)</em> and
+<em>expert parallelism (EP)</em> sharding and normalizes the engine version to <code>major.minor</code> (keeping
+pre-release tags separate), excluding dynamic batch or sequence lengths. Patch upgrades (<code>0.8.x</code>)
+reuse verified artifacts, while minor upgrades (<code>0.8</code> → <code>0.9</code>) or <em>TP</em>/<em>EP</em> changes trigger
+re-forging.</p>
+<h2 id="runner-and-verifier-contract">Runner and verifier contract</h2>
+<p>In <code>sandbox.runnerMode: External</code>, the operator launches a <code>restricted</code> Kueue-admitted <code>ForgeSandbox</code>
+<code>Pod</code> pinned to the probed role&rsquo;s GPU architecture, bounded by <em><code>sandbox.activeDeadlineSeconds</code></em>
+(<code>60</code>–<code>14400</code>, default <code>1800</code>) and <em><code>sandbox.outputSizeLimit</code></em> (<code>64Mi</code>–<code>16Gi</code>, default <code>2Gi</code>). Four
+stages run inside the <code>Pod</code> in <code>External</code> mode (three in <code>Mock</code> mode):</p>
+<ol>
+<li><strong><code>initContainer: forge-runner</code></strong>: Reads <code>forge-request.json</code>, <code>definitions/*.json</code>, and
+<code>workloads/*.jsonl</code> from <code>/var/run/gpustack/forge/input/</code> and writes <code>dispatch-manifest.json</code>,
+<code>solutions/*.json</code>, <code>kernels/*</code>, and <code>traces/*.json</code> into the <code>forge-output</code> <code>emptyDir</code>.</li>
+<li><strong><code>initContainer: forge-stage-sentinel</code></strong> (<code>External</code> mode only): Copies the operator&rsquo;s built-in
+<code>gpustack-engine-sentinel</code> package into a read-only <code>forge-sentinel</code> <code>emptyDir</code> for the verifier.</li>
+<li><strong><code>initContainer: forge-verifier</code></strong>: Mounts <code>forge-output</code> read-only, validates file integrity and
+checksums, re-executes candidate kernels on the sandbox GPU against held-out workloads, enforces
+<em><code>minSpeedupRatio</code></em> and numerical tolerances, and writes <code>verification-report.json</code>.</li>
+<li><strong><code>forge-hold</code> main container</strong>: Runs <code>gpustack-operator model-forger hold</code> to keep the <code>Pod</code> in
+<code>Running</code> after all init containers exit <code>0</code> so the seed <code>Node</code>&rsquo;s <code>model-manager</code> can ingest
+<code>forge-output</code> directly from kubelet&rsquo;s <code>emptyDir</code>.</li>
+</ol>
+<h3 id="runner-container-isolation">Runner container isolation</h3>
+<p>Configure synthesis container overrides under <em><code>sandbox.runner</code></em> (<code>image</code>, <code>imagePullPolicy</code>,
+<code>command</code>, <code>args</code>, <code>env</code>, and <code>envFrom</code>) when <em><code>sandbox.runnerMode</code></em> is <code>External</code> in <code>Shadow</code> or
+<code>Active</code> mode (<code>ObserveOnly</code> does not require <em><code>sandbox.runner</code></em> because it never launches
+sandboxes, while <code>Mock</code> mode rejects <em><code>sandbox.runner</code></em>):</p>
+<ul>
+<li><strong>Strict container boundary</strong>: <em><code>sandbox.runner</code></em> (<code>command</code>, <code>args</code>, <code>env</code>, <code>envFrom</code>, and
+<code>imagePullPolicy</code>) applies strictly to <code>initContainer: forge-runner</code> and is never exposed to
+<code>forge-stage-sentinel</code>, <code>forge-verifier</code>, or <code>forge-hold</code>.</li>
+<li><strong>Reserved operator prefix</strong>: <code>GPUSTACK_FORGE_*</code> environment names and <code>envFrom</code> prefixes are
+reserved and rejected; operator-injected <code>GPUSTACK_FORGE_INPUT_DIR</code> and
+<code>GPUSTACK_FORGE_OUTPUT_DIR</code> always override <code>envFrom</code>.</li>
+<li><strong>Registry credentials and allowlists</strong>: <em><code>sandbox.imagePullSecrets</code></em> merges after the target
+role&rsquo;s <em><code>imagePullSecrets</code></em> (deduplicated in order), and <code>forger-allowed-runner-image-prefixes</code>
+restricts allowed <em><code>sandbox.runner.image</code></em> prefixes.</li>
+<li><strong>Deterministic mock mode</strong>: Set <em><code>sandbox.runnerMode</code></em> to <code>Mock</code> (with <em><code>sandbox.runner</code></em> omitted)
+to run the built-in Go <code>gpustack-operator model-forger mock</code> and <code>model-forger verify</code> helpers
+without Python.</li>
+</ul>
+<h3 id="sandbox-accelerator-allocation">Sandbox accelerator allocation</h3>
+<p>Both <code>forge-runner</code> and <code>forge-verifier</code> run as sequential <code>initContainer</code>s, so the <code>ForgeSandbox</code>
+<code>Pod</code> consumes one accelerator unit plus optional host <em><code>cpu</code></em>, <em><code>ram</code></em>, and <em><code>localStorage</code></em>:</p>
+<table>
+	<thead>
+			<tr>
+					<th>Allocation mode</th>
+					<th><em><code>sandbox.resources</code></em> fields</th>
+					<th>Guidance</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>Exclusive</code> (default)</td>
+					<td>Omit slicing and partitioning fields</td>
+					<td>Requests <code>1</code> whole card; recommended for deterministic verification timing.</td>
+			</tr>
+			<tr>
+					<td><code>Partitioned</code></td>
+					<td>Set <em><code>acceleratorPartitionedProfile</code></em> (e.g., <code>&quot;3g.40gb&quot;</code>)</td>
+					<td>Requests <code>1</code> hardware partition on a partition-offering pool; mutually exclusive with slicing.</td>
+			</tr>
+			<tr>
+					<td><code>Sliced</code></td>
+					<td>Set <em><code>acceleratorSlicedMemoryPercentage</code></em> (<code>1</code>–<code>100</code>) and optional <em><code>acceleratorSlicedCoresPercentage</code></em> (<code>0</code>–<code>100</code>)</td>
+					<td>Requests <code>1</code> software slice on a logically sliceable pool; subject to neighbor contention.</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="runtime-coexistence">Runtime coexistence</h2>
+<p><code>ModelDeploymentForger</code> and <code>ModelDeploymentScaler</code> can bind the same <code>ModelDeployment</code>
+simultaneously without conflict:</p>
+<ul>
+<li><strong>Orthogonal bindings</strong>: <code>forger-binding</code> fences <em><code>spec.roles[*].kernelArtifactRef</code></em>, while
+<code>scaler-binding</code> fences <em><code>spec.roles[*].replicas</code></em>.</li>
+<li><strong>Runtime control alignment</strong>: The forger holds probing and promotion whenever a target role has
+<em><code>pause: true</code></em>, unsynced <em><code>runtimeControl</code></em>, or an active replica retirement (<code>status.retirement</code>).</li>
+<li><strong>Node cache pinning</strong>: Active and rollback-protected <code>ModelKernelArtifact</code> digests stay pinned in
+<code>NodeModelStore.spec.pinned</code> so watermark collection never evicts them before promotion converges.</li>
+</ul>
+<h2 id="canary-rollout-and-rollback">Canary rollout and rollback</h2>
+<p>When <code>Active</code> mode promotes a new <code>ModelKernelArtifact</code> onto <em><code>spec.roles[*].kernelArtifactRef</code></em>,
+<code>ModelDeployment</code> uses recreate-style slot replacement with a readiness gate:</p>
+<ul>
+<li><strong>Canary gate</strong>: The first replacement slot stays held until every member <code>Pod</code> passes
+<code>/gpustack/v1/ready</code> and confirms the target <code>dispatch_manifest_digest</code> on
+<code>/gpustack/v1/runtime_config</code>. Sibling replicas stay on the previous kernel until the canary
+converges.</li>
+<li><strong>Recreate capacity trade-off</strong>: Because each slot deletes the old replica before creating the
+replacement to avoid double GPU quota, one replica of serving capacity is unavailable during each
+swap. A 1-replica role experiences brief downtime during promotion and rollback.</li>
+<li><strong>Automatic rollback and quarantine</strong>: If the canary fails readiness past
+<em><code>rollout.failureTimeoutSeconds</code></em> or reports <code>unsupported_kernel_artifact</code>, the forger reverts
+<em><code>kernelArtifactRef</code></em> to the previous artifact (or <code>nil</code> for stock kernels) and sets
+<code>status.quarantined: true</code> on the failed <code>ModelKernelArtifact</code>.</li>
+</ul>
+<p>Quarantine persists across <code>ModelDeploymentForger</code> recreation, and quarantined artifacts are never
+promoted or newly mounted.</p>
+<h2 id="upgrade-and-downgrade">Upgrade and downgrade</h2>
+<p>Upgrading to an operator release with <code>ModelDeploymentForger</code> causes zero rollout churn for existing
+<code>ModelDeployment</code>s that omit <em><code>spec.roles[*].kernelArtifactRef</code></em>.</p>
+<p>Before downgrading to an operator version that predates <code>ModelDeploymentForger</code> and
+<code>ModelKernelArtifact</code>, complete these steps in order:</p>
+<ol>
+<li>Delete all <code>ModelDeploymentForger</code> resources across all namespaces.</li>
+<li>Clear <em><code>spec.roles[*].kernelArtifactRef</code></em> on any <code>ModelDeployment</code> using forged kernels and wait
+for replicas to roll back to stock engine kernels.</li>
+<li>Delete all <code>ModelKernelArtifact</code> resources so <code>NodeModelStore.spec.pinned</code> releases forged
+digests for normal watermark collection.</li>
+</ol>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p>Inspect the forger, its generated <code>ModelKernelArtifact</code>s, and the target <code>ModelDeployment</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n &lt;ns&gt; get mdf,mkart
+</span></span><span class="line"><span class="cl">kubectl -n &lt;ns&gt; describe mdf &lt;forger-name&gt;
+</span></span><span class="line"><span class="cl">kubectl -n &lt;ns&gt; get md &lt;deployment&gt; -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{&#34;\n&#34;}{end}&#39;</span></span></span></code></pre></div>
+</div>
+<table>
+	<thead>
+			<tr>
+					<th>Symptom</th>
+					<th>Signal</th>
+					<th>Resolution</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Probing or promotion paused</td>
+					<td><code>Blocked=True</code> (<code>RolePaused</code>, <code>RuntimeControlUnsynced</code>, <code>RetirementInProgress</code>)</td>
+					<td>Unpause the role, wait for <code>runtimeControl</code> sync, or wait for retirement to finish.</td>
+			</tr>
+			<tr>
+					<td><code>ForgeSandbox</code> stuck pending</td>
+					<td><code>Blocked=True</code> (<code>SandboxQuotaPending</code>)</td>
+					<td>Free 1 accelerator unit (whole card, partition, or slice) in the target <code>ClusterQueue</code> or raise <em><code>sandbox.priorityClassName</code></em>.</td>
+			</tr>
+			<tr>
+					<td>Multi-node rollout blocked</td>
+					<td><code>KernelsReady=False</code> (<code>PeerSyncDisabled</code>)</td>
+					<td>Enable <code>model-store-peer-sync</code> and set <code>modelManager.port: 32445</code> on consumer <code>Node</code>s.</td>
+			</tr>
+			<tr>
+					<td>Pin ceiling reached</td>
+					<td><code>Blocked=True</code> (<code>PinnedCapacityExceeded</code>)</td>
+					<td>Delete unused <code>ModelPrefetch</code> pins or lower <em><code>rollout.maxRetainedGenerations</code></em>.</td>
+			</tr>
+			<tr>
+					<td>Canary rolled back</td>
+					<td><code>Ready=True</code> (<code>RollbackCompleted</code>), <code>mkart</code> <code>status.quarantined: true</code></td>
+					<td>Inspect <code>ForgeSandbox</code> verification traces and <code>Pod</code> startup logs before re-forging.</td>
+			</tr>
+	</tbody>
+</table>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/">Model Deployment Configuration</a>
+ (role fields, rollout behavior, and admission rules)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/">Online Runtime Control</a>
+ (live parameter tuning and role pause)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
+ (<code>ModelDeploymentScaler</code> coexistence)</li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/operations/">Model Store Operations</a>
+ (<code>NodeModelStore</code> cache and watermark collection)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
+ — configure automated replica scaling alongside kernel forging.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#workflow-and-modes">Workflow and modes</a>
+      <ul>
+        <li><a href="#immutable-kernel-artifacts">Immutable kernel artifacts</a></li>
+      </ul>
+    </li>
+    <li><a href="#scope-and-exclusions">Scope and exclusions</a></li>
+    <li><a href="#runner-and-verifier-contract">Runner and verifier contract</a>
+      <ul>
+        <li><a href="#runner-container-isolation">Runner container isolation</a></li>
+        <li><a href="#sandbox-accelerator-allocation">Sandbox accelerator allocation</a></li>
+      </ul>
+    </li>
+    <li><a href="#runtime-coexistence">Runtime coexistence</a></li>
+    <li><a href="#canary-rollout-and-rollback">Canary rollout and rollback</a></li>
+    <li><a href="#upgrade-and-downgrade">Upgrade and downgrade</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
+</body>
+</html>

@@ -765,6 +765,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -805,6 +808,8 @@
         
       
     
+  
+
   
 
   
@@ -967,6 +972,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Forger" href="/gpustack-operator/main/docs/modules/model-deployment/forger/" >Forger</a>
+          
+          
+        
       
     
       
@@ -1428,9 +1443,11 @@ and wait past <em><code>retryTime</code></em> for the next mount retry.</li>
 <h3 id="cache-collection-rules">Cache collection rules</h3>
 <p>Collection runs above the high watermark, when a reservation does not fit, and every <code>5m</code>. It evicts
 oldest <em><code>lastUsedTime</code></em> entries down to the low watermark while skipping mounted trees and
-<code>ModelPrefetch</code> pins (<em><code>spec.pinned</code></em>):</p>
+<em><code>spec.pinned</code></em> entries (the 3-voice union of <code>ModelTransfer</code> source digests, active/rollback
+<code>ModelKernelArtifact</code> digests, and <code>ModelPrefetch</code> retention pins):</p>
 <ul>
-<li><strong>Published trees</strong>: Eligible <code>10m</code> after the last <code>Pod</code> unmounts them.</li>
+<li><strong>Published trees</strong>: Eligible <code>10m</code> after the last <code>Pod</code> unmounts them. Both <code>Model</code> and
+<code>Kernel</code> (<code>Source: Forge</code>) trees obey the same grace window once unpinned.</li>
 <li><strong>Stale partials and failures</strong>: Idle partial downloads and disk-absent <code>Failed</code> status entries
 expire after <code>24h</code>.</li>
 </ul>

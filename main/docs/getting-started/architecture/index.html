@@ -765,6 +765,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -805,6 +808,8 @@
         
       
     
+  
+
   
 
   
@@ -967,6 +972,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Forger" href="/gpustack-operator/main/docs/modules/model-deployment/forger/" >Forger</a>
+          
+          
+        
       
     
       
@@ -1214,7 +1229,7 @@ memory access (RDMA)</em> accelerates transfers, and shared KV cache stores reus
 </li>
 </ul>
 <h2 id="components">Components</h2>
-<p>The <code>gpustack-operator</code> binary provides five subcommands, paired with the <code>engine-sentinel</code> runtime package staged into managed inference <code>Pod</code>s:</p>
+<p>The <code>gpustack-operator</code> binary provides five service subcommands and the internal <code>model-forger</code> sandbox helper, paired with the <code>engine-sentinel</code> runtime package staged into managed inference <code>Pod</code>s:</p>
 <table>
 	<thead>
 			<tr>
@@ -1237,12 +1252,18 @@ memory access (RDMA)</em> accelerates transfers, and shared KV cache stores reus
 			<tr>
 					<td><code>model-manager</code></td>
 					<td>Per-node <code>DaemonSet</code></td>
-					<td>Caches verified model weights and mounts them through CSI.</td>
+					<td>Caches verified model weights and kernels and mounts them through CSI.</td>
 			</tr>
 			<tr>
 					<td><code>model-transfer</code></td>
 					<td>Vendor source <code>DaemonSet</code></td>
 					<td>Runs the source broker and worker service, paired with the staged <code>gpustack_model_transfer</code> Python reader package for remote weight delivery.</td>
+			</tr>
+			<tr>
+					<td><code>model-forger</code></td>
+					<td><code>ForgeSandbox</code> <code>Pod</code> helper</td>
+					<td>Runs built-in <code>mock</code>, <code>verify</code>, and <code>hold</code> helper stages for kernel specialization; see <a href="/gpustack-operator/main/docs/modules/model-deployment/forger/">Model Deployment Forger</a>
+.</td>
 			</tr>
 			<tr>
 					<td><code>worker-gateway</code></td>

@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers accelerators, organizes capacity into pools, and schedules Kubernetes workloads for interactive use and model serving.
 
-Documentation version: main. Source revision: 74aa9d360844952d0a6d400303a5e871bdc9e05a.
+Documentation version: main. Source revision: 5138fe30e8ecf48c32d7c54d0ab1e84e70fafeff.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -78,6 +78,7 @@ documentation and code for your release. This index routes questions; follow its
 - [External DP Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/index.md): Compare External DP ranks against wide tensor parallelism
 - [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md): Plan replica counts from serving signals and capacity priors
 - [Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md): Measure H100 and H200 scaling latency and limits
+- [Model Deployment Forger](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/forger/index.md): Automate closed-loop kernel probing, forging, and canary rollout
 - [Online Runtime Control](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/runtime-control/index.md): Tune serving parameters, pause roles, and isolate managed routers live
 - [Model Deployment Routing](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/routing/index.md): Configure routing policies and verify router serving
 
@@ -122,11 +123,12 @@ documentation and code for your release. This index routes questions; follow its
 - [Model Deployment Shutdown](https://docs.gpustack.ai/gpustack-operator/main/reference/model-deployment-shutdown.md): Follow replica retirement, drain, and unadmitted removal
 - [Scaling Internals](https://docs.gpustack.ai/gpustack-operator/main/reference/model-deployment-scaling-internals.md): Inspect prior qualification, normalization and status schemas
 - [Model Deployment Scaling Simulation](https://docs.gpustack.ai/gpustack-operator/main/reference/model-deployment-scaling-simulation.md): Compare scaler algorithms on identical synthetic traffic
+- [Model Deployment Forger Internals](https://docs.gpustack.ai/gpustack-operator/main/reference/model-deployment-forger-internals.md): Inspect `LocalKernelKey`, FlashInfer schemas, `/ingest/v1/trees`, and pin union
 - [Instance Metrics Reference](https://docs.gpustack.ai/gpustack-operator/main/reference/instances-metrics.md): Inspect per-instance accelerator utilization metrics
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/74aa9d360844952d0a6d400303a5e871bdc9e05a/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
-- [Development](https://github.com/gpustack/gpustack-operator/blob/74aa9d360844952d0a6d400303a5e871bdc9e05a/docs/contribute/development.md): Build, generate, test, and lint the repository
-- [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/74aa9d360844952d0a6d400303a5e871bdc9e05a/docs/contribute/local-cluster-setup.md): Provision a local kind cluster and CPU-only mock devices for tests
-- [Internals](https://github.com/gpustack/gpustack-operator/blob/74aa9d360844952d0a6d400303a5e871bdc9e05a/docs/contribute/internals.md): Review startup order, bindings, and naming limits
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/5138fe30e8ecf48c32d7c54d0ab1e84e70fafeff/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Development](https://github.com/gpustack/gpustack-operator/blob/5138fe30e8ecf48c32d7c54d0ab1e84e70fafeff/docs/contribute/development.md): Build, generate, test, and lint the repository
+- [Local Cluster Setup](https://github.com/gpustack/gpustack-operator/blob/5138fe30e8ecf48c32d7c54d0ab1e84e70fafeff/docs/contribute/local-cluster-setup.md): Provision a local kind cluster and CPU-only mock devices for tests
+- [Internals](https://github.com/gpustack/gpustack-operator/blob/5138fe30e8ecf48c32d7c54d0ab1e84e70fafeff/docs/contribute/internals.md): Review startup order, bindings, and naming limits

@@ -15,14 +15,15 @@ memory access (RDMA)* accelerates transfers, and shared KV cache stores reusable
 
 ## Components
 
-The `gpustack-operator` binary provides five subcommands, paired with the `engine-sentinel` runtime package staged into managed inference `Pod`s:
+The `gpustack-operator` binary provides five service subcommands and the internal `model-forger` sandbox helper, paired with the `engine-sentinel` runtime package staged into managed inference `Pod`s:
 
 | Component | Deployment | Role |
 |---|---|---|
 | `worker` | Control-plane `Deployment` | Serves APIs and reconciles workloads, queues, and supporting resources. |
 | `device-manager` | Vendor `DaemonSet` | Discovers accelerators and NICs,<br/>publishes capacity, and allocates devices. |
-| `model-manager` | Per-node `DaemonSet` | Caches verified model weights and mounts them through CSI. |
+| `model-manager` | Per-node `DaemonSet` | Caches verified model weights and kernels and mounts them through CSI. |
 | `model-transfer` | Vendor source `DaemonSet` | Runs the source broker and worker service, paired with the staged `gpustack_model_transfer` Python reader package for remote weight delivery. |
+| `model-forger` | `ForgeSandbox` `Pod` helper | Runs built-in `mock`, `verify`, and `hold` helper stages for kernel specialization; see [Model Deployment Forger](/gpustack-operator/main/docs/modules/model-deployment/forger/index.md). |
 | `worker-gateway` | Separate installation | Aggregates `InstanceType`s and capacity across clusters into one fleet view. |
 | `engine-sentinel` | Read-only host mount in engine `Pod`s | Pure-Python runtime package (`gpustack_engine_sentinel`) for live parameter tuning, unified `/gpustack/v1/{live,ready}` probes, role pause, and `PreStop` drain; see [Online Runtime Control](/gpustack-operator/main/docs/modules/model-deployment/runtime-control/index.md). |
 

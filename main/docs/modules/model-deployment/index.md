@@ -52,6 +52,8 @@ flowchart TD
   graceful retirement. Pair it with
   [Scaling Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) and
   [Scaling Benchmark](/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md).
+- [Model Deployment Forger](/gpustack-operator/main/docs/modules/model-deployment/forger/index.md) automates short-window kernel probing, sandbox synthesis,
+  `ModelKernelArtifact` delivery, and readiness-gated canary rollout.
 - [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) grows one running collective in place. Pair it with
   [Elastic EP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) (*tensor parallelism
   (TP)* = 2, *data parallelism (DP)* width 2 → 4) and

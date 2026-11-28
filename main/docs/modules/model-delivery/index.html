@@ -765,6 +765,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -805,6 +808,8 @@
         
       
     
+  
+
   
 
   
@@ -967,6 +972,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Model Deployment Forger" href="/gpustack-operator/main/docs/modules/model-deployment/forger/" >Forger</a>
+          
+          
+        
       
     
       
@@ -1222,7 +1237,10 @@ flowchart TD
 <p><a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/">Model Artifact</a>
  defines weight sources, resolution, and workload mounts.
 <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">Remote Weight Delivery</a>
- covers streaming tensors from prepared source <code>Node</code>s.</p>
+ covers streaming tensors from prepared source <code>Node</code>s.
+<code>ModelKernelArtifact</code> reuses <code>NodeModelStore</code> (<code>Source: Forge</code>, <code>Kind: Kernel</code>) and peer sync to
+deliver forged single-GPU kernels to <a href="/gpustack-operator/main/docs/modules/model-deployment/forger/">Model Deployment Forger</a>
+.</p>
 <h2 id="configuration">Configuration</h2>
 <p>Start with the <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#configuration">artifact manifest</a>
  to declare hub, PVC, or

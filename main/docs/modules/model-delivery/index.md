@@ -27,6 +27,8 @@ flowchart TD
 
 [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md) defines weight sources, resolution, and workload mounts.
 [Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md) covers streaming tensors from prepared source `Node`s.
+`ModelKernelArtifact` reuses `NodeModelStore` (`Source: Forge`, `Kind: Kernel`) and peer sync to
+deliver forged single-GPU kernels to [Model Deployment Forger](/gpustack-operator/main/docs/modules/model-deployment/forger/index.md).
 
 ## Configuration
 
