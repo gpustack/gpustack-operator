@@ -152,8 +152,11 @@ func (r *ModelDeploymentForgerReconciler) SetupController(_ context.Context, opt
 func (r *ModelDeploymentForgerReconciler) Reconcile(
 	ctx context.Context, req ctrl.Request,
 ) (ctrl.Result, error) {
+	// Read the live Forger object directly so cross-resource Pod/Workload watches triggered
+	// immediately after a status update cannot observe stale pre-transition phase/ActiveSandbox
+	// state and mistakenly sweep a freshly created ForgeSandbox Pod.
 	mdf := new(workercore.ModelDeploymentForger)
-	if err := r.Client.Get(ctx, req.NamespacedName, mdf); err != nil {
+	if err := r.apiReaderOrClient().Get(ctx, req.NamespacedName, mdf); err != nil {
 		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
 	}
 	now := r.now()

@@ -786,3 +786,42 @@ func TestRecomputePinnedQuarantinedKernelArtifactDropsSeedNodeKeepsLivePods(t *t
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(mka), persistedMKA))
 	assert.True(t, persistedMKA.Status.Quarantined, "quarantined ModelKernelArtifact record must persist in API")
 }
+
+func TestRecomputePinnedUsesLiveReaderForDeletedKernelArtifact(t *testing.T) {
+	gen1Digest := numberedDigest("11111111", 1)
+	gen2Digest := numberedDigest("22222222", 2)
+
+	nms1 := &workercore.NodeModelStore{
+		ObjectMeta: meta.ObjectMeta{Name: "node-1"},
+		Spec:       workercore.NodeModelStoreSpec{Pinned: []string{gen1Digest}},
+	}
+	nms2 := &workercore.NodeModelStore{
+		ObjectMeta: meta.ObjectMeta{Name: "node-2"},
+		Spec:       workercore.NodeModelStoreSpec{Pinned: []string{gen2Digest}},
+	}
+	gen1 := testNodeStoreKernelArtifactForPins("team-a", "gen-1", gen1Digest, "node-1")
+	gen2 := testNodeStoreKernelArtifactForPins("team-a", "gen-2", gen2Digest, "node-2")
+
+	// Stale cached client still holds gen-1; live APIReader reflects gen-1 already pruned.
+	staleCache := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(
+		nms1.DeepCopy(), nms2.DeepCopy(), gen1, gen2.DeepCopy(),
+	).Build()
+	liveReader := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(
+		nms1.DeepCopy(), nms2.DeepCopy(), gen2.DeepCopy(),
+	).Build()
+
+	r := &ModelPrefetchReconciler{
+		Client: staleCache,
+		Reader: liveReader,
+		Now:    func() time.Time { return testNow },
+	}
+	require.NoError(t, r.recomputePinned(context.Background()))
+
+	got1 := new(workercore.NodeModelStore)
+	require.NoError(t, staleCache.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-1"}, got1))
+	assert.Empty(t, got1.Spec.Pinned, "pruned gen-1 must be unpinned using live reader even under cache lag")
+
+	got2 := new(workercore.NodeModelStore)
+	require.NoError(t, staleCache.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-2"}, got2))
+	assert.Equal(t, []string{gen2Digest}, got2.Spec.Pinned, "active gen-2 must stay pinned")
+}

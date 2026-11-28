@@ -2749,6 +2749,7 @@ func TestModelDeploymentPodSpecHash_CoversEverySpecField(t *testing.T) {
 		"StartupTimeoutSeconds",
 		"Pause",
 		"RuntimeControl",
+		"KernelArtifactRef",
 	}, fieldNames(reflect.TypeFor[workercore.ModelDeploymentRole]()),
 		"new ModelDeploymentRole fields must be wired into modelDeploymentExplicitSpecHash")
 

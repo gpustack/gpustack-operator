@@ -52,8 +52,9 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 	if err := r.Client.List(ctx, nodes); err != nil {
 		return err
 	}
+	reader := r.reader()
 	stores := new(workercore.NodeModelStoreList)
-	if err := r.Client.List(ctx, stores); err != nil {
+	if err := reader.List(ctx, stores); err != nil {
 		return err
 	}
 	deps := new(workercore.ModelDeploymentList)
@@ -69,7 +70,7 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 		return err
 	}
 	kernelArtifacts := new(workercore.ModelKernelArtifactList)
-	if err := r.Client.List(ctx, kernelArtifacts); err != nil {
+	if err := reader.List(ctx, kernelArtifacts); err != nil {
 		return err
 	}
 	forgers := new(workercore.ModelDeploymentForgerList)
@@ -206,6 +207,9 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 		}
 		if len(fresh) == 0 && len(nms.Spec.Pinned) == 0 {
 			continue
+		}
+		if len(fresh) == 0 {
+			fresh = nil
 		}
 		if slices.Equal(nms.Spec.Pinned, fresh) {
 			continue

@@ -6283,3 +6283,84 @@ func TestModelDeploymentForger_PatchUpgradeReusesArtifactWhileMinorUpgradeReforg
 		})
 	}
 }
+
+func TestModelDeploymentForgerReconcileUsesLiveAPIReaderForFreshSandbox(t *testing.T) {
+	now := time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC)
+	node0 := newForgerTestNode("node-0")
+	md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+		d.Spec.Roles[0].Replicas = 1
+	})
+
+	// Cached copy lags behind Status().Update() and still has no ActiveSandbox.
+	staleMDF := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+		f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+		f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
+		f.Spec.Probe.MinActiveRequests = 0
+		f.Status.Binding = &workercore.ModelDeploymentForgerBindingStatus{
+			TargetUID: string(md.UID),
+		}
+	})
+
+	sandboxName := "qwen-decode-forger-decode-g2-abcd1234"
+	liveMDF := staleMDF.DeepCopy()
+	liveMDF.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+		Name:             "decode",
+		Phase:            workercore.ModelDeploymentForgerRolePhaseForging,
+		ActiveGeneration: 2,
+		ActiveSandbox: &workercore.ModelDeploymentForgerSandboxStatus{
+			PodName:   sandboxName,
+			PodUID:    "sandbox-g2-uid",
+			StartedAt: ptr.To(meta.NewTime(now.Add(-5 * time.Second))),
+		},
+	}}
+
+	sandboxPod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: md.Namespace,
+			Name:      sandboxName,
+			UID:       "sandbox-g2-uid",
+			Labels: map[string]string{
+				modelforger.SandboxLabelName:       "model-deployment-forger",
+				modelforger.SandboxLabelInstance:   liveMDF.Name,
+				modelforger.SandboxLabelRole:       "decode",
+				modelforger.SandboxLabelGeneration: "2",
+			},
+		},
+		Status: core.PodStatus{Phase: core.PodPending},
+	}
+
+	// liveClient holds the true API server state; cachedClient serves staleMDF on Get
+	// to simulate informer cache lag when the new sandbox Pod watch fires immediately.
+	liveClient := newForgerTestFakeClient(node0, md, liveMDF, sandboxPod)
+	cachedClient := interceptor.NewClient(liveClient.(ctrlcli.WithWatch), interceptor.Funcs{
+		Get: func(ctx context.Context, c ctrlcli.WithWatch, key ctrlcli.ObjectKey, obj ctrlcli.Object, opts ...ctrlcli.GetOption) error {
+			if dst, ok := obj.(*workercore.ModelDeploymentForger); ok && key == ctrlcli.ObjectKeyFromObject(liveMDF) {
+				staleMDF.DeepCopyInto(dst)
+				return nil
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	})
+
+	r := &ModelDeploymentForgerReconciler{
+		Client:    cachedClient,
+		APIReader: liveClient,
+		Recorder:  ctrlrecord.NewFakeRecorder(16),
+		Now:       func() time.Time { return now },
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(liveMDF)})
+	require.NoError(t, err)
+
+	var gotPod core.Pod
+	require.NoError(t, liveClient.Get(context.Background(), ctrlcli.ObjectKeyFromObject(sandboxPod), &gotPod),
+		"freshly created ForgeSandbox Pod must not be swept when informer cache lags behind APIReader")
+
+	var gotMDF workercore.ModelDeploymentForger
+	require.NoError(t, liveClient.Get(context.Background(), ctrlcli.ObjectKeyFromObject(liveMDF), &gotMDF))
+	rs := findForgerRoleStatus(&gotMDF, "decode")
+	require.NotNil(t, rs)
+	assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseForging, rs.Phase)
+	require.NotNil(t, rs.ActiveSandbox)
+	assert.Equal(t, sandboxName, rs.ActiveSandbox.PodName)
+}
