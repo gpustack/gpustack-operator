@@ -872,7 +872,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	md := obj.(*workercore.ModelDeployment)
 
 	warnings := r.warnModelDeploymentStoreRoleWithoutInterface(ctx, nil, md)
-	errs := validateModelDeployment(md, nil)
+	errs := validateModelDeployment(md, nil, r.resolveBoundForgerTargetedRoles(ctx, md))
 	errs = append(errs, r.validateModelDeploymentScalerFence(ctx, nil, md)...)
 	errs = append(errs, r.validateModelDeploymentForgerFence(ctx, nil, md)...)
 	errs = append(errs, r.ValidateModelDeploymentElasticEP(ctx, md, nil)...)
@@ -937,7 +937,9 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	// is the one that could: a deployment's own name is immutable, so a role whose combined name is
 	// too long could never be shortened, and every later edit -- including one that removes the
 	// offending role -- would be refused. That is worse than the reconcile failure the rule prevents.
-	errs := validateModelDeployment(md, modelDeploymentRoleNames(oldObj))
+	errs := validateModelDeployment(
+		md, modelDeploymentRoleNames(oldObj), r.resolveBoundForgerTargetedRoles(ctx, md),
+	)
 	errs = append(errs, r.validateModelDeploymentScalerFence(ctx, old, md)...)
 	errs = append(errs, r.validateModelDeploymentForgerFence(ctx, old, md)...)
 	errs = append(errs, r.ValidateModelDeploymentElasticEP(ctx, md, old)...)
@@ -1305,10 +1307,10 @@ func (r *ModelDeploymentWebhook) ValidateDelete(
 // bound that did not — has been spent: validateModelDeploymentSingleRole is gone and the group rules
 // below took its place, so lifting the bound really was deleting one call.
 func validateModelDeployment(
-	md *workercore.ModelDeployment, existingRoles sets.Set[string],
+	md *workercore.ModelDeployment, existingRoles sets.Set[string], forgerTargetedRoles ...map[string]struct{},
 ) field.ErrorList {
 	errs := validateModelDeploymentModel(md)
-	errs = append(errs, validateModelDeploymentRoles(md)...)
+	errs = append(errs, validateModelDeploymentRoles(md, forgerTargetedRoles...)...)
 	errs = append(errs, validateModelDeploymentKVCache(md)...)
 	errs = append(errs, validateModelDeploymentRolesCount(md)...)
 	errs = append(errs, validateModelDeploymentRoleNames(md)...)
@@ -2115,7 +2117,9 @@ func validateModelDeploymentRoleKinds(md *workercore.ModelDeployment) field.Erro
 }
 
 // validateModelDeploymentRoles holds the per-role rules that every later version keeps.
-func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorList {
+func validateModelDeploymentRoles(
+	md *workercore.ModelDeployment, forgerTargetedRoles ...map[string]struct{},
+) field.ErrorList {
 	errs := make(field.ErrorList, 0, len(md.Spec.Roles))
 
 	rolesPath := field.NewPath("spec", "roles")
@@ -2132,7 +2136,7 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 		errs = append(errs, validateModelDeploymentRoleResources(role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleAdditionalVolumes(md.Namespace, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleArtifactKeys(md, role, rolePath)...)
-		errs = append(errs, validateModelDeploymentRoleReservedMountPaths(md, role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleReservedMountPaths(md, role, rolePath, forgerTargetedRoles...)...)
 		// Unconditional rather than inside the router's own rules, because the listeners this
 		// refuses against are not all the router's: SGLang's bootstrap registry follows the role
 		// and renders on an unrouted prefiller, and the router-gated walk never runs for one.
@@ -2411,16 +2415,60 @@ func kernelPathsOverlap(a, b string) bool {
 	return strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 
+func (r *ModelDeploymentWebhook) resolveBoundForgerTargetedRoles(
+	ctx context.Context, md *workercore.ModelDeployment,
+) map[string]struct{} {
+	if md == nil || r.APIReader == nil {
+		return nil
+	}
+	binding, ok, err := modelDeploymentForgerBindingOf(md)
+	if err != nil || !ok || binding.ForgerName == "" {
+		return nil
+	}
+	forger := new(workercore.ModelDeploymentForger)
+	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Namespace: md.Namespace, Name: binding.ForgerName}, forger); err != nil {
+		return nil
+	}
+	if binding.ForgerUID != "" && forger.UID != "" && string(forger.UID) != binding.ForgerUID {
+		return nil
+	}
+	if len(forger.Spec.Roles) == 0 {
+		return nil
+	}
+	targeted := make(map[string]struct{}, len(forger.Spec.Roles))
+	for i := range forger.Spec.Roles {
+		targeted[forger.Spec.Roles[i].Name] = struct{}{}
+	}
+	return targeted
+}
+
 // validateModelDeploymentRoleReservedMountPaths refuses a role volume at, inside or around the
 // operator-owned mount paths (ConfigMap mounts overlapping /var/lib/gpustack/kernels, artifact
 // weights/cache when spec.model.artifactRef is set, kernel artifact mount when
-// spec.roles[].kernelArtifactRef is set, and the read-only engine-sentinel mount path on
-// sentinel-injected roles).
+// spec.roles[].kernelArtifactRef is set or a ModelDeploymentForger targets the role, and the
+// read-only engine-sentinel mount path on sentinel-injected roles).
 func validateModelDeploymentRoleReservedMountPaths(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, rolePath *field.Path,
+	md *workercore.ModelDeployment,
+	role *workercore.ModelDeploymentRole,
+	rolePath *field.Path,
+	forgerTargetedRoles ...map[string]struct{},
 ) field.ErrorList {
+	var targetedRoles map[string]struct{}
+	if len(forgerTargetedRoles) > 0 {
+		targetedRoles = forgerTargetedRoles[0]
+	}
 	var errs field.ErrorList
 	sentinelInjected := workerctrl.ModelDeploymentRoleSupportsEngineSentinel(md, role)
+	forgerReserved := false
+	if md.DeletionTimestamp == nil &&
+		md.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey] != "" &&
+		len(validateModelDeploymentRoleKernelScope(md, role, rolePath)) == 0 {
+		if targetedRoles == nil {
+			forgerReserved = true
+		} else {
+			_, forgerReserved = targetedRoles[role.Name]
+		}
+	}
 	for i, av := range role.AdditionalVolumes {
 		mountPathField := rolePath.Child("additionalVolumes").Index(i).Child("mountPath")
 		if av.ConfigMap != nil && kernelPathsOverlap(av.MountPath, modelDeploymentKernelMountPath) {
@@ -2431,10 +2479,15 @@ func validateModelDeploymentRoleReservedMountPaths(
 			)))
 			continue
 		}
-		if role.KernelArtifactRef != nil && kernelPathsOverlap(av.MountPath, modelDeploymentKernelMountPath) {
+		if (role.KernelArtifactRef != nil || forgerReserved) &&
+			kernelPathsOverlap(av.MountPath, modelDeploymentKernelMountPath) {
+			reason := "where the operator mounts the kernel bundle spec.roles[].kernelArtifactRef names"
+			if role.KernelArtifactRef == nil {
+				reason = "where the bound ModelDeploymentForger promotes spec.roles[].kernelArtifactRef"
+			}
 			errs = append(errs, field.Invalid(mountPathField, av.MountPath, fmt.Sprintf(
-				"overlaps %q, where the operator mounts the kernel bundle spec.roles[].kernelArtifactRef names",
-				modelDeploymentKernelMountPath,
+				"overlaps %q, %s",
+				modelDeploymentKernelMountPath, reason,
 			)))
 			continue
 		}
@@ -3708,11 +3761,12 @@ var modelDeploymentRouterRuntimeControlForbiddenArgs = sets.New(
 )
 
 // modelDeploymentEngineSentinelOwnedEnv are operator-managed engine sentinel environment
-// variables that must not be supplied directly on a managed role using runtimeControl.
+// variables that must not be supplied directly on sentinel-injected or runtimeControl roles.
 var modelDeploymentEngineSentinelOwnedEnv = sets.New(
 	"GPUSTACK_ENGINE_SENTINEL_ENABLE",
 	"GPUSTACK_ENGINE_SENTINEL_REQUIRE_ACK",
 	"GPUSTACK_ENGINE_SENTINEL_ENGINE",
+	"GPUSTACK_KERNEL_ARTIFACT_DIR",
 )
 
 // validateModelDeploymentModel rejects reserved model-level fields not yet enabled.
@@ -3780,7 +3834,7 @@ func validateModelDeploymentRoleRuntimeControlScopeAtPath(
 		errs = append(errs, field.Forbidden(fldPath, "not supported on SGLang Ray roles"))
 	}
 	if workerctrl.ModelDeploymentRoleUsesSGLangRustServer(engine, role) {
-		errs = append(errs, field.Forbidden(ctrlPath, "not supported on SGLang Rust server roles"))
+		errs = append(errs, field.Forbidden(fldPath, "not supported on SGLang Rust server roles"))
 	}
 	return errs
 }

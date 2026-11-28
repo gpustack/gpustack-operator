@@ -249,6 +249,7 @@ func TestValidateTraceAndEvaluationThresholds(t *testing.T) {
 		}
 	}
 
+	boolPtr := func(v bool) *bool { return &v }
 	cases := []struct {
 		name    string
 		mutate  func(*Trace)
@@ -256,8 +257,47 @@ func TestValidateTraceAndEvaluationThresholds(t *testing.T) {
 	}{
 		{name: "valid trace", mutate: func(*Trace) {}},
 		{name: "non-PASSED status", mutate: func(tr *Trace) { tr.Evaluation.Status = "INCORRECT_NUMERICAL" }, wantErr: "PASSED"},
-		{name: "max_abs_error > atol", mutate: func(tr *Trace) { tr.Evaluation.Correctness.MaxAbsError = 0.05 }, wantErr: "max_abs_error"},
-		{name: "max_relative_error > rtol", mutate: func(tr *Trace) { tr.Evaluation.Correctness.MaxRelativeError = 0.05 }, wantErr: "max_relative_error"},
+		{
+			name: "bf16 1-ULP max_abs_error > atol with max_relative_error <= rtol passes",
+			mutate: func(tr *Trace) {
+				tr.Evaluation.Correctness.MaxAbsError = 0.015625
+				tr.Evaluation.Correctness.MaxRelativeError = 0.0078
+			},
+		},
+		{
+			name: "near-atol max_abs_error <= atol with raw max_relative_error > rtol passes",
+			mutate: func(tr *Trace) {
+				tr.Evaluation.Correctness.MaxAbsError = 0.0002
+				tr.Evaluation.Correctness.MaxRelativeError = 0.0198
+			},
+		},
+		{
+			name: "both max_abs_error > atol and max_relative_error > rtol fails",
+			mutate: func(tr *Trace) {
+				tr.Evaluation.Correctness.MaxAbsError = 0.05
+				tr.Evaluation.Correctness.MaxRelativeError = 0.05
+			},
+			wantErr: "atol",
+		},
+		{
+			name: "allclose_passed false fails",
+			mutate: func(tr *Trace) {
+				tr.Evaluation.Correctness.AllClosePassed = boolPtr(false)
+				tr.Evaluation.Correctness.MaxAbsError = 1e-4
+				tr.Evaluation.Correctness.MaxRelativeError = 1e-4
+			},
+			wantErr: "allclose_passed",
+		},
+		{
+			name: "allclose_passed true with bf16 1-ULP passes",
+			mutate: func(tr *Trace) {
+				tr.Evaluation.Correctness.AllClosePassed = boolPtr(true)
+				tr.Evaluation.Correctness.MaxAbsError = 0.015625
+				tr.Evaluation.Correctness.MaxRelativeError = 0.0028
+			},
+		},
+		{name: "negative max_abs_error fails", mutate: func(tr *Trace) { tr.Evaluation.Correctness.MaxAbsError = -0.001 }, wantErr: "max_abs_error"},
+		{name: "negative max_relative_error fails", mutate: func(tr *Trace) { tr.Evaluation.Correctness.MaxRelativeError = -0.001 }, wantErr: "max_relative_error"},
 		{name: "speedup_factor < minSpeedupRatio", mutate: func(tr *Trace) { tr.Evaluation.Performance.SpeedupFactor = 1.02 }, wantErr: "speedup_factor"},
 		{name: "NaN speedup", mutate: func(tr *Trace) { tr.Evaluation.Performance.SpeedupFactor = math.NaN() }, wantErr: "speedup_factor"},
 		{name: "missing correctness", mutate: func(tr *Trace) { tr.Evaluation.Correctness = nil }, wantErr: "correctness"},
@@ -399,7 +439,7 @@ func TestValidateDispatchManifestAndVerificationReport(t *testing.T) {
 			Passed:         true,
 			Evaluation: &TraceEvaluation{
 				Status:      StatusPassed,
-				Correctness: &TraceCorrectness{MaxAbsError: 99, MaxRelativeError: 0},
+				Correctness: &TraceCorrectness{MaxAbsError: 99, MaxRelativeError: 99},
 				Performance: &TracePerformance{SpeedupFactor: 1.25},
 			},
 		},

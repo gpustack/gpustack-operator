@@ -28,7 +28,10 @@ import (
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	kvalidation "k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/rest"
 	ctrlrecord "k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
@@ -203,11 +206,6 @@ func newForgerTestFakeClient(objs ...ctrlcli.Object) ctrlcli.Client {
 			return []string{string(obj.GetUID())}
 		}).
 		WithIndex(&workercore.ModelPrefetch{}, modelPrefetchArtifactIndex, modelPrefetchArtifactIndexValues).
-		WithIndex(
-			&workercore.ModelKernelArtifact{},
-			IndexingModelKernelArtifactByManifestDigest,
-			indexModelKernelArtifactByManifestDigest,
-		).
 		WithObjects(all...).
 		WithInterceptorFuncs(interceptor.Funcs{
 			Create: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption) error {
@@ -1219,7 +1217,10 @@ func TestModelDeploymentForger_ObserveOnlyShadowAndSkipModes(t *testing.T) {
 		assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), sbPodKey, &core.Pod{})), "sandbox Pod must be deleted after ingest")
 		assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), sbCMKey, &core.ConfigMap{})), "input ConfigMap must be deleted after ingest")
 
-		// Reconcile ModelKernelArtifact -> Resolved=True, nodes.ready=1 -> Shadow pass completes without touching ModelDeployment!
+		// Reconcile ModelPrefetch + ModelKernelArtifact -> Resolved=True, nodes.ready=1, Pinned=True -> Shadow pass completes without touching ModelDeployment!
+		pfRec := &ModelPrefetchReconciler{Client: cli, Recorder: ctrlrecord.NewFakeRecorder(32), Now: func() time.Time { return curNow }}
+		_, err = pfRec.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: nodeModelStorePinnedRequestName}})
+		require.NoError(t, err)
 		_, err = mkaRec.Reconcile(context.Background(), ctrl.Request{NamespacedName: mkaKey})
 		require.NoError(t, err)
 		_, err = r.Reconcile(context.Background(), req)
@@ -1325,6 +1326,10 @@ func TestModelDeploymentForger_SandboxAndPublishFailures(t *testing.T) {
 					ActiveGeneration: 1,
 				}}
 				mka := newNodeStoreKernelArtifact("qwen-decode-forger-decode-gen-1", "team-a", "9", "8", func(k *workercore.ModelKernelArtifact) {
+					k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+						Name: mdf.Name,
+						UID:  string(mdf.UID),
+					}
 					ModelKernelArtifactConditionResolved.False(k, workercore.ModelKernelArtifactReasonSourceLost, "seed node lost")
 				})
 				extra = append(extra, mka)
@@ -1704,9 +1709,9 @@ func TestModelDeploymentForger_MultiControllerClosedLoopIntegration(t *testing.T
 
 	gen1Name := "qwen-decode-forger-decode-gen-1"
 	gen1Key := types.NamespacedName{Namespace: md.Namespace, Name: gen1Name}
-	_, err = mkaRec.Reconcile(context.Background(), ctrl.Request{NamespacedName: gen1Key})
-	require.NoError(t, err)
 	_, err = pfRec.Reconcile(context.Background(), pinReq)
+	require.NoError(t, err)
+	_, err = mkaRec.Reconcile(context.Background(), ctrl.Request{NamespacedName: gen1Key})
 	require.NoError(t, err)
 
 	var gen1MKA workercore.ModelKernelArtifact
@@ -1779,6 +1784,8 @@ func TestModelDeploymentForger_MultiControllerClosedLoopIntegration(t *testing.T
 
 	gen2Name := "qwen-decode-forger-decode-gen-2"
 	gen2Key := types.NamespacedName{Namespace: md.Namespace, Name: gen2Name}
+	_, err = pfRec.Reconcile(context.Background(), pinReq)
+	require.NoError(t, err)
 	_, err = mkaRec.Reconcile(context.Background(), ctrl.Request{NamespacedName: gen2Key})
 	require.NoError(t, err)
 
@@ -1844,6 +1851,8 @@ func TestModelDeploymentForger_MultiControllerClosedLoopIntegration(t *testing.T
 
 	gen3Name := "qwen-decode-forger-decode-gen-3"
 	gen3Key := types.NamespacedName{Namespace: md.Namespace, Name: gen3Name}
+	_, err = pfRec.Reconcile(context.Background(), pinReq)
+	require.NoError(t, err)
 	_, err = mkaRec.Reconcile(context.Background(), ctrl.Request{NamespacedName: gen3Key})
 	require.NoError(t, err)
 
@@ -2729,9 +2738,14 @@ func TestModelDeploymentForger_DefaultsResolversAndHistoryBounds(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, int64(42), parsedGen)
 
-	podName, cmName := forgerSandboxObjectNames(longForger, longRole, 42)
+	podName, cmName, err := newForgerSandboxObjectNames(longForger, longRole, 42)
+	require.NoError(t, err)
 	assert.LessOrEqual(t, len(podName), forgerMaxKubeResourceNameLen)
 	assert.LessOrEqual(t, len(cmName), forgerMaxKubeResourceNameLen)
+	podName2, cmName2, err := newForgerSandboxObjectNames(longForger, longRole, 42)
+	require.NoError(t, err)
+	assert.NotEqual(t, podName, podName2)
+	assert.NotEqual(t, cmName, cmName2)
 
 	// 2. Bounded 16-entry generation ring buffer.
 	rs := &workercore.ModelDeploymentForgerRoleStatus{Name: "decode"}
@@ -2870,7 +2884,7 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
 	now := time.Date(2026, 11, 27, 20, 0, 0, 0, time.UTC)
 
-	t.Run("Oversized >512KiB sandbox input fails cleanly and pre-existing ConfigMap/Pod Creation is idempotent", func(t *testing.T) {
+	t.Run("Oversized >512KiB sandbox input fails cleanly and pre-existing tenant ConfigMap/Pod cannot hijack activeSandbox", func(t *testing.T) {
 		node0 := newForgerTestNode("node-0")
 		md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
 			d.Spec.Roles[0].Replicas = 1
@@ -2880,7 +2894,26 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
 			f.Spec.Probe.MinActiveRequests = 0
 		})
-		cli := newForgerTestFakeClient(node0, md, mdf)
+		var collideNextPodCreate atomic.Bool
+		const hijackedPodUID = types.UID("tenant-hijack-pod-uid")
+		baseCli := newForgerTestFakeClient(node0, md, mdf)
+		cli := interceptor.NewClient(baseCli.(ctrlcli.WithWatch), interceptor.Funcs{
+			Create: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption) error {
+				if pod, isPod := obj.(*core.Pod); isPod && collideNextPodCreate.CompareAndSwap(true, false) {
+					hijack := &core.Pod{
+						ObjectMeta: meta.ObjectMeta{
+							Namespace: pod.Namespace,
+							Name:      pod.Name,
+							UID:       hijackedPodUID,
+						},
+						Spec: core.PodSpec{NodeName: "node-0"},
+					}
+					_ = c.Create(ctx, hijack)
+					return kerrors.NewAlreadyExists(core.Resource("pods"), pod.Name)
+				}
+				return c.Create(ctx, obj, opts...)
+			},
+		})
 		mdRec := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 		_, err := mdRec.Reconcile(context.Background(), ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(md)})
 		require.NoError(t, err)
@@ -2917,6 +2950,7 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 
 		r := &ModelDeploymentForgerReconciler{
 			Client:        cli,
+			APIReader:     cli,
 			Recorder:      ctrlrecord.NewFakeRecorder(32),
 			Now:           func() time.Time { return now },
 			OperatorImage: "gpustack/gpustack-operator:test",
@@ -2937,46 +2971,23 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 		require.Len(t, rs.Generations, 1)
 		assert.Equal(t, "InvalidSandboxInput", rs.Generations[0].Reason)
 
-		// Advance past cooldown and pre-populate gen-2 ConfigMap & Pod to verify AlreadyExists idempotency.
+		// Advance past cooldown and pre-create predictable tenant ConfigMap & Pod to attempt adoption hijack.
 		now = now.Add(700 * time.Second)
-		sbPodName, sbCMName := forgerSandboxObjectNames(mdf.Name, "decode", 2)
-		preCM, items, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
-			Forger:     &got,
-			Name:       sbCMName,
-			RoleName:   "decode",
-			Generation: 2,
-			Request: forger.ForgeRequest{
-				SchemaVersion:    forger.ForgeRequestSchemaVersion,
-				Engine:           "vLLM",
-				EngineVersion:    "0.19.0",
-				Manufacturer:     nodefeature.ManufacturerNVIDIA,
-				Architecture:     "sm_90a",
-				TargetKernelKeys: []string{key1},
-				MinSpeedupRatio:  1.05,
-				Atol:             1e-2,
-				Rtol:             1e-2,
+		tenantCMName := fmt.Sprintf("%s-decode-gen-2-input", mdf.Name)
+		tenantPodName := fmt.Sprintf("%s-decode-gen-2-sandbox", mdf.Name)
+		require.NoError(t, cli.Create(context.Background(), &core.ConfigMap{
+			ObjectMeta: meta.ObjectMeta{Namespace: md.Namespace, Name: tenantCMName},
+			Data:       map[string]string{"injected.py": "import os; os.system('id')"},
+		}))
+		tenantPod := &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: md.Namespace,
+				Name:      tenantPodName,
+				UID:       "tenant-predictable-pod-uid",
 			},
-		})
-		require.NoError(t, err)
-		require.NoError(t, cli.Create(context.Background(), preCM))
-
-		hw := kernelkey.ExtractNodeHardwareFromNode(node0)[0]
-		prePod, err := forger.BuildSandboxPod(forger.SandboxPodSpec{
-			Forger:              &got,
-			Name:                sbPodName,
-			RoleName:            "decode",
-			Generation:          2,
-			InputConfigMapName:  sbCMName,
-			InputConfigMapItems: items,
-			EntranceQueue:       "default-h20-8x",
-			Manufacturer:        nodefeature.ManufacturerNVIDIA,
-			Hardware:            hw,
-			OperatorImage:       "gpustack/gpustack-operator:test",
-			EngineImage:         "vllm/vllm-openai:v0.19.0",
-			SandboxSpec:         got.Spec.Sandbox,
-		})
-		require.NoError(t, err)
-		require.NoError(t, cli.Create(context.Background(), prePod))
+			Spec: core.PodSpec{NodeName: "node-0"},
+		}
+		require.NoError(t, cli.Create(context.Background(), tenantPod))
 
 		validPayload := &runtimecontrol.ProbePayload{
 			SchemaVersion: forger.FlashInferTraceSchemaVersion,
@@ -2996,13 +3007,201 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 			readyResp: &runtimecontrol.ReadyResponse{Ready: true, BootID: "b1"},
 			startResp: &runtimecontrol.ProbeResponse{State: runtimecontrol.ProbeStateCompleted, BootID: "b1", Payload: validPayload},
 		}
+
+		// Force an AlreadyExists collision on the first sandbox Pod Create: controller must NOT adopt hijackedPodUID,
+		// must delete the freshly created ConfigMap from the failed attempt, and must return an error to retry with a fresh nonce!
+		collideNextPodCreate.Store(true)
+		_, err = r.Reconcile(context.Background(), req)
+		require.Error(t, err, "AlreadyExists on sandbox creation must return conflict error rather than adopting existing Pod")
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &got))
+		rs = findForgerRoleStatus(&got, "decode")
+		assert.Nil(t, rs.ActiveSandbox, "failed AlreadyExists attempt must never adopt pre-existing Pod into activeSandbox")
+
+		var cmList core.ConfigMapList
+		require.NoError(t, cli.List(context.Background(), &cmList, ctrlcli.InNamespace(md.Namespace)))
+		for i := range cmList.Items {
+			assert.Equal(t, tenantCMName, cmList.Items[i].Name, "freshly created ConfigMap from collided attempt must be deleted")
+		}
+
+		// Retry reconcile: succeeds with a fresh random-nonce ConfigMap and Pod, ignoring both tenant objects!
 		_, err = r.Reconcile(context.Background(), req)
 		require.NoError(t, err)
 		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &got))
 		rs = findForgerRoleStatus(&got, "decode")
 		assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseForging, rs.Phase)
 		require.NotNil(t, rs.ActiveSandbox)
-		assert.Equal(t, sbPodName, rs.ActiveSandbox.PodName)
+		assert.NotEqual(t, tenantPodName, rs.ActiveSandbox.PodName)
+		assert.NotEqual(t, tenantCMName, rs.ActiveSandbox.ConfigMapName)
+		assert.NotEqual(t, string(tenantPod.UID), rs.ActiveSandbox.PodUID)
+		assert.NotEqual(t, string(hijackedPodUID), rs.ActiveSandbox.PodUID)
+		assert.LessOrEqual(t, len(rs.ActiveSandbox.PodName), forgerMaxKubeResourceNameLen)
+		assert.LessOrEqual(t, len(rs.ActiveSandbox.ConfigMapName), forgerMaxKubeResourceNameLen)
+	})
+
+	t.Run("Publishing waits for Pinned=True before promoting and advances once Pinned=True", func(t *testing.T) {
+		mka := newNodeStoreKernelArtifact("qwen-decode-forger-decode-gen-1", "team-a", "5", "6", func(k *workercore.ModelKernelArtifact) {
+			k.Spec.Compatibility.KernelKeys = []string{key1}
+			k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+				Name: "qwen-decode-forger",
+				UID:  "mdf-uid-1",
+			}
+			ModelKernelArtifactConditionPinned.False(k, workercore.ModelKernelArtifactReasonUnpinned, "waiting for NodeModelStore pin")
+		})
+		md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+			d.Spec.Roles[0].Replicas = 1
+		})
+		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+			f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+				Name:             "decode",
+				Phase:            workercore.ModelDeploymentForgerRolePhasePublishing,
+				ActiveGeneration: 1,
+			}}
+		})
+
+		cli := newForgerTestFakeClient(mka, md, mdf)
+		r := &ModelDeploymentForgerReconciler{
+			Client:    cli,
+			APIReader: cli,
+			Recorder:  ctrlrecord.NewFakeRecorder(32),
+			Now:       func() time.Time { return now },
+		}
+		req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+
+		// 1. Pinned=False (Unpinned): Publishing waits with forgerDefaultPollInterval and does NOT mutate ModelDeployment!
+		res, err := r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		assert.Equal(t, forgerDefaultPollInterval, res.RequeueAfter)
+
+		var got workercore.ModelDeploymentForger
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &got))
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhasePublishing, findForgerRoleStatus(&got, "decode").Phase)
+		var liveMD workercore.ModelDeployment
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(md), &liveMD))
+		assert.Nil(t, liveMD.Spec.Roles[0].KernelArtifactRef, "must not promote unpinned ModelKernelArtifact")
+
+		// 2. Pinned=False (PinnedCapacityExceeded): Publishing still waits and surfaces Blocked=True/PinnedCapacityExceeded!
+		var liveMKA workercore.ModelKernelArtifact
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(mka), &liveMKA))
+		ModelKernelArtifactConditionPinned.False(&liveMKA, workercore.ModelKernelArtifactReasonPinnedCapacityExceeded, "pin cap reached")
+		require.NoError(t, cli.Status().Update(context.Background(), &liveMKA))
+
+		res, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		assert.Equal(t, forgerDefaultPollInterval, res.RequeueAfter)
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &got))
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhasePublishing, findForgerRoleStatus(&got, "decode").Phase)
+		assert.Equal(t, workercore.ModelDeploymentForgerReasonPinnedCapacityExceeded,
+			findForgerCondition(&got, workercore.ModelDeploymentForgerConditionTypeBlocked).Reason)
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(md), &liveMD))
+		assert.Nil(t, liveMD.Spec.Roles[0].KernelArtifactRef)
+
+		// 3. Pinned=True: Publishing advances to Promoting and commits kernelArtifactRef onto ModelDeployment!
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(mka), &liveMKA))
+		ModelKernelArtifactConditionPinned.True(&liveMKA, workercore.ModelKernelArtifactReasonPinned, "pinned on seedNode")
+		require.NoError(t, cli.Status().Update(context.Background(), &liveMKA))
+
+		_, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &got))
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhasePromoting, findForgerRoleStatus(&got, "decode").Phase)
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(md), &liveMD))
+		require.NotNil(t, liveMD.Spec.Roles[0].KernelArtifactRef)
+		assert.Equal(t, mka.Name, liveMD.Spec.Roles[0].KernelArtifactRef.Name)
+	})
+
+	t.Run("Active ModelKernelArtifact entering SourceLost while Idle bypasses cooldown and re-forges its keys", func(t *testing.T) {
+		node0 := newForgerTestNode("node-0")
+		mka1 := newNodeStoreKernelArtifact("qwen-decode-forger-decode-gen-1", "team-a", "1", "2", func(k *workercore.ModelKernelArtifact) {
+			k.Spec.Compatibility.KernelKeys = []string{key1}
+			k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+				Name: "qwen-decode-forger",
+				UID:  "mdf-uid-1",
+			}
+			ModelKernelArtifactConditionResolved.False(k, workercore.ModelKernelArtifactReasonSourceLost, "no ready copies remain")
+		})
+		md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+			d.Spec.Roles[0].Replicas = 1
+			d.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: mka1.Name}
+		})
+		recentFin := meta.NewTime(now.Add(-15 * time.Second)) // well inside 600s cooldownSeconds!
+		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+			f.Spec.Probe.CooldownSeconds = 600
+			f.Spec.Probe.MinActiveRequests = 0
+			f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+				Name:                 "decode",
+				Phase:                workercore.ModelDeploymentForgerRolePhaseIdle,
+				ActiveGeneration:     1,
+				ActiveKernelArtifact: mka1.Name,
+				Generations: []workercore.ModelDeploymentForgerGenerationStatus{{
+					Generation:   1,
+					ArtifactName: mka1.Name,
+					Outcome:      workercore.ModelDeploymentForgerGenerationOutcomePromoted,
+					FinishedAt:   &recentFin,
+				}},
+			}}
+		})
+
+		cli := newForgerTestFakeClient(node0, mka1, md, mdf)
+		p0 := &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: md.Namespace,
+				Name:      "qwen-pd-decode-0",
+				UID:       "leader-pod-uid-1",
+				Labels: map[string]string{
+					modelDeploymentLabelKeyName:        modelDeploymentLabelValueName,
+					modelDeploymentLabelKeyInstance:    md.Name,
+					modelDeploymentLabelKeyComponent:   "decode",
+					modelDeploymentReplicaOrdinalLabel: "0",
+				},
+			},
+			Spec: core.PodSpec{
+				NodeName:   "node-0",
+				Containers: []core.Container{{Name: modelDeploymentMainContainerName}},
+			},
+		}
+		require.NoError(t, cli.Create(context.Background(), p0))
+		markServingPodReadyEligible(t, cli, p0, "node-0", "10.0.0.10", 8000)
+
+		payload := &runtimecontrol.ProbePayload{
+			SchemaVersion: forger.FlashInferTraceSchemaVersion,
+			Engine:        "vLLM",
+			EngineVersion: "0.19.0",
+			Manufacturer:  nodefeature.ManufacturerNVIDIA,
+			Architecture:  "sm_90a",
+			Bottlenecks: []runtimecontrol.ProbeBottleneck{{
+				LocalKernelKey:      key1,
+				OpFamily:            kernelkey.OpFamilyRMSNorm,
+				GPUTimeUs:           100,
+				GPUTimeSharePercent: 30,
+				CallCount:           4,
+			}},
+		}
+		r := &ModelDeploymentForgerReconciler{
+			Client:        cli,
+			APIReader:     cli,
+			Recorder:      ctrlrecord.NewFakeRecorder(32),
+			Now:           func() time.Time { return now },
+			OperatorImage: "gpustack/gpustack-operator:test",
+			ProbeClient: &stubProbeClient{
+				readyResp: &runtimecontrol.ReadyResponse{Ready: true, BootID: "b1"},
+				startResp: &runtimecontrol.ProbeResponse{State: runtimecontrol.ProbeStateCompleted, BootID: "b1", Payload: payload},
+			},
+		}
+		req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+
+		_, err := r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		var got workercore.ModelDeploymentForger
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &got))
+		rs := findForgerRoleStatus(&got, "decode")
+		require.NotNil(t, rs)
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseForging, rs.Phase,
+			"SourceLost active artifact must bypass cooldown and re-forge key1 instead of waiting or skipping with NoEligibleBottlenecks")
+		assert.Equal(t, int64(2), rs.ActiveGeneration)
+		require.NotNil(t, rs.ActiveSandbox)
 	})
 
 	t.Run("Probing GetProbe transport/idle resets and Publishing transient ingest retry, missing ConfigMap, and RolePaused gate", func(t *testing.T) {
@@ -3126,7 +3325,10 @@ func TestModelDeploymentForger_LaunchPublishAndConvergenceContracts(t *testing.T
 		// Publishing hold when RolePaused is set right before promotion of an already-resolved artifact.
 		mka2 := newNodeStoreKernelArtifact("qwen-decode-forger-decode-gen-2", md.Namespace, "a", "b", func(k *workercore.ModelKernelArtifact) {
 			k.Spec.Compatibility.KernelKeys = []string{key1}
-			k.Spec.Source.NodeStore.ForgerRef.Name = got.Name
+			k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+				Name: got.Name,
+				UID:  string(got.UID),
+			}
 		})
 		require.NoError(t, cli.Create(context.Background(), mka2))
 		var liveMD workercore.ModelDeployment
@@ -3391,4 +3593,2094 @@ func TestModelDeploymentForger_SetupBindingRecoveryAndHoldDetails(t *testing.T) 
 	atEmpty, err := r2.getAcceleratorType(context.Background(), "")
 	require.NoError(t, err)
 	assert.Nil(t, atEmpty)
+}
+
+func TestModelDeploymentForger_PublishingKernelKeysValidation(t *testing.T) {
+	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	key2 := buildTestKernelKey(t, kernelkey.OpFamilyRopeKVAppend, 4096)
+	foreignKey := buildTestKernelKey(t, kernelkey.OpFamilyActivationQuant, 4096)
+	now := time.Date(2026, 11, 27, 22, 0, 0, 0, time.UTC)
+
+	cases := []struct {
+		name           string
+		ingestedKeys   []string
+		wantKeys       []string
+		wantFailReason string
+	}{
+		{
+			name:         "uses ingested kernelKeys subset instead of full targetKernelKeys",
+			ingestedKeys: []string{key2},
+			wantKeys:     []string{key2},
+		},
+		{
+			name:         "falls back to forge-request targetKernelKeys when ingestResp.KernelKeys is empty",
+			ingestedKeys: nil,
+			wantKeys:     []string{key1, key2},
+		},
+		{
+			name:           "rejects unexpected foreign kernelKey from ingest without creating artifact",
+			ingestedKeys:   []string{key1, foreignKey},
+			wantFailReason: "IngestRejected",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			node0 := newForgerTestNode("node-0")
+			md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+				d.Spec.Roles[0].Replicas = 1
+			})
+			mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+				f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+				f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
+			})
+
+			cm, _, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
+				Forger:     mdf,
+				Name:       "qwen-decode-forger-decode-gen-1-aabbccdd-input",
+				RoleName:   "decode",
+				Generation: 1,
+				Request: forger.ForgeRequest{
+					SchemaVersion:    forger.ForgeRequestSchemaVersion,
+					Engine:           "vLLM",
+					EngineVersion:    "0.19.0",
+					Manufacturer:     nodefeature.ManufacturerNVIDIA,
+					Architecture:     "sm_90a",
+					TargetKernelKeys: []string{key1, key2},
+					MinSpeedupRatio:  1.05,
+					Atol:             1e-2,
+					Rtol:             1e-2,
+				},
+			})
+			require.NoError(t, err)
+
+			started := meta.NewTime(now.Add(-15 * time.Second))
+			sbPod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Namespace: md.Namespace,
+					Name:      "qwen-decode-forger-decode-gen-1-aabbccdd-sandbox",
+					UID:       "sb-s2-uid",
+				},
+				Spec: core.PodSpec{NodeName: "node-0"},
+			}
+			mdf.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+				Name:             "decode",
+				Phase:            workercore.ModelDeploymentForgerRolePhasePublishing,
+				ActiveGeneration: 1,
+				ActiveSandbox: &workercore.ModelDeploymentForgerSandboxStatus{
+					PodName:       sbPod.Name,
+					PodUID:        string(sbPod.UID),
+					NodeName:      "node-0",
+					ConfigMapName: cm.Name,
+					StartedAt:     &started,
+				},
+			}}
+
+			cli := newForgerTestFakeClient(node0, md, mdf, cm, sbPod)
+			r := &ModelDeploymentForgerReconciler{
+				Client:        cli,
+				APIReader:     cli,
+				Recorder:      ctrlrecord.NewFakeRecorder(32),
+				Now:           func() time.Time { return now },
+				OperatorImage: "gpustack/gpustack-operator:test",
+				ResolveSeedEndpoint: func(context.Context, string) (string, int, error) {
+					return "10.0.0.50", 10250, nil
+				},
+				IngestClient: &stubIngestClient{
+					resp: &modelstore.IngestTreeResponse{
+						ManifestDigest:         "sha256:" + strings.Repeat("a", 64),
+						DispatchManifestDigest: "sha256:" + strings.Repeat("b", 64),
+						SizeBytes:              4096,
+						FileCount:              3,
+						SeedNode:               "node-0",
+						KernelKeys:             tc.ingestedKeys,
+					},
+				},
+			}
+
+			req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+			_, err = r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+
+			mkaKey := types.NamespacedName{Namespace: md.Namespace, Name: "qwen-decode-forger-decode-gen-1"}
+			var gotMKA workercore.ModelKernelArtifact
+			getErr := cli.Get(context.Background(), mkaKey, &gotMKA)
+
+			var gotMDF workercore.ModelDeploymentForger
+			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &gotMDF))
+			rs := findForgerRoleStatus(&gotMDF, "decode")
+			require.NotNil(t, rs)
+			assert.Nil(t, rs.ActiveSandbox)
+			assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(sbPod), &core.Pod{})))
+			assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(cm), &core.ConfigMap{})))
+
+			if tc.wantFailReason != "" {
+				assert.True(t, kerrors.IsNotFound(getErr), "foreign kernelKey from ingest must not create ModelKernelArtifact")
+				assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseIdle, rs.Phase)
+				require.Len(t, rs.Generations, 1)
+				assert.Equal(t, workercore.ModelDeploymentForgerGenerationOutcomeFailed, rs.Generations[0].Outcome)
+				assert.Equal(t, tc.wantFailReason, rs.Generations[0].Reason)
+				return
+			}
+
+			require.NoError(t, getErr)
+			assert.Equal(t, tc.wantKeys, gotMKA.Spec.Compatibility.KernelKeys)
+		})
+	}
+}
+
+func TestModelDeploymentForger_SandboxStatusFailureCleanupAndOrphanSweep(t *testing.T) {
+	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	now := time.Date(2026, 11, 27, 22, 30, 0, 0, time.UTC)
+
+	payload := &runtimecontrol.ProbePayload{
+		SchemaVersion: forger.FlashInferTraceSchemaVersion,
+		Engine:        "vLLM",
+		EngineVersion: "0.19.0",
+		Manufacturer:  nodefeature.ManufacturerNVIDIA,
+		Architecture:  "sm_90a",
+		Bottlenecks: []runtimecontrol.ProbeBottleneck{{
+			LocalKernelKey:      key1,
+			OpFamily:            kernelkey.OpFamilyRMSNorm,
+			GPUTimeUs:           200,
+			GPUTimeSharePercent: 25,
+			CallCount:           8,
+		}},
+	}
+
+	t.Run("status update failure on sandbox launch deletes newly created Pod and ConfigMap", func(t *testing.T) {
+		for _, startPhase := range []workercore.ModelDeploymentForgerRolePhase{
+			workercore.ModelDeploymentForgerRolePhaseIdle,
+			workercore.ModelDeploymentForgerRolePhaseProbing,
+		} {
+			t.Run(string(startPhase), func(t *testing.T) {
+				node0 := newForgerTestNode("node-0")
+				md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+					d.Spec.Roles[0].Replicas = 1
+				})
+				mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+					f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+					f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
+					f.Spec.Probe.MinActiveRequests = 0
+					f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+						Name:             "decode",
+						Phase:            startPhase,
+						ActiveGeneration: 1,
+					}}
+				})
+
+				var failStatusWrite atomic.Bool
+				baseCli := newForgerTestFakeClient(node0, md, mdf)
+				cli := interceptor.NewClient(baseCli.(ctrlcli.WithWatch), interceptor.Funcs{
+					SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, subResourceName string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
+						if subResourceName == "status" {
+							if _, isMDF := obj.(*workercore.ModelDeploymentForger); isMDF && failStatusWrite.CompareAndSwap(true, false) {
+								return kerrors.NewConflict(workercore.Resource("modeldeploymentforgers"), obj.GetName(), errors.New("simulated status conflict"))
+							}
+						}
+						return c.Status().Update(ctx, obj, opts...)
+					},
+				})
+
+				mdRec := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+				_, err := mdRec.Reconcile(context.Background(), ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(md)})
+				require.NoError(t, err)
+				var pods core.PodList
+				require.NoError(t, cli.List(context.Background(), &pods, ctrlcli.InNamespace(md.Namespace)))
+				require.Len(t, pods.Items, 1)
+				p0 := pods.Items[0].DeepCopy()
+				markServingPodReadyEligible(t, cli, p0, "node-0", "10.0.0.10", 8000)
+
+				r := &ModelDeploymentForgerReconciler{
+					Client:        cli,
+					APIReader:     cli,
+					Recorder:      ctrlrecord.NewFakeRecorder(32),
+					Now:           func() time.Time { return now },
+					OperatorImage: "gpustack/gpustack-operator:test",
+					ProbeClient: &stubProbeClient{
+						readyResp: &runtimecontrol.ReadyResponse{Ready: true, BootID: "b1"},
+						startResp: &runtimecontrol.ProbeResponse{State: runtimecontrol.ProbeStateCompleted, BootID: "b1", Payload: payload},
+						getResp:   &runtimecontrol.ProbeResponse{State: runtimecontrol.ProbeStateCompleted, BootID: "b1", Payload: payload},
+					},
+				}
+				if startPhase == workercore.ModelDeploymentForgerRolePhaseProbing {
+					r.rememberProbe(mdf.UID, "decode", forgerProbeAttempt{
+						PodName:   p0.Name,
+						PodUID:    string(p0.UID),
+						BootID:    "b1",
+						NodeName:  "node-0",
+						StartedAt: now.Add(-2 * time.Second),
+					})
+				}
+
+				failStatusWrite.Store(true)
+				req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+				_, err = r.Reconcile(context.Background(), req)
+				require.Error(t, err)
+
+				var sbPods core.PodList
+				require.NoError(t, cli.List(context.Background(), &sbPods,
+					ctrlcli.InNamespace(md.Namespace),
+					ctrlcli.MatchingLabels{forger.SandboxLabelRole: "decode"},
+				))
+				assert.Empty(t, sbPods.Items, "failed status update on sandbox launch must delete newly created ForgeSandbox Pod")
+
+				var sbCMs core.ConfigMapList
+				require.NoError(t, cli.List(context.Background(), &sbCMs,
+					ctrlcli.InNamespace(md.Namespace),
+					ctrlcli.MatchingLabels{forger.SandboxLabelRole: "decode"},
+				))
+				assert.Empty(t, sbCMs.Items, "failed status update on sandbox launch must delete newly created input ConfigMap")
+			})
+		}
+	})
+
+	t.Run("Idle and Probing automatically sweep orphan ForgeSandbox Pods and ConfigMaps owned by mdf", func(t *testing.T) {
+		node0 := newForgerTestNode("node-0")
+		md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+			d.Spec.Roles[0].Replicas = 1
+		})
+		recentFin := meta.NewTime(now.Add(-30 * time.Second))
+		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+			f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
+			f.Spec.Probe.CooldownSeconds = 600
+			f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+				Name:             "decode",
+				Phase:            workercore.ModelDeploymentForgerRolePhaseIdle,
+				ActiveGeneration: 1,
+				Generations: []workercore.ModelDeploymentForgerGenerationStatus{{
+					Generation: 1,
+					Outcome:    workercore.ModelDeploymentForgerGenerationOutcomeSkipped,
+					FinishedAt: &recentFin,
+				}},
+			}}
+		})
+
+		orphanOwner := []meta.OwnerReference{{
+			APIVersion: workercore.SchemeGroupVersion.String(),
+			Kind:       "ModelDeploymentForger",
+			Name:       mdf.Name,
+			UID:        mdf.UID,
+			Controller: ptr.To(true),
+		}}
+		foreignOwner := []meta.OwnerReference{{
+			APIVersion: workercore.SchemeGroupVersion.String(),
+			Kind:       "ModelDeploymentForger",
+			Name:       "other-forger",
+			UID:        "other-mdf-uid",
+			Controller: ptr.To(true),
+		}}
+		orphanPod := &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace:       mdf.Namespace,
+				Name:            "qwen-decode-forger-decode-gen-1-orphan-sandbox",
+				Labels:          map[string]string{forger.SandboxLabelName: "model-deployment-forger", forger.SandboxLabelRole: "decode"},
+				OwnerReferences: orphanOwner,
+			},
+		}
+		orphanCM := &core.ConfigMap{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace:       mdf.Namespace,
+				Name:            "qwen-decode-forger-decode-gen-1-orphan-input",
+				Labels:          map[string]string{forger.SandboxLabelName: "model-deployment-forger", forger.SandboxLabelRole: "decode"},
+				OwnerReferences: orphanOwner,
+			},
+		}
+		foreignPod := &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace:       mdf.Namespace,
+				Name:            "other-forger-decode-gen-1-sandbox",
+				Labels:          map[string]string{forger.SandboxLabelName: "model-deployment-forger", forger.SandboxLabelRole: "decode"},
+				OwnerReferences: foreignOwner,
+			},
+		}
+
+		cli := newForgerTestFakeClient(node0, md, mdf, orphanPod, orphanCM, foreignPod)
+		r := &ModelDeploymentForgerReconciler{
+			Client:        cli,
+			APIReader:     cli,
+			Recorder:      ctrlrecord.NewFakeRecorder(32),
+			Now:           func() time.Time { return now },
+			OperatorImage: "gpustack/gpustack-operator:test",
+			ProbeClient: &stubProbeClient{
+				getResp: &runtimecontrol.ProbeResponse{State: runtimecontrol.ProbeStateRunning, BootID: "b1"},
+			},
+		}
+		req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+
+		// 1. Sweep during Idle (even inside probe cooldown!).
+		_, err := r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(orphanPod), &core.Pod{})),
+			"orphan sandbox Pod owned by mdf must be swept during Idle")
+		assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(orphanCM), &core.ConfigMap{})),
+			"orphan sandbox ConfigMap owned by mdf must be swept during Idle")
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(foreignPod), &core.Pod{}),
+			"sandbox Pod owned by another ModelDeploymentForger UID must not be deleted")
+
+		// 2. Sweep during Probing.
+		p0 := &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: md.Namespace,
+				Name:      "qwen-pd-decode-0",
+				UID:       "leader-pod-uid",
+				Labels: map[string]string{
+					modelDeploymentLabelKeyName:        modelDeploymentLabelValueName,
+					modelDeploymentLabelKeyInstance:    md.Name,
+					modelDeploymentLabelKeyComponent:   "decode",
+					modelDeploymentReplicaOrdinalLabel: "0",
+				},
+			},
+			Spec: core.PodSpec{NodeName: "node-0", Containers: []core.Container{{Name: modelDeploymentMainContainerName}}},
+		}
+		require.NoError(t, cli.Create(context.Background(), p0))
+		markServingPodReadyEligible(t, cli, p0, "node-0", "10.0.0.10", 8000)
+
+		orphanPod2 := orphanPod.DeepCopy()
+		orphanPod2.Name = "qwen-decode-forger-decode-gen-2-orphan-sandbox"
+		orphanPod2.ResourceVersion = ""
+		orphanPod2.UID = ""
+		require.NoError(t, cli.Create(context.Background(), orphanPod2))
+
+		var liveMDF workercore.ModelDeploymentForger
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMDF))
+		liveMDF.Status.Roles[0].Phase = workercore.ModelDeploymentForgerRolePhaseProbing
+		require.NoError(t, cli.Status().Update(context.Background(), &liveMDF))
+		r.rememberProbe(mdf.UID, "decode", forgerProbeAttempt{
+			PodName: p0.Name, PodUID: string(p0.UID), BootID: "b1", NodeName: "node-0", StartedAt: now.Add(-2 * time.Second),
+		})
+
+		_, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(orphanPod2), &core.Pod{})),
+			"orphan sandbox Pod owned by mdf must be swept during Probing")
+	})
+}
+
+func TestModelDeploymentForger_ForeignKernelArtifactNeverAdopted(t *testing.T) {
+	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	now := time.Date(2026, 11, 27, 23, 0, 0, 0, time.UTC)
+
+	newForeignHFArtifact := func(name, ns string) *workercore.ModelKernelArtifact {
+		resolvedAt := meta.NewTime(now)
+		mka := &workercore.ModelKernelArtifact{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace:  ns,
+				Name:       name,
+				UID:        types.UID("foreign-hf-uid-" + name),
+				Generation: 1,
+			},
+			Spec: workercore.ModelKernelArtifactSpec{
+				Source: workercore.ModelKernelArtifactSource{
+					HuggingFace: &workercore.ModelArtifactHubSource{
+						Repository: "evil-tenant/forged-kernels",
+						Revision:   strings.Repeat("f", 40),
+					},
+				},
+				Compatibility: workercore.ModelKernelArtifactCompatibility{
+					Engine:        "vLLM",
+					EngineVersion: "0.19.0",
+					Manufacturer:  nodefeature.ManufacturerNVIDIA,
+					Architecture:  "sm_90a",
+					KernelKeys:    []string{key1},
+				},
+			},
+			Status: workercore.ModelKernelArtifactStatus{
+				ObservedGeneration: 1,
+				Resolved: &workercore.ModelKernelArtifactResolved{
+					ManifestDigest:         "sha256:" + strings.Repeat("e", 64),
+					DispatchManifestDigest: "sha256:" + strings.Repeat("d", 64),
+					Revision:               strings.Repeat("f", 40),
+					FileCount:              2,
+					SizeBytes:              1024,
+					ResolvedTime:           resolvedAt,
+					LastValidatedTime:      &resolvedAt,
+					DigestSource:           workercore.ModelKernelArtifactDigestSourceHub,
+				},
+				Nodes: &workercore.ModelArtifactNodes{Ready: 1},
+			},
+		}
+		ModelKernelArtifactConditionResolved.True(mka, workercore.ModelKernelArtifactReasonResolved, "resolved")
+		ModelKernelArtifactConditionPinned.True(mka, workercore.ModelKernelArtifactReasonPinned, "pinned")
+		return mka
+	}
+
+	t.Run("pre-existing foreign huggingFace gen-1 artifact is skipped by nextGenerationNumber and never promoted", func(t *testing.T) {
+		node0 := newForgerTestNode("node-0")
+		md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+			d.Spec.Roles[0].Replicas = 1
+		})
+		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+			f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
+			f.Spec.Probe.MinActiveRequests = 0
+		})
+		foreignGen1 := newForeignHFArtifact("qwen-decode-forger-decode-gen-1", md.Namespace)
+
+		cli := newForgerTestFakeClient(node0, md, mdf, foreignGen1)
+		mdRec := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+		_, err := mdRec.Reconcile(context.Background(), ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(md)})
+		require.NoError(t, err)
+		var pods core.PodList
+		require.NoError(t, cli.List(context.Background(), &pods, ctrlcli.InNamespace(md.Namespace)))
+		require.Len(t, pods.Items, 1)
+		p0 := pods.Items[0].DeepCopy()
+		markServingPodReadyEligible(t, cli, p0, "node-0", "10.0.0.10", 8000)
+
+		payload := &runtimecontrol.ProbePayload{
+			SchemaVersion: forger.FlashInferTraceSchemaVersion,
+			Engine:        "vLLM",
+			EngineVersion: "0.19.0",
+			Manufacturer:  nodefeature.ManufacturerNVIDIA,
+			Architecture:  "sm_90a",
+			Bottlenecks: []runtimecontrol.ProbeBottleneck{{
+				LocalKernelKey:      key1,
+				OpFamily:            kernelkey.OpFamilyRMSNorm,
+				GPUTimeUs:           180,
+				GPUTimeSharePercent: 28,
+				CallCount:           6,
+			}},
+		}
+		r := &ModelDeploymentForgerReconciler{
+			Client:        cli,
+			APIReader:     cli,
+			Recorder:      ctrlrecord.NewFakeRecorder(32),
+			Now:           func() time.Time { return now },
+			OperatorImage: "gpustack/gpustack-operator:test",
+			ProbeClient: &stubProbeClient{
+				readyResp: &runtimecontrol.ReadyResponse{Ready: true, BootID: "b1"},
+				startResp: &runtimecontrol.ProbeResponse{State: runtimecontrol.ProbeStateCompleted, BootID: "b1", Payload: payload},
+			},
+			ResolveSeedEndpoint: func(context.Context, string) (string, int, error) {
+				return "10.0.0.50", 10250, nil
+			},
+			IngestClient: &stubIngestClient{
+				resp: &modelstore.IngestTreeResponse{
+					ManifestDigest:         "sha256:" + strings.Repeat("2", 64),
+					DispatchManifestDigest: "sha256:" + strings.Repeat("3", 64),
+					SizeBytes:              4096,
+					FileCount:              3,
+					SeedNode:               "node-0",
+					KernelKeys:             []string{key1},
+				},
+			},
+		}
+
+		req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+		_, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		var got workercore.ModelDeploymentForger
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &got))
+		rs := findForgerRoleStatus(&got, "decode")
+		require.NotNil(t, rs)
+		assert.Equal(t, int64(2), rs.ActiveGeneration, "nextGenerationNumber must count pre-existing foreign gen-1 artifact and advance to gen-2")
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseForging, rs.Phase)
+		require.NotNil(t, rs.ActiveSandbox)
+
+		// Complete gen-2 sandbox and verify gen-2 is published while foreign gen-1 is never adopted or promoted!
+		var sbPod core.Pod
+		require.NoError(t, cli.Get(context.Background(), types.NamespacedName{Namespace: md.Namespace, Name: rs.ActiveSandbox.PodName}, &sbPod))
+		sbPod.Spec.NodeName = "node-0"
+		require.NoError(t, cli.Update(context.Background(), &sbPod))
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(&sbPod), &sbPod))
+		sbPod.Status.Phase = core.PodRunning
+		sbPod.Status.InitContainerStatuses = []core.ContainerStatus{
+			{Name: forger.RunnerContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
+			{Name: forger.VerifierContainerName, State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 0}}},
+		}
+		require.NoError(t, cli.Status().Update(context.Background(), &sbPod))
+
+		_, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		var gen2MKA workercore.ModelKernelArtifact
+		require.NoError(t, cli.Get(context.Background(), types.NamespacedName{Namespace: md.Namespace, Name: "qwen-decode-forger-decode-gen-2"}, &gen2MKA))
+		require.NotNil(t, gen2MKA.Spec.Source.NodeStore)
+		assert.Equal(t, string(mdf.UID), gen2MKA.Spec.Source.NodeStore.ForgerRef.UID)
+
+		var liveMD workercore.ModelDeployment
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(md), &liveMD))
+		if liveMD.Spec.Roles[0].KernelArtifactRef != nil {
+			assert.NotEqual(t, foreignGen1.Name, liveMD.Spec.Roles[0].KernelArtifactRef.Name)
+		}
+	})
+
+	t.Run("AlreadyExists collision with foreign artifact during Publishing records ArtifactNameConflict and bumps generation", func(t *testing.T) {
+		node0 := newForgerTestNode("node-0")
+		md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+			d.Spec.Roles[0].Replicas = 1
+		})
+		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+			f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
+		})
+
+		cm, _, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
+			Forger:     mdf,
+			Name:       "qwen-decode-forger-decode-gen-1-11223344-input",
+			RoleName:   "decode",
+			Generation: 1,
+			Request: forger.ForgeRequest{
+				SchemaVersion:    forger.ForgeRequestSchemaVersion,
+				Engine:           "vLLM",
+				EngineVersion:    "0.19.0",
+				Manufacturer:     nodefeature.ManufacturerNVIDIA,
+				Architecture:     "sm_90a",
+				TargetKernelKeys: []string{key1},
+				MinSpeedupRatio:  1.05,
+				Atol:             1e-2,
+				Rtol:             1e-2,
+			},
+		})
+		require.NoError(t, err)
+
+		started := meta.NewTime(now.Add(-10 * time.Second))
+		sbPod := &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: md.Namespace,
+				Name:      "qwen-decode-forger-decode-gen-1-11223344-sandbox",
+				UID:       "sb-l2-uid",
+			},
+			Spec: core.PodSpec{NodeName: "node-0"},
+		}
+		mdf.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+			Name:             "decode",
+			Phase:            workercore.ModelDeploymentForgerRolePhasePublishing,
+			ActiveGeneration: 1,
+			ActiveSandbox: &workercore.ModelDeploymentForgerSandboxStatus{
+				PodName:       sbPod.Name,
+				PodUID:        string(sbPod.UID),
+				NodeName:      "node-0",
+				ConfigMapName: cm.Name,
+				StartedAt:     &started,
+			},
+		}}
+
+		baseCli := newForgerTestFakeClient(node0, md, mdf, cm, sbPod)
+		var collideCreate atomic.Bool
+		cli := interceptor.NewClient(baseCli.(ctrlcli.WithWatch), interceptor.Funcs{
+			Create: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption) error {
+				if mka, isMKA := obj.(*workercore.ModelKernelArtifact); isMKA && collideCreate.CompareAndSwap(true, false) {
+					_ = c.Create(ctx, newForeignHFArtifact(mka.Name, mka.Namespace))
+					return kerrors.NewAlreadyExists(workercore.Resource("modelkernelartifacts"), mka.Name)
+				}
+				return c.Create(ctx, obj, opts...)
+			},
+		})
+
+		r := &ModelDeploymentForgerReconciler{
+			Client:        cli,
+			APIReader:     cli,
+			Recorder:      ctrlrecord.NewFakeRecorder(32),
+			Now:           func() time.Time { return now },
+			OperatorImage: "gpustack/gpustack-operator:test",
+			ResolveSeedEndpoint: func(context.Context, string) (string, int, error) {
+				return "10.0.0.50", 10250, nil
+			},
+			IngestClient: &stubIngestClient{
+				resp: &modelstore.IngestTreeResponse{
+					ManifestDigest:         "sha256:" + strings.Repeat("9", 64),
+					DispatchManifestDigest: "sha256:" + strings.Repeat("8", 64),
+					SizeBytes:              4096,
+					FileCount:              3,
+					SeedNode:               "node-0",
+					KernelKeys:             []string{key1},
+				},
+			},
+		}
+
+		collideCreate.Store(true)
+		req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+		_, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		var got workercore.ModelDeploymentForger
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &got))
+		rs := findForgerRoleStatus(&got, "decode")
+		require.NotNil(t, rs)
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseIdle, rs.Phase)
+		assert.Empty(t, rs.ActiveKernelArtifact, "foreign pre-existing ModelKernelArtifact must never be adopted")
+		assert.Nil(t, rs.ActiveSandbox)
+		assert.GreaterOrEqual(t, rs.ActiveGeneration, int64(2), "ArtifactNameConflict must advance ActiveGeneration past the collided name")
+		require.Len(t, rs.Generations, 1)
+		assert.Equal(t, workercore.ModelDeploymentForgerGenerationOutcomeFailed, rs.Generations[0].Outcome)
+		assert.Equal(t, "ArtifactNameConflict", rs.Generations[0].Reason)
+
+		var liveMD workercore.ModelDeployment
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(md), &liveMD))
+		assert.Nil(t, liveMD.Spec.Roles[0].KernelArtifactRef, "foreign pre-existing ModelKernelArtifact must never be promoted onto target deployment")
+	})
+}
+
+func TestModelDeploymentForger_UncommittedCanaryRollbackOnExitAndRecovery(t *testing.T) {
+	now := time.Date(2026, 11, 27, 23, 15, 0, 0, time.UTC)
+
+	exitCases := []struct {
+		name         string
+		prevArtifact string
+		mutateExit   func(*workercore.ModelDeploymentForger)
+	}{
+		{
+			name:         "Suspend rolls back uncommitted canary to previousKernelArtifact",
+			prevArtifact: "qwen-decode-forger-decode-gen-1",
+			mutateExit: func(f *workercore.ModelDeploymentForger) {
+				f.Spec.Suspend = true
+			},
+		},
+		{
+			name:         "Suspend rolls back uncommitted canary to nil when previousKernelArtifact is empty",
+			prevArtifact: "",
+			mutateExit: func(f *workercore.ModelDeploymentForger) {
+				f.Spec.Suspend = true
+			},
+		},
+		{
+			name:         "Shadow mode transition rolls back uncommitted canary to previousKernelArtifact",
+			prevArtifact: "qwen-decode-forger-decode-gen-1",
+			mutateExit: func(f *workercore.ModelDeploymentForger) {
+				f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
+			},
+		},
+		{
+			name:         "Shadow mode transition rolls back uncommitted canary to nil when previousKernelArtifact is empty",
+			prevArtifact: "",
+			mutateExit: func(f *workercore.ModelDeploymentForger) {
+				f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
+			},
+		},
+		{
+			name:         "ObserveOnly mode transition rolls back uncommitted canary to previousKernelArtifact",
+			prevArtifact: "qwen-decode-forger-decode-gen-1",
+			mutateExit: func(f *workercore.ModelDeploymentForger) {
+				f.Spec.Mode = workercore.ModelDeploymentForgerModeObserveOnly
+			},
+		},
+	}
+
+	for _, tc := range exitCases {
+		t.Run(tc.name, func(t *testing.T) {
+			canaryName := "qwen-decode-forger-decode-gen-2"
+			bindRaw, err := json.Marshal(workercore.ModelDeploymentForgerBinding{
+				ForgerName: "qwen-decode-forger",
+				ForgerUID:  "mdf-uid-1",
+				Term:       1,
+			})
+			require.NoError(t, err)
+			decRaw, err := json.Marshal(workercore.ModelDeploymentForgerDecision{
+				DecisionID:      formatForgerDecisionID("mdf-uid-1", 1, 1, now.Add(-20*time.Second)),
+				Term:            1,
+				KernelArtifacts: map[string]string{"decode": canaryName},
+			})
+			require.NoError(t, err)
+
+			md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+				d.Spec.Roles[0].Replicas = 2
+				d.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: canaryName}
+				d.Annotations = map[string]string{
+					workercore.ModelDeploymentForgerBindingAnnotationKey:  string(bindRaw),
+					workercore.ModelDeploymentForgerDecisionAnnotationKey: string(decRaw),
+				}
+			})
+
+			var gens []workercore.ModelDeploymentForgerGenerationStatus
+			if tc.prevArtifact != "" {
+				fin := meta.NewTime(now.Add(-700 * time.Second))
+				gens = append(gens, workercore.ModelDeploymentForgerGenerationStatus{
+					Generation:   1,
+					ArtifactName: tc.prevArtifact,
+					Outcome:      workercore.ModelDeploymentForgerGenerationOutcomePromoted,
+					FinishedAt:   &fin,
+				})
+			}
+
+			mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+				f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+				f.Generation = 2
+				f.Status.ObservedGeneration = 1
+				f.Status.Binding = &workercore.ModelDeploymentForgerBindingStatus{
+					TargetUID:  string(md.UID),
+					TargetName: md.Name,
+					Term:       1,
+				}
+				f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+					Name:                   "decode",
+					Phase:                  workercore.ModelDeploymentForgerRolePhasePromoting,
+					ActiveGeneration:       2,
+					ActiveKernelArtifact:   canaryName,
+					PreviousKernelArtifact: tc.prevArtifact,
+					Generations:            gens,
+				}}
+				tc.mutateExit(f)
+			})
+
+			var failRollback atomic.Bool
+			baseCli := newForgerTestFakeClient(md, mdf)
+			cli := interceptor.NewClient(baseCli.(ctrlcli.WithWatch), interceptor.Funcs{
+				Update: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.UpdateOption) error {
+					if _, isMD := obj.(*workercore.ModelDeployment); isMD && failRollback.Load() {
+						return kerrors.NewConflict(workercore.Resource("modeldeployments"), obj.GetName(), errors.New("simulated rollback conflict"))
+					}
+					return c.Update(ctx, obj, opts...)
+				},
+			})
+
+			r := &ModelDeploymentForgerReconciler{
+				Client:        cli,
+				APIReader:     cli,
+				Recorder:      ctrlrecord.NewFakeRecorder(32),
+				Now:           func() time.Time { return now },
+				OperatorImage: "gpustack/gpustack-operator:test",
+			}
+			req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+
+			// When rollback update fails, keep forger-binding and previousKernelArtifact intact.
+			failRollback.Store(true)
+			_, err = r.Reconcile(context.Background(), req)
+			require.Error(t, err)
+
+			var liveMD workercore.ModelDeployment
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(md), &liveMD))
+			assert.NotEmpty(t, liveMD.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey])
+			require.NotNil(t, liveMD.Spec.Roles[0].KernelArtifactRef)
+			assert.Equal(t, canaryName, liveMD.Spec.Roles[0].KernelArtifactRef.Name)
+
+			var liveMDF workercore.ModelDeploymentForger
+			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMDF))
+			rs := findForgerRoleStatus(&liveMDF, "decode")
+			require.NotNil(t, rs)
+			assert.Equal(t, tc.prevArtifact, rs.PreviousKernelArtifact)
+
+			// Once rollback succeeds, target reverts to previousKernelArtifact and binding is released.
+			failRollback.Store(false)
+			_, err = r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(md), &liveMD))
+			assert.Empty(t, liveMD.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey])
+			if tc.prevArtifact == "" {
+				assert.Nil(t, liveMD.Spec.Roles[0].KernelArtifactRef)
+			} else {
+				require.NotNil(t, liveMD.Spec.Roles[0].KernelArtifactRef)
+				assert.Equal(t, tc.prevArtifact, liveMD.Spec.Roles[0].KernelArtifactRef.Name)
+			}
+
+			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMDF))
+			rs = findForgerRoleStatus(&liveMDF, "decode")
+			require.NotNil(t, rs)
+			assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseIdle, rs.Phase)
+			assert.Equal(t, tc.prevArtifact, rs.ActiveKernelArtifact)
+			assert.Empty(t, rs.PreviousKernelArtifact)
+		})
+	}
+
+	t.Run("recoverDecision re-enters Promoting when ActiveKernelArtifact equals uncommitted canary", func(t *testing.T) {
+		prevName := "qwen-decode-forger-decode-gen-1"
+		canaryName := "qwen-decode-forger-decode-gen-2"
+		promotedAt := now.Add(-30 * time.Second)
+		bindRaw, err := json.Marshal(workercore.ModelDeploymentForgerBinding{
+			ForgerName: "qwen-decode-forger",
+			ForgerUID:  "mdf-uid-1",
+			Term:       1,
+		})
+		require.NoError(t, err)
+		decRaw, err := json.Marshal(workercore.ModelDeploymentForgerDecision{
+			DecisionID:      formatForgerDecisionID("mdf-uid-1", 1, 1, promotedAt),
+			Term:            1,
+			KernelArtifacts: map[string]string{"decode": canaryName},
+		})
+		require.NoError(t, err)
+
+		md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+			d.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: canaryName}
+			d.Annotations = map[string]string{
+				workercore.ModelDeploymentForgerBindingAnnotationKey:  string(bindRaw),
+				workercore.ModelDeploymentForgerDecisionAnnotationKey: string(decRaw),
+			}
+		})
+		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
+			f.Spec.Suspend = false
+			f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+				Name:                   "decode",
+				Phase:                  workercore.ModelDeploymentForgerRolePhaseIdle,
+				ActiveGeneration:       2,
+				ActiveKernelArtifact:   canaryName,
+				PreviousKernelArtifact: prevName,
+				Generations: []workercore.ModelDeploymentForgerGenerationStatus{{
+					Generation:   1,
+					ArtifactName: prevName,
+					Outcome:      workercore.ModelDeploymentForgerGenerationOutcomePromoted,
+				}},
+			}}
+		})
+
+		r := &ModelDeploymentForgerReconciler{Now: func() time.Time { return now }}
+		r.recoverDecision(context.Background(), mdf, md)
+
+		rs := findForgerRoleStatus(mdf, "decode")
+		require.NotNil(t, rs)
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhasePromoting, rs.Phase)
+		assert.Equal(t, canaryName, rs.ActiveKernelArtifact)
+		assert.Equal(t, prevName, rs.PreviousKernelArtifact)
+		tracked, ok := r.loadPromotion(mdf.UID, "decode")
+		require.True(t, ok)
+		assert.Equal(t, promotedAt, tracked.StartedAt)
+	})
+}
+
+func TestModelDeploymentForger_QuarantineScopedByForgerRoleAndRunner(t *testing.T) {
+	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	now := time.Date(2026, 11, 27, 23, 30, 0, 0, time.UTC)
+
+	payload := &runtimecontrol.ProbePayload{
+		SchemaVersion: forger.FlashInferTraceSchemaVersion,
+		Engine:        "vLLM",
+		EngineVersion: "0.19.0",
+		Manufacturer:  nodefeature.ManufacturerNVIDIA,
+		Architecture:  "sm_90a",
+		Bottlenecks: []runtimecontrol.ProbeBottleneck{{
+			LocalKernelKey:      key1,
+			OpFamily:            kernelkey.OpFamilyRMSNorm,
+			GPUTimeUs:           240,
+			GPUTimeSharePercent: 25,
+			CallCount:           8,
+		}},
+	}
+
+	t.Run("quarantined artifact from sibling forger or sibling role does not block key forging", func(t *testing.T) {
+		node0 := newForgerTestNode("node-0")
+		mdB := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+			d.Name = "qwen-b"
+			d.UID = "md-qwen-b-uid"
+			prefillRole := d.Spec.Roles[0].DeepCopy()
+			prefillRole.Name = "prefill"
+			prefillRole.Kind = workercore.ModelDeploymentRoleKindPrefill
+			prefillRole.Replicas = 1
+			decodeRole := d.Spec.Roles[0].DeepCopy()
+			decodeRole.Name = "decode"
+			decodeRole.Kind = workercore.ModelDeploymentRoleKindDecode
+			decodeRole.Replicas = 1
+			d.Spec.Roles = []workercore.ModelDeploymentRole{*prefillRole, *decodeRole}
+		})
+		mdfB := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Name = "qwen-b-forger"
+			f.UID = "mdf-uid-b"
+			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+			f.Spec.TargetRef.Name = mdB.Name
+			f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
+			f.Spec.Probe.MinActiveRequests = 0
+			f.Spec.Roles = []workercore.ModelDeploymentForgerRoleSpec{
+				{Name: "prefill", MaxKernelsPerGeneration: 4, MinSpeedupRatio: "1.05"},
+				{Name: "decode", MaxKernelsPerGeneration: 4, MinSpeedupRatio: "1.05"},
+			}
+		})
+
+		quarantinedOtherForger := newNodeStoreKernelArtifact("qwen-a-forger-decode-gen-1", mdB.Namespace, "1", "2", func(k *workercore.ModelKernelArtifact) {
+			k.Labels = map[string]string{
+				forger.SandboxLabelName:     "model-deployment-forger",
+				forger.SandboxLabelInstance: "qwen-a-forger",
+				forger.SandboxLabelRole:     "decode",
+			}
+			k.Spec.Compatibility.KernelKeys = []string{key1}
+			k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+				Name: "qwen-a-forger",
+				UID:  "mdf-uid-a",
+			}
+			k.Status.Quarantined = true
+			k.Status.QuarantineReason = "UnsupportedKernelArtifact"
+		})
+		quarantinedSiblingRole := newNodeStoreKernelArtifact("qwen-b-forger-prefill-gen-1", mdB.Namespace, "3", "4", func(k *workercore.ModelKernelArtifact) {
+			k.Labels = map[string]string{
+				forger.SandboxLabelName:     "model-deployment-forger",
+				forger.SandboxLabelInstance: mdfB.Name,
+				forger.SandboxLabelRole:     "prefill",
+			}
+			k.Spec.Compatibility.KernelKeys = []string{key1}
+			k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+				Name: mdfB.Name,
+				UID:  string(mdfB.UID),
+			}
+			k.Status.Quarantined = true
+			k.Status.QuarantineReason = "RolloutTimeout"
+		})
+
+		prefillPod := &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: mdB.Namespace,
+				Name:      "qwen-b-prefill-0",
+				UID:       "pod-prefill-0",
+				Labels: map[string]string{
+					modelDeploymentLabelKeyName:        modelDeploymentLabelValueName,
+					modelDeploymentLabelKeyInstance:    mdB.Name,
+					modelDeploymentLabelKeyComponent:   "prefill",
+					modelDeploymentReplicaOrdinalLabel: "0",
+				},
+			},
+			Spec: core.PodSpec{NodeName: "node-0", Containers: []core.Container{{Name: modelDeploymentMainContainerName}}},
+		}
+		decodePod := &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: mdB.Namespace,
+				Name:      "qwen-b-decode-0",
+				UID:       "pod-decode-0",
+				Labels: map[string]string{
+					modelDeploymentLabelKeyName:        modelDeploymentLabelValueName,
+					modelDeploymentLabelKeyInstance:    mdB.Name,
+					modelDeploymentLabelKeyComponent:   "decode",
+					modelDeploymentReplicaOrdinalLabel: "0",
+				},
+			},
+			Spec: core.PodSpec{NodeName: "node-0", Containers: []core.Container{{Name: modelDeploymentMainContainerName}}},
+		}
+
+		cli := newForgerTestFakeClient(node0, mdB, mdfB, quarantinedOtherForger, quarantinedSiblingRole, prefillPod, decodePod)
+		markServingPodReadyEligible(t, cli, prefillPod, "node-0", "10.0.0.21", 8000)
+		markServingPodReadyEligible(t, cli, decodePod, "node-0", "10.0.0.22", 8000)
+
+		r := &ModelDeploymentForgerReconciler{
+			Client:        cli,
+			APIReader:     cli,
+			Recorder:      ctrlrecord.NewFakeRecorder(32),
+			Now:           func() time.Time { return now },
+			OperatorImage: "gpustack/gpustack-operator:test",
+			ProbeClient: &stubProbeClient{
+				readyResp: &runtimecontrol.ReadyResponse{Ready: true, BootID: "b1"},
+				startResp: &runtimecontrol.ProbeResponse{State: runtimecontrol.ProbeStateCompleted, BootID: "b1", Payload: payload},
+			},
+		}
+		req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdfB)}
+		_, err := r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		var got workercore.ModelDeploymentForger
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &got))
+		prefillRS := findForgerRoleStatus(&got, "prefill")
+		require.NotNil(t, prefillRS)
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseIdle, prefillRS.Phase)
+		require.Len(t, prefillRS.Generations, 1)
+		assert.Equal(t, workercore.ModelDeploymentForgerGenerationOutcomeSkipped, prefillRS.Generations[0].Outcome)
+
+		decodeRS := findForgerRoleStatus(&got, "decode")
+		require.NotNil(t, decodeRS)
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseForging, decodeRS.Phase)
+		assert.NotNil(t, decodeRS.ActiveSandbox)
+	})
+
+	t.Run("updating sandbox runnerImage allows re-forging previously quarantined key while same runner suppresses retry", func(t *testing.T) {
+		curNow := now
+		node0 := newForgerTestNode("node-0")
+		md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+			d.Spec.Roles[0].Replicas = 1
+		})
+		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+			f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
+			f.Spec.Probe.MinActiveRequests = 0
+			f.Spec.Sandbox.RunnerMode = workercore.ModelDeploymentForgerRunnerModeExternal
+			f.Spec.Sandbox.RunnerImage = "registry.local/forge-runner:v1"
+		})
+		cm, _, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
+			Forger:     mdf,
+			Name:       "qwen-decode-forger-decode-gen-1-aaaa1111-input",
+			RoleName:   "decode",
+			Generation: 1,
+			Request: forger.ForgeRequest{
+				SchemaVersion:    forger.ForgeRequestSchemaVersion,
+				Engine:           "vLLM",
+				EngineVersion:    "0.19.0",
+				Manufacturer:     nodefeature.ManufacturerNVIDIA,
+				Architecture:     "sm_90a",
+				TargetKernelKeys: []string{key1},
+				MinSpeedupRatio:  1.05,
+				Atol:             1e-2,
+				Rtol:             1e-2,
+			},
+		})
+		require.NoError(t, err)
+		started := meta.NewTime(curNow.Add(-10 * time.Second))
+		sbPod := &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: md.Namespace,
+				Name:      "qwen-decode-forger-decode-gen-1-aaaa1111-sandbox",
+				UID:       "sb-fp-uid-1",
+			},
+			Spec: core.PodSpec{NodeName: "node-0"},
+		}
+		mdf.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+			Name:             "decode",
+			Phase:            workercore.ModelDeploymentForgerRolePhasePublishing,
+			ActiveGeneration: 1,
+			ActiveSandbox: &workercore.ModelDeploymentForgerSandboxStatus{
+				PodName:       sbPod.Name,
+				PodUID:        string(sbPod.UID),
+				NodeName:      "node-0",
+				ConfigMapName: cm.Name,
+				StartedAt:     &started,
+			},
+		}}
+
+		leaderPod := &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: md.Namespace,
+				Name:      "qwen-pd-decode-0",
+				UID:       "leader-fp-uid",
+				Labels: map[string]string{
+					modelDeploymentLabelKeyName:        modelDeploymentLabelValueName,
+					modelDeploymentLabelKeyInstance:    md.Name,
+					modelDeploymentLabelKeyComponent:   "decode",
+					modelDeploymentReplicaOrdinalLabel: "0",
+				},
+			},
+			Spec: core.PodSpec{NodeName: "node-0", Containers: []core.Container{{Name: modelDeploymentMainContainerName}}},
+		}
+
+		cli := newForgerTestFakeClient(node0, md, mdf, cm, sbPod, leaderPod)
+		markServingPodReadyEligible(t, cli, leaderPod, "node-0", "10.0.0.10", 8000)
+
+		r := &ModelDeploymentForgerReconciler{
+			Client:        cli,
+			APIReader:     cli,
+			Recorder:      ctrlrecord.NewFakeRecorder(32),
+			Now:           func() time.Time { return curNow },
+			OperatorImage: "gpustack/gpustack-operator:test",
+			ProbeClient: &stubProbeClient{
+				readyResp: &runtimecontrol.ReadyResponse{Ready: true, BootID: "b1"},
+				startResp: &runtimecontrol.ProbeResponse{State: runtimecontrol.ProbeStateCompleted, BootID: "b1", Payload: payload},
+			},
+			ResolveSeedEndpoint: func(context.Context, string) (string, int, error) {
+				return "10.0.0.50", 10250, nil
+			},
+			IngestClient: &stubIngestClient{
+				resp: &modelstore.IngestTreeResponse{
+					ManifestDigest:         "sha256:" + strings.Repeat("5", 64),
+					DispatchManifestDigest: "sha256:" + strings.Repeat("6", 64),
+					SizeBytes:              4096,
+					FileCount:              3,
+					SeedNode:               "node-0",
+					KernelKeys:             []string{key1},
+				},
+			},
+		}
+		req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+
+		// Publish gen-1 and confirm runner-fingerprint annotation is stamped.
+		_, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		mkaKey := types.NamespacedName{Namespace: md.Namespace, Name: "qwen-decode-forger-decode-gen-1"}
+		var createdMKA workercore.ModelKernelArtifact
+		require.NoError(t, cli.Get(context.Background(), mkaKey, &createdMKA))
+		assert.Len(t, createdMKA.Annotations["forger.gpustack.ai/runner-fingerprint"], 16)
+
+		// Quarantine gen-1 and reset role to Idle past cooldown.
+		createdMKA.Status.Quarantined = true
+		createdMKA.Status.QuarantineReason = "UnsupportedKernelArtifact"
+		require.NoError(t, cli.Status().Update(context.Background(), &createdMKA))
+
+		var liveMDF workercore.ModelDeploymentForger
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMDF))
+		liveMDF.Status.Roles[0].Phase = workercore.ModelDeploymentForgerRolePhaseIdle
+		require.NoError(t, cli.Status().Update(context.Background(), &liveMDF))
+
+		// Same runnerImage v1 -> suppresses retry of quarantined key1.
+		curNow = curNow.Add(700 * time.Second)
+		_, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMDF))
+		rs := findForgerRoleStatus(&liveMDF, "decode")
+		require.NotNil(t, rs)
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseIdle, rs.Phase)
+		require.Len(t, rs.Generations, 1)
+		assert.Equal(t, workercore.ModelDeploymentForgerGenerationOutcomeSkipped, rs.Generations[0].Outcome)
+
+		// Update runnerImage to v2 -> fingerprint changes, allowing key1 to be re-forged!
+		liveMDF.Spec.Sandbox.RunnerImage = "registry.local/forge-runner:v2"
+		liveMDF.Generation++
+		require.NoError(t, cli.Update(context.Background(), &liveMDF))
+
+		curNow = curNow.Add(700 * time.Second)
+		_, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMDF))
+		rs = findForgerRoleStatus(&liveMDF, "decode")
+		require.NotNil(t, rs)
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseForging, rs.Phase)
+		assert.NotNil(t, rs.ActiveSandbox)
+	})
+}
+
+func TestModelDeploymentForger_MultiRolePromotionDeadlines(t *testing.T) {
+	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	t0 := time.Date(2026, 11, 27, 23, 45, 0, 0, time.UTC)
+
+	newTwoRoleDeployment := func() *workercore.ModelDeployment {
+		return newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+			prefillRole := d.Spec.Roles[0].DeepCopy()
+			prefillRole.Name = "prefill"
+			prefillRole.Kind = workercore.ModelDeploymentRoleKindPrefill
+			prefillRole.Replicas = 1
+			decodeRole := d.Spec.Roles[0].DeepCopy()
+			decodeRole.Name = "decode"
+			decodeRole.Kind = workercore.ModelDeploymentRoleKindDecode
+			decodeRole.Replicas = 1
+			d.Spec.Roles = []workercore.ModelDeploymentRole{*prefillRole, *decodeRole}
+		})
+	}
+
+	t.Run("committing decode at t=550s preserves prefill t=0 start timestamp across controller restart", func(t *testing.T) {
+		curNow := t0
+		md := newTwoRoleDeployment()
+		prefillMKA := newNodeStoreKernelArtifact("qwen-decode-forger-prefill-gen-1", md.Namespace, "1", "2", func(k *workercore.ModelKernelArtifact) {
+			k.Spec.Compatibility.KernelKeys = []string{key1}
+			k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+				Name: "qwen-decode-forger",
+				UID:  "mdf-uid-1",
+			}
+		})
+		decodeMKA := newNodeStoreKernelArtifact("qwen-decode-forger-decode-gen-1", md.Namespace, "3", "4", func(k *workercore.ModelKernelArtifact) {
+			k.Spec.Compatibility.KernelKeys = []string{key1}
+			k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+				Name: "qwen-decode-forger",
+				UID:  "mdf-uid-1",
+			}
+		})
+		fin := meta.NewTime(t0.Add(-60 * time.Second))
+		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+			f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
+			f.Spec.Rollout.FailureTimeoutSeconds = 600
+			f.Spec.Roles = []workercore.ModelDeploymentForgerRoleSpec{
+				{Name: "prefill", MaxKernelsPerGeneration: 4, MinSpeedupRatio: "1.05"},
+				{Name: "decode", MaxKernelsPerGeneration: 4, MinSpeedupRatio: "1.05"},
+			}
+			f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{
+				{
+					Name:             "prefill",
+					Phase:            workercore.ModelDeploymentForgerRolePhasePublishing,
+					ActiveGeneration: 1,
+				},
+				{
+					Name:             "decode",
+					Phase:            workercore.ModelDeploymentForgerRolePhaseIdle,
+					ActiveGeneration: 1,
+					Generations: []workercore.ModelDeploymentForgerGenerationStatus{{
+						Generation: 1,
+						Outcome:    workercore.ModelDeploymentForgerGenerationOutcomeSkipped,
+						FinishedAt: &fin,
+					}},
+				},
+			}
+		})
+
+		cli := newForgerTestFakeClient(md, mdf, prefillMKA, decodeMKA)
+		rec1 := &ModelDeploymentForgerReconciler{
+			Client:    cli,
+			APIReader: cli,
+			Recorder:  ctrlrecord.NewFakeRecorder(32),
+			Now:       func() time.Time { return curNow },
+		}
+		req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+
+		// At t = 0: prefill promotes onto md.
+		_, err := rec1.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		// At t = 550s: decode promotes onto md while prefill is still waiting for canary readiness.
+		curNow = t0.Add(550 * time.Second)
+		var liveMDF workercore.ModelDeploymentForger
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMDF))
+		for i := range liveMDF.Status.Roles {
+			if liveMDF.Status.Roles[i].Name == "decode" {
+				liveMDF.Status.Roles[i].Phase = workercore.ModelDeploymentForgerRolePhasePublishing
+				liveMDF.Status.Roles[i].Generations = nil
+			}
+		}
+		require.NoError(t, cli.Status().Update(context.Background(), &liveMDF))
+
+		_, err = rec1.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		// At t = 560s: controller restarts (empty in-memory promotions), then ticks at t = 600s.
+		curNow = t0.Add(560 * time.Second)
+		restarted := &ModelDeploymentForgerReconciler{
+			Client:    cli,
+			APIReader: cli,
+			Recorder:  ctrlrecord.NewFakeRecorder(32),
+			Now:       func() time.Time { return curNow },
+		}
+		_, err = restarted.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		curNow = t0.Add(600 * time.Second)
+		_, err = restarted.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMDF))
+		prefillRS := findForgerRoleStatus(&liveMDF, "prefill")
+		require.NotNil(t, prefillRS)
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseIdle, prefillRS.Phase)
+		require.Len(t, prefillRS.Generations, 1)
+		assert.Equal(t, workercore.ModelDeploymentForgerGenerationOutcomeRolledBack, prefillRS.Generations[0].Outcome)
+		assert.Equal(t, "RolloutTimeout", prefillRS.Generations[0].Reason)
+
+		decodeRS := findForgerRoleStatus(&liveMDF, "decode")
+		require.NotNil(t, decodeRS)
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhasePromoting, decodeRS.Phase,
+			"decode promoted at t=550s must still have 550s remaining at t=600s")
+
+		var gotDecodeMKA workercore.ModelKernelArtifact
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(decodeMKA), &gotDecodeMKA))
+		assert.False(t, gotDecodeMKA.Status.Quarantined)
+	})
+
+	t.Run("promoting decode at t=1200s after prefill promoted at t=0 does not adopt t=0", func(t *testing.T) {
+		curNow := t0.Add(1200 * time.Second)
+		prefillMKA := newNodeStoreKernelArtifact("qwen-decode-forger-prefill-gen-1", "team-a", "5", "6", func(k *workercore.ModelKernelArtifact) {
+			k.Spec.Compatibility.KernelKeys = []string{key1}
+			k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+				Name: "qwen-decode-forger",
+				UID:  "mdf-uid-1",
+			}
+		})
+		decodeMKA := newNodeStoreKernelArtifact("qwen-decode-forger-decode-gen-1", "team-a", "7", "8", func(k *workercore.ModelKernelArtifact) {
+			k.Spec.Compatibility.KernelKeys = []string{key1}
+			k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+				Name: "qwen-decode-forger",
+				UID:  "mdf-uid-1",
+			}
+			k.Status.Resolved.ResolvedTime = meta.NewTime(curNow)
+		})
+
+		bindRaw, err := json.Marshal(workercore.ModelDeploymentForgerBinding{
+			ForgerName: "qwen-decode-forger",
+			ForgerUID:  "mdf-uid-1",
+			Term:       1,
+		})
+		require.NoError(t, err)
+		decRaw, err := json.Marshal(workercore.ModelDeploymentForgerDecision{
+			DecisionID:      formatForgerDecisionID("mdf-uid-1", 1, 1, t0),
+			Term:            1,
+			KernelArtifacts: map[string]string{"prefill": prefillMKA.Name, "decode": ""},
+		})
+		require.NoError(t, err)
+
+		md := newTwoRoleDeployment()
+		md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: prefillMKA.Name}
+		md.Spec.Roles[1].KernelArtifactRef = &core.LocalObjectReference{Name: decodeMKA.Name}
+		md.Annotations = map[string]string{
+			workercore.ModelDeploymentForgerBindingAnnotationKey:  string(bindRaw),
+			workercore.ModelDeploymentForgerDecisionAnnotationKey: string(decRaw),
+		}
+
+		fin := meta.NewTime(t0.Add(30 * time.Second))
+		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+			f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
+			f.Spec.Rollout.FailureTimeoutSeconds = 600
+			f.Spec.Roles = []workercore.ModelDeploymentForgerRoleSpec{
+				{Name: "prefill", MaxKernelsPerGeneration: 4, MinSpeedupRatio: "1.05"},
+				{Name: "decode", MaxKernelsPerGeneration: 4, MinSpeedupRatio: "1.05"},
+			}
+			f.Status.Binding = &workercore.ModelDeploymentForgerBindingStatus{
+				TargetUID:  string(md.UID),
+				TargetName: md.Name,
+				Term:       1,
+			}
+			f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{
+				{
+					Name:                 "prefill",
+					Phase:                workercore.ModelDeploymentForgerRolePhaseIdle,
+					ActiveGeneration:     1,
+					ActiveKernelArtifact: prefillMKA.Name,
+					Generations: []workercore.ModelDeploymentForgerGenerationStatus{{
+						Generation:   1,
+						ArtifactName: prefillMKA.Name,
+						Outcome:      workercore.ModelDeploymentForgerGenerationOutcomePromoted,
+						FinishedAt:   &fin,
+					}},
+				},
+				{
+					Name:                 "decode",
+					Phase:                workercore.ModelDeploymentForgerRolePhasePromoting,
+					ActiveGeneration:     1,
+					ActiveKernelArtifact: decodeMKA.Name,
+				},
+			}
+		})
+
+		cli := newForgerTestFakeClient(md, mdf, prefillMKA, decodeMKA)
+		r := &ModelDeploymentForgerReconciler{
+			Client:    cli,
+			APIReader: cli,
+			Recorder:  ctrlrecord.NewFakeRecorder(32),
+			Now:       func() time.Time { return curNow },
+		}
+		req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+		_, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		var gotMDF workercore.ModelDeploymentForger
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &gotMDF))
+		decodeRS := findForgerRoleStatus(&gotMDF, "decode")
+		require.NotNil(t, decodeRS)
+		assert.Equal(t, workercore.ModelDeploymentForgerRolePhasePromoting, decodeRS.Phase,
+			"decode promoted at t=1200s must not adopt prefill t=0 decision timestamp and falsely roll back")
+
+		var gotDecodeMKA workercore.ModelKernelArtifact
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(decodeMKA), &gotDecodeMKA))
+		assert.False(t, gotDecodeMKA.Status.Quarantined)
+	})
+}
+
+func TestModelDeploymentForger_SafeLabelsAndPromotionAdmissionRejection(t *testing.T) {
+	key1 := buildTestKernelKey(t, kernelkey.OpFamilyRMSNorm, 4096)
+	now := time.Date(2026, 11, 27, 23, 55, 0, 0, time.UTC)
+
+	t.Run("SafeLabelValue is used consistently across artifact labels, sandbox selectors, and pod watch mapping", func(t *testing.T) {
+		longForgerName := "qwen-extremely-long-model-deployment-forger-instance-name-over-sixtythree"
+		rawRoleName := "prefill/v1"
+		safeForger := forger.SafeLabelValue(longForgerName)
+		safeRole := forger.SafeLabelValue(rawRoleName)
+		require.NotEqual(t, longForgerName, safeForger)
+		require.NotEqual(t, rawRoleName, safeRole)
+
+		node0 := newForgerTestNode("node-0")
+		md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+			d.Spec.Roles[0].Name = rawRoleName
+			d.Spec.Roles[0].Replicas = 1
+		})
+		mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+			f.Name = longForgerName
+			f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+			f.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
+			f.Spec.Roles = []workercore.ModelDeploymentForgerRoleSpec{
+				{Name: rawRoleName, MaxKernelsPerGeneration: 4, MinSpeedupRatio: "1.05"},
+			}
+		})
+
+		cm, items, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
+			Forger:     mdf,
+			Name:       "safe-label-gen-1-input",
+			RoleName:   rawRoleName,
+			Generation: 1,
+			Request: forger.ForgeRequest{
+				SchemaVersion:    forger.ForgeRequestSchemaVersion,
+				Engine:           "vLLM",
+				EngineVersion:    "0.19.0",
+				Manufacturer:     nodefeature.ManufacturerNVIDIA,
+				Architecture:     "sm_90a",
+				TargetKernelKeys: []string{key1},
+				MinSpeedupRatio:  1.05,
+				Atol:             1e-2,
+				Rtol:             1e-2,
+			},
+		})
+		require.NoError(t, err)
+
+		hw := kernelkey.NodeHardware{
+			Manufacturer:   nodefeature.ManufacturerNVIDIA,
+			Arch:           "sm_90a",
+			SelectorLabels: map[string]string{"gpu": "h20"},
+		}
+		sbPod, err := forger.BuildSandboxPod(forger.SandboxPodSpec{
+			Forger:              mdf,
+			Name:                "safe-label-gen-1-sandbox",
+			RoleName:            rawRoleName,
+			Generation:          1,
+			InputConfigMapName:  cm.Name,
+			InputConfigMapItems: items,
+			EntranceQueue:       "default-queue",
+			Manufacturer:        nodefeature.ManufacturerNVIDIA,
+			Hardware:            hw,
+			OperatorImage:       "gpustack/gpustack-operator:test",
+			SandboxSpec:         workercore.ModelDeploymentForgerSandboxSpec{RunnerMode: workercore.ModelDeploymentForgerRunnerModeMock},
+		})
+		require.NoError(t, err)
+		sbPod.UID = "sb-safe-uid-1"
+		sbPod.Spec.NodeName = "node-0"
+
+		orphanCM := cm.DeepCopy()
+		orphanCM.Name = "safe-label-orphan-input"
+		orphanPod := sbPod.DeepCopy()
+		orphanPod.Name = "safe-label-orphan-sandbox"
+		orphanPod.UID = "sb-orphan-uid"
+
+		started := meta.NewTime(now.Add(-10 * time.Second))
+		mdf.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+			Name:             rawRoleName,
+			Phase:            workercore.ModelDeploymentForgerRolePhasePublishing,
+			ActiveGeneration: 1,
+			ActiveSandbox: &workercore.ModelDeploymentForgerSandboxStatus{
+				PodName:       sbPod.Name,
+				PodUID:        string(sbPod.UID),
+				NodeName:      "node-0",
+				ConfigMapName: cm.Name,
+				StartedAt:     &started,
+			},
+		}}
+
+		cli := newForgerTestFakeClient(node0, md, mdf, cm, sbPod, orphanCM, orphanPod)
+		r := &ModelDeploymentForgerReconciler{
+			Client:        cli,
+			APIReader:     cli,
+			Recorder:      ctrlrecord.NewFakeRecorder(32),
+			Now:           func() time.Time { return now },
+			OperatorImage: "gpustack/gpustack-operator:test",
+			ResolveSeedEndpoint: func(context.Context, string) (string, int, error) {
+				return "10.0.0.50", 10250, nil
+			},
+			IngestClient: &stubIngestClient{
+				resp: &modelstore.IngestTreeResponse{
+					ManifestDigest:         "sha256:" + strings.Repeat("a", 64),
+					DispatchManifestDigest: "sha256:" + strings.Repeat("b", 64),
+					SizeBytes:              4096,
+					FileCount:              3,
+					SeedNode:               "node-0",
+					KernelKeys:             []string{key1},
+				},
+			},
+		}
+
+		// Verify mapPod resolves hashed SandboxLabelInstance back to mdf.Name (with and without OwnerReferences).
+		unownedPod := sbPod.DeepCopy()
+		unownedPod.OwnerReferences = nil
+		wantReqs := []ctrlreconcile.Request{{NamespacedName: types.NamespacedName{Namespace: mdf.Namespace, Name: mdf.Name}}}
+		assert.Equal(t, wantReqs, r.mapPod(context.Background(), sbPod))
+		assert.Equal(t, wantReqs, r.mapPod(context.Background(), unownedPod))
+
+		// Publishing creates ModelKernelArtifact with SafeLabelValue labels.
+		req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+		_, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+
+		artName := forgerArtifactName(mdf.Name, rawRoleName, 1)
+		var gotMKA workercore.ModelKernelArtifact
+		require.NoError(t, cli.Get(context.Background(), types.NamespacedName{Namespace: mdf.Namespace, Name: artName}, &gotMKA))
+		assert.Equal(t, safeForger, gotMKA.Labels[forger.SandboxLabelInstance])
+		assert.Equal(t, safeRole, gotMKA.Labels[forger.SandboxLabelRole])
+		assert.Empty(t, kvalidation.IsValidLabelValue(gotMKA.Labels[forger.SandboxLabelInstance]))
+		assert.Empty(t, kvalidation.IsValidLabelValue(gotMKA.Labels[forger.SandboxLabelRole]))
+
+		// Idle sweeps orphan sandbox Pod and ConfigMap matching SafeLabelValue(roleName).
+		var liveMDF workercore.ModelDeploymentForger
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMDF))
+		liveMDF.Status.Roles[0].Phase = workercore.ModelDeploymentForgerRolePhaseIdle
+		require.NoError(t, cli.Status().Update(context.Background(), &liveMDF))
+
+		_, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(orphanPod), &core.Pod{})))
+		assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(orphanCM), &core.ConfigMap{})))
+
+		// cleanupAllForgerSandboxes on Suspend deletes sandboxes matching SafeLabelValue(mdf.Name).
+		extraPod := &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: mdf.Namespace,
+				Name:      "safe-label-suspend-sandbox",
+				Labels: map[string]string{
+					forger.SandboxLabelName:     "model-deployment-forger",
+					forger.SandboxLabelInstance: safeForger,
+				},
+			},
+		}
+		require.NoError(t, cli.Create(context.Background(), extraPod))
+		require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMDF))
+		liveMDF.Spec.Suspend = true
+		liveMDF.Generation++
+		require.NoError(t, cli.Update(context.Background(), &liveMDF))
+		_, err = r.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(extraPod), &core.Pod{})))
+	})
+
+	t.Run("admission Invalid or Forbidden error on promotion commit marks generation Failed without wedging in Promoting", func(t *testing.T) {
+		admissionErrs := []struct {
+			name string
+			err  error
+		}{
+			{
+				name: "422 Invalid overlapping kernel volume mount",
+				err: kerrors.NewInvalid(
+					kschema.GroupKind{Group: workercore.GroupName, Kind: "ModelDeployment"},
+					"qwen-pd",
+					field.ErrorList{field.Invalid(
+						field.NewPath("spec", "roles").Index(0).Child("additionalVolumes").Index(0).Child("mountPath"),
+						"/var/lib/gpustack/kernels",
+						"overlaps \"/var/lib/gpustack/kernels\"",
+					)},
+				),
+			},
+			{
+				name: "403 Forbidden admission rejection",
+				err: kerrors.NewForbidden(
+					workercore.Resource("modeldeployments"),
+					"qwen-pd",
+					errors.New("kernelArtifactRef forbidden by policy"),
+				),
+			},
+		}
+
+		for _, tc := range admissionErrs {
+			t.Run(tc.name, func(t *testing.T) {
+				mka := newNodeStoreKernelArtifact("qwen-decode-forger-decode-gen-1", "team-a", "9", "a", func(k *workercore.ModelKernelArtifact) {
+					k.Spec.Compatibility.KernelKeys = []string{key1}
+					k.Spec.Source.NodeStore.ForgerRef = workercore.ModelKernelArtifactForgerReference{
+						Name: "qwen-decode-forger",
+						UID:  "mdf-uid-1",
+					}
+				})
+				md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+					d.Spec.Roles[0].Replicas = 1
+				})
+				mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+					f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+					f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
+					f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+						Name:             "decode",
+						Phase:            workercore.ModelDeploymentForgerRolePhasePublishing,
+						ActiveGeneration: 1,
+					}}
+				})
+
+				baseCli := newForgerTestFakeClient(mka, md, mdf)
+				cli := interceptor.NewClient(baseCli.(ctrlcli.WithWatch), interceptor.Funcs{
+					Update: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.UpdateOption) error {
+						if updatedMD, isMD := obj.(*workercore.ModelDeployment); isMD &&
+							len(updatedMD.Spec.Roles) > 0 && updatedMD.Spec.Roles[0].KernelArtifactRef != nil {
+							return tc.err
+						}
+						return c.Update(ctx, obj, opts...)
+					},
+				})
+
+				rec := ctrlrecord.NewFakeRecorder(16)
+				r := &ModelDeploymentForgerReconciler{
+					Client:    cli,
+					APIReader: cli,
+					Recorder:  rec,
+					Now:       func() time.Time { return now },
+				}
+				req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+				res, err := r.Reconcile(context.Background(), req)
+				require.NoError(t, err, "admission rejection must not return an unbounded requeue error")
+				assert.Equal(t, effectiveProbeCooldown(mdf), res.RequeueAfter)
+
+				var got workercore.ModelDeploymentForger
+				require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &got))
+				rs := findForgerRoleStatus(&got, "decode")
+				require.NotNil(t, rs)
+				assert.Equal(t, workercore.ModelDeploymentForgerRolePhaseIdle, rs.Phase)
+				assert.Empty(t, rs.ActiveKernelArtifact)
+				assert.Empty(t, rs.PreviousKernelArtifact)
+				require.Len(t, rs.Generations, 1)
+				assert.Equal(t, workercore.ModelDeploymentForgerGenerationOutcomeFailed, rs.Generations[0].Outcome)
+
+				readyCond := findForgerCondition(&got, workercore.ModelDeploymentForgerConditionTypeReady)
+				require.NotNil(t, readyCond)
+				assert.Equal(t, meta.ConditionFalse, readyCond.Status)
+				assert.Equal(t, workercore.ModelDeploymentForgerReasonDegraded, readyCond.Reason)
+
+				select {
+				case ev := <-rec.Events:
+					assert.Contains(t, ev, core.EventTypeWarning)
+				default:
+					t.Fatal("expected Warning event for rejected promotion")
+				}
+			})
+		}
+	})
+}
+
+func TestModelDeploymentForger_BindingAcquisitionAdmissionRejection(t *testing.T) {
+	now := time.Date(2026, 11, 27, 23, 58, 0, 0, time.UTC)
+
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "422 Invalid overlapping kernel volume during binding acquisition",
+			err: kerrors.NewInvalid(
+				kschema.GroupKind{Group: workercore.GroupName, Kind: "ModelDeployment"},
+				"qwen-pd",
+				field.ErrorList{field.Invalid(
+					field.NewPath("spec", "roles").Index(0).Child("additionalVolumes").Index(0).Child("mountPath"),
+					"/var/lib/gpustack/kernels",
+					"overlaps \"/var/lib/gpustack/kernels\", where the bound ModelDeploymentForger promotes spec.roles[].kernelArtifactRef",
+				)},
+			),
+		},
+		{
+			name: "403 Forbidden policy rejection during binding acquisition",
+			err: kerrors.NewForbidden(
+				workercore.Resource("modeldeployments"),
+				"qwen-pd",
+				errors.New("forger-binding update forbidden"),
+			),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newForgerTestDeployment()
+			mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+				f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+				f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
+			})
+
+			baseCli := newForgerTestFakeClient(md, mdf)
+			cli := interceptor.NewClient(baseCli.(ctrlcli.WithWatch), interceptor.Funcs{
+				Update: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.UpdateOption) error {
+					if updatedMD, isMD := obj.(*workercore.ModelDeployment); isMD &&
+						updatedMD.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey] != "" {
+						return tc.err
+					}
+					return c.Update(ctx, obj, opts...)
+				},
+			})
+
+			rec := ctrlrecord.NewFakeRecorder(16)
+			r := &ModelDeploymentForgerReconciler{
+				Client:    cli,
+				APIReader: cli,
+				Recorder:  rec,
+				Now:       func() time.Time { return now },
+			}
+			req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+			res, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+			assert.Equal(t, forgerIdleRetryInterval, res.RequeueAfter)
+
+			var got workercore.ModelDeploymentForger
+			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &got))
+			assert.Equal(t, mdf.Generation, got.Status.ObservedGeneration)
+
+			bound := findForgerCondition(&got, workercore.ModelDeploymentForgerConditionTypeBound)
+			require.NotNil(t, bound)
+			assert.Equal(t, meta.ConditionFalse, bound.Status)
+			assert.Equal(t, workercore.ModelDeploymentForgerReasonInvalidBinding, bound.Reason)
+			assert.Contains(t, bound.Message, tc.err.Error())
+
+			active := findForgerCondition(&got, workercore.ModelDeploymentForgerConditionTypeActive)
+			require.NotNil(t, active)
+			assert.Equal(t, meta.ConditionFalse, active.Status)
+			assert.Equal(t, workercore.ModelDeploymentForgerReasonInvalidBinding, active.Reason)
+
+			blocked := findForgerCondition(&got, workercore.ModelDeploymentForgerConditionTypeBlocked)
+			require.NotNil(t, blocked)
+			assert.Equal(t, meta.ConditionFalse, blocked.Status)
+
+			ready := findForgerCondition(&got, workercore.ModelDeploymentForgerConditionTypeReady)
+			require.NotNil(t, ready)
+			assert.Equal(t, meta.ConditionFalse, ready.Status)
+			assert.Equal(t, workercore.ModelDeploymentForgerReasonDegraded, ready.Reason)
+			assert.Contains(t, ready.Message, tc.err.Error())
+
+			select {
+			case ev := <-rec.Events:
+				assert.Contains(t, ev, core.EventTypeWarning)
+				assert.Contains(t, ev, workercore.ModelDeploymentForgerReasonInvalidBinding)
+			default:
+				t.Fatal("expected Warning event when binding acquisition is rejected")
+			}
+		})
+	}
+}
+
+func TestModelDeploymentForger_DeletionRollsBackUncommittedPromotions(t *testing.T) {
+	now := time.Date(2026, 11, 27, 23, 59, 0, 0, time.UTC)
+
+	cases := []struct {
+		name         string
+		prevArtifact string
+		wantRef      *core.LocalObjectReference
+	}{
+		{
+			name:         "reverts to previous gen-1 artifact before releasing binding and finalizer",
+			prevArtifact: "qwen-decode-forger-decode-gen-1",
+			wantRef:      &core.LocalObjectReference{Name: "qwen-decode-forger-decode-gen-1"},
+		},
+		{
+			name:         "clears kernelArtifactRef to stock kernels when previous artifact is empty",
+			prevArtifact: "",
+			wantRef:      nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			const canaryArtifact = "qwen-decode-forger-decode-gen-2"
+			bindRaw, err := json.Marshal(workercore.ModelDeploymentForgerBinding{
+				ForgerName: "qwen-decode-forger",
+				ForgerUID:  "mdf-uid-1",
+				Term:       2,
+			})
+			require.NoError(t, err)
+			decRaw, err := json.Marshal(forgerDecisionPayload{
+				ModelDeploymentForgerDecision: workercore.ModelDeploymentForgerDecision{
+					DecisionID:      formatForgerDecisionID("mdf-uid-1", 2, 1, now.Add(-30*time.Second)),
+					Term:            2,
+					KernelArtifacts: map[string]string{"decode": canaryArtifact},
+				},
+				RolePromotedAt: map[string]int64{"decode": now.Add(-30 * time.Second).UnixNano()},
+			})
+			require.NoError(t, err)
+
+			md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+				d.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: canaryArtifact}
+				d.Annotations = map[string]string{
+					workercore.ModelDeploymentForgerBindingAnnotationKey:  string(bindRaw),
+					workercore.ModelDeploymentForgerDecisionAnnotationKey: string(decRaw),
+				}
+			})
+			mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+				f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+				f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
+				f.Status.Binding = &workercore.ModelDeploymentForgerBindingStatus{
+					TargetUID:  string(md.UID),
+					TargetName: md.Name,
+					Term:       2,
+				}
+				f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{{
+					Name:                   "decode",
+					Phase:                  workercore.ModelDeploymentForgerRolePhasePromoting,
+					ActiveGeneration:       2,
+					ActiveKernelArtifact:   canaryArtifact,
+					PreviousKernelArtifact: tc.prevArtifact,
+				}}
+			})
+
+			type mdMutation struct {
+				ref        *core.LocalObjectReference
+				hasBinding bool
+			}
+			var mutations []mdMutation
+
+			baseCli := newForgerTestFakeClient(md, mdf)
+			cli := interceptor.NewClient(baseCli.(ctrlcli.WithWatch), interceptor.Funcs{
+				Update: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.UpdateOption) error {
+					if updatedMD, isMD := obj.(*workercore.ModelDeployment); isMD {
+						var refCopy *core.LocalObjectReference
+						if len(updatedMD.Spec.Roles) > 0 && updatedMD.Spec.Roles[0].KernelArtifactRef != nil {
+							cp := *updatedMD.Spec.Roles[0].KernelArtifactRef
+							refCopy = &cp
+						}
+						mutations = append(mutations, mdMutation{
+							ref:        refCopy,
+							hasBinding: updatedMD.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey] != "",
+						})
+					}
+					return c.Update(ctx, obj, opts...)
+				},
+			})
+
+			require.NoError(t, cli.Delete(context.Background(), mdf))
+
+			r := &ModelDeploymentForgerReconciler{
+				Client:    cli,
+				APIReader: cli,
+				Recorder:  ctrlrecord.NewFakeRecorder(16),
+				Now:       func() time.Time { return now },
+			}
+			req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+			_, err = r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+
+			assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), req.NamespacedName, &workercore.ModelDeploymentForger{})))
+
+			var liveMD workercore.ModelDeployment
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(md), &liveMD))
+			assert.Equal(t, tc.wantRef, liveMD.Spec.Roles[0].KernelArtifactRef)
+			assert.Empty(t, liveMD.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey])
+			assert.Empty(t, liveMD.Annotations[workercore.ModelDeploymentForgerDecisionAnnotationKey])
+
+			require.Len(t, mutations, 2, "rollback must update KernelArtifactRef while holding binding before releasing binding")
+			assert.Equal(t, tc.wantRef, mutations[0].ref)
+			assert.True(t, mutations[0].hasBinding)
+			assert.Equal(t, tc.wantRef, mutations[1].ref)
+			assert.False(t, mutations[1].hasBinding)
+		})
+	}
+}
+
+func TestModelDeploymentForger_RemovedRoleRollsBackCanaryAndCleansSandbox(t *testing.T) {
+	now := time.Date(2026, 11, 27, 23, 59, 30, 0, time.UTC)
+
+	cases := []struct {
+		name           string
+		canaryArtifact string
+		prevArtifact   string
+		prevGens       []workercore.ModelDeploymentForgerGenerationStatus
+		failFirstWrite bool
+		wantPrefillRef *core.LocalObjectReference
+	}{
+		{
+			name:           "reverts removed prefill canary gen-2 to gen-1 and cleans up prefill sandbox while preserving decode",
+			canaryArtifact: "qwen-decode-forger-prefill-gen-2",
+			prevArtifact:   "qwen-decode-forger-prefill-gen-1",
+			prevGens: []workercore.ModelDeploymentForgerGenerationStatus{{
+				Generation:   1,
+				ArtifactName: "qwen-decode-forger-prefill-gen-1",
+				Outcome:      workercore.ModelDeploymentForgerGenerationOutcomePromoted,
+			}},
+			wantPrefillRef: &core.LocalObjectReference{Name: "qwen-decode-forger-prefill-gen-1"},
+		},
+		{
+			name:           "reverts removed prefill canary gen-1 to nil stock kernels",
+			canaryArtifact: "qwen-decode-forger-prefill-gen-1",
+			prevArtifact:   "",
+			wantPrefillRef: nil,
+		},
+		{
+			name:           "retains removed role in status when rollback fails transiently and completes on retry",
+			canaryArtifact: "qwen-decode-forger-prefill-gen-2",
+			prevArtifact:   "qwen-decode-forger-prefill-gen-1",
+			failFirstWrite: true,
+			wantPrefillRef: &core.LocalObjectReference{Name: "qwen-decode-forger-prefill-gen-1"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			const decodeCommitted = "qwen-decode-forger-decode-gen-1"
+			bindRaw, err := json.Marshal(workercore.ModelDeploymentForgerBinding{
+				ForgerName: "qwen-decode-forger",
+				ForgerUID:  "mdf-uid-1",
+				Term:       2,
+			})
+			require.NoError(t, err)
+			decRaw, err := json.Marshal(forgerDecisionPayload{
+				ModelDeploymentForgerDecision: workercore.ModelDeploymentForgerDecision{
+					DecisionID: formatForgerDecisionID("mdf-uid-1", 2, 1, now.Add(-30*time.Second)),
+					Term:       2,
+					KernelArtifacts: map[string]string{
+						"prefill": tc.canaryArtifact,
+						"decode":  decodeCommitted,
+					},
+				},
+				RolePromotedAt: map[string]int64{
+					"prefill": now.Add(-30 * time.Second).UnixNano(),
+					"decode":  now.Add(-10 * time.Minute).UnixNano(),
+				},
+			})
+			require.NoError(t, err)
+
+			md := newForgerTestDeployment(func(d *workercore.ModelDeployment) {
+				d.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				d.Spec.Roles = []workercore.ModelDeploymentRole{
+					{
+						Name:              "prefill",
+						Kind:              workercore.ModelDeploymentRoleKindPrefill,
+						Replicas:          1,
+						AcceleratorType:   "h20-8x",
+						KernelArtifactRef: &core.LocalObjectReference{Name: tc.canaryArtifact},
+					},
+					{
+						Name:              "decode",
+						Kind:              workercore.ModelDeploymentRoleKindDecode,
+						Replicas:          1,
+						AcceleratorType:   "h20-8x",
+						KernelArtifactRef: &core.LocalObjectReference{Name: decodeCommitted},
+					},
+				}
+				d.Annotations = map[string]string{
+					workercore.ModelDeploymentForgerBindingAnnotationKey:  string(bindRaw),
+					workercore.ModelDeploymentForgerDecisionAnnotationKey: string(decRaw),
+				}
+			})
+
+			prefillSBName, prefillCMName := forgerSandboxObjectNames("qwen-decode-forger", "prefill", 2, "a1b2c3d4")
+			prefillOrphanName, _ := forgerSandboxObjectNames("qwen-decode-forger", "prefill", 1, "deadbeef")
+			decodeSBName, decodeCMName := forgerSandboxObjectNames("qwen-decode-forger", "decode", 2, "e5f60718")
+
+			mdf := newTestModelDeploymentForger(func(f *workercore.ModelDeploymentForger) {
+				f.Finalizers = []string{workercore.ModelDeploymentForgerFinalizerKey}
+				f.Generation = 2
+				f.Spec.Mode = workercore.ModelDeploymentForgerModeActive
+				f.Spec.Roles = []workercore.ModelDeploymentForgerRoleSpec{{
+					Name:                    "decode",
+					MaxKernelsPerGeneration: 4,
+					MinSpeedupRatio:         "1.05",
+				}}
+				f.Status.ObservedGeneration = 1
+				f.Status.Binding = &workercore.ModelDeploymentForgerBindingStatus{
+					TargetUID:  string(md.UID),
+					TargetName: md.Name,
+					Term:       2,
+				}
+				fin := meta.NewTime(now.Add(-5 * time.Minute))
+				f.Status.Roles = []workercore.ModelDeploymentForgerRoleStatus{
+					{
+						Name:                   "prefill",
+						Phase:                  workercore.ModelDeploymentForgerRolePhasePromoting,
+						ActiveGeneration:       2,
+						ActiveKernelArtifact:   tc.canaryArtifact,
+						PreviousKernelArtifact: tc.prevArtifact,
+						Generations:            tc.prevGens,
+						ActiveSandbox: &workercore.ModelDeploymentForgerSandboxStatus{
+							PodName:       prefillSBName,
+							ConfigMapName: prefillCMName,
+						},
+					},
+					{
+						Name:                 "decode",
+						Phase:                workercore.ModelDeploymentForgerRolePhaseForging,
+						ActiveGeneration:     2,
+						ActiveKernelArtifact: decodeCommitted,
+						ActiveSandbox: &workercore.ModelDeploymentForgerSandboxStatus{
+							PodName:       decodeSBName,
+							PodUID:        "uid-decode-sb",
+							ConfigMapName: decodeCMName,
+							StartedAt:     ptr.To(meta.NewTime(now.Add(-10 * time.Second))),
+						},
+						Generations: []workercore.ModelDeploymentForgerGenerationStatus{{
+							Generation:   1,
+							ArtifactName: decodeCommitted,
+							Outcome:      workercore.ModelDeploymentForgerGenerationOutcomePromoted,
+							FinishedAt:   &fin,
+						}},
+					},
+				}
+			})
+
+			ownerRef := meta.OwnerReference{
+				APIVersion: workercore.SchemeGroupVersion.String(),
+				Kind:       "ModelDeploymentForger",
+				Name:       mdf.Name,
+				UID:        mdf.UID,
+				Controller: ptr.To(true),
+			}
+			prefillSBPod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Namespace:       mdf.Namespace,
+					Name:            prefillSBName,
+					UID:             "uid-prefill-sb",
+					OwnerReferences: []meta.OwnerReference{ownerRef},
+					Labels: map[string]string{
+						forger.SandboxLabelName:     "model-deployment-forger",
+						forger.SandboxLabelInstance: mdf.Name,
+						forger.SandboxLabelRole:     "prefill",
+					},
+				},
+			}
+			prefillOrphanPod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Namespace:       mdf.Namespace,
+					Name:            prefillOrphanName,
+					UID:             "uid-prefill-orphan",
+					OwnerReferences: []meta.OwnerReference{ownerRef},
+					Labels: map[string]string{
+						forger.SandboxLabelName:     "model-deployment-forger",
+						forger.SandboxLabelInstance: mdf.Name,
+						forger.SandboxLabelRole:     "prefill",
+					},
+				},
+			}
+			prefillSBCM := &core.ConfigMap{
+				ObjectMeta: meta.ObjectMeta{
+					Namespace:       mdf.Namespace,
+					Name:            prefillCMName,
+					OwnerReferences: []meta.OwnerReference{ownerRef},
+					Labels: map[string]string{
+						forger.SandboxLabelName:     "model-deployment-forger",
+						forger.SandboxLabelInstance: mdf.Name,
+						forger.SandboxLabelRole:     "prefill",
+					},
+				},
+			}
+			decodeSBPod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Namespace:       mdf.Namespace,
+					Name:            decodeSBName,
+					UID:             "uid-decode-sb",
+					OwnerReferences: []meta.OwnerReference{ownerRef},
+					Labels: map[string]string{
+						forger.SandboxLabelName:     "model-deployment-forger",
+						forger.SandboxLabelInstance: mdf.Name,
+						forger.SandboxLabelRole:     "decode",
+					},
+				},
+			}
+			decodeSBCM := &core.ConfigMap{
+				ObjectMeta: meta.ObjectMeta{
+					Namespace:       mdf.Namespace,
+					Name:            decodeCMName,
+					OwnerReferences: []meta.OwnerReference{ownerRef},
+					Labels: map[string]string{
+						forger.SandboxLabelName:     "model-deployment-forger",
+						forger.SandboxLabelInstance: mdf.Name,
+						forger.SandboxLabelRole:     "decode",
+					},
+				},
+			}
+
+			var failedOnce atomic.Bool
+			baseCli := newForgerTestFakeClient(md, mdf, prefillSBPod, prefillOrphanPod, prefillSBCM, decodeSBPod, decodeSBCM)
+			cli := interceptor.NewClient(baseCli.(ctrlcli.WithWatch), interceptor.Funcs{
+				Update: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.UpdateOption) error {
+					if _, isMD := obj.(*workercore.ModelDeployment); isMD && tc.failFirstWrite && failedOnce.CompareAndSwap(false, true) {
+						return errors.New("transient apiserver conflict")
+					}
+					return c.Update(ctx, obj, opts...)
+				},
+			})
+
+			r := &ModelDeploymentForgerReconciler{
+				Client:    cli,
+				APIReader: cli,
+				Recorder:  ctrlrecord.NewFakeRecorder(16),
+				Now:       func() time.Time { return now },
+			}
+			r.rememberProbe(mdf.UID, "prefill", forgerProbeAttempt{PodName: "prefill-0", StartedAt: now})
+			r.rememberPromotion(mdf.UID, "prefill", forgerPromotionAttempt{ArtifactName: tc.canaryArtifact, StartedAt: now})
+
+			req := ctrl.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(mdf)}
+			if tc.failFirstWrite {
+				_, err = r.Reconcile(context.Background(), req)
+				require.Error(t, err)
+
+				var midMDF workercore.ModelDeploymentForger
+				require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &midMDF))
+				require.NotNil(t, findForgerRoleStatus(&midMDF, "prefill"),
+					"removed role must stay in status.roles until rollback succeeds")
+			}
+
+			_, err = r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+
+			_, hasProbe := r.loadProbe(mdf.UID, "prefill")
+			assert.False(t, hasProbe)
+			_, hasPromo := r.loadPromotion(mdf.UID, "prefill")
+			assert.False(t, hasPromo)
+
+			assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(prefillSBPod), &core.Pod{})))
+			assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(prefillOrphanPod), &core.Pod{})))
+			assert.True(t, kerrors.IsNotFound(cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(prefillSBCM), &core.ConfigMap{})))
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(decodeSBPod), &core.Pod{}))
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(decodeSBCM), &core.ConfigMap{}))
+
+			var liveMD workercore.ModelDeployment
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(md), &liveMD))
+			assert.Equal(t, tc.wantPrefillRef, liveMD.Spec.Roles[0].KernelArtifactRef)
+			assert.Equal(t, &core.LocalObjectReference{Name: decodeCommitted}, liveMD.Spec.Roles[1].KernelArtifactRef)
+
+			decAfter, hasDecAfter, decErr := readForgerDecision(&liveMD)
+			require.NoError(t, decErr)
+			require.True(t, hasDecAfter)
+			_, prefillInDec := decAfter.KernelArtifacts["prefill"]
+			assert.False(t, prefillInDec)
+			_, prefillInPromotedAt := decAfter.RolePromotedAt["prefill"]
+			assert.False(t, prefillInPromotedAt)
+			assert.Equal(t, decodeCommitted, decAfter.KernelArtifacts["decode"])
+
+			var liveMDF workercore.ModelDeploymentForger
+			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMDF))
+			assert.Nil(t, findForgerRoleStatus(&liveMDF, "prefill"))
+			decodeRS := findForgerRoleStatus(&liveMDF, "decode")
+			require.NotNil(t, decodeRS)
+			assert.Equal(t, decodeCommitted, decodeRS.ActiveKernelArtifact)
+		})
+	}
 }

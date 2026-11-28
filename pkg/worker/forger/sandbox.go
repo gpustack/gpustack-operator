@@ -2,6 +2,8 @@ package forger
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -15,6 +17,7 @@ import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kvalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/utils/ptr"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
@@ -101,6 +104,22 @@ type InputConfigMapSpec struct {
 	Workloads   []Workload
 }
 
+type encodedWorkload struct {
+	workload Workload
+	line     []byte
+	order    int
+}
+
+func shouldEvictWorkloadBefore(a, b encodedWorkload) bool {
+	if a.workload.ObservedDurationUs != b.workload.ObservedDurationUs {
+		return a.workload.ObservedDurationUs < b.workload.ObservedDurationUs
+	}
+	if a.workload.UUID != b.workload.UUID {
+		return a.workload.UUID > b.workload.UUID
+	}
+	return a.order > b.order
+}
+
 // BuildInputConfigMap builds an owner-referenced ConfigMap (<= 512 KiB) carrying
 // forge-request.json, definitions/<name>.json, and workloads/<name>.jsonl along with the sorted
 // KeyToPath projections required to mount the nested layout into /var/run/gpustack/forge/input/.
@@ -166,11 +185,15 @@ func BuildInputConfigMap(spec InputConfigMapSpec) (*core.ConfigMap, []core.KeyTo
 		})
 	}
 
-	workloadsByDef := make(map[string][]Workload)
+	workloadsByDef := make(map[string][]encodedWorkload)
 	for i := range spec.Workloads {
 		wl := spec.Workloads[i]
 		if err := ValidateWorkload(&wl); err != nil {
 			return nil, nil, fmt.Errorf("workloads[%d]: %w", i, err)
+		}
+		line, err := marshalCompactJSON(wl)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode workload %q: %w", wl.UUID, err)
 		}
 		defKey := strings.TrimSpace(wl.Definition)
 		if defKey == "" {
@@ -180,18 +203,54 @@ func BuildInputConfigMap(spec InputConfigMapSpec) (*core.ConfigMap, []core.KeyTo
 			defKey = "default"
 		}
 		safeName := sanitizeConfigMapSegment(defKey)
-		workloadsByDef[safeName] = append(workloadsByDef[safeName], wl)
+		workloadsByDef[safeName] = append(workloadsByDef[safeName], encodedWorkload{
+			workload: wl,
+			line:     line,
+			order:    i,
+		})
 	}
 
+	totalBytes := 0
+	for k, v := range data {
+		totalBytes += len(k) + len(v)
+	}
 	wlGroupNames := slices.Sorted(maps.Keys(workloadsByDef))
 	for _, safeName := range wlGroupNames {
-		var buf bytes.Buffer
-		for _, wl := range workloadsByDef[safeName] {
-			line, err := marshalCompactJSON(wl)
-			if err != nil {
-				return nil, nil, fmt.Errorf("encode workload %q: %w", wl.UUID, err)
+		cmKey := configMapWorkloadPrefix + safeName + ".jsonl"
+		totalBytes += len(cmKey)
+		for _, entry := range workloadsByDef[safeName] {
+			totalBytes += len(entry.line) + 1
+		}
+	}
+
+	for totalBytes > MaxInputConfigMapBytes {
+		bestGroup := ""
+		bestIdx := -1
+		var best encodedWorkload
+		for _, safeName := range wlGroupNames {
+			group := workloadsByDef[safeName]
+			if len(group) <= 1 {
+				continue
 			}
-			buf.Write(line)
+			for idx, cand := range group {
+				if bestIdx == -1 || shouldEvictWorkloadBefore(cand, best) {
+					bestGroup = safeName
+					bestIdx = idx
+					best = cand
+				}
+			}
+		}
+		if bestIdx == -1 {
+			break
+		}
+		totalBytes -= len(best.line) + 1
+		workloadsByDef[bestGroup] = slices.Delete(workloadsByDef[bestGroup], bestIdx, bestIdx+1)
+	}
+
+	for _, safeName := range wlGroupNames {
+		var buf bytes.Buffer
+		for _, entry := range workloadsByDef[safeName] {
+			buf.Write(entry.line)
 			buf.WriteByte('\n')
 		}
 		cmKey := configMapWorkloadPrefix + safeName + ".jsonl"
@@ -202,10 +261,6 @@ func BuildInputConfigMap(spec InputConfigMapSpec) (*core.ConfigMap, []core.KeyTo
 		})
 	}
 
-	totalBytes := 0
-	for k, v := range data {
-		totalBytes += len(k) + len(v)
-	}
 	if totalBytes > MaxInputConfigMapBytes {
 		return nil, nil, fmt.Errorf("input configMap size %d bytes exceeds %d byte cap",
 			totalBytes, MaxInputConfigMapBytes)
@@ -552,6 +607,9 @@ func buildSandboxContainerResources(
 func restrictedPodSecurityContext() *core.PodSecurityContext {
 	return &core.PodSecurityContext{
 		RunAsNonRoot: ptr.To(true),
+		RunAsUser:    ptr.To[int64](65532),
+		RunAsGroup:   ptr.To[int64](65532),
+		FSGroup:      ptr.To[int64](65532),
 		SeccompProfile: &core.SeccompProfile{
 			Type: core.SeccompProfileTypeRuntimeDefault,
 		},
@@ -562,6 +620,8 @@ func restrictedContainerSecurityContext() *core.SecurityContext {
 	return &core.SecurityContext{
 		AllowPrivilegeEscalation: ptr.To(false),
 		RunAsNonRoot:             ptr.To(true),
+		RunAsUser:                ptr.To[int64](65532),
+		RunAsGroup:               ptr.To[int64](65532),
 		Capabilities: &core.Capabilities{
 			Drop: []core.Capability{"ALL"},
 		},
@@ -574,11 +634,37 @@ func restrictedContainerSecurityContext() *core.SecurityContext {
 func sandboxCommonLabels(forgerName, roleName string, generation int64) map[string]string {
 	return map[string]string{
 		SandboxLabelName:       sandboxLabelValueName,
-		SandboxLabelInstance:   forgerName,
+		SandboxLabelInstance:   SafeLabelValue(forgerName),
 		SandboxLabelComponent:  sandboxLabelValueComponent,
-		SandboxLabelRole:       roleName,
+		SandboxLabelRole:       SafeLabelValue(roleName),
 		SandboxLabelGeneration: strconv.FormatInt(generation, 10),
 	}
+}
+
+// SafeLabelValue returns a valid Kubernetes label value (<= 63 chars) derived from raw,
+// preserving valid label values verbatim and hashing longer or non-label-safe strings.
+func SafeLabelValue(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if len(trimmed) <= kvalidation.DNS1123LabelMaxLength && len(kvalidation.IsValidLabelValue(trimmed)) == 0 {
+		return trimmed
+	}
+	sum := sha256.Sum256([]byte(trimmed))
+	suffix := hex.EncodeToString(sum[:])[:8]
+
+	prefix := safeConfigMapKeyCharRe.ReplaceAllString(trimmed, "-")
+	prefix = strings.TrimLeft(prefix, "._-")
+	maxPrefixLen := kvalidation.DNS1123LabelMaxLength - 1 - len(suffix)
+	if len(prefix) > maxPrefixLen {
+		prefix = prefix[:maxPrefixLen]
+	}
+	prefix = strings.TrimRight(prefix, "._-")
+	if prefix == "" {
+		return suffix
+	}
+	return prefix + "-" + suffix
 }
 
 func forgerControllerOwnerRef(forger *workercore.ModelDeploymentForger) meta.OwnerReference {

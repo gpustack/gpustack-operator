@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/setting"
@@ -593,6 +595,18 @@ var (
 		setting.AllowBool(),
 	)
 
+	// ForgerAllowedRunnerImagePrefixes restricts External forge-runner images admitted on
+	// ModelDeploymentForger resources to a comma-separated list of allowed prefixes. Blank (default)
+	// permits any valid image reference within the namespace's trust domain.
+	ForgerAllowedRunnerImagePrefixes = settings.NewEditable(
+		"forger-allowed-runner-image-prefixes",
+		"Indicates the comma-separated allowed image prefixes for External forge-runner containers on "+
+			"ModelDeploymentForger resources. Blank (default) allows any valid image reference.",
+		setting.InitializeFromEnv(),
+		setting.AllowBlank(),
+		allowRunnerImagePrefixes(),
+	)
+
 	// Model prefetch.
 
 	// ModelPrefetchWarmupImage is the image a ModelPrefetch's warm-up Pod runs on each target
@@ -761,4 +775,24 @@ func validateLayer(l modelstore.Layer) error {
 	}
 
 	return nil
+}
+
+func allowRunnerImagePrefixes() setting.Admission {
+	return func(_ context.Context, _, newVal string) error {
+		hasPrefix := false
+		for _, segment := range strings.Split(newVal, ",") {
+			prefix := strings.TrimSpace(segment)
+			if prefix == "" {
+				continue
+			}
+			if strings.ContainsFunc(prefix, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+				return fmt.Errorf("invalid image prefix %q: must not contain whitespace or control characters", prefix)
+			}
+			hasPrefix = true
+		}
+		if !hasPrefix {
+			return errors.New("at least one non-empty image prefix is required")
+		}
+		return nil
+	}
 }

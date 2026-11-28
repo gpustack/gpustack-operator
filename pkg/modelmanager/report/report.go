@@ -337,6 +337,9 @@ func (r *Reporter) report(ctx context.Context, retryConflict bool) error {
 					continue
 				}
 				time.AfterFunc(conflictRetry, func() { r.Trigger("") })
+				if retryConflict {
+					return fmt.Errorf("update status after %d conflict attempts: %w", maxConflictAttempts, err)
+				}
 				return nil
 			}
 			return fmt.Errorf("update status: %w", err)

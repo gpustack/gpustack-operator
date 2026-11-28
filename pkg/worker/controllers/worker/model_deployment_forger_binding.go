@@ -9,6 +9,7 @@ import (
 	"time"
 
 	core "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -32,15 +33,20 @@ func readForgerBinding(md *workercore.ModelDeployment) (workercore.ModelDeployme
 	return binding, true, nil
 }
 
-func readForgerDecision(md *workercore.ModelDeployment) (workercore.ModelDeploymentForgerDecision, bool, error) {
+type forgerDecisionPayload struct {
+	workercore.ModelDeploymentForgerDecision
+	RolePromotedAt map[string]int64 `json:"rolePromotedAt,omitempty"`
+}
+
+func readForgerDecision(md *workercore.ModelDeployment) (forgerDecisionPayload, bool, error) {
 	if md == nil {
-		return workercore.ModelDeploymentForgerDecision{}, false, nil
+		return forgerDecisionPayload{}, false, nil
 	}
 	value := md.Annotations[workercore.ModelDeploymentForgerDecisionAnnotationKey]
 	if value == "" {
-		return workercore.ModelDeploymentForgerDecision{}, false, nil
+		return forgerDecisionPayload{}, false, nil
 	}
-	var decision workercore.ModelDeploymentForgerDecision
+	var decision forgerDecisionPayload
 	if err := json.Unmarshal([]byte(value), &decision); err != nil {
 		return decision, false, fmt.Errorf("decode target forger decision: %w", err)
 	}
@@ -116,6 +122,225 @@ func (r *ModelDeploymentForgerReconciler) releaseOwnedBinding(
 	return nil
 }
 
+func hasTerminalGenerationOutcome(
+	forgerName string, rs *workercore.ModelDeploymentForgerRoleStatus, artifactName string,
+) bool {
+	if rs == nil || artifactName == "" {
+		return false
+	}
+	for _, g := range rs.Generations {
+		if g.ArtifactName == artifactName &&
+			(g.Outcome == workercore.ModelDeploymentForgerGenerationOutcomePromoted ||
+				g.Outcome == workercore.ModelDeploymentForgerGenerationOutcomeRolledBack) {
+			return true
+		}
+	}
+	if len(rs.Generations) >= forgerMaxGenerationHistory {
+		if parsedGen, ok := parseForgerArtifactGeneration(forgerName, rs.Name, artifactName); ok &&
+			parsedGen < rs.Generations[0].Generation {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveRoleDecisionPromotedAt(
+	decision forgerDecisionPayload, forgerUID, roleName, artifactName string,
+) (time.Time, bool) {
+	if artifactName == "" {
+		return time.Time{}, false
+	}
+	owned, fallbackTS, hasFallback := parseForgerDecisionID(decision.DecisionID, forgerUID)
+	if !owned || decision.KernelArtifacts[roleName] != artifactName {
+		return time.Time{}, false
+	}
+	if tsNS, ok := decision.RolePromotedAt[roleName]; ok && tsNS > 0 {
+		return time.Unix(0, tsNS).UTC(), true
+	}
+	if hasFallback {
+		return fallbackTS, true
+	}
+	return time.Time{}, false
+}
+
+func (r *ModelDeploymentForgerReconciler) rollbackUncommittedPromotions(
+	ctx context.Context,
+	mdf *workercore.ModelDeploymentForger,
+	md *workercore.ModelDeployment,
+	now time.Time,
+) error {
+	if mdf == nil || md == nil {
+		return nil
+	}
+	if binding, hasBinding, bindErr := readForgerBinding(md); bindErr == nil &&
+		hasBinding && binding.ForgerUID != string(mdf.UID) {
+		return nil
+	}
+
+	decision, hasDecision, decErr := readForgerDecision(md)
+	ownedDecision := false
+	if decErr == nil && hasDecision {
+		ownedDecision, _, _ = parseForgerDecisionID(decision.DecisionID, string(mdf.UID))
+	}
+
+	for i := range mdf.Status.Roles {
+		rs := &mdf.Status.Roles[i]
+		mdRole := findModelDeploymentSpecRole(md, rs.Name)
+		mdArtifact := ""
+		if mdRole != nil && mdRole.KernelArtifactRef != nil {
+			mdArtifact = strings.TrimSpace(mdRole.KernelArtifactRef.Name)
+		}
+
+		inPromoting := rs.Phase == workercore.ModelDeploymentForgerRolePhasePromoting
+		uncommittedActive := rs.ActiveKernelArtifact != "" &&
+			mdArtifact == rs.ActiveKernelArtifact &&
+			!hasTerminalGenerationOutcome(mdf.Name, rs, rs.ActiveKernelArtifact)
+		uncommittedDecision := ownedDecision &&
+			mdArtifact != "" &&
+			decision.KernelArtifacts[rs.Name] == mdArtifact &&
+			!hasTerminalGenerationOutcome(mdf.Name, rs, mdArtifact)
+
+		if !inPromoting && !uncommittedActive && !uncommittedDecision {
+			continue
+		}
+
+		revertTarget := strings.TrimSpace(rs.PreviousKernelArtifact)
+		if mdRole != nil && (mdArtifact != revertTarget || (ownedDecision && decision.KernelArtifacts[rs.Name] != revertTarget)) {
+			if err := r.commitRoleKernelArtifact(ctx, mdf, md, rs.Name, revertTarget, now); err != nil {
+				return err
+			}
+		}
+
+		r.forgetPromotion(mdf.UID, rs.Name)
+		rs.ActiveKernelArtifact = revertTarget
+		rs.PreviousKernelArtifact = ""
+		rs.Phase = workercore.ModelDeploymentForgerRolePhaseIdle
+	}
+	return nil
+}
+
+func (r *ModelDeploymentForgerReconciler) cleanupRemovedRoles(
+	ctx context.Context,
+	mdf *workercore.ModelDeploymentForger,
+	md *workercore.ModelDeployment,
+	now time.Time,
+) error {
+	if mdf == nil || len(mdf.Status.Roles) == 0 {
+		return nil
+	}
+
+	specRoles := make(map[string]struct{}, len(mdf.Spec.Roles))
+	for i := range mdf.Spec.Roles {
+		specRoles[mdf.Spec.Roles[i].Name] = struct{}{}
+	}
+
+	hasRemoved := false
+	for i := range mdf.Status.Roles {
+		if _, kept := specRoles[mdf.Status.Roles[i].Name]; !kept {
+			hasRemoved = true
+			break
+		}
+	}
+	if !hasRemoved {
+		return nil
+	}
+
+	canMutateTarget := md != nil
+	if md != nil {
+		if binding, hasBinding, bindErr := readForgerBinding(md); bindErr == nil &&
+			hasBinding && binding.ForgerUID != string(mdf.UID) {
+			canMutateTarget = false
+		}
+	}
+
+	var (
+		decision      forgerDecisionPayload
+		ownedDecision bool
+	)
+	if md != nil {
+		if dec, hasDec, decErr := readForgerDecision(md); decErr == nil && hasDec {
+			decision = dec
+			ownedDecision, _, _ = parseForgerDecisionID(dec.DecisionID, string(mdf.UID))
+		}
+	}
+
+	for i := range mdf.Status.Roles {
+		rs := &mdf.Status.Roles[i]
+		if _, kept := specRoles[rs.Name]; kept {
+			continue
+		}
+
+		if attempt, hasAttempt := r.loadProbe(mdf.UID, rs.Name); hasAttempt {
+			if attempt.PodName != "" && md != nil {
+				if mdRole := findModelDeploymentSpecRole(md, rs.Name); mdRole != nil {
+					if pod, _ := r.findPodByName(ctx, md.Namespace, attempt.PodName); pod != nil {
+						if target, tErr := r.resolveSentinelTarget(ctx, md, mdRole, pod); tErr == nil {
+							_, _ = r.probeClient().DeleteProbe(ctx, target)
+						}
+					}
+				}
+			}
+			r.forgetProbe(mdf.UID, rs.Name)
+		}
+
+		if sb := rs.ActiveSandbox; sb != nil {
+			if sb.PodName != "" {
+				delPod := &core.Pod{ObjectMeta: meta.ObjectMeta{Namespace: mdf.Namespace, Name: sb.PodName}}
+				if err := ctrlcli.IgnoreNotFound(r.Client.Delete(ctx, delPod)); err != nil {
+					return err
+				}
+			}
+			if sb.ConfigMapName != "" {
+				delCM := &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Namespace: mdf.Namespace, Name: sb.ConfigMapName}}
+				if err := ctrlcli.IgnoreNotFound(r.Client.Delete(ctx, delCM)); err != nil {
+					return err
+				}
+			}
+			rs.ActiveSandbox = nil
+		}
+		if err := r.sweepOrphanRoleSandboxes(ctx, mdf, rs.Name, nil); err != nil {
+			return err
+		}
+
+		if canMutateTarget {
+			mdRole := findModelDeploymentSpecRole(md, rs.Name)
+			mdArtifact := ""
+			if mdRole != nil && mdRole.KernelArtifactRef != nil {
+				mdArtifact = strings.TrimSpace(mdRole.KernelArtifactRef.Name)
+			}
+
+			inPromoting := rs.Phase == workercore.ModelDeploymentForgerRolePhasePromoting
+			uncommittedActive := rs.ActiveKernelArtifact != "" &&
+				mdArtifact == rs.ActiveKernelArtifact &&
+				!hasTerminalGenerationOutcome(mdf.Name, rs, rs.ActiveKernelArtifact)
+			uncommittedDecision := ownedDecision &&
+				mdArtifact != "" &&
+				decision.KernelArtifacts[rs.Name] == mdArtifact &&
+				!hasTerminalGenerationOutcome(mdf.Name, rs, mdArtifact)
+
+			if inPromoting || uncommittedActive || uncommittedDecision {
+				revertTarget := strings.TrimSpace(rs.PreviousKernelArtifact)
+				if revertTarget == "" && rs.ActiveKernelArtifact != "" &&
+					rs.ActiveKernelArtifact != mdArtifact &&
+					hasTerminalGenerationOutcome(mdf.Name, rs, rs.ActiveKernelArtifact) {
+					revertTarget = strings.TrimSpace(rs.ActiveKernelArtifact)
+				}
+				_, decisionHasRole := decision.KernelArtifacts[rs.Name]
+				if mdRole != nil && (mdArtifact != revertTarget || (ownedDecision && decisionHasRole)) {
+					if err := r.commitRoleKernelArtifact(ctx, mdf, md, rs.Name, revertTarget, now); err != nil {
+						return err
+					}
+				}
+				rs.ActiveKernelArtifact = revertTarget
+				rs.PreviousKernelArtifact = ""
+				rs.Phase = workercore.ModelDeploymentForgerRolePhaseIdle
+			}
+		}
+		r.forgetPromotion(mdf.UID, rs.Name)
+	}
+	return nil
+}
+
 func (r *ModelDeploymentForgerReconciler) recoverDecision(
 	ctx context.Context, mdf *workercore.ModelDeploymentForger, md *workercore.ModelDeployment,
 ) {
@@ -132,7 +357,7 @@ func (r *ModelDeploymentForgerReconciler) recoverDecision(
 	if bindErr != nil {
 		return
 	}
-	ownedByPrefix, promotedAt, hasMeta := parseForgerDecisionID(decision.DecisionID, string(mdf.UID))
+	ownedByPrefix, _, _ := parseForgerDecisionID(decision.DecisionID, string(mdf.UID))
 	if hasBinding {
 		if binding.ForgerUID != string(mdf.UID) || decision.Term != binding.Term {
 			return
@@ -159,38 +384,39 @@ func (r *ModelDeploymentForgerReconciler) recoverDecision(
 		if committedArtifact == "" {
 			continue
 		}
-		alreadyPromoted := false
-		for _, g := range rs.Generations {
-			if g.ArtifactName == committedArtifact &&
-				(g.Outcome == workercore.ModelDeploymentForgerGenerationOutcomePromoted ||
-					g.Outcome == workercore.ModelDeploymentForgerGenerationOutcomeRolledBack) {
-				alreadyPromoted = true
-				break
-			}
-		}
-		if alreadyPromoted {
+		if hasTerminalGenerationOutcome(mdf.Name, rs, committedArtifact) {
 			if rs.ActiveKernelArtifact == "" {
 				rs.ActiveKernelArtifact = committedArtifact
 			}
 			continue
 		}
 
+		if rs.ActiveKernelArtifact != "" && rs.ActiveKernelArtifact != committedArtifact && rs.PreviousKernelArtifact == "" {
+			rs.PreviousKernelArtifact = rs.ActiveKernelArtifact
+		}
 		if rs.Phase == workercore.ModelDeploymentForgerRolePhasePublishing ||
-			(rs.Phase == workercore.ModelDeploymentForgerRolePhaseIdle && rs.ActiveKernelArtifact != committedArtifact) {
+			rs.Phase == workercore.ModelDeploymentForgerRolePhaseIdle ||
+			rs.Phase == "" {
 			rs.ActiveKernelArtifact = committedArtifact
 			if parsedGen, genOK := parseForgerArtifactGeneration(mdf.Name, rs.Name, committedArtifact); genOK && parsedGen > rs.ActiveGeneration {
 				rs.ActiveGeneration = parsedGen
 			}
-			if mdf.Spec.Mode == workercore.ModelDeploymentForgerModeActive && !mdf.Spec.Suspend {
-				rs.Phase = workercore.ModelDeploymentForgerRolePhasePromoting
+		}
+		if mdf.Spec.Mode == workercore.ModelDeploymentForgerModeActive && !mdf.Spec.Suspend {
+			rs.ActiveKernelArtifact = committedArtifact
+			if parsedGen, genOK := parseForgerArtifactGeneration(mdf.Name, rs.Name, committedArtifact); genOK && parsedGen > rs.ActiveGeneration {
+				rs.ActiveGeneration = parsedGen
 			}
+			rs.Phase = workercore.ModelDeploymentForgerRolePhasePromoting
 		}
 
-		if hasMeta && rs.Phase == workercore.ModelDeploymentForgerRolePhasePromoting {
-			r.rememberPromotionIfAbsent(mdf.UID, rs.Name, forgerPromotionAttempt{
-				ArtifactName: committedArtifact,
-				StartedAt:    promotedAt,
-			})
+		if rs.Phase == workercore.ModelDeploymentForgerRolePhasePromoting {
+			if promotedAt, hasMeta := resolveRoleDecisionPromotedAt(decision, string(mdf.UID), rs.Name, committedArtifact); hasMeta {
+				r.rememberPromotionIfAbsent(mdf.UID, rs.Name, forgerPromotionAttempt{
+					ArtifactName: committedArtifact,
+					StartedAt:    promotedAt,
+				})
+			}
 		}
 	}
 
@@ -261,17 +487,49 @@ func (r *ModelDeploymentForgerReconciler) commitRoleKernelArtifact(
 
 	managedRefs := make(map[string]string, len(mdf.Spec.Roles))
 	currentRefs := modelDeploymentKernelArtifactRefs(fresh)
+	isTargetedRole := false
 	for i := range mdf.Spec.Roles {
 		name := mdf.Spec.Roles[i].Name
 		managedRefs[name] = currentRefs[name]
+		if name == roleName {
+			isTargetedRole = true
+		}
+	}
+
+	rolePromotedAt := make(map[string]int64, len(mdf.Spec.Roles))
+	if prevDec, hasPrevDec, decErr := readForgerDecision(fresh); decErr == nil && hasPrevDec && prevDec.Term == term {
+		if prevOwned, prevFallbackTS, prevHasFallback := parseForgerDecisionID(prevDec.DecisionID, string(mdf.UID)); prevOwned {
+			for i := range mdf.Spec.Roles {
+				name := mdf.Spec.Roles[i].Name
+				if name == roleName || managedRefs[name] == "" {
+					continue
+				}
+				if tsNS, ok := prevDec.RolePromotedAt[name]; ok && tsNS > 0 && prevDec.KernelArtifacts[name] == managedRefs[name] {
+					rolePromotedAt[name] = tsNS
+				} else if len(prevDec.RolePromotedAt) == 0 && prevHasFallback && prevDec.KernelArtifacts[name] == managedRefs[name] {
+					rolePromotedAt[name] = prevFallbackTS.UnixNano()
+				}
+			}
+		}
+	}
+	if artifactName == "" || !isTargetedRole {
+		delete(rolePromotedAt, roleName)
+	} else {
+		rolePromotedAt[roleName] = now.UnixNano()
+	}
+	if len(rolePromotedAt) == 0 {
+		rolePromotedAt = nil
 	}
 
 	preUpdateGen := fresh.Generation
 	decisionID := formatForgerDecisionID(string(mdf.UID), term, preUpdateGen, now)
-	decisionBytes, err := json.Marshal(workercore.ModelDeploymentForgerDecision{
-		DecisionID:      decisionID,
-		Term:            term,
-		KernelArtifacts: managedRefs,
+	decisionBytes, err := json.Marshal(forgerDecisionPayload{
+		ModelDeploymentForgerDecision: workercore.ModelDeploymentForgerDecision{
+			DecisionID:      decisionID,
+			Term:            term,
+			KernelArtifacts: managedRefs,
+		},
+		RolePromotedAt: rolePromotedAt,
 	})
 	if err != nil {
 		return err

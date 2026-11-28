@@ -95,16 +95,18 @@ Each target key encodes static per-rank shard dimensions after *tensor paralleli
 ## Runner and verifier contract
 
 In `sandbox.runnerMode: External`, the operator launches a `restricted` Kueue-admitted `ForgeSandbox`
-`Pod` requesting `1` whole accelerator card matching the probed role's GPU architecture. Three
-stages run inside the `Pod`:
+`Pod` requesting `1` whole accelerator card matching the probed role's GPU architecture. Four
+stages run inside the `Pod` in `External` mode (three in `Mock` mode):
 
 1. **`initContainer: forge-runner`**: Reads `forge-request.json`, `definitions/*.json`, and
    `workloads/*.jsonl` from `/var/run/gpustack/forge/input/` and writes `dispatch-manifest.json`,
    `solutions/*.json`, `kernels/*`, and `traces/*.json` into the `forge-output` `emptyDir`.
-2. **`initContainer: forge-verifier`**: Mounts `forge-output` read-only, validates file integrity and
+2. **`initContainer: forge-stage-sentinel`** (`External` mode only): Copies the operator's built-in
+   `gpustack-engine-sentinel` package into a read-only `forge-sentinel` `emptyDir` for the verifier.
+3. **`initContainer: forge-verifier`**: Mounts `forge-output` read-only, validates file integrity and
    checksums, re-executes candidate kernels on the sandbox GPU against held-out workloads, enforces
    *`minSpeedupRatio`* and numerical tolerances, and writes `verification-report.json`.
-3. **`forge-hold` main container**: Holds the `Pod` in `Running` after both init containers exit `0`
+4. **`forge-hold` main container**: Holds the `Pod` in `Running` after all init containers exit `0`
    so the seed `Node`'s `model-manager` can ingest `forge-output` directly from kubelet's `emptyDir`.
 
 Clusters may restrict allowed `runnerImage` prefixes with the `forger-allowed-runner-image-prefixes`
@@ -174,7 +176,7 @@ kubectl -n <ns> get md <deployment> -o jsonpath='{range .status.conditions[*]}{.
 | `ForgeSandbox` stuck pending | `Blocked=True` (`SandboxQuotaPending`) | Free 1 whole accelerator card in the target `ClusterQueue` or raise *`sandbox.priorityClassName`*. |
 | Multi-node rollout blocked | `KernelsReady=False` (`PeerSyncDisabled`) | Enable `model-store-peer-sync` and set `modelManager.port: 32445` on consumer `Node`s. |
 | Pin ceiling reached | `Blocked=True` (`PinnedCapacityExceeded`) | Delete unused `ModelPrefetch` pins or lower *`rollout.maxRetainedGenerations`*. |
-| Canary rolled back | `Ready=True` (`RollbackCompleted`), `mkart` `Quarantined=True` | Inspect `ForgeSandbox` verification traces and `Pod` startup logs before re-forging. |
+| Canary rolled back | `Ready=True` (`RollbackCompleted`), `mkart` `status.quarantined: true` | Inspect `ForgeSandbox` verification traces and `Pod` startup logs before re-forging. |
 
 ---
 

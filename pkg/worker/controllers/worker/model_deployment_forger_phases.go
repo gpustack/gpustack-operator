@@ -3,6 +3,9 @@ package worker
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +18,7 @@ import (
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,12 +34,23 @@ import (
 )
 
 const (
-	forgerDefaultPollInterval    = 2 * time.Second
-	forgerIdleRetryInterval      = 5 * time.Second
-	forgerProbeWallClockTimeout  = 20 * time.Second
-	forgerSandboxQuotaGrace      = 60 * time.Second
-	forgerMaxKubeResourceNameLen = 63
+	forgerDefaultPollInterval            = 2 * time.Second
+	forgerIdleRetryInterval              = 5 * time.Second
+	forgerProbeWallClockTimeout          = 20 * time.Second
+	forgerSandboxQuotaGrace              = 60 * time.Second
+	forgerMaxKubeResourceNameLen         = 63
+	forgerRunnerFingerprintAnnotationKey = "forger.gpustack.ai/runner-fingerprint"
+	forgerTargetDeploymentAnnotationKey  = "forger.gpustack.ai/target-deployment"
 )
+
+func forgerRunnerFingerprint(mdf *workercore.ModelDeploymentForger) string {
+	var runnerImage string
+	if mdf != nil {
+		runnerImage = strings.TrimSpace(mdf.Spec.Sandbox.RunnerImage)
+	}
+	sum := sha256.Sum256([]byte(string(effectiveRunnerMode(mdf)) + "\x00" + runnerImage))
+	return hex.EncodeToString(sum[:])[:16]
+}
 
 type forgerBlockState struct {
 	Blocked bool
@@ -183,28 +198,38 @@ func forgerArtifactName(forgerName, roleName string, generation int64) string {
 }
 
 func parseForgerArtifactGeneration(forgerName, roleName, artifactName string) (int64, bool) {
-	prefix := forgerName + "-" + roleName + "-gen-"
-	if strings.HasPrefix(artifactName, prefix) {
-		n, err := strconv.ParseInt(strings.TrimPrefix(artifactName, prefix), 10, 64)
-		return n, err == nil && n >= 1
-	}
 	idx := strings.LastIndex(artifactName, "-gen-")
 	if idx < 0 {
 		return 0, false
 	}
 	n, err := strconv.ParseInt(artifactName[idx+5:], 10, 64)
-	return n, err == nil && n >= 1
+	if err != nil || n < 1 {
+		return 0, false
+	}
+	if forgerArtifactName(forgerName, roleName, n) != artifactName {
+		return 0, false
+	}
+	return n, true
 }
 
-func forgerSandboxObjectNames(forgerName, roleName string, generation int64) (podName, cmName string) {
+func newForgerSandboxObjectNames(forgerName, roleName string, generation int64) (podName, cmName string, err error) {
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", "", fmt.Errorf("generate sandbox nonce: %w", err)
+	}
+	podName, cmName = forgerSandboxObjectNames(forgerName, roleName, generation, hex.EncodeToString(buf[:]))
+	return podName, cmName, nil
+}
+
+func forgerSandboxObjectNames(forgerName, roleName string, generation int64, nonce string) (podName, cmName string) {
 	raw := fmt.Sprintf("%s-%s-gen-%d", forgerName, roleName, generation)
-	const maxPrefix = forgerMaxKubeResourceNameLen - len("-sandbox")
+	maxPrefix := forgerMaxKubeResourceNameLen - len("-") - len(nonce) - len("-sandbox")
 	prefix := raw
 	if len(prefix) > maxPrefix {
 		hash := stringx.SumBySHA256(raw)[:8]
 		prefix = strings.TrimRight(raw[:maxPrefix-9], "-.") + "-" + hash
 	}
-	return prefix + "-sandbox", prefix + "-input"
+	return prefix + "-" + nonce + "-sandbox", prefix + "-" + nonce + "-input"
 }
 
 func (r *ModelDeploymentForgerReconciler) nextGenerationNumber(
@@ -226,10 +251,8 @@ func (r *ModelDeploymentForgerReconciler) nextGenerationNumber(
 	}
 	for i := range list.Items {
 		mka := &list.Items[i]
-		if mka.Spec.Source.NodeStore != nil && mka.Spec.Source.NodeStore.ForgerRef.Name == mdf.Name {
-			if gen, ok := parseForgerArtifactGeneration(mdf.Name, roleName, mka.Name); ok && gen > highest {
-				highest = gen
-			}
+		if gen, ok := parseForgerArtifactGeneration(mdf.Name, roleName, mka.Name); ok && gen > highest {
+			highest = gen
 		}
 	}
 	return highest + 1, nil
@@ -344,7 +367,7 @@ func (r *ModelDeploymentForgerReconciler) reconcileSingleRole(
 	switch rs.Phase {
 	case "", workercore.ModelDeploymentForgerRolePhaseIdle:
 		rs.Phase = workercore.ModelDeploymentForgerRolePhaseIdle
-		return r.reconcileIdleRole(ctx, mdf, md, roleSpec, mdRole, rs, block, now)
+		return r.reconcileIdleRole(ctx, before, mdf, md, roleSpec, mdRole, rs, block, now)
 	case workercore.ModelDeploymentForgerRolePhaseProbing:
 		return r.reconcileProbingRole(ctx, before, mdf, md, roleSpec, mdRole, rs, block, now)
 	case workercore.ModelDeploymentForgerRolePhaseForging, workercore.ModelDeploymentForgerRolePhaseVerifying:
@@ -359,9 +382,75 @@ func (r *ModelDeploymentForgerReconciler) reconcileSingleRole(
 	}
 }
 
-func (r *ModelDeploymentForgerReconciler) reconcileIdleRole(
+func hasControllerOwnerUID(obj meta.Object, uid types.UID) bool {
+	if obj == nil || uid == "" {
+		return false
+	}
+	for _, ref := range obj.GetOwnerReferences() {
+		if ref.Controller != nil && *ref.Controller && ref.UID == uid {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *ModelDeploymentForgerReconciler) sweepOrphanRoleSandboxes(
 	ctx context.Context,
 	mdf *workercore.ModelDeploymentForger,
+	roleName string,
+	rs *workercore.ModelDeploymentForgerRoleStatus,
+) error {
+	if mdf == nil || mdf.UID == "" || roleName == "" {
+		return nil
+	}
+	var activePodName, activeCMName string
+	if rs != nil && rs.ActiveSandbox != nil {
+		activePodName = rs.ActiveSandbox.PodName
+		activeCMName = rs.ActiveSandbox.ConfigMapName
+	}
+
+	match := ctrlcli.MatchingLabels{
+		forger.SandboxLabelRole: forger.SafeLabelValue(roleName),
+	}
+	pods := new(core.PodList)
+	if err := r.Client.List(ctx, pods, ctrlcli.InNamespace(mdf.Namespace), match); err != nil {
+		return err
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if !pod.DeletionTimestamp.IsZero() || pod.Name == activePodName {
+			continue
+		}
+		if !hasControllerOwnerUID(pod, mdf.UID) {
+			continue
+		}
+		if err := ctrlcli.IgnoreNotFound(r.Client.Delete(ctx, pod)); err != nil {
+			return err
+		}
+	}
+
+	cms := new(core.ConfigMapList)
+	if err := r.Client.List(ctx, cms, ctrlcli.InNamespace(mdf.Namespace), match); err != nil {
+		return err
+	}
+	for i := range cms.Items {
+		cm := &cms.Items[i]
+		if !cm.DeletionTimestamp.IsZero() || cm.Name == activeCMName {
+			continue
+		}
+		if !hasControllerOwnerUID(cm, mdf.UID) {
+			continue
+		}
+		if err := ctrlcli.IgnoreNotFound(r.Client.Delete(ctx, cm)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *ModelDeploymentForgerReconciler) reconcileIdleRole(
+	ctx context.Context,
+	before, mdf *workercore.ModelDeploymentForger,
 	md *workercore.ModelDeployment,
 	roleSpec *workercore.ModelDeploymentForgerRoleSpec,
 	mdRole *workercore.ModelDeploymentRole,
@@ -369,10 +458,19 @@ func (r *ModelDeploymentForgerReconciler) reconcileIdleRole(
 	block *forgerBlockState,
 	now time.Time,
 ) (ctrl.Result, error) {
+	if err := r.sweepOrphanRoleSandboxes(ctx, mdf, roleSpec.Name, rs); err != nil {
+		return ctrl.Result{}, err
+	}
+	sourceLost, err := r.roleActiveArtifactSourceLost(ctx, mdf, mdRole, rs)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	cooldown := effectiveProbeCooldown(mdf)
-	if last := lastPassTimestamp(rs); !last.IsZero() {
-		if elapsed := now.Sub(last); elapsed < cooldown {
-			return ctrl.Result{RequeueAfter: cooldown - elapsed}, nil
+	if !sourceLost {
+		if last := lastPassTimestamp(rs); !last.IsZero() {
+			if elapsed := now.Sub(last); elapsed < cooldown {
+				return ctrl.Result{RequeueAfter: cooldown - elapsed}, nil
+			}
 		}
 	}
 
@@ -470,7 +568,7 @@ func (r *ModelDeploymentForgerReconciler) reconcileIdleRole(
 	rs.Phase = workercore.ModelDeploymentForgerRolePhaseProbing
 
 	if startResp != nil && startResp.State == runtimecontrol.ProbeStateCompleted && startResp.Payload != nil {
-		return r.finishCompletedProbe(ctx, mdf, md, roleSpec, mdRole, rs, leaderPod.Spec.NodeName, startResp, now, now)
+		return r.finishCompletedProbe(ctx, before, mdf, md, roleSpec, mdRole, rs, leaderPod.Spec.NodeName, startResp, now, now)
 	}
 	return ctrl.Result{RequeueAfter: forgerDefaultPollInterval}, nil
 }
@@ -485,6 +583,9 @@ func (r *ModelDeploymentForgerReconciler) reconcileProbingRole(
 	block *forgerBlockState,
 	now time.Time,
 ) (ctrl.Result, error) {
+	if err := r.sweepOrphanRoleSandboxes(ctx, mdf, roleSpec.Name, rs); err != nil {
+		return ctrl.Result{}, err
+	}
 	attempt, hasAttempt := r.loadProbe(mdf.UID, roleSpec.Name)
 
 	if reason, msg, held := evaluateRoleRuntimeHold(md, roleSpec.Name); held {
@@ -563,18 +664,7 @@ func (r *ModelDeploymentForgerReconciler) reconcileProbingRole(
 			r.recordFailedGeneration(mdf, rs, "EmptyProbePayload", "completed probe returned nil payload", startedAt, now)
 			return ctrl.Result{RequeueAfter: effectiveProbeCooldown(mdf)}, nil
 		}
-		res, finishErr := r.finishCompletedProbe(ctx, mdf, md, roleSpec, mdRole, rs, targetPod.Spec.NodeName, probeResp, startedAt, now)
-		if finishErr != nil {
-			return ctrl.Result{}, finishErr
-		}
-		if rs.Phase == workercore.ModelDeploymentForgerRolePhaseForging && rs.ActiveSandbox != nil {
-			mdf.Status.ObservedGeneration = mdf.Generation
-			if err := r.updateStatus(ctx, before, mdf); err != nil {
-				return ctrl.Result{}, err
-			}
-			*before = *mdf.DeepCopy()
-		}
-		return res, nil
+		return r.finishCompletedProbe(ctx, before, mdf, md, roleSpec, mdRole, rs, targetPod.Spec.NodeName, probeResp, startedAt, now)
 
 	case runtimecontrol.ProbeStateFailed, runtimecontrol.ProbeStateAborted:
 		recordForgerProbeMetric(engineLabel, forgerProbeResultError, 0)
@@ -595,7 +685,7 @@ func (r *ModelDeploymentForgerReconciler) reconcileProbingRole(
 
 func (r *ModelDeploymentForgerReconciler) finishCompletedProbe(
 	ctx context.Context,
-	mdf *workercore.ModelDeploymentForger,
+	before, mdf *workercore.ModelDeploymentForger,
 	md *workercore.ModelDeployment,
 	roleSpec *workercore.ModelDeploymentForgerRoleSpec,
 	mdRole *workercore.ModelDeploymentRole,
@@ -617,7 +707,9 @@ func (r *ModelDeploymentForgerReconciler) finishCompletedProbe(
 		return ctrl.Result{RequeueAfter: forgerIdleRetryInterval}, nil
 	}
 
-	coveredKeys, quarantinedKeys, err := r.collectCoveredAndQuarantinedKeys(ctx, mdf, mdRole, rs)
+	coveredKeys, quarantinedKeys, err := r.collectCoveredAndQuarantinedKeys(
+		ctx, mdf, roleSpec.Name, forgerRunnerFingerprint(mdf), mdRole, rs,
+	)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -739,12 +831,12 @@ func (r *ModelDeploymentForgerReconciler) finishCompletedProbe(
 		return ctrl.Result{RequeueAfter: cooldown}, nil
 	}
 
-	return r.launchForgeSandbox(ctx, mdf, md, roleSpec, mdRole, rs, hw, normVer, selectedKeys, baselineLatencies, probeResp.Payload, now)
+	return r.launchForgeSandbox(ctx, before, mdf, md, roleSpec, mdRole, rs, hw, normVer, selectedKeys, baselineLatencies, probeResp.Payload, now)
 }
 
 func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 	ctx context.Context,
-	mdf *workercore.ModelDeploymentForger,
+	before, mdf *workercore.ModelDeploymentForger,
 	md *workercore.ModelDeployment,
 	roleSpec *workercore.ModelDeploymentForgerRoleSpec,
 	mdRole *workercore.ModelDeploymentRole,
@@ -774,7 +866,10 @@ func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 	thresholds.MinSpeedupRatio = minSpeedup
 
 	defs, workloads := buildSandboxDefinitionsAndWorkloads(payload, selectedKeys)
-	podName, cmName := forgerSandboxObjectNames(mdf.Name, roleSpec.Name, rs.ActiveGeneration)
+	podName, cmName, err := newForgerSandboxObjectNames(mdf.Name, roleSpec.Name, rs.ActiveGeneration)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
 	cm, items, err := forger.BuildInputConfigMap(forger.InputConfigMapSpec{
 		Forger:     mdf,
@@ -802,14 +897,7 @@ func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 	}
 
 	if err := r.Client.Create(ctx, cm); err != nil {
-		if !kerrors.IsAlreadyExists(err) {
-			return ctrl.Result{}, err
-		}
-		existingCM := new(core.ConfigMap)
-		if getErr := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(cm), existingCM); getErr != nil {
-			return ctrl.Result{}, getErr
-		}
-		items = forger.ConfigMapVolumeItems(existingCM)
+		return ctrl.Result{}, err
 	}
 
 	engineImg := strings.TrimSpace(mdRole.Image)
@@ -840,17 +928,12 @@ func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 	}
 
 	if err := r.Client.Create(ctx, pod); err != nil {
-		if !kerrors.IsAlreadyExists(err) {
-			return ctrl.Result{}, err
-		}
-		existingPod := new(core.Pod)
-		if getErr := r.apiReaderOrClient().Get(ctx, ctrlcli.ObjectKeyFromObject(pod), existingPod); getErr != nil {
-			return ctrl.Result{}, getErr
-		}
-		pod = existingPod
+		_ = r.Client.Delete(ctx, cm)
+		return ctrl.Result{}, err
 	}
 
 	startedMeta := meta.NewTime(now)
+	gen := rs.ActiveGeneration
 	rs.Phase = workercore.ModelDeploymentForgerRolePhaseForging
 	rs.ActiveSandbox = &workercore.ModelDeploymentForgerSandboxStatus{
 		PodName:       pod.Name,
@@ -859,11 +942,20 @@ func (r *ModelDeploymentForgerReconciler) launchForgeSandbox(
 		ConfigMapName: cmName,
 		StartedAt:     &startedMeta,
 	}
+	mdf.Status.ObservedGeneration = mdf.Generation
+	r.updateSummaryReadyCondition(mdf, now)
+	if err := r.updateStatus(ctx, before, mdf); err != nil {
+		_ = ctrlcli.IgnoreNotFound(r.Client.Delete(ctx, pod))
+		_ = ctrlcli.IgnoreNotFound(r.Client.Delete(ctx, cm))
+		rs.ActiveSandbox = nil
+		return ctrl.Result{}, err
+	}
+	*before = *mdf.DeepCopy()
 
 	if r.Recorder != nil {
 		r.Recorder.Eventf(mdf, core.EventTypeNormal, "SandboxCreated",
 			"created Kueue ForgeSandbox Pod %s for role %s generation %d",
-			pod.Name, roleSpec.Name, rs.ActiveGeneration)
+			pod.Name, roleSpec.Name, gen)
 	}
 	return ctrl.Result{RequeueAfter: forgerDefaultPollInterval}, nil
 }
@@ -1114,6 +1206,27 @@ func (r *ModelDeploymentForgerReconciler) reconcilePublishingRole(
 	if err != nil && !kerrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
+	if err == nil && (mka.Spec.Source.NodeStore == nil || mka.Spec.Source.NodeStore.ForgerRef.UID != string(mdf.UID)) {
+		startedAt := now
+		if rs.ActiveSandbox != nil {
+			if rs.ActiveSandbox.StartedAt != nil {
+				startedAt = rs.ActiveSandbox.StartedAt.Time
+			}
+			r.cleanupRoleSandboxObjects(ctx, mdf.Namespace, rs.ActiveSandbox)
+			rs.ActiveSandbox = nil
+		}
+		r.recordFailedGeneration(
+			mdf, rs, "ArtifactNameConflict",
+			fmt.Sprintf("ModelKernelArtifact %q already exists and is not owned by this forger", artifactName),
+			startedAt, now,
+		)
+		if nextGen, genErr := r.nextGenerationNumber(ctx, mdf, roleSpec.Name, rs); genErr == nil {
+			rs.ActiveGeneration = nextGen
+		} else {
+			rs.ActiveGeneration = gen + 1
+		}
+		return ctrl.Result{RequeueAfter: effectiveProbeCooldown(mdf)}, nil
+	}
 
 	if kerrors.IsNotFound(err) {
 		sb := rs.ActiveSandbox
@@ -1178,6 +1291,18 @@ func (r *ModelDeploymentForgerReconciler) reconcilePublishingRole(
 			return ctrl.Result{RequeueAfter: forgerIdleRetryInterval}, nil //nolint:nilerr // transient seed endpoint errors retry on schedule.
 		}
 
+		if ingestResp == nil {
+			return ctrl.Result{RequeueAfter: forgerIdleRetryInterval}, nil
+		}
+		var keyErr error
+		compat, keyErr = applyIngestedKernelKeys(compat, ingestResp.KernelKeys)
+		if keyErr != nil {
+			r.cleanupRoleSandboxObjects(ctx, mdf.Namespace, sb)
+			rs.ActiveSandbox = nil
+			r.recordFailedGeneration(mdf, rs, "IngestRejected", keyErr.Error(), startedAt, now)
+			return ctrl.Result{RequeueAfter: effectiveProbeCooldown(mdf)}, nil
+		}
+
 		publishedSeed := strings.TrimSpace(ingestResp.SeedNode)
 		if publishedSeed == "" {
 			publishedSeed = seedNode
@@ -1189,9 +1314,13 @@ func (r *ModelDeploymentForgerReconciler) reconcilePublishingRole(
 				Name:      artifactName,
 				Labels: map[string]string{
 					forger.SandboxLabelName:       "model-deployment-forger",
-					forger.SandboxLabelInstance:   mdf.Name,
-					forger.SandboxLabelRole:       roleSpec.Name,
+					forger.SandboxLabelInstance:   forger.SafeLabelValue(mdf.Name),
+					forger.SandboxLabelRole:       forger.SafeLabelValue(roleSpec.Name),
 					forger.SandboxLabelGeneration: strconv.FormatInt(gen, 10),
+				},
+				Annotations: map[string]string{
+					forgerRunnerFingerprintAnnotationKey: forgerRunnerFingerprint(mdf),
+					forgerTargetDeploymentAnnotationKey:  mdf.Spec.TargetRef.Name,
 				},
 			},
 			Spec: workercore.ModelKernelArtifactSpec{
@@ -1212,10 +1341,33 @@ func (r *ModelDeploymentForgerReconciler) reconcilePublishingRole(
 			},
 		}
 
-		if createErr := r.Client.Create(ctx, mka); createErr != nil && !kerrors.IsAlreadyExists(createErr) {
-			return ctrl.Result{}, createErr
-		}
-		if getErr := r.apiReaderOrClient().Get(ctx, ctrlcli.ObjectKeyFromObject(mka), mka); getErr != nil {
+		if createErr := r.Client.Create(ctx, mka); createErr != nil {
+			if !kerrors.IsAlreadyExists(createErr) {
+				return ctrl.Result{}, createErr
+			}
+			existing := new(workercore.ModelKernelArtifact)
+			if getErr := r.apiReaderOrClient().Get(ctx, ctrlcli.ObjectKeyFromObject(mka), existing); getErr != nil {
+				return ctrl.Result{}, getErr
+			}
+			if existing.Spec.Source.NodeStore == nil ||
+				existing.Spec.Source.NodeStore.ForgerRef.UID != string(mdf.UID) ||
+				existing.Spec.Source.NodeStore.ManifestDigest != ingestResp.ManifestDigest {
+				r.cleanupRoleSandboxObjects(ctx, mdf.Namespace, sb)
+				rs.ActiveSandbox = nil
+				r.recordFailedGeneration(
+					mdf, rs, "ArtifactNameConflict",
+					fmt.Sprintf("ModelKernelArtifact %q already exists with conflicting owner or manifest digest", artifactName),
+					startedAt, now,
+				)
+				if nextGen, genErr := r.nextGenerationNumber(ctx, mdf, roleSpec.Name, rs); genErr == nil {
+					rs.ActiveGeneration = nextGen
+				} else {
+					rs.ActiveGeneration = gen + 1
+				}
+				return ctrl.Result{RequeueAfter: effectiveProbeCooldown(mdf)}, nil
+			}
+			mka = existing
+		} else if getErr := r.apiReaderOrClient().Get(ctx, ctrlcli.ObjectKeyFromObject(mka), mka); getErr != nil {
 			return ctrl.Result{}, getErr
 		}
 
@@ -1258,7 +1410,10 @@ func (r *ModelDeploymentForgerReconciler) reconcilePublishingRole(
 		_ = r.pruneRetiredKernelArtifacts(ctx, mdf, md, roleSpec.Name)
 	}
 
-	if !ModelKernelArtifactConditionResolved.IsTrue(mka) || mka.Status.Nodes == nil || mka.Status.Nodes.Ready < 1 {
+	if !ModelKernelArtifactConditionResolved.IsTrue(mka) ||
+		mka.Status.Nodes == nil ||
+		mka.Status.Nodes.Ready < 1 ||
+		!ModelKernelArtifactConditionPinned.IsTrue(mka) {
 		return ctrl.Result{RequeueAfter: forgerDefaultPollInterval}, nil
 	}
 
@@ -1312,23 +1467,32 @@ func (r *ModelDeploymentForgerReconciler) reconcilePublishingRole(
 	if mdRole.KernelArtifactRef != nil && mdRole.KernelArtifactRef.Name != "" && mdRole.KernelArtifactRef.Name != mka.Name {
 		prevRef = mdRole.KernelArtifactRef.Name
 	}
+
+	if err := r.commitRoleKernelArtifact(ctx, mdf, md, roleSpec.Name, mka.Name, now); err != nil {
+		if kerrors.IsInvalid(err) || kerrors.IsForbidden(err) {
+			startTime := mka.CreationTimestamp.Time
+			if startTime.IsZero() {
+				startTime = now
+			}
+			r.recordFailedGenerationWithArtifact(mdf, rs, mka.Name, manifestDigest, "PromotionRejected", err.Error(), startTime, now)
+			return ctrl.Result{RequeueAfter: effectiveProbeCooldown(mdf)}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
 	rs.PreviousKernelArtifact = prevRef
 	rs.ActiveKernelArtifact = mka.Name
 	rs.Phase = workercore.ModelDeploymentForgerRolePhasePromoting
+	r.rememberPromotion(mdf.UID, roleSpec.Name, forgerPromotionAttempt{
+		ArtifactName: mka.Name,
+		StartedAt:    now,
+	})
 
 	mdf.Status.ObservedGeneration = mdf.Generation
 	if err := r.updateStatus(ctx, before, mdf); err != nil {
 		return ctrl.Result{}, err
 	}
 	*before = *mdf.DeepCopy()
-
-	if err := r.commitRoleKernelArtifact(ctx, mdf, md, roleSpec.Name, mka.Name, now); err != nil {
-		return ctrl.Result{}, err
-	}
-	r.rememberPromotion(mdf.UID, roleSpec.Name, forgerPromotionAttempt{
-		ArtifactName: mka.Name,
-		StartedAt:    now,
-	})
 
 	if r.Recorder != nil {
 		r.Recorder.Eventf(mdf, core.EventTypeNormal, "PromotionStarted",
@@ -1371,6 +1535,42 @@ func (r *ModelDeploymentForgerReconciler) readSandboxInputCompatibility(
 		"sandbox input ConfigMap %q for %s/%s had no readable %s",
 		cmName, hw.Manufacturer, normVer, forger.ForgeRequestFileName,
 	)
+}
+
+func applyIngestedKernelKeys(
+	compat workercore.ModelKernelArtifactCompatibility,
+	ingestedKeys []string,
+) (workercore.ModelKernelArtifactCompatibility, error) {
+	if len(ingestedKeys) == 0 {
+		return compat, nil
+	}
+	var allowed map[string]struct{}
+	if len(compat.KernelKeys) > 0 {
+		allowed = make(map[string]struct{}, len(compat.KernelKeys))
+		for _, k := range compat.KernelKeys {
+			allowed[k] = struct{}{}
+		}
+	}
+	resolved := make([]string, 0, len(ingestedKeys))
+	seen := make(map[string]struct{}, len(ingestedKeys))
+	for i, key := range ingestedKeys {
+		if strings.TrimSpace(key) == "" {
+			return workercore.ModelKernelArtifactCompatibility{}, fmt.Errorf("ingested kernelKeys[%d] is empty", i)
+		}
+		if len(allowed) > 0 {
+			if _, ok := allowed[key]; !ok {
+				return workercore.ModelKernelArtifactCompatibility{},
+					fmt.Errorf("ingested kernel key %q was not requested in targetKernelKeys", key)
+			}
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		resolved = append(resolved, key)
+	}
+	compat.KernelKeys = resolved
+	return compat, nil
 }
 
 func (r *ModelDeploymentForgerReconciler) reconcilePromotingRole(
@@ -1520,7 +1720,7 @@ func (r *ModelDeploymentForgerReconciler) resolvePromotionTracking(
 	}
 
 	if decision, hasDec, err := readForgerDecision(md); err == nil && hasDec {
-		if _, ts, hasMeta := parseForgerDecisionID(decision.DecisionID, string(mdf.UID)); hasMeta {
+		if ts, hasMeta := resolveRoleDecisionPromotedAt(decision, string(mdf.UID), roleName, mka.Name); hasMeta {
 			r.rememberPromotion(mdf.UID, roleName, forgerPromotionAttempt{
 				ArtifactName: mka.Name,
 				StartedAt:    ts,
@@ -1709,27 +1909,10 @@ func roleObservedKernelArtifactMatches(md *workercore.ModelDeployment, roleName,
 func summarizeRuntimeConfigKernelState(
 	rc *runtimecontrol.RuntimeConfigState,
 ) (loadErr, dispatchDigest string, loadedKeys []string) {
-	if rc == nil {
+	st := kernelRuntimeStateFromRuntimeConfig(rc)
+	if st == nil {
 		return "", "", nil
 	}
-	st := &ModelDeploymentKernelRuntimeState{
-		BootID:                 rc.BootID,
-		Ready:                  rc.Ready,
-		Paused:                 rc.Paused,
-		DispatchManifestDigest: rc.DispatchManifestDigest,
-		LoadedKernelKeys:       slices.Clone(rc.LoadedKernelKeys),
-		KernelLoadError:        rc.KernelLoadError,
-	}
-	for i := range rc.Ranks {
-		rk := &rc.Ranks[i]
-		st.Ranks = append(st.Ranks, ModelDeploymentKernelRuntimeRankState{
-			RankID:                 rk.RankID,
-			DispatchManifestDigest: rk.DispatchManifestDigest,
-			LoadedKernelKeys:       slices.Clone(rk.LoadedKernelKeys),
-			KernelLoadError:        rk.KernelLoadError,
-		})
-	}
-	st.normalize()
 	return st.KernelLoadError, st.DispatchManifestDigest, st.LoadedKernelKeys
 }
 
@@ -1958,7 +2141,8 @@ func (r *ModelDeploymentForgerReconciler) pruneRetiredKernelArtifacts(
 		if mka.Spec.Source.NodeStore.ForgerRef.Name != mdf.Name {
 			continue
 		}
-		if roleLbl := mka.Labels[forger.SandboxLabelRole]; roleLbl != "" && roleLbl != roleName {
+		if roleLbl := mka.Labels[forger.SandboxLabelRole]; roleLbl != "" &&
+			roleLbl != forger.SafeLabelValue(roleName) && roleLbl != roleName {
 			continue
 		}
 		gen, ok := parseForgerArtifactGeneration(mdf.Name, roleName, mka.Name)
@@ -2001,9 +2185,52 @@ func (r *ModelDeploymentForgerReconciler) pruneRetiredKernelArtifacts(
 	return errors.Join(errs...)
 }
 
+func quarantinedArtifactMatchesRole(
+	mka *workercore.ModelKernelArtifact,
+	mdf *workercore.ModelDeploymentForger,
+	roleName, runnerFingerprint string,
+) bool {
+	if mka == nil || mdf == nil || mka.Spec.Source.NodeStore == nil {
+		return false
+	}
+	ref := mka.Spec.Source.NodeStore.ForgerRef
+	sameForger := false
+	if mdf.UID != "" && ref.UID == string(mdf.UID) {
+		sameForger = true
+	} else if mdf.Name != "" && ref.Name == mdf.Name {
+		targetAnn := strings.TrimSpace(mka.Annotations[forgerTargetDeploymentAnnotationKey])
+		sameForger = targetAnn == "" || targetAnn == mdf.Spec.TargetRef.Name
+	}
+	if !sameForger {
+		return false
+	}
+
+	safeRole := forger.SafeLabelValue(roleName)
+	if roleLbl := mka.Labels[forger.SandboxLabelRole]; roleLbl != "" {
+		if roleLbl != safeRole && roleLbl != roleName {
+			return false
+		}
+	} else {
+		ownerName := ref.Name
+		if ownerName == "" {
+			ownerName = mdf.Name
+		}
+		if _, ok := parseForgerArtifactGeneration(ownerName, roleName, mka.Name); !ok {
+			return false
+		}
+	}
+
+	if annFP := strings.TrimSpace(mka.Annotations[forgerRunnerFingerprintAnnotationKey]); annFP != "" {
+		return annFP == runnerFingerprint
+	}
+	return strings.TrimSpace(mdf.Spec.Sandbox.RunnerImage) == ""
+}
+
 func (r *ModelDeploymentForgerReconciler) collectCoveredAndQuarantinedKeys(
 	ctx context.Context,
 	mdf *workercore.ModelDeploymentForger,
+	roleName string,
+	runnerFingerprint string,
 	mdRole *workercore.ModelDeploymentRole,
 	rs *workercore.ModelDeploymentForgerRoleStatus,
 ) (covered, quarantined map[string]struct{}, err error) {
@@ -2030,19 +2257,54 @@ func (r *ModelDeploymentForgerReconciler) collectCoveredAndQuarantinedKeys(
 			continue
 		}
 		if mka.Status.Quarantined {
-			for _, k := range mka.Spec.Compatibility.KernelKeys {
-				quarantined[k] = struct{}{}
+			if quarantinedArtifactMatchesRole(mka, mdf, roleName, runnerFingerprint) {
+				for _, k := range mka.Spec.Compatibility.KernelKeys {
+					quarantined[k] = struct{}{}
+				}
 			}
 			continue
 		}
-		if (activeRefName != "" && mka.Name == activeRefName) ||
-			(shadowActiveName != "" && mka.Name == shadowActiveName) {
+		if ((activeRefName != "" && mka.Name == activeRefName) ||
+			(shadowActiveName != "" && mka.Name == shadowActiveName)) &&
+			ModelKernelArtifactConditionResolved.IsTrue(mka) {
 			for _, k := range mka.Spec.Compatibility.KernelKeys {
 				covered[k] = struct{}{}
 			}
 		}
 	}
 	return covered, quarantined, nil
+}
+
+func (r *ModelDeploymentForgerReconciler) roleActiveArtifactSourceLost(
+	ctx context.Context,
+	mdf *workercore.ModelDeploymentForger,
+	mdRole *workercore.ModelDeploymentRole,
+	rs *workercore.ModelDeploymentForgerRoleStatus,
+) (bool, error) {
+	var names []string
+	if mdRole != nil && mdRole.KernelArtifactRef != nil && strings.TrimSpace(mdRole.KernelArtifactRef.Name) != "" {
+		names = append(names, strings.TrimSpace(mdRole.KernelArtifactRef.Name))
+	}
+	if effectiveForgerMode(mdf) == workercore.ModelDeploymentForgerModeShadow && rs != nil {
+		if shadowName := strings.TrimSpace(rs.ActiveKernelArtifact); shadowName != "" && !slices.Contains(names, shadowName) {
+			names = append(names, shadowName)
+		}
+	}
+	for _, name := range names {
+		mka := new(workercore.ModelKernelArtifact)
+		if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Namespace: mdf.Namespace, Name: name}, mka); err != nil {
+			if kerrors.IsNotFound(err) {
+				continue
+			}
+			return false, err
+		}
+		if mka.DeletionTimestamp == nil &&
+			ModelKernelArtifactConditionResolved.IsFalse(mka) &&
+			ModelKernelArtifactConditionResolved.GetReason(mka) == workercore.ModelKernelArtifactReasonSourceLost {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *ModelDeploymentForgerReconciler) recordFailedGeneration(

@@ -119,6 +119,7 @@ CREATED_MDFS=()
 CREATED_MDS=()
 CREATED_PODS=()
 SETTINGS_SAVED=0
+LOAD_PID=""
 CLEANED=false
 
 ns_label() {
@@ -152,6 +153,12 @@ cleanup() {
   echo
   echo "[case-38] cleanup"
 
+  if [ -n "${LOAD_PID:-}" ]; then
+    kill "$LOAD_PID" 2>/dev/null || true
+    wait "$LOAD_PID" 2>/dev/null || true
+    LOAD_PID=""
+  fi
+
   for item in ${CREATED_MDFS[@]+"${CREATED_MDFS[@]}"}; do
     kubectl -n "$NS" delete "$MDF_RES" "$item" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   done
@@ -165,6 +172,7 @@ cleanup() {
   kubectl -n "$NS" delete pods -l "$LABEL" --ignore-not-found --wait=false --force --grace-period=0 >/dev/null 2>&1 || true
   kubectl -n "$NS" delete "$MKA_RES" -l "$LABEL" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   kubectl -n "$NS" delete "$MKA_RES" -l "app.kubernetes.io/instance=${P}-mdf" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kubectl -n "$NS" delete "$MKA_RES" -l "app.kubernetes.io/instance=${P}-live-mdf" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   kubectl -n "$NS" delete modelartifacts.worker.gpustack.ai -l "$LABEL" --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NS" delete configmap -l "$LABEL" --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NS" delete deploy,svc,configmap -l e2e.gpustack.ai/model-hub=true --ignore-not-found >/dev/null 2>&1 || true
@@ -1579,7 +1587,7 @@ YAML
     done
     printf '%s|%s\n' "$ok" "$err" >"$load_log"
   ) &
-  local load_pid=$!
+  LOAD_PID=$!
 
   kubectl apply -f - >/dev/null <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -1624,7 +1632,8 @@ YAML
   done
 
   : >"${SCRATCH}/stop-load"
-  wait "$load_pid" 2>/dev/null || true
+  wait "$LOAD_PID" 2>/dev/null || true
+  LOAD_PID=""
   local load_res=""
   load_res="$(cat "$load_log" 2>/dev/null || echo '0|0')"
 
@@ -1636,9 +1645,10 @@ YAML
   fi
 
   # Check zero /dev/shm/gpustack-probe residue and loaded_kernel_keys on /gpustack/v1/runtime_config.
-  local shm_bad="" rc_bad="" pod
+  local shm_bad="" rc_bad="" pod pod_count=0
   for pod in $(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${md_live},app.kubernetes.io/component=server" \
     -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+    pod_count=$((pod_count + 1))
     local rem=""
     rem="$(kubectl -n "$NS" exec "$pod" -c main -- sh -c 'ls -A /dev/shm/gpustack-probe 2>/dev/null || true' 2>/dev/null || true)"
     [ -n "$rem" ] && shm_bad="${shm_bad}${pod}:${rem} "
@@ -1654,15 +1664,20 @@ print("OK" if len(keys) > 0 else "EMPTY")
     [ "$rcheck" = "OK" ] || rc_bad="${rc_bad}${pod}:${rcheck} "
   done
 
-  if [ -z "$shm_bad" ]; then
-    record PASS "Leg B: zero /dev/shm/gpustack-probe residue on all live GPU Pods" "${NS}/${md_live}"
+  if [ "$pod_count" -eq 0 ]; then
+    record FAIL "Leg B: zero /dev/shm/gpustack-probe residue on all live GPU Pods" "no server Pods found for ${NS}/${md_live}"
+    record FAIL "Leg B: /gpustack/v1/runtime_config confirms loaded_kernel_keys on all Pods" "no server Pods found for ${NS}/${md_live}"
   else
-    record FAIL "Leg B: zero /dev/shm/gpustack-probe residue on all live GPU Pods" "$shm_bad"
-  fi
-  if [ -z "$rc_bad" ]; then
-    record PASS "Leg B: /gpustack/v1/runtime_config confirms loaded_kernel_keys on all Pods" "${NS}/${md_live}"
-  else
-    record FAIL "Leg B: /gpustack/v1/runtime_config confirms loaded_kernel_keys on all Pods" "$rc_bad"
+    if [ -z "$shm_bad" ]; then
+      record PASS "Leg B: zero /dev/shm/gpustack-probe residue on all live GPU Pods" "${NS}/${md_live} (${pod_count} pods)"
+    else
+      record FAIL "Leg B: zero /dev/shm/gpustack-probe residue on all live GPU Pods" "$shm_bad"
+    fi
+    if [ -z "$rc_bad" ]; then
+      record PASS "Leg B: /gpustack/v1/runtime_config confirms loaded_kernel_keys on all Pods" "${NS}/${md_live} (${pod_count} pods)"
+    else
+      record FAIL "Leg B: /gpustack/v1/runtime_config confirms loaded_kernel_keys on all Pods" "$rc_bad"
+    fi
   fi
   if [ "${load_res##*|}" = "0" ] && [ "${load_res%%|*}" -ge 1 ]; then
     record PASS "Leg B: zero dropped client requests during probe and readiness-gated rollout" "ok=${load_res%%|*} err=0"

@@ -7299,13 +7299,14 @@ func TestModelDeploymentWebhook_StoreInterfaceWarningOnUpdate(t *testing.T) {
 
 func TestValidateModelDeploymentConfigMapKernelMountForbidden(t *testing.T) {
 	cases := []struct {
-		name       string
-		mountPath  string
-		configMap  bool
-		withModel  bool
-		withKernel bool
-		wantReason string
-		wantErr    bool
+		name        string
+		mountPath   string
+		configMap   bool
+		withModel   bool
+		withKernel  bool
+		forgerBound bool
+		wantReason  string
+		wantErr     bool
 	}{
 		{
 			name:       "exact kernel mount path with ConfigMap is forbidden",
@@ -7376,6 +7377,21 @@ func TestValidateModelDeploymentConfigMapKernelMountForbidden(t *testing.T) {
 			wantReason: "kernelArtifactRef",
 			wantErr:    true,
 		},
+		{
+			name:        "non-ConfigMap secret mount overlapping kernels path rejected when forger-binding set",
+			mountPath:   "/var/lib/gpustack/kernels",
+			configMap:   false,
+			forgerBound: true,
+			wantReason:  "/var/lib/gpustack/kernels",
+			wantErr:     true,
+		},
+		{
+			name:        "non-ConfigMap secret mount at sibling path allowed when forger-binding set",
+			mountPath:   "/var/lib/gpustack/kernels-other",
+			configMap:   false,
+			forgerBound: true,
+			wantErr:     false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -7386,6 +7402,11 @@ func TestValidateModelDeploymentConfigMapKernelMountForbidden(t *testing.T) {
 			}
 			if tc.withKernel {
 				md.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: "mk-gen-1"}
+			}
+			if tc.forgerBound {
+				md.Annotations = map[string]string{
+					workercore.ModelDeploymentForgerBindingAnnotationKey: `{"forgerName":"qwen-forger","forgerUID":"forger-uid-1","term":1}`,
+				}
 			}
 			av := workercore.ModelDeploymentAdditionalVolume{
 				MountPath: tc.mountPath,
@@ -7820,5 +7841,182 @@ func TestValidateModelDeploymentForgerFenceAndScalerCoexistence(t *testing.T) {
 		userPause.Spec.Roles[0].Pause = true
 		assert.Empty(t, w.validateModelDeploymentScalerFence(userCtx, old, userPause))
 		assert.Empty(t, w.validateModelDeploymentForgerFence(userCtx, old, userPause))
+	})
+}
+
+func TestValidateModelDeploymentKernelArtifactDirEnvOwned(t *testing.T) {
+	cases := []struct {
+		name      string
+		engine    string
+		mutate    func(*workercore.ModelDeployment)
+		wantField string
+	}{
+		{
+			name:   "rejects GPUSTACK_KERNEL_ARTIFACT_DIR on sentinel-supported vLLM role mounting ConfigMap elsewhere",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{
+					{
+						MountPath: "/opt/custom-kernels",
+						ConfigMap: &core.LocalObjectReference{Name: "unverified-kernels"},
+					},
+				}
+				md.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{
+					{Name: "GPUSTACK_KERNEL_ARTIFACT_DIR", Value: "/opt/custom-kernels"},
+				}
+			},
+			wantField: "spec.roles[0].env[0]",
+		},
+		{
+			name:   "rejects GPUSTACK_KERNEL_ARTIFACT_DIR on SGLang role with runtimeControl",
+			engine: workercore.ModelDeploymentEngineSGLang,
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].RuntimeControl = &workercore.ModelDeploymentRoleRuntimeControl{}
+				md.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{
+					{Name: "GPUSTACK_KERNEL_ARTIFACT_DIR", Value: "/tmp/kernels"},
+				}
+			},
+			wantField: "spec.roles[0].env[0]",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := modelDeployment(tc.engine)
+			tc.mutate(md)
+
+			errs := validateModelDeploymentRoleRuntimeControl(md, &md.Spec.Roles[0], field.NewPath("spec", "roles").Index(0))
+			require.NotEmpty(t, errs)
+			assert.Equal(t, tc.wantField, errs[0].Field)
+			assert.Contains(t, errs[0].ErrorBody(), "GPUSTACK_KERNEL_ARTIFACT_DIR")
+		})
+	}
+}
+
+func TestValidateModelDeploymentForgerBoundReservedMountScope(t *testing.T) {
+	decodeOnlyForger := &workercore.ModelDeploymentForger{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen-forger", UID: "forger-uid-1"},
+		Spec: workercore.ModelDeploymentForgerSpec{
+			TargetRef: core.LocalObjectReference{Name: "qwen-72b"},
+			Mode:      workercore.ModelDeploymentForgerModeActive,
+			Roles:     []workercore.ModelDeploymentForgerRoleSpec{{Name: "decode"}},
+		},
+	}
+
+	newMultiRoleMD := func() *workercore.ModelDeployment {
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			workercore.ModelDeploymentRole{
+				Name:            "prefill",
+				Kind:            workercore.ModelDeploymentRoleKindPrefill,
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				},
+			},
+			workercore.ModelDeploymentRole{
+				Name:            "decode",
+				Kind:            workercore.ModelDeploymentRoleKindDecode,
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				},
+			},
+		)
+		md.Spec.KVCache = nil
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		return md
+	}
+
+	t.Run("untargeted prefill secret mount at /var/lib/gpustack/kernels admits forger-binding acquisition", func(t *testing.T) {
+		old := newMultiRoleMD()
+		old.Spec.Roles[0].AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{{
+			MountPath: "/var/lib/gpustack/kernels",
+			Secret:    &core.LocalObjectReference{Name: "prefill-custom-data"},
+		}}
+
+		bound := old.DeepCopy()
+		bound.Annotations = map[string]string{
+			workercore.ModelDeploymentForgerBindingAnnotationKey: `{"forgerName":"qwen-forger","forgerUID":"forger-uid-1","term":1}`,
+		}
+
+		w := modelDeploymentFenceWebhookWithObjects(servingAcceleratorType("h20-8x", 8), decodeOnlyForger)
+		_, err := w.ValidateUpdate(modelDeploymentFenceContext(testFenceOperatorUser()), old, bound)
+		require.NoError(t, err)
+	})
+
+	t.Run("ineligible command role secret mount at /var/lib/gpustack/kernels admits forger-binding acquisition", func(t *testing.T) {
+		old := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			workercore.ModelDeploymentRole{
+				Name:            "custom-side",
+				Kind:            workercore.ModelDeploymentRoleKindServer,
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				Command:         []string{"python3", "-m", "custom_worker"},
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				},
+				AdditionalVolumes: []workercore.ModelDeploymentAdditionalVolume{{
+					MountPath: "/var/lib/gpustack/kernels",
+					Secret:    &core.LocalObjectReference{Name: "custom-secret"},
+				}},
+			},
+			workercore.ModelDeploymentRole{
+				Name:            "decode",
+				Kind:            workercore.ModelDeploymentRoleKindServer,
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				},
+			},
+		)
+		old.Spec.KVCache = nil
+
+		bound := old.DeepCopy()
+		bound.Annotations = map[string]string{
+			workercore.ModelDeploymentForgerBindingAnnotationKey: `{"forgerName":"qwen-forger","forgerUID":"forger-uid-1","term":1}`,
+		}
+
+		w := modelDeploymentFenceWebhookWithObjects(servingAcceleratorType("h20-8x", 8), decodeOnlyForger)
+		_, err := w.ValidateUpdate(modelDeploymentFenceContext(testFenceOperatorUser()), old, bound)
+		require.NoError(t, err)
+	})
+
+	t.Run("targeted decode role secret mount at /var/lib/gpustack/kernels is rejected when bound", func(t *testing.T) {
+		old := newMultiRoleMD()
+		old.Spec.Roles[1].AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{{
+			MountPath: "/var/lib/gpustack/kernels",
+			Secret:    &core.LocalObjectReference{Name: "decode-secret"},
+		}}
+
+		bound := old.DeepCopy()
+		bound.Annotations = map[string]string{
+			workercore.ModelDeploymentForgerBindingAnnotationKey: `{"forgerName":"qwen-forger","forgerUID":"forger-uid-1","term":1}`,
+		}
+
+		w := modelDeploymentFenceWebhookWithObjects(servingAcceleratorType("h20-8x", 8), decodeOnlyForger)
+		_, err := w.ValidateUpdate(modelDeploymentFenceContext(testFenceOperatorUser()), old, bound)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.roles[1].additionalVolumes[0].mountPath")
+		assert.Contains(t, err.Error(), "/var/lib/gpustack/kernels")
+	})
+
+	t.Run("ConfigMap mount overlapping /var/lib/gpustack/kernels remains forbidden on untargeted role", func(t *testing.T) {
+		old := newMultiRoleMD()
+		bound := old.DeepCopy()
+		bound.Spec.Roles[0].AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{{
+			MountPath: "/var/lib/gpustack/kernels",
+			ConfigMap: &core.LocalObjectReference{Name: "unverified-cm"},
+		}}
+		bound.Annotations = map[string]string{
+			workercore.ModelDeploymentForgerBindingAnnotationKey: `{"forgerName":"qwen-forger","forgerUID":"forger-uid-1","term":1}`,
+		}
+
+		w := modelDeploymentFenceWebhookWithObjects(servingAcceleratorType("h20-8x", 8), decodeOnlyForger)
+		_, err := w.ValidateUpdate(modelDeploymentFenceContext(testFenceOperatorUser()), old, bound)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), modelDeploymentConfigMapKernelMountForbiddenReason)
 	})
 }

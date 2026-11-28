@@ -869,12 +869,6 @@ func TestModelKernelArtifactWatchMappers(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, res)
-
-	// Field indexer extracts manifest digest for nodeStore and resolved huggingFace, nil for image.
-	assert.Equal(t, []string{testKernelManifestDigest}, indexModelKernelArtifactByManifestDigest(nodeMKA))
-	assert.Equal(t, []string{testKernelManifestDigest}, indexModelKernelArtifactByManifestDigest(hfMKA))
-	assert.Nil(t, indexModelKernelArtifactByManifestDigest(imgMKA))
-	assert.Nil(t, indexModelKernelArtifactByManifestDigest(nmsOld))
 }
 
 func TestModelKernelArtifactReconcileNodesWindowAndHuggingFaceRevalidation(t *testing.T) {

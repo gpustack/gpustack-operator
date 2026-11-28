@@ -144,6 +144,7 @@ type Solution struct {
 	Definition     string           `json:"definition"`
 	LocalKernelKey string           `json:"local_kernel_key,omitempty"`
 	Author         string           `json:"author"`
+	Mock           bool             `json:"mock,omitempty"`
 	Spec           SolutionSpec     `json:"spec"`
 	Sources        []SolutionSource `json:"sources"`
 	Description    string           `json:"description,omitempty"`
@@ -151,6 +152,7 @@ type Solution struct {
 
 // TraceCorrectness matches upstream FlashInfer Trace evaluation.correctness fields.
 type TraceCorrectness struct {
+	AllClosePassed   *bool   `json:"allclose_passed,omitempty"`
 	MaxAbsError      float64 `json:"max_abs_error"`
 	MaxRelativeError float64 `json:"max_relative_error"`
 }
@@ -198,6 +200,7 @@ type DispatchCompatibility struct {
 type DispatchManifestEntry struct {
 	LocalKernelKey    string  `json:"localKernelKey"`
 	Definition        string  `json:"definition"`
+	Mock              bool    `json:"mock,omitempty"`
 	SolutionPath      string  `json:"solutionPath"`
 	SolutionSHA256    string  `json:"solutionSha256,omitempty"`
 	LibraryPath       string  `json:"libraryPath"`
@@ -532,15 +535,20 @@ func ValidateEvaluation(eval *TraceEvaluation, thresholds VerificationThresholds
 	if math.IsNaN(maxAbs) || math.IsInf(maxAbs, 0) || maxAbs < 0 {
 		return fmt.Errorf("evaluation.correctness.max_abs_error %v must be finite and >= 0", maxAbs)
 	}
-	if maxAbs > thresholds.Atol {
-		return fmt.Errorf("evaluation.correctness.max_abs_error %v exceeds atol %v", maxAbs, thresholds.Atol)
-	}
 	maxRel := eval.Correctness.MaxRelativeError
 	if math.IsNaN(maxRel) || math.IsInf(maxRel, 0) || maxRel < 0 {
 		return fmt.Errorf("evaluation.correctness.max_relative_error %v must be finite and >= 0", maxRel)
 	}
-	if maxRel > thresholds.Rtol {
-		return fmt.Errorf("evaluation.correctness.max_relative_error %v exceeds rtol %v", maxRel, thresholds.Rtol)
+	if eval.Correctness.AllClosePassed != nil {
+		if !*eval.Correctness.AllClosePassed {
+			return fmt.Errorf("evaluation.correctness.allclose_passed is false (max_abs_error=%v, max_relative_error=%v)",
+				maxAbs, maxRel)
+		}
+	} else if maxAbs > thresholds.Atol && maxRel > thresholds.Rtol {
+		return fmt.Errorf(
+			"evaluation.correctness exceeds allclose bounds: max_abs_error %v > atol %v and max_relative_error %v > rtol %v",
+			maxAbs, thresholds.Atol, maxRel, thresholds.Rtol,
+		)
 	}
 	if eval.Performance == nil {
 		return errors.New("evaluation.performance must not be nil")
@@ -705,8 +713,9 @@ func ValidateVerificationReport(report *VerificationReport, wantDispatchDigest s
 	if report.PassedCount < 1 {
 		return fmt.Errorf("verification report passedCount %d must be >= 1", report.PassedCount)
 	}
-	if report.FailedCount < 0 {
-		return fmt.Errorf("verification report failedCount %d must not be negative", report.FailedCount)
+	if report.FailedCount != 0 {
+		return fmt.Errorf("verification report failedCount %d must be 0 when overallStatus is %q",
+			report.FailedCount, StatusPassed)
 	}
 	if err := ValidateThresholds(report.Thresholds); err != nil {
 		return fmt.Errorf("verification report thresholds: %w", err)
@@ -717,7 +726,7 @@ func ValidateVerificationReport(report *VerificationReport, wantDispatchDigest s
 	passedEntries := 0
 	for i, entry := range report.Entries {
 		if !entry.Passed {
-			continue
+			return fmt.Errorf("verification report entries[%d] did not pass", i)
 		}
 		if err := kernelkey.ValidateKey(entry.LocalKernelKey); err != nil {
 			return fmt.Errorf("verification report entries[%d].localKernelKey: %w", i, err)

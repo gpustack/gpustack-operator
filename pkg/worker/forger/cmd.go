@@ -130,6 +130,7 @@ func RunForgeMock(opts ForgeMockOptions) error {
 		Definition:     def.Name,
 		LocalKernelKey: selectedRawKey,
 		Author:         "gpustack-operator-forge-mock",
+		Mock:           true,
 		Spec: SolutionSpec{
 			Language:       "python",
 			TargetHardware: []string{selectedKey.Manufacturer + ":" + selectedKey.Arch},
@@ -206,6 +207,7 @@ func RunForgeMock(opts ForgeMockOptions) error {
 			{
 				LocalKernelKey:    selectedRawKey,
 				Definition:        def.Name,
+				Mock:              true,
 				SolutionPath:      solRel,
 				SolutionSHA256:    solDigest,
 				LibraryPath:       libRel,
@@ -314,16 +316,146 @@ func resolveMockWorkload(rawKey string, def Definition, workloads map[string][]W
 }
 
 func renderMockKernelPython(solutionID, localKernelKey, opFamily string) string {
-	return fmt.Sprintf(`"""Deterministic mock kernel %s for %s (%s)."""
+	var body string
+	switch opFamily {
+	case kernelkey.OpFamilyLayerNorm:
+		body = `def run(x, weight=None, bias=None, eps=1e-5):
+    if weight is None:
+        return x
+    import torch.nn.functional as F
 
+    return F.layer_norm(x, (x.shape[-1],), weight, bias, eps)`
+	case kernelkey.OpFamilyActivationQuant:
+		body = `def run(x):
+    import torch.nn.functional as F
 
-def run(x, weight=None, eps=1e-6):
+    half = x.shape[-1] // 2
+    if half == 0:
+        return F.silu(x)
+    return F.silu(x[..., :half]) * x[..., half : 2 * half]`
+	case kernelkey.OpFamilyRopeKVAppend:
+		body = `def run(q, k, cos, sin):
+    import torch
+
+    c = cos.unsqueeze(-2) if cos.ndim < q.ndim else cos
+    s = sin.unsqueeze(-2) if sin.ndim < q.ndim else sin
+    half = q.shape[-1] // 2
+    if half == 0:
+        return (q * c, k * c)
+    q_rot = torch.cat((-q[..., half : 2 * half], q[..., :half]), dim=-1)
+    k_rot = torch.cat((-k[..., half : 2 * half], k[..., :half]), dim=-1)
+    c_use = c[..., : 2 * half]
+    s_use = s[..., : 2 * half]
+    return (
+        q[..., : 2 * half] * c_use + q_rot * s_use,
+        k[..., : 2 * half] * c_use + k_rot * s_use,
+    )`
+	case kernelkey.OpFamilyMoERouterTopK:
+		body = `def run(logits, top_k=2):
+    import torch
+
+    k = max(1, min(int(top_k), logits.shape[-1]))
+    probs = torch.softmax(logits, dim=-1)
+    return torch.topk(probs, k=k, dim=-1)`
+	case kernelkey.OpFamilyMoEPermuteUnpermute:
+		body = `def run(x, indices=None):
+    import torch
+
+    if indices is None:
+        indices = torch.arange(x.shape[0] - 1, -1, -1, device=x.device, dtype=torch.long)
+    return x.index_select(0, indices)`
+	case kernelkey.OpFamilyPagedAttention:
+		body = `def run(q, k_cache, v_cache):
+    import torch
+
+    scale = q.shape[-1] ** -0.5
+    if q.ndim == 3:
+        qh = q.transpose(0, 1)
+        kh = k_cache.transpose(0, 1)
+        vh = v_cache.transpose(0, 1)
+        scores = torch.matmul(qh, kh.transpose(-2, -1)) * scale
+        probs = torch.softmax(scores, dim=-1)
+        return torch.matmul(probs, vh).transpose(0, 1)
+    scores = torch.matmul(q, k_cache.transpose(-2, -1)) * scale
+    probs = torch.softmax(scores, dim=-1)
+    return torch.matmul(probs, v_cache)`
+	case kernelkey.OpFamilyRaggedPrefillAttention:
+		body = `def run(q, k, v):
+    import torch
+
+    scale = q.shape[-1] ** -0.5
+    if q.ndim == 3:
+        qh = q.transpose(0, 1)
+        kh = k.transpose(0, 1)
+        vh = v.transpose(0, 1)
+        scores = torch.matmul(qh, kh.transpose(-2, -1)) * scale
+        t = scores.shape[-1]
+        mask = torch.triu(torch.ones((t, t), device=q.device, dtype=torch.bool), diagonal=1)
+        scores = scores.masked_fill(mask, float("-inf"))
+        probs = torch.softmax(scores, dim=-1)
+        return torch.matmul(probs, vh).transpose(0, 1)
+    scores = torch.matmul(q, k.transpose(-2, -1)) * scale
+    t = scores.shape[-1]
+    mask = torch.triu(torch.ones((t, t), device=q.device, dtype=torch.bool), diagonal=1)
+    scores = scores.masked_fill(mask, float("-inf"))
+    probs = torch.softmax(scores, dim=-1)
+    return torch.matmul(probs, v)`
+	case kernelkey.OpFamilyMLALocal:
+		body = `def run(q_nope, q_pe, kv_c, k_pe):
+    import torch
+
+    q = torch.cat((q_nope, q_pe), dim=-1)
+    k = torch.cat((kv_c, k_pe), dim=-1)
+    scale = q.shape[-1] ** -0.5
+    if q.ndim == 3:
+        qh = q.transpose(0, 1)
+        kh = k.transpose(0, 1)
+        vh = kv_c.transpose(0, 1)
+        scores = torch.matmul(qh, kh.transpose(-2, -1)) * scale
+        probs = torch.softmax(scores, dim=-1)
+        return torch.matmul(probs, vh).transpose(0, 1)
+    scores = torch.matmul(q, k.transpose(-2, -1)) * scale
+    probs = torch.softmax(scores, dim=-1)
+    return torch.matmul(probs, kv_c)`
+	case kernelkey.OpFamilySpeculativeVerify:
+		body = `def run(draft_logits, target_logits):
+    import torch
+
+    draft_probs = torch.softmax(draft_logits, dim=-1)
+    target_probs = torch.softmax(target_logits, dim=-1)
+    ratio = target_probs / draft_probs.clamp_min(1e-8)
+    return torch.clamp(ratio, max=1.0)`
+	case kernelkey.OpFamilySamplingLogits:
+		body = `def run(logits, top_k=50, top_p=0.9):
+    import torch
+
+    k = max(1, min(int(top_k), logits.shape[-1]))
+    top_vals, top_idx = torch.topk(logits, k=k, dim=-1)
+    probs = torch.softmax(top_vals, dim=-1)
+    cumprobs = torch.cumsum(probs, dim=-1)
+    keep = (cumprobs - probs) <= float(top_p)
+    masked = probs * keep.to(probs.dtype)
+    norm = masked.sum(dim=-1, keepdim=True).clamp_min(1e-8)
+    return (masked / norm, top_idx)`
+	case kernelkey.OpFamilyCustomElementwiseFusion:
+		body = `def run(x, y):
+    return x + y`
+	default:
+		body = `def run(x, weight=None, eps=1e-6):
     if weight is None:
         return x
     import torch
 
-    return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps) * weight
-`, solutionID, localKernelKey, opFamily)
+    return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps) * weight`
+	}
+
+	return fmt.Sprintf(`"""Deterministic mock kernel %s for %s (%s)."""
+
+MOCK_KERNEL = True
+
+
+%s
+`, solutionID, localKernelKey, opFamily, body)
 }
 
 // ForgeVerifyOptions configures gpustack-operator forge-verify execution.
@@ -387,7 +519,7 @@ func NewForgeVerifyCommand() *cobra.Command {
 
 // RunForgeVerify validates dispatch-manifest.json, single-link regular output files (O_NOFOLLOW),
 // SHA-256 checksums, FlashInfer Solution/Trace schemas, and thresholds, writes
-// verification-report.json atomically, and returns a non-nil error if zero entries pass.
+// verification-report.json atomically, and returns a non-nil error unless all entries pass.
 func RunForgeVerify(opts ForgeVerifyOptions) (*VerificationReport, error) {
 	if strings.TrimSpace(opts.OutputDir) == "" {
 		return nil, errors.New("output-dir must not be empty")
@@ -458,26 +590,88 @@ func RunForgeVerify(opts ForgeVerifyOptions) (*VerificationReport, error) {
 		})
 	}
 
-	compatTarget := kernelkey.CompatibilityTarget{
+	manifestCompat := kernelkey.CompatibilityTarget{
 		Engine:        manifest.Compatibility.Engine,
 		EngineVersion: manifest.Compatibility.EngineVersion,
 		Manufacturer:  manifest.Compatibility.Manufacturer,
 		Arch:          manifest.Compatibility.Architecture,
 	}
+	if err := validateCompatibilityTarget(manifestCompat); err != nil {
+		return finalize(&VerificationReport{
+			SchemaVersion:          VerificationReportSchemaVersion,
+			OverallStatus:          StatusFailed,
+			DispatchManifestDigest: manifestDigest,
+			Thresholds:             thresholds,
+			Entries:                []VerificationEntryReport{},
+			Error:                  fmt.Sprintf("invalid dispatch manifest compatibility: %v", err),
+		})
+	}
+
+	var (
+		reqCompat   *kernelkey.CompatibilityTarget
+		allowedKeys map[string]struct{}
+	)
 	if req != nil {
-		compatTarget = kernelkey.CompatibilityTarget{
+		rc := kernelkey.CompatibilityTarget{
 			Engine:        req.Engine,
 			EngineVersion: req.EngineVersion,
 			Manufacturer:  req.Manufacturer,
 			Arch:          req.Architecture,
 		}
+		if err := matchCompatibilityTargets(manifestCompat, rc); err != nil {
+			return finalize(&VerificationReport{
+				SchemaVersion:          VerificationReportSchemaVersion,
+				OverallStatus:          StatusFailed,
+				DispatchManifestDigest: manifestDigest,
+				Thresholds:             thresholds,
+				Entries:                []VerificationEntryReport{},
+				Error:                  fmt.Sprintf("dispatch manifest compatibility mismatch: %v", err),
+			})
+		}
+		reqCompat = &rc
+		if len(req.TargetKernelKeys) > 0 {
+			allowedKeys = make(map[string]struct{}, len(req.TargetKernelKeys))
+			for _, k := range req.TargetKernelKeys {
+				if trimmed := strings.TrimSpace(k); trimmed != "" {
+					allowedKeys[trimmed] = struct{}{}
+				}
+			}
+		}
+	}
+
+	var defs verifyDefinitionIndex
+	if strings.TrimSpace(opts.InputDir) != "" {
+		loadedDefs, defErr := loadDefinitionIndexFromDir(opts.InputDir)
+		if defErr != nil {
+			return finalize(&VerificationReport{
+				SchemaVersion:          VerificationReportSchemaVersion,
+				OverallStatus:          StatusFailed,
+				DispatchManifestDigest: manifestDigest,
+				Thresholds:             thresholds,
+				Entries:                []VerificationEntryReport{},
+				Error:                  fmt.Sprintf("load input definitions: %v", defErr),
+			})
+		}
+		defs = loadedDefs
 	}
 
 	entryReports := make([]VerificationEntryReport, 0, len(manifest.Entries))
 	passedCount := 0
 	failedCount := 0
+	seenKeys := make(map[string]struct{}, len(manifest.Entries))
 	for i, entry := range manifest.Entries {
-		rep := verifyManifestEntry(i, opts.OutputDir, entry, manifest.Checksums, compatTarget, thresholds)
+		rep := verifyManifestEntry(verifyEntryContext{
+			index:             i,
+			outputDir:         opts.OutputDir,
+			entry:             entry,
+			manifestChecksums: manifest.Checksums,
+			manifestCompat:    manifestCompat,
+			reqCompat:         reqCompat,
+			allowedKeys:       allowedKeys,
+			defs:              defs,
+			seenKeys:          seenKeys,
+			thresholds:        thresholds,
+		})
 		if rep.Passed {
 			passedCount++
 		} else {
@@ -495,24 +689,104 @@ func RunForgeVerify(opts ForgeVerifyOptions) (*VerificationReport, error) {
 		Thresholds:             thresholds,
 		Entries:                entryReports,
 	}
-	if passedCount == 0 {
+	switch {
+	case passedCount == 0:
 		report.OverallStatus = StatusFailed
 		report.Error = "zero candidate kernels passed verification"
+	case failedCount > 0:
+		report.OverallStatus = StatusFailed
+		report.Error = fmt.Sprintf("%d of %d candidate kernels failed verification", failedCount, len(manifest.Entries))
 	}
 	return finalize(report)
 }
 
-func verifyManifestEntry(
-	index int,
-	outputDir string,
-	entry DispatchManifestEntry,
-	manifestChecksums map[string]string,
-	target kernelkey.CompatibilityTarget,
-	thresholds VerificationThresholds,
-) VerificationEntryReport {
+type verifyDefinitionIndex struct {
+	byName map[string]Definition
+	byKey  map[string]Definition
+}
+
+type verifyEntryContext struct {
+	index             int
+	outputDir         string
+	entry             DispatchManifestEntry
+	manifestChecksums map[string]string
+	manifestCompat    kernelkey.CompatibilityTarget
+	reqCompat         *kernelkey.CompatibilityTarget
+	allowedKeys       map[string]struct{}
+	defs              verifyDefinitionIndex
+	seenKeys          map[string]struct{}
+	thresholds        VerificationThresholds
+}
+
+func validateCompatibilityTarget(t kernelkey.CompatibilityTarget) error {
+	if _, err := kernelkey.NormalizeEngine(t.Engine); err != nil {
+		return fmt.Errorf("engine: %w", err)
+	}
+	if _, err := kernelkey.NormalizeEngineVersion(t.EngineVersion); err != nil {
+		return fmt.Errorf("engineVersion: %w", err)
+	}
+	manu, err := kernelkey.NormalizeManufacturer(t.Manufacturer)
+	if err != nil {
+		return fmt.Errorf("manufacturer: %w", err)
+	}
+	if _, err := kernelkey.NormalizeArch(manu, t.Arch); err != nil {
+		return fmt.Errorf("architecture: %w", err)
+	}
+	return nil
+}
+
+func matchCompatibilityTargets(have, want kernelkey.CompatibilityTarget) error {
+	haveEngine, err := kernelkey.NormalizeEngine(have.Engine)
+	if err != nil {
+		return fmt.Errorf("manifest engine: %w", err)
+	}
+	wantEngine, err := kernelkey.NormalizeEngine(want.Engine)
+	if err != nil {
+		return fmt.Errorf("request engine: %w", err)
+	}
+	if haveEngine != wantEngine {
+		return fmt.Errorf("engine %q does not match request %q", haveEngine, wantEngine)
+	}
+
+	haveVer, err := kernelkey.NormalizeEngineVersion(have.EngineVersion)
+	if err != nil {
+		return fmt.Errorf("manifest engineVersion: %w", err)
+	}
+	wantVer, err := kernelkey.NormalizeEngineVersion(want.EngineVersion)
+	if err != nil {
+		return fmt.Errorf("request engineVersion: %w", err)
+	}
+	if haveVer != wantVer {
+		return fmt.Errorf("engineVersion %q does not match request %q", haveVer, wantVer)
+	}
+
+	haveManu, err := kernelkey.NormalizeManufacturer(have.Manufacturer)
+	if err != nil {
+		return fmt.Errorf("manifest manufacturer: %w", err)
+	}
+	wantManu, err := kernelkey.NormalizeManufacturer(want.Manufacturer)
+	if err != nil {
+		return fmt.Errorf("request manufacturer: %w", err)
+	}
+	if haveManu != wantManu {
+		return fmt.Errorf("manufacturer %q does not match request %q", haveManu, wantManu)
+	}
+
+	archOK, err := kernelkey.ArchCompatible(wantManu, have.Arch, want.Arch)
+	if err != nil {
+		return fmt.Errorf("architecture: %w", err)
+	}
+	if !archOK {
+		return fmt.Errorf("architecture %q is not compatible with request %q", have.Arch, want.Arch)
+	}
+	return nil
+}
+
+func verifyManifestEntry(vctx verifyEntryContext) VerificationEntryReport {
+	entry := vctx.entry
 	fail := func(reason string, eval *TraceEvaluation) VerificationEntryReport {
 		return VerificationEntryReport{
-			Index:          index,
+			Index:          vctx.index,
 			LocalKernelKey: entry.LocalKernelKey,
 			Definition:     entry.Definition,
 			Passed:         false,
@@ -521,33 +795,78 @@ func verifyManifestEntry(
 		}
 	}
 
-	parsedKey, err := kernelkey.Parse(strings.TrimSpace(entry.LocalKernelKey))
+	trimmedKey := strings.TrimSpace(entry.LocalKernelKey)
+	parsedKey, err := kernelkey.Parse(trimmedKey)
 	if err != nil {
 		return fail(fmt.Sprintf("invalid localKernelKey: %v", err), nil)
 	}
 	if excluded, reason := kernelkey.IsExcluded(parsedKey.OpFamily); excluded {
 		return fail(fmt.Sprintf("excluded opFamily %q: %s", parsedKey.OpFamily, reason), nil)
 	}
-	if err := kernelkey.MatchCompatibility(parsedKey, target); err != nil {
+	if err := kernelkey.MatchCompatibility(parsedKey, vctx.manifestCompat); err != nil {
 		return fail(fmt.Sprintf("compatibility mismatch: %v", err), nil)
 	}
+	if vctx.reqCompat != nil {
+		if err := kernelkey.MatchCompatibility(parsedKey, *vctx.reqCompat); err != nil {
+			return fail(fmt.Sprintf("request compatibility mismatch: %v", err), nil)
+		}
+	}
+	if vctx.allowedKeys != nil {
+		if _, ok := vctx.allowedKeys[trimmedKey]; !ok {
+			return fail(fmt.Sprintf("localKernelKey %q is not in forge-request targetKernelKeys", trimmedKey), nil)
+		}
+	}
+	if _, dup := vctx.seenKeys[trimmedKey]; dup {
+		return fail(fmt.Sprintf("duplicate localKernelKey %q in dispatch manifest", trimmedKey), nil)
+	}
+	vctx.seenKeys[trimmedKey] = struct{}{}
+
+	entryDefName := strings.TrimSpace(entry.Definition)
+	if def, ok := vctx.defs.byName[entryDefName]; ok && entryDefName != "" {
+		if defKey := strings.TrimSpace(def.LocalKernelKey); defKey != "" && defKey != trimmedKey {
+			return fail(fmt.Sprintf(
+				"definition %q local_kernel_key %q does not match entry localKernelKey %q",
+				entryDefName, defKey, trimmedKey,
+			), nil)
+		}
+		if defOp := strings.TrimSpace(def.OpType); defOp != "" && defOp != parsedKey.OpFamily {
+			return fail(fmt.Sprintf(
+				"definition %q op_type %q does not match entry opFamily %q",
+				entryDefName, defOp, parsedKey.OpFamily,
+			), nil)
+		}
+	} else if keyDef, hasKeyDef := vctx.defs.byKey[trimmedKey]; hasKeyDef {
+		if entryDefName != "" && keyDef.Name != "" && entryDefName != keyDef.Name {
+			return fail(fmt.Sprintf(
+				"entry definition %q does not match definition %q for localKernelKey %q",
+				entryDefName, keyDef.Name, trimmedKey,
+			), nil)
+		}
+		if defOp := strings.TrimSpace(keyDef.OpType); defOp != "" && defOp != parsedKey.OpFamily {
+			return fail(fmt.Sprintf(
+				"definition %q op_type %q does not match entry opFamily %q",
+				keyDef.Name, defOp, parsedKey.OpFamily,
+			), nil)
+		}
+	}
+
 	if strings.TrimSpace(entry.Entrypoint) == "" {
 		return fail("entrypoint must not be empty", nil)
 	}
 
-	libDigest, err := hashRegularSingleLinkFile(outputDir, entry.LibraryPath)
+	libDigest, err := hashRegularSingleLinkFile(vctx.outputDir, entry.LibraryPath)
 	if err != nil {
 		return fail(fmt.Sprintf("libraryPath %q: %v", entry.LibraryPath, err), nil)
 	}
-	if err := checkExpectedChecksum(entry.LibraryPath, libDigest, entry.LibrarySHA256, manifestChecksums); err != nil {
+	if err := checkExpectedChecksum(entry.LibraryPath, libDigest, entry.LibrarySHA256, vctx.manifestChecksums); err != nil {
 		return fail(err.Error(), nil)
 	}
 
-	solBytes, solDigest, err := readRegularSingleLinkFile(outputDir, entry.SolutionPath, maxMetadataFileBytes)
+	solBytes, solDigest, err := readRegularSingleLinkFile(vctx.outputDir, entry.SolutionPath, maxMetadataFileBytes)
 	if err != nil {
 		return fail(fmt.Sprintf("solutionPath %q: %v", entry.SolutionPath, err), nil)
 	}
-	if err := checkExpectedChecksum(entry.SolutionPath, solDigest, entry.SolutionSHA256, manifestChecksums); err != nil {
+	if err := checkExpectedChecksum(entry.SolutionPath, solDigest, entry.SolutionSHA256, vctx.manifestChecksums); err != nil {
 		return fail(err.Error(), nil)
 	}
 	var sol Solution
@@ -557,31 +876,45 @@ func verifyManifestEntry(
 	if err := ValidateSolution(&sol); err != nil {
 		return fail(fmt.Sprintf("invalid solution %q: %v", entry.SolutionPath, err), nil)
 	}
+	if solKey := strings.TrimSpace(sol.LocalKernelKey); solKey != "" && solKey != trimmedKey {
+		return fail(fmt.Sprintf("solution local_kernel_key %q does not match entry localKernelKey %q", solKey, trimmedKey), nil)
+	}
+	if entryDefName != "" && strings.TrimSpace(sol.Definition) != entryDefName {
+		return fail(fmt.Sprintf("solution definition %q does not match entry definition %q", sol.Definition, entryDefName), nil)
+	}
 
-	traceBytes, traceDigest, err := readRegularSingleLinkFile(outputDir, entry.TracePath, maxMetadataFileBytes)
+	traceBytes, traceDigest, err := readRegularSingleLinkFile(vctx.outputDir, entry.TracePath, maxMetadataFileBytes)
 	if err != nil {
 		return fail(fmt.Sprintf("tracePath %q: %v", entry.TracePath, err), nil)
 	}
-	if err := checkExpectedChecksum(entry.TracePath, traceDigest, entry.TraceSHA256, manifestChecksums); err != nil {
+	if err := checkExpectedChecksum(entry.TracePath, traceDigest, entry.TraceSHA256, vctx.manifestChecksums); err != nil {
 		return fail(err.Error(), nil)
 	}
 	var trace Trace
 	if err := json.Unmarshal(traceBytes, &trace); err != nil {
 		return fail(fmt.Sprintf("parse trace %q: %v", entry.TracePath, err), nil)
 	}
-	if err := ValidateTrace(&trace, thresholds); err != nil {
+	if err := ValidateTrace(&trace, vctx.thresholds); err != nil {
 		evalCopy := trace.Evaluation
 		return fail(err.Error(), &evalCopy)
 	}
+	if entryDefName != "" && strings.TrimSpace(trace.Definition) != entryDefName {
+		evalCopy := trace.Evaluation
+		return fail(fmt.Sprintf("trace definition %q does not match entry definition %q", trace.Definition, entryDefName), &evalCopy)
+	}
+	if wlKey := strings.TrimSpace(trace.Workload.LocalKernelKey); wlKey != "" && wlKey != trimmedKey {
+		evalCopy := trace.Evaluation
+		return fail(fmt.Sprintf("trace workload local_kernel_key %q does not match entry localKernelKey %q", wlKey, trimmedKey), &evalCopy)
+	}
 
 	evalCopy := trace.Evaluation
-	defName := strings.TrimSpace(entry.Definition)
+	defName := entryDefName
 	if defName == "" {
 		defName = parsedKey.OpFamily
 	}
 	return VerificationEntryReport{
-		Index:          index,
-		LocalKernelKey: strings.TrimSpace(entry.LocalKernelKey),
+		Index:          vctx.index,
+		LocalKernelKey: trimmedKey,
 		Definition:     defName,
 		Passed:         true,
 		Reason:         "ok",
@@ -679,15 +1012,18 @@ func RunForgeHold(ctx context.Context, maxDuration time.Duration) error {
 	}
 }
 
-func loadDefinitionsFromDir(inputDir string) (map[string]Definition, error) {
-	defs := make(map[string]Definition)
+func loadDefinitionIndexFromDir(inputDir string) (verifyDefinitionIndex, error) {
+	idx := verifyDefinitionIndex{
+		byName: make(map[string]Definition),
+		byKey:  make(map[string]Definition),
+	}
 	defsDir := filepath.Join(inputDir, "definitions")
 	entries, err := os.ReadDir(defsDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return defs, nil
+			return idx, nil
 		}
-		return nil, fmt.Errorf("read definitions directory: %w", err)
+		return idx, fmt.Errorf("read definitions directory: %w", err)
 	}
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -699,18 +1035,33 @@ func loadDefinitionsFromDir(inputDir string) (map[string]Definition, error) {
 	for _, name := range names {
 		raw, err := os.ReadFile(filepath.Join(defsDir, name))
 		if err != nil {
-			return nil, fmt.Errorf("read definition %q: %w", name, err)
+			return idx, fmt.Errorf("read definition %q: %w", name, err)
 		}
 		var def Definition
 		if err := json.Unmarshal(raw, &def); err != nil {
-			return nil, fmt.Errorf("parse definition %q: %w", name, err)
+			return idx, fmt.Errorf("parse definition %q: %w", name, err)
 		}
-		if def.Name != "" {
-			defs[def.Name] = def
+		if defName := strings.TrimSpace(def.Name); defName != "" {
+			idx.byName[defName] = def
 		}
-		if def.LocalKernelKey != "" {
-			defs[def.LocalKernelKey] = def
+		if defKey := strings.TrimSpace(def.LocalKernelKey); defKey != "" {
+			idx.byKey[defKey] = def
 		}
+	}
+	return idx, nil
+}
+
+func loadDefinitionsFromDir(inputDir string) (map[string]Definition, error) {
+	idx, err := loadDefinitionIndexFromDir(inputDir)
+	if err != nil {
+		return nil, err
+	}
+	defs := make(map[string]Definition, len(idx.byName)+len(idx.byKey))
+	for k, v := range idx.byName {
+		defs[k] = v
+	}
+	for k, v := range idx.byKey {
+		defs[k] = v
 	}
 	return defs, nil
 }

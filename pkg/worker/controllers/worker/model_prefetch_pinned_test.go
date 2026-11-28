@@ -621,3 +621,168 @@ func TestModelPrefetchPinnedWatchesAndPredicates(t *testing.T) {
 	assert.Nil(t, admitted)
 	assert.Equal(t, []string{"b"}, dropped)
 }
+
+func TestRecomputePinnedSeedNodeLifecycleAfterResolution(t *testing.T) {
+	digest := numberedDigest("77777777", 1)
+
+	// 1. Before initial resolution (Status.Resolved == nil): seedNode stays pinned even before its Ready report lands.
+	mka := testNodeStoreKernelArtifactForPins("team-a", "gen-1", digest, "node-1")
+	nms1 := &workercore.NodeModelStore{ObjectMeta: meta.ObjectMeta{Name: "node-1"}}
+	nms2 := &workercore.NodeModelStore{ObjectMeta: meta.ObjectMeta{Name: "node-2"}}
+	md := &workercore.ModelDeployment{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen"},
+		Spec: workercore.ModelDeploymentSpec{
+			Roles: []workercore.ModelDeploymentRole{
+				{Name: "decode", KernelArtifactRef: &core.LocalObjectReference{Name: "gen-1"}},
+			},
+		},
+	}
+	podOnNode2 := testModelDeploymentPod("team-a", "qwen", "decode", "qwen-decode-0", "node-2", core.PodRunning)
+
+	r, cli := newTestModelPrefetchEnv(t, nms1, nms2, mka, md, podOnNode2)
+	require.NoError(t, r.recomputePinned(context.Background()))
+
+	got1 := new(workercore.NodeModelStore)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-1"}, got1))
+	assert.Equal(t, []string{digest}, got1.Spec.Pinned, "awaiting initial resolution must protect seedNode")
+
+	// 2. Resolved and seedNode reports Ready: seedNode pin stays held.
+	now := meta.Now()
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(mka), mka))
+	mka.Status.Resolved = &workercore.ModelKernelArtifactResolved{
+		ManifestDigest:         digest,
+		DispatchManifestDigest: mka.Spec.Source.NodeStore.DispatchManifestDigest,
+		FileCount:              3,
+		SizeBytes:              4096,
+		ResolvedTime:           now,
+		LastValidatedTime:      &now,
+		DigestSource:           workercore.ModelKernelArtifactDigestSourceForge,
+	}
+	require.NoError(t, cli.Update(context.Background(), mka))
+
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-1"}, got1))
+	got1.Status.Models = []workercore.NodeModelStoreModel{{
+		Digest: digest,
+		State:  workercore.NodeModelStoreModelStateReady,
+	}}
+	require.NoError(t, cli.Update(context.Background(), got1))
+
+	require.NoError(t, r.recomputePinned(context.Background()))
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-1"}, got1))
+	assert.Equal(t, []string{digest}, got1.Spec.Pinned, "seedNode pin must be held while seedNode reports Ready")
+
+	// 3. Seed node drops out of Ready after resolution (no live referencing Pod on node-1): seedNode pin is released, while live Pod node-2 keeps its pin!
+	got1.Status.Models = nil
+	require.NoError(t, cli.Update(context.Background(), got1))
+
+	require.NoError(t, r.recomputePinned(context.Background()))
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-1"}, got1))
+	assert.Empty(t, got1.Spec.Pinned, "seedNode pin must be released once seedNode drops out of Ready after resolution")
+
+	got2 := new(workercore.NodeModelStore)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-2"}, got2))
+	assert.Equal(t, []string{digest}, got2.Spec.Pinned, "live referencing Pod node must retain its pin")
+
+	// 4. If a live referencing Pod also runs on seedNode, seedNode stays pinned via the live Pod rule.
+	podOnNode1 := testModelDeploymentPod("team-a", "qwen", "decode", "qwen-decode-1", "node-1", core.PodRunning)
+	require.NoError(t, cli.Create(context.Background(), podOnNode1))
+
+	require.NoError(t, r.recomputePinned(context.Background()))
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-1"}, got1))
+	assert.Equal(t, []string{digest}, got1.Spec.Pinned, "live referencing Pod on seedNode still requires a pin")
+}
+
+func TestRecomputePinnedQuarantinedKernelArtifactDropsSeedNodeKeepsLivePods(t *testing.T) {
+	digest := numberedDigest("88888888", 1)
+	now := meta.Now()
+
+	mka := testNodeStoreKernelArtifactForPins("team-a", "gen-3", digest, "node-1")
+	mka.Status.Resolved = &workercore.ModelKernelArtifactResolved{
+		ManifestDigest:         digest,
+		DispatchManifestDigest: mka.Spec.Source.NodeStore.DispatchManifestDigest,
+		FileCount:              3,
+		SizeBytes:              4096,
+		ResolvedTime:           now,
+		LastValidatedTime:      &now,
+		DigestSource:           workercore.ModelKernelArtifactDigestSourceForge,
+	}
+	unquarantined := mka.DeepCopy()
+	mka.Status.Quarantined = true
+	mka.Status.QuarantineReason = "UnsupportedKernelArtifact"
+
+	assert.True(t, modelKernelArtifactPinChanged.Update(ctrlevent.UpdateEvent{
+		ObjectOld: unquarantined,
+		ObjectNew: mka,
+	}), "quarantining a nodeStore ModelKernelArtifact must trigger pin recomputation")
+
+	nms1 := &workercore.NodeModelStore{
+		ObjectMeta: meta.ObjectMeta{Name: "node-1"},
+		Spec:       workercore.NodeModelStoreSpec{Pinned: []string{digest}},
+		Status: workercore.NodeModelStoreStatus{
+			Models: []workercore.NodeModelStoreModel{{
+				Digest: digest,
+				State:  workercore.NodeModelStoreModelStateReady,
+			}},
+		},
+	}
+	nms2 := &workercore.NodeModelStore{
+		ObjectMeta: meta.ObjectMeta{Name: "node-2"},
+		Status: workercore.NodeModelStoreStatus{
+			Models: []workercore.NodeModelStoreModel{{
+				Digest: digest,
+				State:  workercore.NodeModelStoreModelStateReady,
+			}},
+		},
+	}
+	md := &workercore.ModelDeployment{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen"},
+		Spec: workercore.ModelDeploymentSpec{
+			Roles: []workercore.ModelDeploymentRole{
+				{Name: "decode", KernelArtifactRef: &core.LocalObjectReference{Name: "gen-3"}},
+			},
+		},
+	}
+	rkRender := buildModelDeploymentKernelRender(mka, kernelArtifactDeliveryKind(mka))
+	require.NotNil(t, rkRender)
+	vols, _ := rkRender.volumes(false)
+	canaryPod := testModelDeploymentPod("team-a", "qwen", "decode", "qwen-decode-0", "node-2", core.PodRunning)
+	canaryPod.Spec.Volumes = vols
+
+	r, cli := newTestModelPrefetchEnv(t, nms1, nms2, mka, md, canaryPod)
+
+	// 1. Quarantined artifact immediately drops its seedNode (node-1) pin while keeping live Pod node-2 pinned.
+	require.NoError(t, r.recomputePinned(context.Background()))
+
+	got1 := new(workercore.NodeModelStore)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-1"}, got1))
+	assert.Empty(t, got1.Spec.Pinned, "quarantined ModelKernelArtifact must not stay pinned on seedNode")
+
+	got2 := new(workercore.NodeModelStore)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-2"}, got2))
+	assert.Equal(t, []string{digest}, got2.Spec.Pinned, "live Pod node must stay pinned until rollback replaces Pods")
+
+	// 2. Rollback reverts ModelDeployment.spec.roles[].kernelArtifactRef to nil while canaryPod is still running on node-2:
+	// node-2 remains pinned via the live Pod CSI volume until canaryPod rolls off.
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(md), md))
+	md.Spec.Roles[0].KernelArtifactRef = nil
+	require.NoError(t, cli.Update(context.Background(), md))
+
+	require.NoError(t, r.recomputePinned(context.Background()))
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-2"}, got2))
+	assert.Equal(t, []string{digest}, got2.Spec.Pinned, "node hosting live Pod still mounting quarantined CSI volume must stay pinned")
+
+	// 3. Once canaryPod rolls off (terminates), node-2 drops the pin too while the quarantined API record persists.
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(canaryPod), canaryPod))
+	canaryPod.Status.Phase = core.PodSucceeded
+	require.NoError(t, cli.Status().Update(context.Background(), canaryPod))
+
+	require.NoError(t, r.recomputePinned(context.Background()))
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-1"}, got1))
+	assert.Empty(t, got1.Spec.Pinned)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "node-2"}, got2))
+	assert.Empty(t, got2.Spec.Pinned, "all pins for quarantined artifact must release once live Pods roll off")
+
+	persistedMKA := new(workercore.ModelKernelArtifact)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(mka), persistedMKA))
+	assert.True(t, persistedMKA.Status.Quarantined, "quarantined ModelKernelArtifact record must persist in API")
+}

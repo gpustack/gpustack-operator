@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -80,16 +81,17 @@ func (f *fakeTokenReviewer) Create(
 }
 
 type ingestTestEnv struct {
-	handler      http.Handler
-	server       *Server
-	store        *store.Store
-	kubeletDir   string
-	cli          ctrlcli.Client
-	reviewer     *fakeTokenReviewer
-	reporter     *report.Reporter
-	reserveCalls atomic.Int32
-	reserveErr   error
-	ready        bool
+	handler           http.Handler
+	server            *Server
+	store             *store.Store
+	kubeletDir        string
+	cli               ctrlcli.Client
+	reviewer          *fakeTokenReviewer
+	reporter          *report.Reporter
+	reserveCalls      atomic.Int32
+	lastReservedBytes atomic.Int64
+	reserveErr        error
+	ready             bool
 }
 
 func newIngestTestEnv(t *testing.T, objs ...ctrlcli.Object) *ingestTestEnv {
@@ -171,6 +173,7 @@ func newIngestTestEnv(t *testing.T, objs ...ctrlcli.Object) *ingestTestEnv {
 		Ready:      func() bool { return env.ready },
 		Reserve: func(ctx context.Context, hex string, sizeBytes int64, written func() int64) (func(), error) {
 			env.reserveCalls.Add(1)
+			env.lastReservedBytes.Store(sizeBytes)
 			if env.reserveErr != nil {
 				return nil, env.reserveErr
 			}
@@ -331,6 +334,7 @@ func TestIngestPublishesVerifiedKernelTreeAndFlushesStatus(t *testing.T) {
 	assert.Equal(t, int64(3), resp.FileCount)
 	assert.Greater(t, resp.SizeBytes, int64(0))
 	assert.Equal(t, testNodeName, resp.SeedNode)
+	assert.Equal(t, []string{testKernelKey}, resp.KernelKeys)
 
 	hex := store.HexOf(resp.ManifestDigest)
 	require.NotEmpty(t, hex)
@@ -606,6 +610,74 @@ func TestIngestRejectsFilesystemHazardsAndCapsBeforeReserve(t *testing.T) {
 			},
 		},
 		{
+			name: "verification-report.json failedCount non-zero with partial pass",
+			tamper: func(t *testing.T, outputDir, verifiedDir, _ string) {
+				secondKey := "vllm/0.8.5/nvidia/sm_90a/layernorm/fedcba9876543210"
+				multiDispatch := fmt.Sprintf(`{
+  "schemaVersion": "gpustack-forge-dispatch/v1",
+  "entries": [
+    {"localKernelKey": %q, "libraryPath": "kernels/rmsnorm_v1/kernel.py"},
+    {"localKernelKey": %q, "libraryPath": "kernels/rmsnorm_v1/kernel.py"}
+  ]
+}`, testKernelKey, secondKey)
+				require.NoError(t, os.WriteFile(filepath.Join(outputDir, "dispatch-manifest.json"), []byte(multiDispatch), 0o644))
+				d := "sha256:" + stringx.SumBySHA256(multiDispatch)
+				bad := fmt.Sprintf(`{"schemaVersion":"gpustack-forge-verification/v1","overallStatus":"PASSED","dispatchManifestDigest":%q,"passedCount":1,"failedCount":1,"entries":[{"passed":true,"evaluation":{"status":"PASSED"}},{"passed":false,"evaluation":{"status":"FAILED"}}]}`, d)
+				require.NoError(t, os.WriteFile(filepath.Join(verifiedDir, "verification-report.json"), []byte(bad), 0o644))
+			},
+		},
+		{
+			name: "verification-report.json entry with passed false and zero failedCount",
+			tamper: func(t *testing.T, outputDir, verifiedDir, _ string) {
+				secondKey := "vllm/0.8.5/nvidia/sm_90a/layernorm/fedcba9876543210"
+				multiDispatch := fmt.Sprintf(`{
+  "schemaVersion": "gpustack-forge-dispatch/v1",
+  "entries": [
+    {"localKernelKey": %q, "libraryPath": "kernels/rmsnorm_v1/kernel.py"},
+    {"localKernelKey": %q, "libraryPath": "kernels/rmsnorm_v1/kernel.py"}
+  ]
+}`, testKernelKey, secondKey)
+				require.NoError(t, os.WriteFile(filepath.Join(outputDir, "dispatch-manifest.json"), []byte(multiDispatch), 0o644))
+				d := "sha256:" + stringx.SumBySHA256(multiDispatch)
+				bad := fmt.Sprintf(`{"schemaVersion":"gpustack-forge-verification/v1","overallStatus":"PASSED","dispatchManifestDigest":%q,"passedCount":2,"failedCount":0,"entries":[{"passed":true,"evaluation":{"status":"PASSED"}},{"passed":false,"evaluation":{"status":"PASSED"}}]}`, d)
+				require.NoError(t, os.WriteFile(filepath.Join(verifiedDir, "verification-report.json"), []byte(bad), 0o644))
+			},
+		},
+		{
+			name: "verification-report.json entry with evaluation status FAILED",
+			tamper: func(t *testing.T, outputDir, verifiedDir, _ string) {
+				secondKey := "vllm/0.8.5/nvidia/sm_90a/layernorm/fedcba9876543210"
+				multiDispatch := fmt.Sprintf(`{
+  "schemaVersion": "gpustack-forge-dispatch/v1",
+  "entries": [
+    {"localKernelKey": %q, "libraryPath": "kernels/rmsnorm_v1/kernel.py"},
+    {"localKernelKey": %q, "libraryPath": "kernels/rmsnorm_v1/kernel.py"}
+  ]
+}`, testKernelKey, secondKey)
+				require.NoError(t, os.WriteFile(filepath.Join(outputDir, "dispatch-manifest.json"), []byte(multiDispatch), 0o644))
+				d := "sha256:" + stringx.SumBySHA256(multiDispatch)
+				bad := fmt.Sprintf(`{"schemaVersion":"gpustack-forge-verification/v1","overallStatus":"PASSED","dispatchManifestDigest":%q,"passedCount":2,"failedCount":0,"entries":[{"passed":true,"evaluation":{"status":"PASSED"}},{"passed":true,"evaluation":{"status":"FAILED"}}]}`, d)
+				require.NoError(t, os.WriteFile(filepath.Join(verifiedDir, "verification-report.json"), []byte(bad), 0o644))
+			},
+		},
+		{
+			name: "verification-report.json passedCount does not cover all dispatch-manifest entries",
+			tamper: func(t *testing.T, outputDir, verifiedDir, _ string) {
+				secondKey := "vllm/0.8.5/nvidia/sm_90a/layernorm/fedcba9876543210"
+				multiDispatch := fmt.Sprintf(`{
+  "schemaVersion": "gpustack-forge-dispatch/v1",
+  "entries": [
+    {"localKernelKey": %q, "libraryPath": "kernels/rmsnorm_v1/kernel.py"},
+    {"localKernelKey": %q, "libraryPath": "kernels/rmsnorm_v1/kernel.py"}
+  ]
+}`, testKernelKey, secondKey)
+				require.NoError(t, os.WriteFile(filepath.Join(outputDir, "dispatch-manifest.json"), []byte(multiDispatch), 0o644))
+				d := "sha256:" + stringx.SumBySHA256(multiDispatch)
+				bad := fmt.Sprintf(`{"schemaVersion":"gpustack-forge-verification/v1","overallStatus":"PASSED","dispatchManifestDigest":%q,"passedCount":1,"failedCount":0,"entries":[{"passed":true,"evaluation":{"status":"PASSED"}}]}`, d)
+				require.NoError(t, os.WriteFile(filepath.Join(verifiedDir, "verification-report.json"), []byte(bad), 0o644))
+			},
+		},
+		{
 			name: "verification-report.json digest mismatch with dispatch-manifest.json",
 			tamper: func(t *testing.T, _, verifiedDir, _ string) {
 				bad := fmt.Sprintf(`{"schemaVersion":"gpustack-forge-verification/v1","overallStatus":"PASSED","dispatchManifestDigest":"sha256:%s","passedCount":1}`, strings.Repeat("f", 64))
@@ -774,6 +846,74 @@ func TestIngestAdditionalRequestReportAndConflictBranches(t *testing.T) {
 			"podUID":    testPodUID,
 		})
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	})
+
+	t.Run("multi-entry manifest succeeds when all entries pass", func(t *testing.T) {
+		forger, pod := validForgerAndSandboxPod()
+		env := newIngestTestEnv(t, forger, pod)
+		outDir, verifiedDir, _ := writeValidSandboxFiles(t, env.kubeletDir, testPodUID)
+
+		secondKey := "vllm/0.8.5/nvidia/sm_90a/layernorm/fedcba9876543210"
+		multiDispatch := fmt.Sprintf(`{
+  "schemaVersion": "gpustack-forge-dispatch/v1",
+  "compatibility": {
+    "engine": "vLLM",
+    "engineVersion": "0.8.5",
+    "manufacturer": "nvidia",
+    "architecture": "sm_90a"
+  },
+  "entries": [
+    {"localKernelKey": %q, "libraryPath": "kernels/rmsnorm_v1/kernel.py"},
+    {"localKernelKey": %q, "libraryPath": "kernels/rmsnorm_v1/kernel.py"}
+  ]
+}`, testKernelKey, secondKey)
+		require.NoError(t, os.WriteFile(filepath.Join(outDir, "dispatch-manifest.json"), []byte(multiDispatch), 0o644))
+		d := "sha256:" + stringx.SumBySHA256(multiDispatch)
+		allPassReport := fmt.Sprintf(`{
+  "schemaVersion": "gpustack-forge-verification/v1",
+  "overallStatus": "PASSED",
+  "dispatchManifestDigest": %q,
+  "passedCount": 2,
+  "failedCount": 0,
+  "entries": [
+    {"passed": true, "evaluation": {"status": "PASSED"}},
+    {"passed": true, "evaluation": {"status": "PASSED"}}
+  ]
+}`, d)
+		require.NoError(t, os.WriteFile(filepath.Join(verifiedDir, "verification-report.json"), []byte(allPassReport), 0o644))
+
+		rec := doIngestRequest(t, env.handler, "worker-ingest-jwt", defaultIngestRequest())
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var resp modelstore.IngestTreeResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, []string{secondKey, testKernelKey}, resp.KernelKeys)
+	})
+
+	t.Run("rejects dispatch-manifest entries mismatching manifest.compatibility", func(t *testing.T) {
+		forger, pod := validForgerAndSandboxPod()
+		env := newIngestTestEnv(t, forger, pod)
+		outDir, verifiedDir, _ := writeValidSandboxFiles(t, env.kubeletDir, testPodUID)
+
+		mismatchedDispatch := fmt.Sprintf(`{
+  "schemaVersion": "gpustack-forge-dispatch/v1",
+  "compatibility": {
+    "engine": "vLLM",
+    "engineVersion": "0.9.0",
+    "manufacturer": "nvidia",
+    "architecture": "sm_90a"
+  },
+  "entries": [
+    {"localKernelKey": %q, "libraryPath": "kernels/rmsnorm_v1/kernel.py"}
+  ]
+}`, testKernelKey)
+		require.NoError(t, os.WriteFile(filepath.Join(outDir, "dispatch-manifest.json"), []byte(mismatchedDispatch), 0o644))
+		d := "sha256:" + stringx.SumBySHA256(mismatchedDispatch)
+		rep := fmt.Sprintf(`{"schemaVersion":"gpustack-forge-verification/v1","overallStatus":"PASSED","dispatchManifestDigest":%q,"passedCount":1}`, d)
+		require.NoError(t, os.WriteFile(filepath.Join(verifiedDir, "verification-report.json"), []byte(rep), 0o644))
+
+		rec := doIngestRequest(t, env.handler, "worker-ingest-jwt", defaultIngestRequest())
+		assert.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
+		assert.Zero(t, env.reserveCalls.Load())
 	})
 
 	t.Run("conflicting digest already published as non-kernel returns 409", func(t *testing.T) {
@@ -981,4 +1121,142 @@ func TestIngestAdditionalRequestReportAndConflictBranches(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestIngestHonorsSandboxOutputSizeLimit(t *testing.T) {
+	cases := []struct {
+		name            string
+		outputSizeLimit *resource.Quantity
+		blobSizeBytes   int64
+		stopAtReserve   bool
+		wantCode        int
+		wantReserveCall int32
+	}{
+		{
+			name:            "nil outputSizeLimit defaults to 2Gi and rejects larger bundle before Reserve",
+			outputSizeLimit: nil,
+			blobSizeBytes:   (int64(2) << 30) + (1 << 20),
+			wantCode:        http.StatusUnprocessableEntity,
+			wantReserveCall: 0,
+		},
+		{
+			name:            "4Gi outputSizeLimit admits 2.5Gi bundle past pre-scan into Reserve",
+			outputSizeLimit: ptr.To(resource.MustParse("4Gi")),
+			blobSizeBytes:   int64(5) << 29,
+			stopAtReserve:   true,
+			wantCode:        http.StatusInsufficientStorage,
+			wantReserveCall: 1,
+		},
+		{
+			name:            "4Gi outputSizeLimit rejects bundle exceeding 4Gi before Reserve",
+			outputSizeLimit: ptr.To(resource.MustParse("4Gi")),
+			blobSizeBytes:   (int64(4) << 30) + (1 << 20),
+			wantCode:        http.StatusUnprocessableEntity,
+			wantReserveCall: 0,
+		},
+		{
+			name:            "outputSizeLimit below 64Mi clamps to 64Mi and rejects 65Mi bundle before Reserve",
+			outputSizeLimit: ptr.To(resource.MustParse("32Mi")),
+			blobSizeBytes:   int64(65) << 20,
+			wantCode:        http.StatusUnprocessableEntity,
+			wantReserveCall: 0,
+		},
+		{
+			name:            "outputSizeLimit above 16Gi clamps to 16Gi and rejects bundle above 16Gi before Reserve",
+			outputSizeLimit: ptr.To(resource.MustParse("32Gi")),
+			blobSizeBytes:   (int64(16) << 30) + (1 << 20),
+			wantCode:        http.StatusUnprocessableEntity,
+			wantReserveCall: 0,
+		},
+		{
+			name:            "128Mi outputSizeLimit publishes 65Mi bundle end-to-end",
+			outputSizeLimit: ptr.To(resource.MustParse("128Mi")),
+			blobSizeBytes:   int64(65) << 20,
+			wantCode:        http.StatusOK,
+			wantReserveCall: 1,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			forger, pod := validForgerAndSandboxPod()
+			forger.Spec.Sandbox.OutputSizeLimit = c.outputSizeLimit
+			env := newIngestTestEnv(t, forger, pod)
+			if c.stopAtReserve {
+				env.reserveErr = &download.Error{
+					Reason:  download.ReasonInsufficientCapacity,
+					Message: "stop after pre-scan",
+					Detail:  "stop after pre-scan",
+				}
+			}
+
+			outDir, _, _ := writeValidSandboxFiles(t, env.kubeletDir, testPodUID)
+			blobPath := filepath.Join(outDir, "kernels", "rmsnorm_v1", "weights.bin")
+			f, err := os.OpenFile(blobPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+			require.NoError(t, err)
+			require.NoError(t, f.Truncate(c.blobSizeBytes))
+			require.NoError(t, f.Close())
+
+			rec := doIngestRequest(t, env.handler, "worker-ingest-jwt", defaultIngestRequest())
+			assert.Equal(t, c.wantCode, rec.Code, rec.Body.String())
+			assert.Equal(t, c.wantReserveCall, env.reserveCalls.Load())
+			if c.wantReserveCall > 0 {
+				assert.Greater(t, env.lastReservedBytes.Load(), c.blobSizeBytes)
+			}
+			if c.wantCode == http.StatusOK {
+				var resp modelstore.IngestTreeResponse
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+				assert.Greater(t, resp.SizeBytes, c.blobSizeBytes)
+				assert.True(t, env.store.IsPublished(store.HexOf(resp.ManifestDigest)))
+			}
+		})
+	}
+}
+
+func TestResolveOutputSizeLimitAndWalkCustomCap(t *testing.T) {
+	cases := []struct {
+		name  string
+		limit *resource.Quantity
+		want  int64
+	}{
+		{name: "nil defaults to 2Gi", limit: nil, want: MaxTotalBytes},
+		{name: "zero defaults to 2Gi", limit: ptr.To(resource.MustParse("0")), want: MaxTotalBytes},
+		{name: "negative defaults to 2Gi", limit: ptr.To(resource.MustParse("-1Gi")), want: MaxTotalBytes},
+		{name: "below 64Mi clamps to 64Mi", limit: ptr.To(resource.MustParse("16Mi")), want: MinOutputSizeBytes},
+		{name: "exact 64Mi stays 64Mi", limit: ptr.To(resource.MustParse("64Mi")), want: MinOutputSizeBytes},
+		{name: "4Gi returns 4Gi", limit: ptr.To(resource.MustParse("4Gi")), want: int64(4) << 30},
+		{name: "exact 16Gi stays 16Gi", limit: ptr.To(resource.MustParse("16Gi")), want: MaxOutputSizeBytes},
+		{name: "above 16Gi clamps to 16Gi", limit: ptr.To(resource.MustParse("32Gi")), want: MaxOutputSizeBytes},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, resolveOutputSizeLimit(c.limit))
+		})
+	}
+
+	forger, pod := validForgerAndSandboxPod()
+	forger.Spec.Sandbox.OutputSizeLimit = ptr.To(resource.MustParse("4Gi"))
+	env := newIngestTestEnv(t, forger, pod)
+	gotLimit, code, _, _ := env.server.verifySandboxOwnership(context.Background(), defaultIngestRequest())
+	require.Zero(t, code)
+	assert.Equal(t, int64(4)<<30, gotLimit)
+
+	outDir, _, dDigest := writeValidSandboxFiles(t, env.kubeletDir, testPodUID)
+	totalBytes, err := preScanForgeOutput(context.Background(), outDir, dDigest, 1, 8192)
+	require.NoError(t, err)
+	assert.Greater(t, totalBytes, int64(0))
+
+	_, err = preScanForgeOutput(context.Background(), outDir, dDigest, 1, totalBytes-1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "total size exceeds cap")
+
+	var copied atomic.Int64
+	_, err = env.server.copyAndPublish(context.Background(), outDir, dDigest, 1, totalBytes-1, &copied)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "total size exceeds cap")
+
+	copied.Store(0)
+	resp, err := env.server.copyAndPublish(context.Background(), outDir, dDigest, 1, totalBytes, &copied)
+	require.NoError(t, err)
+	assert.Equal(t, totalBytes, resp.SizeBytes)
 }

@@ -32,8 +32,9 @@ const (
 // recomputePinned rewrites every node's spec.pinned as the deterministic, sorted, deduplicated
 // union of three priority tiers:
 //  1. Admitted ModelTransfer source-generation digests reported on that node.
-//  2. Non-deleting nodeStore ModelKernelArtifact digests on their seedNode, on nodes hosting live
-//     Pods of ModelDeployments referencing them, and on nodes protecting previousKernelArtifact
+//  2. Non-deleting nodeStore ModelKernelArtifact digests on their seedNode (while not quarantined
+//     and while Ready or awaiting initial resolution), on nodes hosting live Pods of
+//     ModelDeployments referencing or mounting them, and on nodes protecting previousKernelArtifact
 //     during an in-flight ModelDeploymentForger rollout.
 //  3. Live ModelPrefetch disk-retention pins (spec.retention.pinned under allowPinned while the
 //     retention TTL holds).
@@ -135,7 +136,7 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 		if digest == "" {
 			continue
 		}
-		requiredNodes := kernelArtifactRequiredNodes(mka, deps.Items, forgers.Items, pods.Items)
+		requiredNodes := kernelArtifactRequiredNodes(mka, stores.Items, deps.Items, forgers.Items, pods.Items)
 		for _, node := range requiredNodes {
 			addPin(tier2, node, digest)
 			if kernelByNodeDigest[node] == nil {
@@ -278,11 +279,13 @@ func sortedSetKeys(m map[string]struct{}) []string {
 }
 
 // kernelArtifactRequiredNodes returns the sorted node names that must pin a non-deleting nodeStore
-// ModelKernelArtifact: its seedNode, every node hosting a live Pod of a referencing ModelDeployment
-// role, and every node hosting a live Pod of a ModelDeploymentForger target role that holds this
-// artifact as previousKernelArtifact.
+// ModelKernelArtifact: its seedNode (when not quarantined and while seedNode reports the digest
+// Ready or before initial resolution), every node hosting a live Pod of a referencing
+// ModelDeployment role or still mounting the artifact's CSI volume, and every node hosting a live
+// Pod of a ModelDeploymentForger target role that holds this artifact as previousKernelArtifact.
 func kernelArtifactRequiredNodes(
 	mka *workercore.ModelKernelArtifact,
+	stores []workercore.NodeModelStore,
 	deps []workercore.ModelDeployment,
 	forgers []workercore.ModelDeploymentForger,
 	pods []core.Pod,
@@ -290,13 +293,21 @@ func kernelArtifactRequiredNodes(
 	if mka == nil || mka.DeletionTimestamp != nil || mka.Spec.Source.NodeStore == nil {
 		return nil
 	}
-	if mka.Spec.Source.NodeStore.ManifestDigest == "" {
+	digest := mka.Spec.Source.NodeStore.ManifestDigest
+	if digest == "" {
 		return nil
 	}
 
 	nodeSet := map[string]struct{}{}
-	if seed := mka.Spec.Source.NodeStore.SeedNode; seed != "" {
-		nodeSet[seed] = struct{}{}
+	if !mka.Status.Quarantined {
+		if seed := mka.Spec.Source.NodeStore.SeedNode; seed != "" {
+			if mka.Status.Resolved == nil {
+				nodeSet[seed] = struct{}{}
+			} else if entry, ok := modelstore.NodeEntries(stores, digest)[seed]; ok &&
+				entry.State == workercore.NodeModelStoreModelStateReady {
+				nodeSet[seed] = struct{}{}
+			}
+		}
 	}
 
 	addDeploymentRoleNodes := func(ns, mdName, roleName string, allowMissingComponent bool) {
@@ -305,6 +316,19 @@ func kernelArtifactRequiredNodes(
 			if podMatchesDeploymentRole(p, ns, mdName, roleName, allowMissingComponent) {
 				nodeSet[p.Spec.NodeName] = struct{}{}
 			}
+		}
+	}
+
+	for i := range pods {
+		p := &pods[i]
+		if !isLiveModelDeploymentPod(p) || p.Namespace != mka.Namespace {
+			continue
+		}
+		if src := modelDeploymentPodKernelVolumeSource(p); src != nil && src.CSI != nil &&
+			src.CSI.Driver == modelstore.DriverName &&
+			(src.CSI.VolumeAttributes[modelstore.VolumeAttrArtifact] == mka.Name ||
+				src.CSI.VolumeAttributes[modelstore.VolumeAttrManifestDigest] == digest) {
+			nodeSet[p.Spec.NodeName] = struct{}{}
 		}
 	}
 
@@ -429,6 +453,7 @@ var modelKernelArtifactPinChanged = ctrlpredicate.Funcs{
 		}
 		return o.Generation != n.Generation ||
 			!o.DeletionTimestamp.Equal(n.DeletionTimestamp) ||
+			o.Status.Quarantined != n.Status.Quarantined ||
 			!kubemeta.DeepEqual(o.Status.Resolved, n.Status.Resolved)
 	},
 	GenericFunc: func(ctrlevent.GenericEvent) bool { return false },

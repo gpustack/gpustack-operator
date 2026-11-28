@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	kvalidation "k8s.io/apimachinery/pkg/util/validation"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -48,6 +49,12 @@ func assertRestrictedPSACompliant(t *testing.T, pod *core.Pod) {
 	require.NotNil(t, pod.Spec.SecurityContext)
 	require.NotNil(t, pod.Spec.SecurityContext.RunAsNonRoot)
 	require.True(t, *pod.Spec.SecurityContext.RunAsNonRoot)
+	require.NotNil(t, pod.Spec.SecurityContext.RunAsUser)
+	require.Equal(t, int64(65532), *pod.Spec.SecurityContext.RunAsUser)
+	require.NotNil(t, pod.Spec.SecurityContext.RunAsGroup)
+	require.Equal(t, int64(65532), *pod.Spec.SecurityContext.RunAsGroup)
+	require.NotNil(t, pod.Spec.SecurityContext.FSGroup)
+	require.Equal(t, int64(65532), *pod.Spec.SecurityContext.FSGroup)
 	require.NotNil(t, pod.Spec.SecurityContext.SeccompProfile)
 	require.Equal(t, core.SeccompProfileTypeRuntimeDefault, pod.Spec.SecurityContext.SeccompProfile.Type)
 
@@ -63,6 +70,10 @@ func assertRestrictedPSACompliant(t *testing.T, pod *core.Pod) {
 		require.False(t, *c.SecurityContext.AllowPrivilegeEscalation)
 		require.NotNil(t, c.SecurityContext.RunAsNonRoot)
 		require.True(t, *c.SecurityContext.RunAsNonRoot)
+		require.NotNil(t, c.SecurityContext.RunAsUser)
+		require.Equal(t, int64(65532), *c.SecurityContext.RunAsUser)
+		require.NotNil(t, c.SecurityContext.RunAsGroup)
+		require.Equal(t, int64(65532), *c.SecurityContext.RunAsGroup)
 		require.NotNil(t, c.SecurityContext.Capabilities)
 		require.Equal(t, []core.Capability{"ALL"}, c.SecurityContext.Capabilities.Drop)
 		require.NotNil(t, c.SecurityContext.SeccompProfile)
@@ -152,6 +163,130 @@ func TestBuildInputConfigMap_SuccessAndSizeLimit(t *testing.T) {
 		Generation:  1,
 		Request:     req,
 		Definitions: []Definition{hugeDef},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeds")
+}
+
+func TestBuildInputConfigMap_TrimsLowestDurationWorkloadsBeforeFailingSizeCap(t *testing.T) {
+	t.Parallel()
+
+	forger := sampleForger()
+	rmsKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
+	lnKey := sampleValidKernelKey(t, kernelkey.OpFamilyLayerNorm)
+	hidden := int64(4096)
+
+	defA := Definition{
+		Name:           "rmsnorm_hidden4096",
+		OpType:         kernelkey.OpFamilyRMSNorm,
+		LocalKernelKey: rmsKey,
+		Axes: map[string]AxisSpec{
+			"hidden_size": {Type: "const", Value: &hidden},
+			"num_tokens":  {Type: "var"},
+		},
+		Inputs:    map[string]TensorSpec{"x": {Shape: []string{"num_tokens", "hidden_size"}, Dtype: "bfloat16"}},
+		Outputs:   map[string]TensorSpec{"out": {Shape: []string{"num_tokens", "hidden_size"}, Dtype: "bfloat16"}},
+		Reference: "def run(x): return x",
+	}
+	defB := Definition{
+		Name:           "layernorm_hidden4096",
+		OpType:         kernelkey.OpFamilyLayerNorm,
+		LocalKernelKey: lnKey,
+		Axes: map[string]AxisSpec{
+			"hidden_size": {Type: "const", Value: &hidden},
+			"num_tokens":  {Type: "var"},
+		},
+		Inputs:    map[string]TensorSpec{"x": {Shape: []string{"num_tokens", "hidden_size"}, Dtype: "bfloat16"}},
+		Outputs:   map[string]TensorSpec{"out": {Shape: []string{"num_tokens", "hidden_size"}, Dtype: "bfloat16"}},
+		Reference: "def run(x): return x",
+	}
+	req := ForgeRequest{
+		Engine:           "vLLM",
+		EngineVersion:    "0.8.5",
+		Manufacturer:     "nvidia",
+		Architecture:     "sm_90a",
+		TargetKernelKeys: []string{rmsKey, lnKey},
+		MinSpeedupRatio:  1.05,
+		Atol:             1e-2,
+		Rtol:             1e-2,
+	}
+
+	padding := strings.Repeat("p", 80<<10)
+	durations := []float64{90.0, 20.0, 50.0, 50.0, 10.0, 80.0, 70.0}
+	uuids := []string{"wl-b-90", "wl-b-20", "wl-b-50-a", "wl-b-50-b", "wl-b-10", "wl-b-80", "wl-b-70"}
+	workloads := make([]Workload, 0, 1+len(durations))
+	workloads = append(workloads, Workload{
+		UUID:               "wl-defA-sole",
+		Definition:         defA.Name,
+		LocalKernelKey:     rmsKey,
+		Axes:               map[string]int64{"num_tokens": 16},
+		Inputs:             map[string]WorkloadInput{"x": {Type: "random", Value: padding}},
+		ObservedDurationUs: 1.0, // lowest globally, but must be preserved as sole workload of defA
+		CallCount:          1,
+	})
+	for i := range durations {
+		workloads = append(workloads, Workload{
+			UUID:               uuids[i],
+			Definition:         defB.Name,
+			LocalKernelKey:     lnKey,
+			Axes:               map[string]int64{"num_tokens": int64(32 + i)},
+			Inputs:             map[string]WorkloadInput{"x": {Type: "random", Value: padding}},
+			ObservedDurationUs: durations[i],
+			CallCount:          2,
+		})
+	}
+
+	spec := InputConfigMapSpec{
+		Forger:      forger,
+		Name:        "near-cap-input",
+		RoleName:    "decode",
+		Generation:  1,
+		Request:     req,
+		Definitions: []Definition{defA, defB},
+		Workloads:   workloads,
+	}
+	cm1, _, err := BuildInputConfigMap(spec)
+	require.NoError(t, err)
+	cm2, _, err := BuildInputConfigMap(spec)
+	require.NoError(t, err)
+	require.Equal(t, cm1.Data, cm2.Data, "workload trimming must be deterministic")
+
+	totalBytes := 0
+	for k, v := range cm1.Data {
+		totalBytes += len(k) + len(v)
+	}
+	require.LessOrEqual(t, totalBytes, MaxInputConfigMapBytes)
+
+	// defA's sole workload must be preserved despite having the lowest duration overall.
+	require.Contains(t, cm1.Data["wl-rmsnorm_hidden4096.jsonl"], "wl-defA-sole")
+
+	// defB must keep its top-duration workloads and drop the lowest-duration ones.
+	defBJSONL := cm1.Data["wl-layernorm_hidden4096.jsonl"]
+	require.Contains(t, defBJSONL, "wl-b-90")
+	require.Contains(t, defBJSONL, "wl-b-80")
+	require.Contains(t, defBJSONL, "wl-b-70")
+	require.NotContains(t, defBJSONL, "wl-b-10")
+	require.NotContains(t, defBJSONL, "wl-b-20")
+
+	// Irreducible single workload exceeding 512 KiB still fails with size-cap error.
+	hugePadding := strings.Repeat("z", MaxInputConfigMapBytes)
+	_, _, err = BuildInputConfigMap(InputConfigMapSpec{
+		Forger:      forger,
+		Name:        "irreducible-input",
+		RoleName:    "decode",
+		Generation:  1,
+		Request:     req,
+		Definitions: []Definition{defA},
+		Workloads: []Workload{
+			{
+				UUID:               "wl-huge-sole",
+				Definition:         defA.Name,
+				LocalKernelKey:     rmsKey,
+				Axes:               map[string]int64{"num_tokens": 16},
+				Inputs:             map[string]WorkloadInput{"x": {Type: "random", Value: hugePadding}},
+				ObservedDurationUs: 10.0,
+			},
+		},
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "exceeds")
@@ -324,4 +459,63 @@ func TestBuildSandboxPod_MockAndExternalModes(t *testing.T) {
 		require.Equal(t, "op", sanitizeConfigMapSegment("///"))
 		require.Len(t, sanitizeConfigMapSegment(strings.Repeat("a", 200)), 120)
 	})
+}
+
+func TestSandboxLabels_DefensivelyTruncateLongForgerAndRoleNames(t *testing.T) {
+	t.Parallel()
+
+	longForgerName := strings.Repeat("forger-name-segment-", 5) // 100 chars
+	longRoleName := strings.Repeat("decode-role-segment-", 5)   // 100 chars
+	forger := &workercore.ModelDeploymentForger{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      longForgerName,
+			Namespace: "team-a",
+			UID:       types.UID("forger-uid-long"),
+		},
+	}
+	validKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
+	req := ForgeRequest{
+		Engine:           "vLLM",
+		EngineVersion:    "0.8.5",
+		Manufacturer:     "nvidia",
+		Architecture:     "sm_90a",
+		TargetKernelKeys: []string{validKey},
+		MinSpeedupRatio:  1.05,
+		Atol:             1e-2,
+		Rtol:             1e-2,
+	}
+
+	cm, _, err := BuildInputConfigMap(InputConfigMapSpec{
+		Forger:     forger,
+		Name:       "long-forger-input-1",
+		RoleName:   longRoleName,
+		Generation: 1,
+		Request:    req,
+	})
+	require.NoError(t, err)
+	for k, v := range cm.Labels {
+		require.LessOrEqual(t, len(v), kvalidation.DNS1123LabelMaxLength, "ConfigMap label %s=%q exceeds 63 chars", k, v)
+		require.Empty(t, kvalidation.IsValidLabelValue(v), "ConfigMap label %s=%q is not a valid K8s label value", k, v)
+	}
+
+	pod, err := BuildSandboxPod(SandboxPodSpec{
+		Forger:             forger,
+		Name:               "long-forger-sb-1",
+		RoleName:           longRoleName,
+		Generation:         1,
+		InputConfigMapName: "long-forger-input-1",
+		EntranceQueue:      "nvidia-h100-lq",
+		Hardware:           sampleNodeHardware(),
+		OperatorImage:      "gpustack/operator:v1.0.0",
+		SandboxSpec: workercore.ModelDeploymentForgerSandboxSpec{
+			RunnerMode: workercore.ModelDeploymentForgerRunnerModeMock,
+		},
+	})
+	require.NoError(t, err)
+	for k, v := range pod.Labels {
+		require.LessOrEqual(t, len(v), kvalidation.DNS1123LabelMaxLength, "Pod label %s=%q exceeds 63 chars", k, v)
+		require.Empty(t, kvalidation.IsValidLabelValue(v), "Pod label %s=%q is not a valid K8s label value", k, v)
+	}
+	require.Equal(t, cm.Labels[SandboxLabelInstance], pod.Labels[SandboxLabelInstance])
+	require.Equal(t, cm.Labels[SandboxLabelRole], pod.Labels[SandboxLabelRole])
 }

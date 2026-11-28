@@ -2,16 +2,10 @@ package worker
 
 import (
 	"context"
-	"crypto/tls"
-	stdjson "encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	core "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
@@ -42,29 +36,12 @@ const (
 
 	modelDeploymentKernelArtifactDirEnv = "GPUSTACK_KERNEL_ARTIFACT_DIR"
 
-	modelDeploymentSentinelRuntimeConfigPath = "/gpustack/v1/runtime_config"
-	modelDeploymentKernelRuntimeHTTPTimeout  = 5 * time.Second
-	modelDeploymentKernelRuntimeMaxBodyBytes = 1 << 20
-
 	// ModelDeploymentConditionKernelsReady reports whether every role's referenced
 	// ModelKernelArtifact is resolved, unquarantined, and deliverable.
 	ModelDeploymentConditionKernelsReady kubeapistatus.ConditionType = workercore.ModelDeploymentConditionTypeKernelsReady
 )
 
-var (
-	defaultKernelHTTPClient = &http.Client{
-		Timeout: modelDeploymentKernelRuntimeHTTPTimeout,
-	}
-	defaultKernelInsecureHTTPSClient = &http.Client{
-		Timeout: modelDeploymentKernelRuntimeHTTPTimeout,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				MinVersion:         tls.VersionTLS12,
-				InsecureSkipVerify: true, //nolint:gosec // Pod-local HTTPS listeners use self-signed certificates when --ssl-certfile is set.
-			},
-		},
-	}
-)
+var defaultKernelRuntimeClient = runtimecontrol.NewClient()
 
 // ModelDeploymentKernelRender holds the resolved inputs for rendering a role's kernel artifact
 // volume and environment.
@@ -801,6 +778,34 @@ func (r *ModelDeploymentReconciler) canReadPodKernelRuntime(pod *core.Pod) bool 
 	return pod != nil && strings.TrimSpace(pod.Status.PodIP) != ""
 }
 
+func kernelRuntimeStateFromRuntimeConfig(rc *runtimecontrol.RuntimeConfigState) *ModelDeploymentKernelRuntimeState {
+	if rc == nil {
+		return nil
+	}
+	st := &ModelDeploymentKernelRuntimeState{
+		BootID:                 rc.BootID,
+		Ready:                  rc.Ready,
+		Paused:                 rc.Paused,
+		DispatchManifestDigest: rc.DispatchManifestDigest,
+		LoadedKernelKeys:       slices.Clone(rc.LoadedKernelKeys),
+		KernelLoadError:        rc.KernelLoadError,
+	}
+	if len(rc.Ranks) > 0 {
+		st.Ranks = make([]ModelDeploymentKernelRuntimeRankState, len(rc.Ranks))
+		for i := range rc.Ranks {
+			rk := &rc.Ranks[i]
+			st.Ranks[i] = ModelDeploymentKernelRuntimeRankState{
+				RankID:                 rk.RankID,
+				DispatchManifestDigest: rk.DispatchManifestDigest,
+				LoadedKernelKeys:       slices.Clone(rk.LoadedKernelKeys),
+				KernelLoadError:        rk.KernelLoadError,
+			}
+		}
+	}
+	st.normalize()
+	return st
+}
+
 func (r *ModelDeploymentReconciler) readPodKernelRuntimeState(
 	ctx context.Context,
 	md *workercore.ModelDeployment,
@@ -823,55 +828,18 @@ func (r *ModelDeploymentReconciler) readPodKernelRuntimeState(
 	}
 
 	host := strings.TrimSpace(target.Host)
-	if host == "" {
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = host[1 : len(host)-1]
+	}
+	target.Host = host
+	if target.Host == "" {
 		return nil, fmt.Errorf("pod %s has no IP address for sentinel runtime_config check", pod.Name)
 	}
-	if target.Port <= 0 {
-		return nil, fmt.Errorf("pod %s has invalid sentinel port %d", pod.Name, target.Port)
-	}
-	scheme := strings.ToLower(strings.TrimSpace(target.Scheme))
-	if scheme == "" {
-		scheme = "http"
-	}
-	u := &url.URL{
-		Scheme: scheme,
-		Host:   fmt.Sprintf("%s:%d", host, target.Port),
-		Path:   modelDeploymentSentinelRuntimeConfigPath,
-	}
-
-	reqCtx, cancel := context.WithTimeout(ctx, modelDeploymentKernelRuntimeHTTPTimeout)
-	defer cancel()
-
-	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodGet, u.String(), nil)
+	rcState, err := defaultKernelRuntimeClient.GetRuntimeConfig(ctx, target)
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Accept", "application/json")
-
-	httpClient := defaultKernelHTTPClient
-	if scheme == "https" && target.InsecureSkipVerify {
-		httpClient = defaultKernelInsecureHTTPSClient
-	}
-	resp, err := httpClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, modelDeploymentKernelRuntimeMaxBodyBytes))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("GET %s returned HTTP %d", modelDeploymentSentinelRuntimeConfigPath, resp.StatusCode)
-	}
-
-	var state ModelDeploymentKernelRuntimeState
-	if err := stdjson.Unmarshal(raw, &state); err != nil {
-		return nil, fmt.Errorf("decode %s response: %w", modelDeploymentSentinelRuntimeConfigPath, err)
-	}
-	state.normalize()
-	return &state, nil
+	return kernelRuntimeStateFromRuntimeConfig(rcState), nil
 }
 
 func modelDeploymentPodKernelVolumeSource(pod *core.Pod) *core.VolumeSource {
@@ -988,11 +956,11 @@ func (r *ModelDeploymentReconciler) verifyCanaryReplacementKernels(
 			return fmt.Sprintf("canary member %s is not Ready yet", member.Name)
 		}
 	}
-	if slot.DispatchManifestDigest == "" {
-		return ""
-	}
 	role := replacementRoleByName(md, slot.Role)
 	if role == nil {
+		return ""
+	}
+	if slot.DispatchManifestDigest == "" && (role.KernelArtifactRef == nil || role.KernelArtifactRef.Name == "") {
 		return ""
 	}
 	sentinelEnabled := ModelDeploymentRoleSupportsEngineSentinel(md, role) ||
@@ -1012,7 +980,7 @@ func (r *ModelDeploymentReconciler) verifyCanaryReplacementKernels(
 		if state.KernelLoadError != "" {
 			return fmt.Sprintf("canary member %s reported kernel_load_error %q", member.Name, state.KernelLoadError)
 		}
-		if state.DispatchManifestDigest != slot.DispatchManifestDigest {
+		if slot.DispatchManifestDigest != "" && state.DispatchManifestDigest != slot.DispatchManifestDigest {
 			return fmt.Sprintf(
 				"canary member %s dispatch_manifest_digest is %q, want %q",
 				member.Name, state.DispatchManifestDigest, slot.DispatchManifestDigest,

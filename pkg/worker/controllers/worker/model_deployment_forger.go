@@ -225,6 +225,13 @@ func (r *ModelDeploymentForgerReconciler) Reconcile(
 	mode := effectiveForgerMode(mdf)
 
 	if mdf.Spec.Suspend || mode != workercore.ModelDeploymentForgerModeActive {
+		before := mdf.DeepCopy()
+		if err := r.rollbackUncommittedPromotions(ctx, mdf, md, now); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.cleanupRemovedRoles(ctx, mdf, md, now); err != nil {
+			return ctrl.Result{}, err
+		}
 		if err := r.releaseOwnedBinding(ctx, mdf, md); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -232,7 +239,6 @@ func (r *ModelDeploymentForgerReconciler) Reconcile(
 		if mdf.Spec.Suspend {
 			r.cleanupAllForgerSandboxes(ctx, mdf)
 			r.forgetForgerState(mdf.UID)
-			before := mdf.DeepCopy()
 			ensureForgerRoleStatuses(mdf)
 			for i := range mdf.Status.Roles {
 				mdf.Status.Roles[i].ActiveSandbox = nil
@@ -278,7 +284,6 @@ func (r *ModelDeploymentForgerReconciler) Reconcile(
 			return r.reportAlreadyBound(ctx, mdf, now)
 		}
 
-		before := mdf.DeepCopy()
 		if mdf.Status.Binding == nil {
 			mdf.Status.Binding = &workercore.ModelDeploymentForgerBindingStatus{
 				TargetUID:  string(md.UID),
@@ -339,6 +344,9 @@ func (r *ModelDeploymentForgerReconciler) Reconcile(
 		}
 		freshMD.Annotations[workercore.ModelDeploymentForgerBindingAnnotationKey] = string(value)
 		if err := r.Client.Update(ctx, freshMD); err != nil {
+			if kerrors.IsInvalid(err) || kerrors.IsForbidden(err) {
+				return r.reportBindingRejected(ctx, mdf, freshMD.Name, err, now)
+			}
 			return ctrl.Result{}, err
 		}
 		if err := r.apiReaderOrClient().Get(ctx, ctrlcli.ObjectKeyFromObject(freshMD), md); err != nil {
@@ -352,6 +360,9 @@ func (r *ModelDeploymentForgerReconciler) Reconcile(
 		TargetName: md.Name,
 		Term:       term,
 	}
+	if err := r.cleanupRemovedRoles(ctx, mdf, md, now); err != nil {
+		return ctrl.Result{}, err
+	}
 	r.recoverDecision(ctx, mdf, md)
 	r.setCondition(mdf, workercore.ModelDeploymentForgerConditionTypeBound, meta.ConditionTrue,
 		workercore.ModelDeploymentForgerReasonBound, "the forger owns the target lease", now)
@@ -359,6 +370,31 @@ func (r *ModelDeploymentForgerReconciler) Reconcile(
 		workercore.ModelDeploymentForgerReasonActive, "the forger is actively managing kernel specialization", now)
 
 	return r.reconcileTargetRoles(ctx, before, mdf, md, now, prevBlockedReason)
+}
+
+func (r *ModelDeploymentForgerReconciler) reportBindingRejected(
+	ctx context.Context, mdf *workercore.ModelDeploymentForger, targetName string, err error, now time.Time,
+) (ctrl.Result, error) {
+	msg := err.Error()
+	ctrl.LoggerFrom(ctx).Error(err, "the target rejected forger binding acquisition", "target", targetName)
+	if r.Recorder != nil {
+		r.Recorder.Eventf(mdf, core.EventTypeWarning, workercore.ModelDeploymentForgerReasonInvalidBinding,
+			"failed acquiring forger binding on target %s: %v", targetName, err)
+	}
+	before := mdf.DeepCopy()
+	r.setCondition(mdf, workercore.ModelDeploymentForgerConditionTypeBound, meta.ConditionFalse,
+		workercore.ModelDeploymentForgerReasonInvalidBinding, msg, now)
+	r.setCondition(mdf, workercore.ModelDeploymentForgerConditionTypeActive, meta.ConditionFalse,
+		workercore.ModelDeploymentForgerReasonInvalidBinding, msg, now)
+	r.setCondition(mdf, workercore.ModelDeploymentForgerConditionTypeBlocked, meta.ConditionFalse,
+		workercore.ModelDeploymentForgerReasonNoBlock, msg, now)
+	r.setCondition(mdf, workercore.ModelDeploymentForgerConditionTypeReady, meta.ConditionFalse,
+		workercore.ModelDeploymentForgerReasonDegraded, msg, now)
+	mdf.Status.ObservedGeneration = mdf.Generation
+	if updateErr := r.updateStatus(ctx, before, mdf); updateErr != nil {
+		return ctrl.Result{}, updateErr
+	}
+	return ctrl.Result{RequeueAfter: forgerIdleRetryInterval}, nil
 }
 
 func (r *ModelDeploymentForgerReconciler) reportInvalidBinding(
@@ -414,6 +450,9 @@ func (r *ModelDeploymentForgerReconciler) reconcileDeletion(
 		md := new(workercore.ModelDeployment)
 		err := r.Client.Get(ctx, ctrlcli.ObjectKey{Namespace: mdf.Namespace, Name: mdf.Spec.TargetRef.Name}, md)
 		if err == nil {
+			if rbErr := r.rollbackUncommittedPromotions(ctx, mdf, md, r.now()); rbErr != nil {
+				return ctrl.Result{}, rbErr
+			}
 			if relErr := r.releaseOwnedBinding(ctx, mdf, md); relErr != nil {
 				return ctrl.Result{}, relErr
 			}
@@ -454,7 +493,7 @@ func (r *ModelDeploymentForgerReconciler) cleanupAllForgerSandboxes(
 
 	match := ctrlcli.MatchingLabels{
 		forger.SandboxLabelName:     "model-deployment-forger",
-		forger.SandboxLabelInstance: mdf.Name,
+		forger.SandboxLabelInstance: forger.SafeLabelValue(mdf.Name),
 	}
 	pods := new(core.PodList)
 	if err := r.Client.List(ctx, pods, ctrlcli.InNamespace(mdf.Namespace), match); err == nil {
@@ -873,17 +912,50 @@ func (r *ModelDeploymentForgerReconciler) mapTargetDeployment(
 	return reqs
 }
 
+func (r *ModelDeploymentForgerReconciler) mapForgerInstanceLabel(
+	ctx context.Context, obj ctrlcli.Object, instanceLabel string,
+) []ctrlreconcile.Request {
+	for _, ref := range obj.GetOwnerReferences() {
+		if ref.Kind == "ModelDeploymentForger" && ref.Name != "" && (ref.Controller == nil || *ref.Controller) {
+			return []ctrlreconcile.Request{{
+				NamespacedName: types.NamespacedName{
+					Namespace: obj.GetNamespace(),
+					Name:      ref.Name,
+				},
+			}}
+		}
+	}
+	safeLabel := forger.SafeLabelValue(instanceLabel)
+	if r.Client != nil {
+		list := new(workercore.ModelDeploymentForgerList)
+		if err := r.Client.List(ctx, list, ctrlcli.InNamespace(obj.GetNamespace()), ctrlclix.WithoutQuorum); err == nil {
+			var reqs []ctrlreconcile.Request
+			for i := range list.Items {
+				if forger.SafeLabelValue(list.Items[i].Name) == safeLabel || list.Items[i].Name == instanceLabel {
+					reqs = append(reqs, ctrlreconcile.Request{
+						NamespacedName: ctrlcli.ObjectKeyFromObject(&list.Items[i]),
+					})
+				}
+			}
+			if len(reqs) > 0 {
+				return reqs
+			}
+		}
+	}
+	return []ctrlreconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Namespace: obj.GetNamespace(),
+			Name:      safeLabel,
+		},
+	}}
+}
+
 func (r *ModelDeploymentForgerReconciler) mapPod(
 	ctx context.Context, obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
 	lbls := obj.GetLabels()
 	if lbls[forger.SandboxLabelName] == "model-deployment-forger" && lbls[forger.SandboxLabelInstance] != "" {
-		return []ctrlreconcile.Request{{
-			NamespacedName: types.NamespacedName{
-				Namespace: obj.GetNamespace(),
-				Name:      lbls[forger.SandboxLabelInstance],
-			},
-		}}
+		return r.mapForgerInstanceLabel(ctx, obj, lbls[forger.SandboxLabelInstance])
 	}
 	if mdName := lbls[modelDeploymentLabelKeyInstance]; mdName != "" {
 		return r.mapTargetDeployment(ctx, &meta.PartialObjectMetadata{
@@ -932,12 +1004,7 @@ func (r *ModelDeploymentForgerReconciler) mapWorkload(
 	}
 	lbls := obj.GetLabels()
 	if lbls[forger.SandboxLabelInstance] != "" {
-		return []ctrlreconcile.Request{{
-			NamespacedName: types.NamespacedName{
-				Namespace: obj.GetNamespace(),
-				Name:      lbls[forger.SandboxLabelInstance],
-			},
-		}}
+		return r.mapForgerInstanceLabel(ctx, obj, lbls[forger.SandboxLabelInstance])
 	}
 	return nil
 }

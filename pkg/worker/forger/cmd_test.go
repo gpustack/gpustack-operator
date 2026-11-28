@@ -447,3 +447,438 @@ func TestForgeMockAndVerify_MinimalInputAndFailureModes(t *testing.T) {
 		})
 	}
 }
+
+func writeCandidateEntryFiles(
+	t *testing.T, dir, slug, defName, kernelKey string, speedup float64,
+) DispatchManifestEntry {
+	t.Helper()
+
+	libRel := filepath.ToSlash(filepath.Join("kernels", slug, "kernel.py"))
+	solRel := filepath.ToSlash(filepath.Join("solutions", slug+".json"))
+	traceRel := filepath.ToSlash(filepath.Join("traces", slug+".json"))
+
+	libBytes := []byte("def run(x):\n    return x\n")
+	require.NoError(t, writeOutputRegularFile(dir, libRel, libBytes))
+
+	solBytes, err := marshalPrettyJSON(Solution{
+		Name:           slug,
+		Definition:     defName,
+		LocalKernelKey: kernelKey,
+		Author:         "tester",
+		Spec: SolutionSpec{
+			Language:       "python",
+			TargetHardware: []string{"nvidia:sm_90a"},
+			EntryPoint:     "run",
+		},
+		Sources: []SolutionSource{{Path: libRel}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, writeOutputRegularFile(dir, solRel, solBytes))
+
+	traceBytes, err := marshalPrettyJSON(Trace{
+		Definition: defName,
+		Workload: Workload{
+			UUID:           "wl-" + slug,
+			Definition:     defName,
+			LocalKernelKey: kernelKey,
+			Axes:           map[string]int64{"num_tokens": 64},
+			Inputs:         map[string]WorkloadInput{"x": {Type: "random"}},
+		},
+		Solution: slug,
+		Evaluation: TraceEvaluation{
+			Status:      StatusPassed,
+			Correctness: &TraceCorrectness{MaxAbsError: 1e-4, MaxRelativeError: 1e-3},
+			Performance: &TracePerformance{LatencyMs: 0.08, ReferenceLatencyMs: 0.10, SpeedupFactor: speedup},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, writeOutputRegularFile(dir, traceRel, traceBytes))
+
+	return DispatchManifestEntry{
+		LocalKernelKey:    kernelKey,
+		Definition:        defName,
+		SolutionPath:      solRel,
+		SolutionSHA256:    sha256DigestBytes(solBytes),
+		LibraryPath:       libRel,
+		LibrarySHA256:     sha256DigestBytes(libBytes),
+		Entrypoint:        "run",
+		TracePath:         traceRel,
+		TraceSHA256:       sha256DigestBytes(traceBytes),
+		BaselineLatencyUs: 100,
+		ForgedLatencyUs:   80,
+		SpeedupRatio:      speedup,
+	}
+}
+
+func TestForgeVerify_MultiEntryManifestRequiresAllPass(t *testing.T) {
+	t.Parallel()
+
+	rmsKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
+	ropeKey := sampleValidKernelKey(t, kernelkey.OpFamilyRopeKVAppend)
+
+	cases := []struct {
+		name        string
+		secondSpeed float64
+		tamper      func(t *testing.T, dir string)
+		wantPassed  int
+		wantFailed  int
+		wantStatus  string
+		wantErr     bool
+	}{
+		{
+			name:        "all entries pass",
+			secondSpeed: 1.20,
+			wantPassed:  2,
+			wantFailed:  0,
+			wantStatus:  StatusPassed,
+			wantErr:     false,
+		},
+		{
+			name:        "mixed pass and speedup failure is rejected",
+			secondSpeed: 1.01,
+			wantPassed:  1,
+			wantFailed:  1,
+			wantStatus:  StatusFailed,
+			wantErr:     true,
+		},
+		{
+			name:        "mixed pass and checksum failure is rejected",
+			secondSpeed: 1.20,
+			tamper: func(t *testing.T, dir string) {
+				require.NoError(t, os.WriteFile(
+					filepath.Join(dir, "kernels", "rope_v1", "kernel.py"),
+					[]byte("def run(x):\n    return x + 1\n"),
+					0o600,
+				))
+			},
+			wantPassed: 1,
+			wantFailed: 1,
+			wantStatus: StatusFailed,
+			wantErr:    true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			reportPath := filepath.Join(t.TempDir(), VerificationReportFileName)
+			e1 := writeCandidateEntryFiles(t, dir, "rmsnorm_v1", "rmsnorm_hidden4096", rmsKey, 1.25)
+			e2 := writeCandidateEntryFiles(t, dir, "rope_v1", "rope_hidden4096", ropeKey, tc.secondSpeed)
+
+			dm := DispatchManifest{
+				SchemaVersion: DispatchManifestSchemaVersion,
+				Compatibility: DispatchCompatibility{
+					Engine: "vLLM", EngineVersion: "0.8.5", Manufacturer: "nvidia", Architecture: "sm_90a",
+				},
+				Checksums: map[string]string{
+					e1.LibraryPath:  e1.LibrarySHA256,
+					e1.SolutionPath: e1.SolutionSHA256,
+					e1.TracePath:    e1.TraceSHA256,
+					e2.LibraryPath:  e2.LibrarySHA256,
+					e2.SolutionPath: e2.SolutionSHA256,
+					e2.TracePath:    e2.TraceSHA256,
+				},
+				Entries: []DispatchManifestEntry{e1, e2},
+			}
+			dmBytes, err := marshalPrettyJSON(dm)
+			require.NoError(t, err)
+			require.NoError(t, writeOutputRegularFile(dir, DispatchManifestFileName, dmBytes))
+			if tc.tamper != nil {
+				tc.tamper(t, dir)
+			}
+
+			report, err := RunForgeVerify(ForgeVerifyOptions{
+				OutputDir:  dir,
+				ReportPath: reportPath,
+			})
+			require.NotNil(t, report)
+			require.Equal(t, tc.wantStatus, report.OverallStatus)
+			require.Equal(t, tc.wantPassed, report.PassedCount)
+			require.Equal(t, tc.wantFailed, report.FailedCount)
+			require.Len(t, report.Entries, 2)
+			require.FileExists(t, reportPath)
+			if tc.wantErr {
+				require.Error(t, err)
+				require.Error(t, ValidateVerificationReport(report, ""))
+				forgedPassed := *report
+				forgedPassed.OverallStatus = StatusPassed
+				require.Error(t, ValidateVerificationReport(&forgedPassed, ""))
+			} else {
+				require.NoError(t, err)
+				require.NoError(t, ValidateVerificationReport(report, ""))
+			}
+		})
+	}
+}
+
+func TestForgeVerify_BindsTargetKernelKeysDefinitionsAndCompatibility(t *testing.T) {
+	t.Parallel()
+
+	rmsKey := sampleValidKernelKey(t, kernelkey.OpFamilyRMSNorm)
+	lnKey := sampleValidKernelKey(t, kernelkey.OpFamilyLayerNorm)
+	ropeKey := sampleValidKernelKey(t, kernelkey.OpFamilyRopeKVAppend)
+	hidden := int64(4096)
+
+	writeRequestAndDefs := func(t *testing.T, targetKeys []string, arch string) string {
+		t.Helper()
+		inputDir := filepath.Join(t.TempDir(), "input")
+		require.NoError(t, os.MkdirAll(filepath.Join(inputDir, "definitions"), 0o750))
+
+		req := ForgeRequest{
+			SchemaVersion:    ForgeRequestSchemaVersion,
+			Engine:           "vLLM",
+			EngineVersion:    "0.8.5",
+			Manufacturer:     "nvidia",
+			Architecture:     arch,
+			TargetKernelKeys: targetKeys,
+			MinSpeedupRatio:  1.05,
+			Atol:             1e-2,
+			Rtol:             1e-2,
+		}
+		reqBytes, err := json.Marshal(req)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(inputDir, ForgeRequestFileName), reqBytes, 0o600))
+
+		rmsDef := Definition{
+			Name:           "rmsnorm_d4096",
+			OpType:         kernelkey.OpFamilyRMSNorm,
+			LocalKernelKey: rmsKey,
+			Axes: map[string]AxisSpec{
+				"hidden_size": {Type: "const", Value: &hidden},
+				"num_tokens":  {Type: "var"},
+			},
+			Inputs: map[string]TensorSpec{
+				"x":      {Shape: []string{"num_tokens", "hidden_size"}, Dtype: "bfloat16"},
+				"weight": {Shape: []string{"hidden_size"}, Dtype: "bfloat16"},
+			},
+			Outputs: map[string]TensorSpec{
+				"out": {Shape: []string{"num_tokens", "hidden_size"}, Dtype: "bfloat16"},
+			},
+			Reference: "def run(x, weight): return x * weight",
+		}
+		defBytes, err := json.Marshal(rmsDef)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(inputDir, "definitions", "rmsnorm_d4096.json"), defBytes, 0o600))
+
+		mismatchedOpDef := Definition{
+			Name:           "wrong_op_def",
+			OpType:         kernelkey.OpFamilyRMSNorm,
+			LocalKernelKey: lnKey,
+			Axes: map[string]AxisSpec{
+				"hidden_size": {Type: "const", Value: &hidden},
+				"num_tokens":  {Type: "var"},
+			},
+			Inputs: map[string]TensorSpec{
+				"x": {Shape: []string{"num_tokens", "hidden_size"}, Dtype: "bfloat16"},
+			},
+			Outputs: map[string]TensorSpec{
+				"out": {Shape: []string{"num_tokens", "hidden_size"}, Dtype: "bfloat16"},
+			},
+			Reference: "def run(x): return x",
+		}
+		misBytes, err := json.Marshal(mismatchedOpDef)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(inputDir, "definitions", "wrong_op_def.json"), misBytes, 0o600))
+
+		return inputDir
+	}
+
+	cases := []struct {
+		name         string
+		targetKeys   []string
+		reqArch      string
+		manifestComp DispatchCompatibility
+		entryDef     string
+		entryKey     string
+		wantPass     bool
+		wantErrSub   string
+	}{
+		{
+			name:       "accepts matching targetKernelKey, definition, and ArchCompatible sm_90 vs sm_90a",
+			targetKeys: []string{rmsKey},
+			reqArch:    "sm_90",
+			manifestComp: DispatchCompatibility{
+				Engine: "vLLM", EngineVersion: "0.8.5", Manufacturer: "nvidia", Architecture: "sm_90a",
+			},
+			entryDef: "rmsnorm_d4096",
+			entryKey: rmsKey,
+			wantPass: true,
+		},
+		{
+			name:       "rejects entry localKernelKey not in forge-request targetKernelKeys",
+			targetKeys: []string{rmsKey},
+			reqArch:    "sm_90a",
+			manifestComp: DispatchCompatibility{
+				Engine: "vLLM", EngineVersion: "0.8.5", Manufacturer: "nvidia", Architecture: "sm_90a",
+			},
+			entryDef:   "rope_def",
+			entryKey:   ropeKey,
+			wantErrSub: "targetKernelKeys",
+		},
+		{
+			name:       "rejects definition.local_kernel_key mismatch (cross-op substitution S2)",
+			targetKeys: []string{rmsKey, lnKey},
+			reqArch:    "sm_90a",
+			manifestComp: DispatchCompatibility{
+				Engine: "vLLM", EngineVersion: "0.8.5", Manufacturer: "nvidia", Architecture: "sm_90a",
+			},
+			entryDef:   "rmsnorm_d4096",
+			entryKey:   lnKey,
+			wantErrSub: "local_kernel_key",
+		},
+		{
+			name:       "rejects definition.op_type mismatch against parsed opFamily",
+			targetKeys: []string{rmsKey, lnKey},
+			reqArch:    "sm_90a",
+			manifestComp: DispatchCompatibility{
+				Engine: "vLLM", EngineVersion: "0.8.5", Manufacturer: "nvidia", Architecture: "sm_90a",
+			},
+			entryDef:   "wrong_op_def",
+			entryKey:   lnKey,
+			wantErrSub: "op_type",
+		},
+		{
+			name:       "rejects manifest.compatibility engineVersion mismatch with forge-request",
+			targetKeys: []string{rmsKey},
+			reqArch:    "sm_90a",
+			manifestComp: DispatchCompatibility{
+				Engine: "vLLM", EngineVersion: "0.9.0", Manufacturer: "nvidia", Architecture: "sm_90a",
+			},
+			entryDef:   "rmsnorm_d4096",
+			entryKey:   rmsKey,
+			wantErrSub: "compatibility",
+		},
+		{
+			name:       "rejects manifest.compatibility architecture mismatch with forge-request",
+			targetKeys: []string{rmsKey},
+			reqArch:    "sm_90a",
+			manifestComp: DispatchCompatibility{
+				Engine: "vLLM", EngineVersion: "0.8.5", Manufacturer: "nvidia", Architecture: "sm_80",
+			},
+			entryDef:   "rmsnorm_d4096",
+			entryKey:   rmsKey,
+			wantErrSub: "compatibility",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			inputDir := writeRequestAndDefs(t, tc.targetKeys, tc.reqArch)
+			outDir := filepath.Join(t.TempDir(), "output")
+			reportPath := filepath.Join(t.TempDir(), VerificationReportFileName)
+
+			entry := writeCandidateEntryFiles(t, outDir, "cand_v1", tc.entryDef, tc.entryKey, 1.25)
+			dm := DispatchManifest{
+				SchemaVersion: DispatchManifestSchemaVersion,
+				Compatibility: tc.manifestComp,
+				Checksums: map[string]string{
+					entry.LibraryPath:  entry.LibrarySHA256,
+					entry.SolutionPath: entry.SolutionSHA256,
+					entry.TracePath:    entry.TraceSHA256,
+				},
+				Entries: []DispatchManifestEntry{entry},
+			}
+			dmBytes, err := marshalPrettyJSON(dm)
+			require.NoError(t, err)
+			require.NoError(t, writeOutputRegularFile(outDir, DispatchManifestFileName, dmBytes))
+
+			report, verifyErr := RunForgeVerify(ForgeVerifyOptions{
+				InputDir:   inputDir,
+				OutputDir:  outDir,
+				ReportPath: reportPath,
+			})
+			require.NotNil(t, report)
+			if tc.wantPass {
+				require.NoError(t, verifyErr)
+				require.Equal(t, StatusPassed, report.OverallStatus)
+				return
+			}
+			require.Error(t, verifyErr)
+			require.Equal(t, StatusFailed, report.OverallStatus)
+			combined := verifyErr.Error()
+			if len(report.Entries) > 0 {
+				combined += " " + report.Entries[0].Reason
+			}
+			require.Contains(t, combined, tc.wantErrSub)
+		})
+	}
+}
+
+func TestForgeMock_EmitsFamilyAppropriateSignaturesAndMockMetadata(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		opFamily      string
+		wantSigSubstr string
+	}{
+		{opFamily: kernelkey.OpFamilyRMSNorm, wantSigSubstr: "def run(x, weight=None, eps=1e-6):"},
+		{opFamily: kernelkey.OpFamilyLayerNorm, wantSigSubstr: "def run(x, weight=None, bias=None, eps=1e-5):"},
+		{opFamily: kernelkey.OpFamilyActivationQuant, wantSigSubstr: "def run(x):"},
+		{opFamily: kernelkey.OpFamilyRopeKVAppend, wantSigSubstr: "def run(q, k, cos, sin):"},
+		{opFamily: kernelkey.OpFamilyMoERouterTopK, wantSigSubstr: "def run(logits, top_k=2):"},
+		{opFamily: kernelkey.OpFamilyPagedAttention, wantSigSubstr: "def run(q, k_cache, v_cache):"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.opFamily, func(t *testing.T) {
+			t.Parallel()
+			inputDir := filepath.Join(t.TempDir(), "in")
+			outputDir := filepath.Join(t.TempDir(), "out")
+			require.NoError(t, os.MkdirAll(inputDir, 0o750))
+
+			key := sampleValidKernelKey(t, tc.opFamily)
+			req := ForgeRequest{
+				SchemaVersion:    ForgeRequestSchemaVersion,
+				Engine:           "vLLM",
+				EngineVersion:    "0.8.5",
+				Manufacturer:     "nvidia",
+				Architecture:     "sm_90a",
+				TargetKernelKeys: []string{key},
+				MinSpeedupRatio:  1.05,
+				Atol:             1e-2,
+				Rtol:             1e-2,
+			}
+			reqBytes, err := json.Marshal(req)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(inputDir, ForgeRequestFileName), reqBytes, 0o600))
+
+			require.NoError(t, RunForgeMock(ForgeMockOptions{
+				InputDir:  inputDir,
+				OutputDir: outputDir,
+			}))
+
+			solID := tc.opFamily + "_mock_v1"
+			kernelBytes, err := os.ReadFile(filepath.Join(outputDir, "kernels", solID, "kernel.py"))
+			require.NoError(t, err)
+			require.Contains(t, string(kernelBytes), tc.wantSigSubstr)
+
+			solBytes, err := os.ReadFile(filepath.Join(outputDir, "solutions", solID+".json"))
+			require.NoError(t, err)
+			var solMap map[string]any
+			require.NoError(t, json.Unmarshal(solBytes, &solMap))
+			require.Equal(t, true, solMap["mock"], "solutions/<sol>.json must carry mock=true")
+
+			dmBytes, err := os.ReadFile(filepath.Join(outputDir, DispatchManifestFileName))
+			require.NoError(t, err)
+			var dmMap map[string]any
+			require.NoError(t, json.Unmarshal(dmBytes, &dmMap))
+			entries, ok := dmMap["entries"].([]any)
+			require.True(t, ok)
+			require.Len(t, entries, 1)
+			entryMap, ok := entries[0].(map[string]any)
+			require.True(t, ok)
+			require.Equal(t, true, entryMap["mock"], "dispatch-manifest entry must carry mock=true")
+
+			// Verify forge-verify still passes cleanly on every mock family output.
+			report, err := RunForgeVerify(ForgeVerifyOptions{
+				InputDir:  inputDir,
+				OutputDir: outputDir,
+			})
+			require.NoError(t, err)
+			require.Equal(t, StatusPassed, report.OverallStatus)
+		})
+	}
+}

@@ -250,7 +250,7 @@ Admission enforces a strict engine-router matrix: `sgl-router` and deprecated `s
 | Engine | Defaulted | All | Ascend A5 (`Family == "950"`), HIXL remote delivery, `interface: 0` | `ASCEND_LOCAL_COMM_RES='{"version":"1.3"}'` | Deduplicated with KV connector defaults; user *`roles[].env`* wins. |
 | Engine | Defaulted | All | Ascend A5 (`Family == "950"`), HIXL remote delivery, `interface > 0` | `ASCEND_GLOBAL_RESOURCE_CONFIG='{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}'` and read-only `/etc/hixlep` (`gpustack-ascend-hixlep`, `HostPathDirectory`) | *Server* and symmetric *PD* roles on `vLLM` or `SGLang`; user *`roles[].env`* and *`additionalVolumes`* win. |
 | Engine | Defaulted | All | Remote delivery | `GPUSTACK_MODEL_TRANSFER_TIMEOUT=1800` | User environment wins. |
-| Engine | Owned | All | *`spec.roles[*].kernelArtifactRef`* set | `GPUSTACK_KERNEL_ARTIFACT_DIR=/var/lib/gpustack/kernels`, read-only CSI or OCI image volume at `/var/lib/gpustack/kernels` | `ConfigMap` mounts overlapping `/var/lib/gpustack/kernels` are refused (`ConfigMapKernelMountForbidden`). |
+| Engine | Owned | All | Sentinel-supported or *`runtimeControl`* role (reserved); rendered when *`spec.roles[*].kernelArtifactRef`* is set | `GPUSTACK_KERNEL_ARTIFACT_DIR=/var/lib/gpustack/kernels`, read-only CSI or OCI image volume at `/var/lib/gpustack/kernels` | User `GPUSTACK_KERNEL_ARTIFACT_DIR` is refused on all sentinel-supported and *`runtimeControl`* roles; `ConfigMap` mounts overlapping `/var/lib/gpustack/kernels` are refused (`ConfigMapKernelMountForbidden`). |
 
 ---
 

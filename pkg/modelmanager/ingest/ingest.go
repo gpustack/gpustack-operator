@@ -26,6 +26,7 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klog "k8s.io/klog/v2"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,11 +43,15 @@ import (
 )
 
 // Hard limits enforced on every ingested ForgeSandbox output tree before reserving cache space.
+// MaxTotalBytes is the default byte ceiling when outputSizeLimit is unset; configured values are
+// clamped to [MinOutputSizeBytes, MaxOutputSizeBytes].
 const (
-	MaxFiles      = 1024
-	MaxTotalBytes = int64(2) << 30
-	MaxPathDepth  = 16
-	MaxPathLength = 256
+	MaxFiles           = 1024
+	MaxTotalBytes      = int64(2) << 30
+	MinOutputSizeBytes = int64(64) << 20
+	MaxOutputSizeBytes = int64(16) << 30
+	MaxPathDepth       = 16
+	MaxPathLength      = 256
 
 	VerificationReportSchemaVersion = "gpustack-forge-verification/v1"
 	DispatchManifestSchemaVersion   = "gpustack-forge-dispatch/v1"
@@ -124,17 +129,28 @@ type verificationReport struct {
 	DispatchManifestDigest string `json:"dispatchManifestDigest"`
 	PassedCount            int    `json:"passedCount"`
 	VerifiedCount          int    `json:"verifiedCount"`
+	FailedCount            int    `json:"failedCount"`
 	Entries                []struct {
 		Passed     bool `json:"passed"`
-		Evaluation struct {
+		Evaluation *struct {
 			Status string `json:"status"`
 		} `json:"evaluation"`
 	} `json:"entries"`
 }
 
+func (r verificationReport) verifiedEntryCount() int {
+	return max(r.PassedCount, r.VerifiedCount)
+}
+
 type dispatchManifest struct {
 	SchemaVersion string `json:"schemaVersion"`
-	Entries       []struct {
+	Compatibility struct {
+		Engine        string `json:"engine"`
+		EngineVersion string `json:"engineVersion"`
+		Manufacturer  string `json:"manufacturer"`
+		Architecture  string `json:"architecture"`
+	} `json:"compatibility"`
+	Entries []struct {
 		LocalKernelKey string `json:"localKernelKey"`
 		LibraryPath    string `json:"libraryPath"`
 	} `json:"entries"`
@@ -192,7 +208,8 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if code, reason, msg := s.verifySandboxOwnership(ctx, req); code != 0 {
+	maxTotalBytes, code, reason, msg := s.verifySandboxOwnership(ctx, req)
+	if code != 0 {
 		refuseJSON(w, code, reason, msg)
 		return
 	}
@@ -211,8 +228,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dispatchHex := store.HexOf(vReport.DispatchManifestDigest)
+	wantVerifiedEntries := vReport.verifiedEntryCount()
 
-	totalBytes, err := preScanForgeOutput(ctx, outputDir, vReport.DispatchManifestDigest)
+	totalBytes, err := preScanForgeOutput(ctx, outputDir, vReport.DispatchManifestDigest, wantVerifiedEntries, maxTotalBytes)
 	if err != nil {
 		klog.V(1).InfoS("sandbox output pre-scan rejected", "node", s.NodeID, "error", err.Error())
 		refuseJSON(w, http.StatusUnprocessableEntity, "InvalidSandboxOutput", "sandbox output failed integrity or size checks")
@@ -234,7 +252,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		defer release()
 	}
 
-	resp, err := s.copyAndPublish(ctx, outputDir, vReport.DispatchManifestDigest, &copiedBytes)
+	resp, err := s.copyAndPublish(ctx, outputDir, vReport.DispatchManifestDigest, wantVerifiedEntries, maxTotalBytes, &copiedBytes)
 	if err != nil {
 		var statusErr *httpError
 		if errors.As(err, &statusErr) {
@@ -291,22 +309,36 @@ func decodeIngestRequest(body io.Reader) (modelstore.IngestTreeRequest, error) {
 	return req, nil
 }
 
+func resolveOutputSizeLimit(limit *resource.Quantity) int64 {
+	if limit == nil || limit.Sign() <= 0 {
+		return MaxTotalBytes
+	}
+	size := limit.Value()
+	if size < MinOutputSizeBytes {
+		return MinOutputSizeBytes
+	}
+	if size > MaxOutputSizeBytes {
+		return MaxOutputSizeBytes
+	}
+	return size
+}
+
 // verifySandboxOwnership checks live API state before reading a single byte from kubelet's disk.
-func (s *Server) verifySandboxOwnership(ctx context.Context, req modelstore.IngestTreeRequest) (int, string, string) {
+func (s *Server) verifySandboxOwnership(ctx context.Context, req modelstore.IngestTreeRequest) (int64, int, string, string) {
 	if s.APIReader == nil {
-		return http.StatusServiceUnavailable, "Unavailable", "live API reader is unavailable"
+		return 0, http.StatusServiceUnavailable, "Unavailable", "live API reader is unavailable"
 	}
 
 	forger := new(workercore.ModelDeploymentForger)
 	if err := s.APIReader.Get(ctx, ctrlcli.ObjectKey{Namespace: req.Namespace, Name: req.ForgerName}, forger); err != nil {
 		if kerrors.IsNotFound(err) {
-			return http.StatusForbidden, "ForgerNotFound", "the owning ModelDeploymentForger does not exist"
+			return 0, http.StatusForbidden, "ForgerNotFound", "the owning ModelDeploymentForger does not exist"
 		}
 		klog.ErrorS(err, "read ModelDeploymentForger for ingest")
-		return http.StatusServiceUnavailable, "Unavailable", "failed reading ModelDeploymentForger"
+		return 0, http.StatusServiceUnavailable, "Unavailable", "failed reading ModelDeploymentForger"
 	}
 	if forger.UID == "" || (req.ForgerUID != "" && string(forger.UID) != req.ForgerUID) {
-		return http.StatusForbidden, "ForgerUIDMismatch", "the ModelDeploymentForger UID does not match"
+		return 0, http.StatusForbidden, "ForgerUIDMismatch", "the ModelDeploymentForger UID does not match"
 	}
 
 	sandboxMatched := false
@@ -316,45 +348,45 @@ func (s *Server) verifySandboxOwnership(ctx context.Context, req modelstore.Inge
 			continue
 		}
 		if sb.PodName != "" && sb.PodName != req.PodName {
-			return http.StatusForbidden, "SandboxMismatch", "activeSandbox podName does not match request"
+			return 0, http.StatusForbidden, "SandboxMismatch", "activeSandbox podName does not match request"
 		}
 		if sb.NodeName != "" && sb.NodeName != s.NodeID {
-			return http.StatusForbidden, "SandboxNodeMismatch", "activeSandbox nodeName does not match this node"
+			return 0, http.StatusForbidden, "SandboxNodeMismatch", "activeSandbox nodeName does not match this node"
 		}
 		sandboxMatched = true
 		break
 	}
 	if !sandboxMatched {
-		return http.StatusForbidden, "SandboxNotActive", "the Pod UID is not recorded as an activeSandbox on ModelDeploymentForger"
+		return 0, http.StatusForbidden, "SandboxNotActive", "the Pod UID is not recorded as an activeSandbox on ModelDeploymentForger"
 	}
 
 	pod := new(core.Pod)
 	if err := s.APIReader.Get(ctx, ctrlcli.ObjectKey{Namespace: req.Namespace, Name: req.PodName}, pod); err != nil {
 		if kerrors.IsNotFound(err) {
-			return http.StatusForbidden, "PodNotFound", "the ForgeSandbox Pod does not exist"
+			return 0, http.StatusForbidden, "PodNotFound", "the ForgeSandbox Pod does not exist"
 		}
 		klog.ErrorS(err, "read ForgeSandbox Pod for ingest")
-		return http.StatusServiceUnavailable, "Unavailable", "failed reading ForgeSandbox Pod"
+		return 0, http.StatusServiceUnavailable, "Unavailable", "failed reading ForgeSandbox Pod"
 	}
 	if string(pod.UID) != req.PodUID {
-		return http.StatusForbidden, "PodUIDMismatch", "the ForgeSandbox Pod UID does not match"
+		return 0, http.StatusForbidden, "PodUIDMismatch", "the ForgeSandbox Pod UID does not match"
 	}
 	if s.NodeID == "" || pod.Spec.NodeName != s.NodeID {
-		return http.StatusForbidden, "PodNodeMismatch", "the ForgeSandbox Pod is not scheduled on this node"
+		return 0, http.StatusForbidden, "PodNodeMismatch", "the ForgeSandbox Pod is not scheduled on this node"
 	}
 	owner := meta.GetControllerOf(pod)
 	if owner == nil || owner.UID != forger.UID || owner.Kind != "ModelDeploymentForger" || owner.Name != forger.Name {
-		return http.StatusForbidden, "PodOwnerMismatch", "the ForgeSandbox Pod is not controlled by the owning ModelDeploymentForger"
+		return 0, http.StatusForbidden, "PodOwnerMismatch", "the ForgeSandbox Pod is not controlled by the owning ModelDeploymentForger"
 	}
 
 	for _, initName := range []string{initContainerRunner, initContainerVerifier} {
 		if !initContainerSucceeded(pod.Status.InitContainerStatuses, initName) {
-			return http.StatusConflict, "SandboxNotTerminated",
+			return 0, http.StatusConflict, "SandboxNotTerminated",
 				fmt.Sprintf("initContainer %s has not terminated with exit code 0", initName)
 		}
 	}
 
-	return 0, "", ""
+	return resolveOutputSizeLimit(forger.Spec.Sandbox.OutputSizeLimit), 0, "", ""
 }
 
 func initContainerSucceeded(statuses []core.ContainerStatus, wantName string) bool {
@@ -470,24 +502,32 @@ func readAndValidateVerificationReport(verifiedDir string) (verificationReport, 
 		return out, fmt.Errorf("verification status is %q, want PASSED", status)
 	}
 
-	if out.PassedCount < 0 || out.VerifiedCount < 0 {
+	if out.PassedCount < 0 || out.VerifiedCount < 0 || out.FailedCount < 0 {
 		return out, errors.New("negative verification counts")
+	}
+	if out.FailedCount > 0 {
+		return out, fmt.Errorf("verification report failedCount is %d, want 0", out.FailedCount)
 	}
 	if out.PassedCount > 0 && out.VerifiedCount > 0 && out.PassedCount != out.VerifiedCount {
 		return out, errors.New("conflicting passedCount and verifiedCount")
 	}
-	if max(out.PassedCount, out.VerifiedCount) < 1 {
+	verifiedCount := out.verifiedEntryCount()
+	if verifiedCount < 1 {
 		return out, errors.New("verified count must be at least 1")
 	}
 	if len(out.Entries) > 0 {
-		entryPassed := 0
-		for _, e := range out.Entries {
-			if e.Passed || e.Evaluation.Status == "PASSED" {
-				entryPassed++
-			}
+		if len(out.Entries) != verifiedCount {
+			return out, fmt.Errorf("verification report entries length %d does not match verified count %d",
+				len(out.Entries), verifiedCount)
 		}
-		if entryPassed < 1 {
-			return out, errors.New("verification report entries contain zero passed candidates")
+		for i, e := range out.Entries {
+			if !e.Passed {
+				return out, fmt.Errorf("verification report entry %d did not pass", i)
+			}
+			if e.Evaluation != nil && strings.TrimSpace(e.Evaluation.Status) != "PASSED" {
+				return out, fmt.Errorf("verification report entry %d evaluation status is %q, want PASSED",
+					i, e.Evaluation.Status)
+			}
 		}
 	}
 	if store.HexOf(out.DispatchManifestDigest) == "" {
@@ -497,26 +537,65 @@ func readAndValidateVerificationReport(verifiedDir string) (verificationReport, 
 	return out, nil
 }
 
-func validateDispatchManifest(raw []byte) error {
+func validateDispatchManifest(raw []byte, wantVerifiedEntries int) ([]string, error) {
 	var dm dispatchManifest
 	if err := json.Unmarshal(raw, &dm); err != nil {
-		return fmt.Errorf("parse dispatch-manifest.json: %w", err)
+		return nil, fmt.Errorf("parse dispatch-manifest.json: %w", err)
 	}
 	if dm.SchemaVersion != DispatchManifestSchemaVersion {
-		return fmt.Errorf("unsupported dispatch-manifest schemaVersion %q", dm.SchemaVersion)
+		return nil, fmt.Errorf("unsupported dispatch-manifest schemaVersion %q", dm.SchemaVersion)
 	}
 	if len(dm.Entries) == 0 {
-		return errors.New("dispatch-manifest.json contains no entries")
+		return nil, errors.New("dispatch-manifest.json contains no entries")
 	}
+	if wantVerifiedEntries > 0 && len(dm.Entries) != wantVerifiedEntries {
+		return nil, fmt.Errorf("verified entry count %d does not cover all %d entries in dispatch-manifest.json",
+			wantVerifiedEntries, len(dm.Entries))
+	}
+
+	target := kernelkey.CompatibilityTarget{
+		Engine:        dm.Compatibility.Engine,
+		EngineVersion: dm.Compatibility.EngineVersion,
+		Manufacturer:  dm.Compatibility.Manufacturer,
+		Arch:          dm.Compatibility.Architecture,
+	}
+	if _, err := kernelkey.NormalizeEngine(target.Engine); err != nil {
+		return nil, fmt.Errorf("compatibility.engine: %w", err)
+	}
+	if _, err := kernelkey.NormalizeEngineVersion(target.EngineVersion); err != nil {
+		return nil, fmt.Errorf("compatibility.engineVersion: %w", err)
+	}
+	if _, err := kernelkey.NormalizeManufacturer(target.Manufacturer); err != nil {
+		return nil, fmt.Errorf("compatibility.manufacturer: %w", err)
+	}
+	if _, err := kernelkey.NormalizeArch(target.Manufacturer, target.Arch); err != nil {
+		return nil, fmt.Errorf("compatibility.architecture: %w", err)
+	}
+
+	seen := make(map[string]struct{}, len(dm.Entries))
+	keys := make([]string, 0, len(dm.Entries))
 	for i, e := range dm.Entries {
-		if err := kernelkey.ValidateKey(strings.TrimSpace(e.LocalKernelKey)); err != nil {
-			return fmt.Errorf("entry %d localKernelKey: %w", i, err)
+		rawKey := strings.TrimSpace(e.LocalKernelKey)
+		parsed, err := kernelkey.Parse(rawKey)
+		if err != nil {
+			return nil, fmt.Errorf("entry %d localKernelKey: %w", i, err)
+		}
+		if excluded, reason := kernelkey.IsExcluded(parsed.OpFamily); excluded {
+			return nil, fmt.Errorf("entry %d localKernelKey excluded (%s)", i, reason)
+		}
+		if err := kernelkey.MatchCompatibility(parsed, target); err != nil {
+			return nil, fmt.Errorf("entry %d localKernelKey compatibility: %w", i, err)
 		}
 		if strings.TrimSpace(e.LibraryPath) == "" {
-			return fmt.Errorf("entry %d libraryPath is empty", i)
+			return nil, fmt.Errorf("entry %d libraryPath is empty", i)
+		}
+		if _, dup := seen[rawKey]; !dup {
+			seen[rawKey] = struct{}{}
+			keys = append(keys, rawKey)
 		}
 	}
-	return nil
+	slices.Sort(keys)
+	return keys, nil
 }
 
 // walkForgeOutput walks outputDir via os.OpenRoot and openat(O_NOFOLLOW|O_NONBLOCK), enforcing
@@ -524,9 +603,13 @@ func validateDispatchManifest(raw []byte) error {
 func walkForgeOutput(
 	ctx context.Context,
 	outputDir string,
+	maxTotalBytes int64,
 	onDir func(relPath string) error,
 	onFile func(relPath string, f *os.File, size int64) error,
 ) (int64, error) {
+	if maxTotalBytes <= 0 {
+		maxTotalBytes = MaxTotalBytes
+	}
 	root, err := os.OpenRoot(outputDir)
 	if err != nil {
 		return 0, &httpError{code: http.StatusUnprocessableEntity, reason: "InvalidSandboxOutput", msg: err.Error()}
@@ -599,7 +682,7 @@ func walkForgeOutput(
 			if err != nil {
 				return &httpError{code: http.StatusUnprocessableEntity, reason: "InvalidSandboxOutput", msg: err.Error()}
 			}
-			if size > MaxTotalBytes-totalBytes {
+			if size > maxTotalBytes-totalBytes {
 				_ = f.Close()
 				return &httpError{code: http.StatusUnprocessableEntity, reason: "InvalidSandboxOutput", msg: "total size exceeds cap"}
 			}
@@ -621,9 +704,11 @@ func walkForgeOutput(
 
 // preScanForgeOutput validates caps, file types, and verification-report digest agreement before
 // gc.Collector.Reserve is called.
-func preScanForgeOutput(ctx context.Context, outputDir, wantDispatchDigest string) (int64, error) {
+func preScanForgeOutput(
+	ctx context.Context, outputDir, wantDispatchDigest string, wantVerifiedEntries int, maxTotalBytes int64,
+) (int64, error) {
 	seenDispatch := false
-	totalBytes, err := walkForgeOutput(ctx, outputDir, nil, func(relPath string, f *os.File, size int64) error {
+	totalBytes, err := walkForgeOutput(ctx, outputDir, maxTotalBytes, nil, func(relPath string, f *os.File, size int64) error {
 		if relPath != dispatchManifestFileName {
 			return nil
 		}
@@ -640,7 +725,7 @@ func preScanForgeOutput(ctx context.Context, outputDir, wantDispatchDigest strin
 			return fmt.Errorf("dispatch-manifest.json digest %s does not match verification report %s",
 				gotDigest, wantDispatchDigest)
 		}
-		if err := validateDispatchManifest(raw); err != nil {
+		if _, err := validateDispatchManifest(raw, wantVerifiedEntries); err != nil {
 			return err
 		}
 		seenDispatch = true
@@ -660,9 +745,16 @@ func preScanForgeOutput(ctx context.Context, outputDir, wantDispatchDigest strin
 // verification report, writes manifest.json (0600, Kind: "Kernel"), publishes atomically with
 // Source: "Forge" and Kind: "Kernel", stamps LastUsedTime, and flushes NodeModelStore status.
 func (s *Server) copyAndPublish(
-	ctx context.Context, outputDir, wantDispatchDigest string, copiedBytes *atomic.Int64,
+	ctx context.Context,
+	outputDir, wantDispatchDigest string,
+	wantVerifiedEntries int,
+	maxTotalBytes int64,
+	copiedBytes *atomic.Int64,
 ) (modelstore.IngestTreeResponse, error) {
 	var zero modelstore.IngestTreeResponse
+	if maxTotalBytes <= 0 {
+		maxTotalBytes = MaxTotalBytes
+	}
 
 	partialParent := filepath.Join(s.Store.Root(), "partial")
 	stagingDir, err := os.MkdirTemp(partialParent, ".ingest-")
@@ -680,9 +772,10 @@ func (s *Server) copyAndPublish(
 		entries              []modelartifact.ManifestEntry
 		totalCopied          int64
 		copiedDispatchDigest string
+		copiedKernelKeys     []string
 		buf                  = make([]byte, copyChunkBytes)
 	)
-	_, err = walkForgeOutput(ctx, outputDir,
+	_, err = walkForgeOutput(ctx, outputDir, maxTotalBytes,
 		func(relPath string) error {
 			return os.MkdirAll(filepath.Join(stagedTreeDir, filepath.FromSlash(relPath)), 0o755)
 		},
@@ -708,7 +801,7 @@ func (s *Server) copyAndPublish(
 			for {
 				n, rerr := srcFile.Read(buf)
 				if n > 0 {
-					if int64(n) > MaxTotalBytes-totalCopied {
+					if int64(n) > maxTotalBytes-totalCopied {
 						_ = dstFile.Close()
 						return &httpError{code: http.StatusUnprocessableEntity, reason: "InvalidSandboxOutput", msg: "total size exceeds cap"}
 					}
@@ -752,7 +845,8 @@ func (s *Server) copyAndPublish(
 						msg:    "copied dispatch-manifest.json digest does not match verification report",
 					}
 				}
-				if err := validateDispatchManifest(dispatchBuf.Bytes()); err != nil {
+				verifiedKeys, err := validateDispatchManifest(dispatchBuf.Bytes(), wantVerifiedEntries)
+				if err != nil {
 					return &httpError{
 						code:   http.StatusUnprocessableEntity,
 						reason: "InvalidDispatchManifest",
@@ -760,6 +854,7 @@ func (s *Server) copyAndPublish(
 					}
 				}
 				copiedDispatchDigest = fileDigest
+				copiedKernelKeys = verifiedKeys
 			}
 
 			entries = append(entries, modelartifact.ManifestEntry{
@@ -823,6 +918,7 @@ func (s *Server) copyAndPublish(
 		SizeBytes:              manifest.SizeBytes,
 		FileCount:              manifest.FileCount,
 		SeedNode:               s.NodeID,
+		KernelKeys:             copiedKernelKeys,
 	}, nil
 }
 

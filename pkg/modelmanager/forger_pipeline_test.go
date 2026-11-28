@@ -397,6 +397,7 @@ func TestTwoNodeForgerIngestPeerSyncIsolationAndGC(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(outDir, "solutions", "rmsnorm_v1.json"), []byte(solutionMeta), 0o644))
 	dispatchRaw := fmt.Sprintf(`{
   "schemaVersion": "gpustack-forge-dispatch/v1",
+  "compatibility": {"engine": "vllm", "engineVersion": "0.8.5", "manufacturer": "nvidia", "architecture": "sm_90a"},
   "entries": [{"localKernelKey": %q, "solutionPath": "solutions/rmsnorm_v1.json", "libraryPath": "kernels/rmsnorm/kernel.py"}]
 }`, kernelKey)
 	require.NoError(t, os.WriteFile(filepath.Join(outDir, "dispatch-manifest.json"), []byte(dispatchRaw), 0o644))

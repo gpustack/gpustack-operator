@@ -85,7 +85,7 @@ owner-referenced `ConfigMap` capped at `512 KiB`) and stages outputs in `forge-o
       "solutionSha256": "sha256:...",
       "libraryPath": "kernels/rmsnorm_v1/kernel.py",
       "librarySha256": "sha256:...",
-      "entrypoint": "kernel.py:run",
+      "entrypoint": "run",
       "tracePath": "traces/rmsnorm_v1.json",
       "traceSha256": "sha256:...",
       "baselineLatencyUs": 100.0,
@@ -96,12 +96,13 @@ owner-referenced `ConfigMap` capped at `512 KiB`) and stages outputs in `forge-o
 }
 ```
 
-After `forge-runner` exits `0`, `initContainer: forge-verifier` mounts `forge-output` read-only and
-writes `forge-verified/verification-report.json` (`gpustack-forge-verification/v1`, `16 MiB`
-`emptyDir`).
+After `forge-runner` (and `forge-stage-sentinel` in `External` mode) exits `0`,
+`initContainer: forge-verifier` mounts `forge-output` read-only and writes
+`forge-verified/verification-report.json` (`gpustack-forge-verification/v1`, `16 MiB` `emptyDir`).
 
-The verifier asserts `overallStatus: "PASSED"`, `passedCount >= 1`, `evaluation.status == "PASSED"`,
-`max_abs_error <= atol`, `max_relative_error <= rtol`, and `speedup_factor >= minSpeedupRatio`.
+The verifier asserts `overallStatus: "PASSED"` (requiring `failedCount == 0` and `passedCount > 0`,
+so all entries must pass), `evaluation.status == "PASSED"`, element-wise `allclose` within `atol`
+and `rtol` (`allclose_passed: true`), and `speedup_factor >= minSpeedupRatio`.
 
 ## Sentinel probe and loader
 
@@ -111,9 +112,9 @@ The verifier asserts `overallStatus: "PASSED"`, `passedCount >= 1`, `evaluation.
 
 | Method | Purpose | Guardrails and codes |
 |---|---|---|
-| `POST /gpustack/v1/probe` | Arm a probe (`expected_boot_id`, `steps` clamped to `[3, 5]`, default `4`) | `409 boot_id_mismatch`, `409 probe_in_progress`, `409 role_paused`, `429 probe_cooldown` (`GPUSTACK_PROBE_MIN_COOLDOWN_SECONDS`, default `60`), `422 unsupported_engine_version` |
+| `POST /gpustack/v1/probe` | Arm a probe (`expected_boot_id`; `steps` must be in `[3, 5]` (default `4`); out-of-range values return `400 invalid_argument`) | `400 invalid_argument`, `409 boot_id_mismatch`, `409 probe_in_progress`, `409 role_paused`, `429 probe_cooldown` (`GPUSTACK_PROBE_MIN_COOLDOWN_SECONDS`, default `60`), `422 unsupported_engine_version` |
 | `GET /gpustack/v1/probe` | Read state and distilled `Definition` + `Workload` JSON (`<= 512 KiB`) | Strips dense/block-scaled GEMM and collectives; zero prompt/tensor values |
-| `DELETE /gpustack/v1/probe` | Abort active probe and purge `/dev/shm` | Immediately unlinks `/dev/shm/gpustack-probe/<probe_id>/` across all ranks |
+| `DELETE /gpustack/v1/probe` | Abort active probe and purge staging directory | Restores rank-0 probe hooks and immediately unlinks `/dev/shm/gpustack-probe/<probe_id>/` |
 
 ### Staging and engine hooks
 
@@ -144,10 +145,13 @@ The verifier asserts `overallStatus: "PASSED"`, `passedCount >= 1`, `evaluation.
    `ModelDeploymentForger.status.roles[*].activeSandbox.podUID == req.PodUID`, that the `Pod` runs
    on `d.NodeID` with controller `ownerReference` matching the forger UID, and that both
    `forge-runner` and `forge-verifier` `initContainerStatuses` are `Terminated` with `ExitCode == 0`.
+   `ForgeSandbox` `Pod`s run with explicit non-zero `runAsUser`/`runAsGroup`/`fsGroup` (`65532`)
+   and random nonces to prevent pre-creation adoption.
 3. **Tree validation**: `model-manager` reads
    `<kubeletDir>/pods/<podUID>/volumes/kubernetes.io~empty-dir/` (`forge-verified/verification-report.json`
    and `forge-output`), walks files via `os.OpenRoot` with `O_NOFOLLOW|O_NONBLOCK` and `Nlink == 1`,
-   and enforces caps (`<= 1024` files, `<= 2 GiB`, depth `<= 16`, path `<= 256`).
+   and enforces caps (`<= 1024` files, `<= 2 GiB` default (up to `spec.sandbox.outputSizeLimit`,
+   max `16 GiB`), depth `<= 16`, path `<= 256`).
 4. **Single-pass copy and publish**: `model-manager` reserves capacity with
    `gc.Collector.Reserve`, hashes every byte in a single copy pass into `<root>/partial/`, builds
    `gpustack-manifest v1`, writes `manifest.json` (`0600`, `Kind: "Kernel"`), publishes
@@ -172,8 +176,10 @@ under the `256`-entry schema cap:
 1. **Priority 1 — `ModelTransfer`**: Admitted `ModelTransfer` source-generation digests reported on
    the node.
 2. **Priority 2 — `ModelKernelArtifact`**: Non-deleting `nodeStore` kernel digests on `seedNode`
-   (while `Ready`), nodes hosting live `Pod`s referencing `spec.roles[*].kernelArtifactRef`, and
-   nodes protecting `previousKernelArtifact` during an in-flight `ModelDeploymentForger` rollout.
+   (while unquarantined and either awaiting initial resolution with `status.resolved == nil` or
+   reported `Ready`; released when `status.quarantined: true`), nodes hosting live `Pod`s
+   referencing `spec.roles[*].kernelArtifactRef`, and nodes protecting `previousKernelArtifact`
+   during an in-flight `ModelDeploymentForger` rollout.
 3. **Priority 3 — `ModelPrefetch`**: Live `spec.retention.pinned` entries under `allowPinned: true`.
 
 Each node is capped independently at `256` entries (`1 > 2 > 3`, lexicographic tie-break); cap

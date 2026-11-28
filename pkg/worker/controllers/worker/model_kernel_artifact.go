@@ -50,10 +50,6 @@ const (
 	// pinned on all required NodeModelStore caches.
 	ModelKernelArtifactConditionPinned kubeapistatus.ConditionType = workercore.ModelKernelArtifactConditionTypePinned
 
-	// IndexingModelKernelArtifactByManifestDigest indexes ModelKernelArtifacts by their resolved
-	// or declared manifest digest.
-	IndexingModelKernelArtifactByManifestDigest = "modelkernelartifacts.worker.gpustack.ai/manifest-digest"
-
 	kernelDispatchManifestFile = "dispatch-manifest.json"
 )
 
@@ -659,7 +655,7 @@ func (r *ModelKernelArtifactReconciler) reconcilePinnedCondition(
 		return err
 	}
 
-	requiredNodes := kernelArtifactRequiredNodes(mka, deps.Items, forgers.Items, pods.Items)
+	requiredNodes := kernelArtifactRequiredNodes(mka, stores, deps.Items, forgers.Items, pods.Items)
 	storeByName := make(map[string]*workercore.NodeModelStore, len(stores))
 	for i := range stores {
 		storeByName[stores[i].Name] = &stores[i]
@@ -792,24 +788,7 @@ func (r *ModelKernelArtifactReconciler) newHubHTTPClient(ctx context.Context) (*
 	return modelartifact.NewHTTPClient(opts)
 }
 
-func indexModelKernelArtifactByManifestDigest(obj ctrlcli.Object) []string {
-	mka, ok := obj.(*workercore.ModelKernelArtifact)
-	if !ok {
-		return nil
-	}
-	if digest := kernelArtifactNodeDigest(mka); digest != "" {
-		return []string{digest}
-	}
-	return nil
-}
-
-func (r *ModelKernelArtifactReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
-	if err := opts.Manager.GetFieldIndexer().IndexField(
-		ctx, &workercore.ModelKernelArtifact{}, IndexingModelKernelArtifactByManifestDigest, indexModelKernelArtifactByManifestDigest,
-	); err != nil {
-		return fmt.Errorf("index model kernel artifact '%s': %w", IndexingModelKernelArtifactByManifestDigest, err)
-	}
-
+func (r *ModelKernelArtifactReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
 	r.Recorder = opts.Manager.GetEventRecorderFor("modelkernelartifact")
 	if r.NewHuggingFace == nil {

@@ -2,9 +2,11 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/registry/rest"
@@ -14,6 +16,8 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/extensionapi"
 )
+
+var _ extensionapi.CurdProxyOnCreateBeforeAdvice[*worker.ModelKernelArtifact] = (*ModelKernelArtifactHandler)(nil)
 
 // ModelKernelArtifactHandler exposes the v1 view of a v1alpha1.ModelKernelArtifact.
 //
@@ -91,4 +95,19 @@ func (h *ModelKernelArtifactHandler) CastObjectFrom(
 	_ context.Context, obj *workercore.ModelKernelArtifact,
 ) *worker.ModelKernelArtifact {
 	return (*worker.ModelKernelArtifact)(obj)
+}
+
+// BeforeOnCreate rejects spec.source.nodeStore on the public v1 proxy before forwarding with the
+// worker's own identity, preserving the worker-only creation boundary enforced on v1alpha1.
+func (h *ModelKernelArtifactHandler) BeforeOnCreate(
+	_ context.Context, obj *worker.ModelKernelArtifact, _ *ctrlcli.CreateOptions,
+) error {
+	if obj != nil && obj.Spec.Source.NodeStore != nil {
+		return kerrors.NewForbidden(
+			worker.SchemeGroupVersionResource("modelkernelartifacts").GroupResource(),
+			obj.Name,
+			errors.New("NodeStoreSourceForbidden: only the operator worker may create a ModelKernelArtifact with spec.source.nodeStore"),
+		)
+	}
+	return nil
 }

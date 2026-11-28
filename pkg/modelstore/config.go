@@ -260,9 +260,10 @@ type IngestTreeRequest struct {
 
 // IngestTreeResponse reports the content-addressed kernel tree published by IngestTreesPath.
 type IngestTreeResponse struct {
-	ManifestDigest         string `json:"manifestDigest"`
-	DispatchManifestDigest string `json:"dispatchManifestDigest"`
-	SizeBytes              int64  `json:"sizeBytes"`
-	FileCount              int64  `json:"fileCount"`
-	SeedNode               string `json:"seedNode"`
+	ManifestDigest         string   `json:"manifestDigest"`
+	DispatchManifestDigest string   `json:"dispatchManifestDigest"`
+	SizeBytes              int64    `json:"sizeBytes"`
+	FileCount              int64    `json:"fileCount"`
+	SeedNode               string   `json:"seedNode"`
+	KernelKeys             []string `json:"kernelKeys,omitempty"`
 }

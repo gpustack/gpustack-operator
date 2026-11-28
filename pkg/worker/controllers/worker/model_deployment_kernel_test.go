@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -122,6 +124,7 @@ func newNodeStoreKernelArtifact(name, namespace, manifestChar, dispatchChar stri
 		},
 	}
 	ModelKernelArtifactConditionResolved.True(mka, workercore.ModelKernelArtifactReasonResolved, "ready")
+	ModelKernelArtifactConditionPinned.True(mka, workercore.ModelKernelArtifactReasonPinned, "pinned")
 	for _, fn := range mutate {
 		fn(mka)
 	}
@@ -966,4 +969,223 @@ func TestModelDeploymentKernel_NonKernelReplacementKeepsAdmissionOnlyBehavior(t 
 	slot, held = modelDeploymentReplacementSlotsOf(&liveMD).slotFor("decode")
 	require.True(t, held)
 	assert.Equal(t, 0, slot.Ordinal, "non-kernel replacement clears ordinal 1 upon Kueue Admission without waiting for PodReady")
+}
+
+func TestModelDeploymentKernel_ReadPodKernelRuntimeStateIPv6AndTLSConfig(t *testing.T) {
+	ln, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("IPv6 loopback unavailable in test environment: %v", err)
+	}
+
+	dispatchDigest := "sha256:" + strings.Repeat("a", 64)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/gpustack/v1/runtime_config" {
+			http.NotFound(w, req)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"engine":  "vllm",
+			"boot_id": "boot-ipv6-tls",
+			"ready":   true,
+			"paused":  false,
+			"ranks": []map[string]any{
+				{
+					"rank_id":                  0,
+					"boot_id":                  "boot-ipv6-tls",
+					"dispatch_manifest_digest": dispatchDigest,
+					"loaded_kernel_keys":       []string{"vLLM/0.19.0/nvidia/sm_90a/rmsnorm/0000000000000001"},
+				},
+			},
+		})
+	}))
+	srv.Listener = ln
+	srv.StartTLS()
+	defer srv.Close()
+
+	host, portStr, err := net.SplitHostPort(srv.Listener.Addr().String())
+	require.NoError(t, err)
+	require.Equal(t, "::1", host)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	certPool := x509.NewCertPool()
+	certPool.AddCert(srv.Certificate())
+
+	md := newKernelTestDeployment()
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Namespace: md.Namespace, Name: "qwen-decode-0"},
+		Status:     core.PodStatus{Phase: core.PodRunning, PodIP: host},
+	}
+	r := &ModelDeploymentReconciler{
+		runtimeControlTarget: func(_ context.Context, _ *workercore.ModelDeployment, _ *workercore.ModelDeploymentRole, p *core.Pod) (runtimecontrol.Target, error) {
+			return runtimecontrol.Target{
+				Scheme:             "https",
+				Host:               p.Status.PodIP,
+				Port:               port,
+				InsecureSkipVerify: false,
+				TLSConfig: &tls.Config{
+					MinVersion: tls.VersionTLS12,
+					RootCAs:    certPool,
+				},
+			}, nil
+		},
+	}
+
+	state, err := r.readPodKernelRuntimeState(context.Background(), md, &md.Spec.Roles[0], pod)
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	assert.Equal(t, "boot-ipv6-tls", state.BootID)
+	assert.True(t, state.Ready)
+	assert.Equal(t, dispatchDigest, state.DispatchManifestDigest)
+	assert.Equal(t, []string{"vLLM/0.19.0/nvidia/sm_90a/rmsnorm/0000000000000001"}, state.LoadedKernelKeys)
+}
+
+func TestModelDeploymentKernel_ImageCanaryKernelLoadErrorHoldsSlot(t *testing.T) {
+	imgRef := "registry.example.com/kernels/qwen-rmsnorm@sha256:" + strings.Repeat("c", 64)
+	imgMKA := &workercore.ModelKernelArtifact{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace:  "team-a",
+			Name:       "mk-img-1",
+			UID:        "mka-uid-mk-img-1",
+			Generation: 1,
+		},
+		Spec: workercore.ModelKernelArtifactSpec{
+			Source: workercore.ModelKernelArtifactSource{
+				Image: &workercore.ModelArtifactImageSource{Reference: imgRef},
+			},
+			Compatibility: workercore.ModelKernelArtifactCompatibility{
+				Engine:        "vLLM",
+				EngineVersion: "0.19.0",
+				Manufacturer:  nodefeature.ManufacturerNVIDIA,
+				Architecture:  "sm_90a",
+				KernelKeys:    []string{"vLLM/0.19.0/nvidia/sm_90a/rmsnorm/0123456789abcdef"},
+			},
+		},
+		Status: workercore.ModelKernelArtifactStatus{ObservedGeneration: 1},
+	}
+	ModelKernelArtifactConditionResolved.True(imgMKA, workercore.ModelKernelArtifactReasonResolved, "resolved image")
+
+	var sentinelLoadErr atomic.Value
+	var sentinelLoadedCount atomic.Int32
+	sentinelLoadErr.Store("unsupported_kernel_artifact")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/gpustack/v1/runtime_config" {
+			http.NotFound(w, req)
+			return
+		}
+		count := int(sentinelLoadedCount.Load())
+		keys := make([]string, 0, count)
+		for i := range count {
+			keys = append(keys, fmt.Sprintf("vLLM/0.19.0/nvidia/sm_90a/rmsnorm/%016x", i+1))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"engine":             "vllm",
+			"boot_id":            "boot-img-canary",
+			"ready":              true,
+			"paused":             false,
+			"loaded_kernel_keys": keys,
+			"kernel_load_error":  sentinelLoadErr.Load().(string),
+		})
+	}))
+	defer srv.Close()
+
+	host, portStr, err := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	md := newKernelTestDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 2
+	})
+	cli := newKernelTestFakeClient(md, imgMKA)
+	r := &ModelDeploymentReconciler{
+		Client:    cli,
+		APIReader: cli,
+		Recorder:  ctrlrecord.NewFakeRecorder(64),
+		runtimeControlTarget: func(context.Context, *workercore.ModelDeployment, *workercore.ModelDeploymentRole, *core.Pod) (runtimecontrol.Target, error) {
+			return runtimecontrol.Target{Scheme: "http", Host: host, Port: port}, nil
+		},
+	}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: md.Namespace, Name: md.Name}}
+
+	_, err = r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+	_, err = r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+
+	var initialPods core.PodList
+	require.NoError(t, cli.List(context.Background(), &initialPods, ctrlcli.InNamespace(md.Namespace)))
+	require.Len(t, initialPods.Items, 2)
+
+	var stockOrd0UID types.UID
+	for i := range initialPods.Items {
+		pod := initialPods.Items[i].DeepCopy()
+		markKernelTestPodReady(t, cli, pod, "node-0", host)
+		ord, ok := modelDeploymentPodOrdinal(pod)
+		require.True(t, ok)
+		if ord == 0 {
+			stockOrd0UID = pod.UID
+		}
+		require.NoError(t, cli.Create(context.Background(), admit(composeReplicaGroup(md, "decode", ord, []*core.Pod{pod}))))
+	}
+
+	var liveMD workercore.ModelDeployment
+	require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMD))
+	liveMD.Spec.Roles[0].KernelArtifactRef = &core.LocalObjectReference{Name: imgMKA.Name}
+	liveMD.Generation++
+	require.NoError(t, cli.Update(context.Background(), &liveMD))
+
+	// Pass 1 & 2: Replace ordinal 1 with image-backed canary Pod (DispatchManifestDigest == "").
+	_, err = r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+	require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMD))
+	slot, held := modelDeploymentReplacementSlotsOf(&liveMD).slotFor("decode")
+	require.True(t, held)
+	assert.True(t, slot.RequireReadiness)
+	assert.Empty(t, slot.DispatchManifestDigest)
+
+	_, err = r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+
+	var pods core.PodList
+	require.NoError(t, cli.List(context.Background(), &pods, ctrlcli.InNamespace(md.Namespace)))
+	var canaryPod *core.Pod
+	for i := range pods.Items {
+		if ord, _ := modelDeploymentPodOrdinal(&pods.Items[i]); ord == 1 {
+			canaryPod = pods.Items[i].DeepCopy()
+		}
+	}
+	require.NotNil(t, canaryPod)
+	markKernelTestPodReady(t, cli, canaryPod, "node-0", host)
+	canaryWL := admit(composeReplicaGroup(&liveMD, "decode", 1, []*core.Pod{canaryPod}))
+	canaryWL.UID = types.UID("wl-img-canary-ord-1")
+	require.NoError(t, cli.Create(context.Background(), canaryWL))
+
+	// Canary is Ready, but sentinel reports kernel_load_error="unsupported_kernel_artifact" -> slot MUST hold!
+	_, err = r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMD))
+	slot, held = modelDeploymentReplacementSlotsOf(&liveMD).slotFor("decode")
+	require.True(t, held, "image-sourced kernel canary with kernel_load_error must hold RequireReadiness slot")
+	assert.Equal(t, 1, slot.Ordinal)
+	require.NoError(t, cli.List(context.Background(), &pods, ctrlcli.InNamespace(md.Namespace)))
+	require.True(t, slices.ContainsFunc(pods.Items, func(p core.Pod) bool {
+		return p.UID == stockOrd0UID && p.DeletionTimestamp == nil
+	}), "sibling replica 0 must stay untouched while image canary fails kernel load verification")
+
+	// Clear kernel_load_error and confirm loaded_kernel_keys -> slot 1 clears and ordinal 0 begins replacement!
+	sentinelLoadErr.Store("")
+	sentinelLoadedCount.Store(1)
+
+	_, err = r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(context.Background(), req.NamespacedName, &liveMD))
+	nextSlot, nextHeld := modelDeploymentReplacementSlotsOf(&liveMD).slotFor("decode")
+	require.True(t, nextHeld)
+	assert.Equal(t, 0, nextSlot.Ordinal, "once image canary confirms loaded_kernel_keys without error, ordinal 0 rolls next")
 }

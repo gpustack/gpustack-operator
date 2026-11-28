@@ -600,3 +600,59 @@ func TestAWSEFAEnabledSetting(t *testing.T) {
 		assert.True(t, AWSEFAEnabled.ShouldValueBool(ctx), "ShouldValueBool must return true when overridden in delegated secret")
 	})
 }
+
+func TestForgerAllowedRunnerImagePrefixesSetting(t *testing.T) {
+	const wantName = "forger-allowed-runner-image-prefixes"
+	const wantEnv = "GPUSTACK_FORGER_ALLOWED_RUNNER_IMAGE_PREFIXES"
+
+	assert.Equal(t, wantName, ForgerAllowedRunnerImagePrefixes.Name(), "name drives the GPUSTACK_ env mapping")
+	assert.Equal(t, "", ForgerAllowedRunnerImagePrefixes.DefaultValue(), "boot default must be blank")
+	assert.True(t, ForgerAllowedRunnerImagePrefixes.Editable(), "must stay editable for runtime adjustment")
+
+	indexed, ok := Indexer()(wantName)
+	require.True(t, ok, "settings.Indexer() must serve forger-allowed-runner-image-prefixes")
+	assert.Equal(t, ForgerAllowedRunnerImagePrefixes.Name(), indexed.Name())
+	assert.Equal(t, ForgerAllowedRunnerImagePrefixes.DefaultValue(), indexed.DefaultValue())
+	assert.Equal(t, ForgerAllowedRunnerImagePrefixes.Editable(), indexed.Editable())
+
+	_, envName, _ := setting.InitializeFromEnv()(ForgerAllowedRunnerImagePrefixes.Name())
+	assert.Equal(t, wantEnv, envName)
+
+	t.Setenv(wantEnv, "registry.example.com/forge/,ghcr.io/org/runner:")
+	val, _, declared := setting.InitializeFromEnv()(ForgerAllowedRunnerImagePrefixes.Name())
+	assert.True(t, declared)
+	assert.Equal(t, "registry.example.com/forge/,ghcr.io/org/runner:", val)
+
+	ctx := context.Background()
+	validateCases := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "blank disables prefix restriction", value: "", wantErr: false},
+		{name: "single prefix", value: "registry.example.com/forge/", wantErr: false},
+		{name: "comma separated prefixes with padding", value: "registry.example.com/forge/, ghcr.io/org/runner:", wantErr: false},
+		{name: "prefix with internal whitespace", value: "registry.example.com/bad prefix", wantErr: true},
+		{name: "prefix with control character", value: "registry.example.com/bad\x00prefix", wantErr: true},
+		{name: "comma only with no prefixes", value: " , ", wantErr: true},
+	}
+	for _, tc := range validateCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ForgerAllowedRunnerImagePrefixes.Validate(ctx, tc.value)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+
+	t.Run("delegated secret override", func(t *testing.T) {
+		settingtest.MergeDelegatedSettings(t, map[string]string{
+			wantName: "registry.example.com/approved/",
+		})
+		got, err := indexed.Value(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "registry.example.com/approved/", got)
+	})
+}

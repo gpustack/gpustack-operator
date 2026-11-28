@@ -356,6 +356,211 @@ func TestModelDeploymentForgerWebhookValidateCreate(t *testing.T) {
 			in:        newTestModelDeploymentForger(),
 			wantField: "spec.sandbox.runnerImage",
 		},
+		{
+			name: "boundary-aware prefix docker.io/gpustack accepts slash separator",
+			objs: []ctrlcli.Object{
+				&core.Secret{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: setting.DelegatedSecretNamespace,
+						Name:      setting.DelegatedSecretName,
+					},
+					Data: map[string][]byte{
+						forgerAllowedRunnerImagePrefixesSettingName: []byte("docker.io/gpustack"),
+					},
+				},
+			},
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.RunnerImage = "docker.io/gpustack/runner:v1"
+			}),
+		},
+		{
+			name: "boundary-aware prefix docker.io/gpustack accepts tag separator",
+			objs: []ctrlcli.Object{
+				&core.Secret{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: setting.DelegatedSecretNamespace,
+						Name:      setting.DelegatedSecretName,
+					},
+					Data: map[string][]byte{
+						forgerAllowedRunnerImagePrefixesSettingName: []byte("docker.io/gpustack"),
+					},
+				},
+			},
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.RunnerImage = "docker.io/gpustack:v1"
+			}),
+		},
+		{
+			name: "boundary-aware prefix docker.io/gpustack accepts digest separator",
+			objs: []ctrlcli.Object{
+				&core.Secret{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: setting.DelegatedSecretNamespace,
+						Name:      setting.DelegatedSecretName,
+					},
+					Data: map[string][]byte{
+						forgerAllowedRunnerImagePrefixesSettingName: []byte("docker.io/gpustack"),
+					},
+				},
+			},
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.RunnerImage = "docker.io/gpustack@sha256:" + strings.Repeat("a", 64)
+			}),
+		},
+		{
+			name: "boundary-aware prefix docker.io/gpustack rejects docker.io/gpustack-evil/runner:v1",
+			objs: []ctrlcli.Object{
+				&core.Secret{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: setting.DelegatedSecretNamespace,
+						Name:      setting.DelegatedSecretName,
+					},
+					Data: map[string][]byte{
+						forgerAllowedRunnerImagePrefixesSettingName: []byte("docker.io/gpustack"),
+					},
+				},
+			},
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.RunnerImage = "docker.io/gpustack-evil/runner:v1"
+			}),
+			wantField: "spec.sandbox.runnerImage",
+		},
+		{
+			name: "prefix gpustack rejects host:port/repo registry reinterpretation",
+			objs: []ctrlcli.Object{
+				&core.Secret{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: setting.DelegatedSecretNamespace,
+						Name:      setting.DelegatedSecretName,
+					},
+					Data: map[string][]byte{
+						forgerAllowedRunnerImagePrefixesSettingName: []byte("gpustack"),
+					},
+				},
+			},
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.RunnerImage = "gpustack:5000/attacker/evil:v1"
+			}),
+			wantField: "spec.sandbox.runnerImage",
+		},
+		{
+			name: "prefix registry.corp.internal rejects :port/repo registry reinterpretation",
+			objs: []ctrlcli.Object{
+				&core.Secret{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: setting.DelegatedSecretNamespace,
+						Name:      setting.DelegatedSecretName,
+					},
+					Data: map[string][]byte{
+						forgerAllowedRunnerImagePrefixesSettingName: []byte("registry.corp.internal"),
+					},
+				},
+			},
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.RunnerImage = "registry.corp.internal:8080/attacker/evil:v1"
+			}),
+			wantField: "spec.sandbox.runnerImage",
+		},
+		{
+			name: "prefix gpustack allows gpustack:v1 tag",
+			objs: []ctrlcli.Object{
+				&core.Secret{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: setting.DelegatedSecretNamespace,
+						Name:      setting.DelegatedSecretName,
+					},
+					Data: map[string][]byte{
+						forgerAllowedRunnerImagePrefixesSettingName: []byte("gpustack"),
+					},
+				},
+			},
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.RunnerImage = "gpustack:v1"
+			}),
+		},
+		{
+			name: "prefix gpustack allows gpustack/runner:v1 repository path",
+			objs: []ctrlcli.Object{
+				&core.Secret{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: setting.DelegatedSecretNamespace,
+						Name:      setting.DelegatedSecretName,
+					},
+					Data: map[string][]byte{
+						forgerAllowedRunnerImagePrefixesSettingName: []byte("gpustack"),
+					},
+				},
+			},
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.RunnerImage = "gpustack/runner:v1"
+			}),
+		},
+		{
+			name: "prefix gpustack allows gpustack@sha256 digest",
+			objs: []ctrlcli.Object{
+				&core.Secret{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: setting.DelegatedSecretNamespace,
+						Name:      setting.DelegatedSecretName,
+					},
+					Data: map[string][]byte{
+						forgerAllowedRunnerImagePrefixesSettingName: []byte("gpustack"),
+					},
+				},
+			},
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Sandbox.RunnerImage = "gpustack@sha256:" + strings.Repeat("a", 64)
+			}),
+		},
+		{
+			name: "accepts 63-character forger metadata.name and role name",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Name = strings.Repeat("f", 63)
+				m.Spec.Roles[0].Name = strings.Repeat("r", 63)
+			}),
+		},
+		{
+			name: "rejects forger metadata.name longer than 63 characters",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Name = strings.Repeat("f", 64)
+			}),
+			wantField: "metadata.name",
+		},
+		{
+			name: "rejects forger metadata.name with invalid label syntax",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Name = "-qwen-forger-"
+			}),
+			wantField: "metadata.name",
+		},
+		{
+			name: "rejects forger metadata.name containing slash",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Name = "qwen/forger"
+			}),
+			wantField: "metadata.name",
+		},
+		{
+			name: "rejects role name longer than 63 characters",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Roles[0].Name = strings.Repeat("r", 64)
+			}),
+			wantField: "spec.roles[0].name",
+		},
+		{
+			name: "rejects role name with slash when target does not exist yet",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Roles[0].Name = "prefill/v1"
+			}),
+			wantField: "spec.roles[0].name",
+		},
+		{
+			name: "rejects role name with leading or trailing hyphen when target does not exist yet",
+			in: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Roles[0].Name = "-decode-"
+			}),
+			wantField: "spec.roles[0].name",
+		},
 	}
 
 	for _, c := range cases {
@@ -502,6 +707,42 @@ func TestModelDeploymentForgerWebhookValidateAgainstTarget(t *testing.T) {
 			forger:    newTestModelDeploymentForger(),
 			wantField: "spec.roles[0].name",
 			wantMsg:   "supported engines are vLLM and SGLang",
+		},
+		{
+			name: "rejects Active mode targeting role with non-ConfigMap mount overlapping /var/lib/gpustack/kernels",
+			target: newTestForgerTargetDeployment(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRole{
+				Name:            "decode",
+				Kind:            workercore.ModelDeploymentRoleKindDecode,
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				AdditionalVolumes: []workercore.ModelDeploymentAdditionalVolume{
+					{
+						MountPath: "/var/lib/gpustack/kernels",
+						Secret:    &core.LocalObjectReference{Name: "custom-secret"},
+					},
+				},
+			}),
+			forger:    newTestModelDeploymentForger(),
+			wantField: "spec.roles[0].name",
+			wantMsg:   "/var/lib/gpustack/kernels",
+		},
+		{
+			name: "admits Shadow mode targeting role with non-ConfigMap mount overlapping /var/lib/gpustack/kernels",
+			target: newTestForgerTargetDeployment(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRole{
+				Name:            "decode",
+				Kind:            workercore.ModelDeploymentRoleKindDecode,
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				AdditionalVolumes: []workercore.ModelDeploymentAdditionalVolume{
+					{
+						MountPath: "/var/lib/gpustack/kernels",
+						Secret:    &core.LocalObjectReference{Name: "custom-secret"},
+					},
+				},
+			}),
+			forger: newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+				m.Spec.Mode = workercore.ModelDeploymentForgerModeShadow
+			}),
 		},
 	}
 
@@ -655,5 +896,239 @@ func TestModelDeploymentForgerStatusGuard(t *testing.T) {
 	t.Run("implements ReceiveDeletionUpdate", func(t *testing.T) {
 		_, ok := any(new(ModelDeploymentForgerWebhook)).(webhook.ReceiveDeletionUpdate)
 		assert.True(t, ok)
+	})
+}
+
+func TestModelDeploymentForgerRunnerImageSecurity(t *testing.T) {
+	digestA := "sha256:" + strings.Repeat("a", 64)
+	digestB := "sha256:" + strings.Repeat("b", 64)
+
+	t.Run("webhook rejects malformed OCI references and dot segments", func(t *testing.T) {
+		badRefs := []string{
+			"gpustack/forge-runner:v1:v2",
+			"gpustack/forge-runner@sha256:short",
+			"UPPERCASE/Runner:v1",
+			"ghcr.io/trusted-org/../attacker-org/evil:v1",
+			"ghcr.io/trusted-org/./evil:v1",
+			"ghcr.io/trusted-org//evil:v1",
+			"/leading/slash:v1",
+			"trailing/slash/:v1",
+			"gpustack:",
+			"ghcr.io/org/forge-runner@",
+		}
+		wh := newTestForgerWebhook()
+		for _, img := range badRefs {
+			t.Run(img, func(t *testing.T) {
+				mdf := newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+					m.Spec.Sandbox.RunnerImage = img
+				})
+				_, err := wh.ValidateCreate(context.Background(), mdf)
+				require.Error(t, err)
+				assertInvalidField(t, err, "spec.sandbox.runnerImage")
+			})
+		}
+	})
+
+	t.Run("webhook enforces boundary-hardened runnerImage prefix allowlist", func(t *testing.T) {
+		cases := []struct {
+			name    string
+			prefix  string
+			image   string
+			wantErr bool
+		}{
+			{
+				name:    "prefix gpustack: rejects host:port reinterpretation",
+				prefix:  "gpustack:",
+				image:   "gpustack:5000/attacker/evil:v1",
+				wantErr: true,
+			},
+			{
+				name:    "prefix gpustack: rejects tag plus unpinned digest override",
+				prefix:  "gpustack:",
+				image:   "gpustack:v1@" + digestA,
+				wantErr: true,
+			},
+			{
+				name:   "prefix gpustack: allows plain tag",
+				prefix: "gpustack:",
+				image:  "gpustack:v1",
+			},
+			{
+				name:    "prefix runner:2026 rejects host:port reinterpretation",
+				prefix:  "runner:2026",
+				image:   "runner:2026/attacker/evil:v1",
+				wantErr: true,
+			},
+			{
+				name:    "prefix runner:2026 rejects digest override",
+				prefix:  "runner:2026",
+				image:   "runner:2026@" + digestA,
+				wantErr: true,
+			},
+			{
+				name:   "prefix runner:2026 allows exact match",
+				prefix: "runner:2026",
+				image:  "runner:2026",
+			},
+			{
+				name:    "prefix ghcr.io/org/forge-runner:v1.0.0 rejects tag@digest override",
+				prefix:  "ghcr.io/org/forge-runner:v1.0.0",
+				image:   "ghcr.io/org/forge-runner:v1.0.0@" + digestA,
+				wantErr: true,
+			},
+			{
+				name:   "prefix ghcr.io/org/forge-runner:v1.0.0 allows exact pinned tag",
+				prefix: "ghcr.io/org/forge-runner:v1.0.0",
+				image:  "ghcr.io/org/forge-runner:v1.0.0",
+			},
+			{
+				name:   "prefix ghcr.io/org/forge-runner@digest allows exact digest",
+				prefix: "ghcr.io/org/forge-runner@" + digestA,
+				image:  "ghcr.io/org/forge-runner@" + digestA,
+			},
+			{
+				name:    "prefix ghcr.io/org/forge-runner@digest rejects different digest",
+				prefix:  "ghcr.io/org/forge-runner@" + digestA,
+				image:   "ghcr.io/org/forge-runner@" + digestB,
+				wantErr: true,
+			},
+			{
+				name:    "prefix ghcr.io/trusted-org/ rejects parent directory traversal",
+				prefix:  "ghcr.io/trusted-org/",
+				image:   "ghcr.io/trusted-org/../attacker-org/evil:v1",
+				wantErr: true,
+			},
+			{
+				name:   "prefix ghcr.io/trusted-org/ allows clean child image",
+				prefix: "ghcr.io/trusted-org/",
+				image:  "ghcr.io/trusted-org/forge-runner:v1",
+			},
+			{
+				name:   "untagged repo prefix allows repo:tag@digest on same repo",
+				prefix: "ghcr.io/org/forge-runner",
+				image:  "ghcr.io/org/forge-runner:v1.0.0@" + digestA,
+			},
+			{
+				name:   "slashless host:port prefix registry.corp.internal:5000 allows private registry image",
+				prefix: "registry.corp.internal:5000",
+				image:  "registry.corp.internal:5000/forge/runner:v1",
+			},
+			{
+				name:    "slashless host:port prefix registry.corp.internal:5000 rejects bare Docker Hub pull",
+				prefix:  "registry.corp.internal:5000",
+				image:   "registry.corp.internal:5000",
+				wantErr: true,
+			},
+			{
+				name:    "slashless host:port prefix registry.corp.internal:5000 rejects longer port prefix",
+				prefix:  "registry.corp.internal:5000",
+				image:   "registry.corp.internal:50000/evil:v1",
+				wantErr: true,
+			},
+			{
+				name:   "slashless localhost:5000 prefix allows localhost registry image",
+				prefix: "localhost:5000",
+				image:  "localhost:5000/forge/runner:v1",
+			},
+			{
+				name:    "slashless localhost:5000 prefix rejects bare Docker Hub localhost:5000",
+				prefix:  "localhost:5000",
+				image:   "localhost:5000",
+				wantErr: true,
+			},
+			{
+				name:   "slashless host prefix registry.corp.internal allows private registry image",
+				prefix: "registry.corp.internal",
+				image:  "registry.corp.internal/forge/runner:v1",
+			},
+			{
+				name:    "slashless host prefix registry.corp.internal rejects Docker Hub tag reinterpretation",
+				prefix:  "registry.corp.internal",
+				image:   "registry.corp.internal:v1",
+				wantErr: true,
+			},
+			{
+				name:    "slashless host prefix registry.corp.internal rejects bare Docker Hub latest reinterpretation",
+				prefix:  "registry.corp.internal",
+				image:   "registry.corp.internal",
+				wantErr: true,
+			},
+			{
+				name:    "slashless host prefix registry.corp.internal rejects arbitrary port reinterpretation",
+				prefix:  "registry.corp.internal",
+				image:   "registry.corp.internal:8080/evil:v1",
+				wantErr: true,
+			},
+		}
+
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				sec := &core.Secret{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: setting.DelegatedSecretNamespace,
+						Name:      setting.DelegatedSecretName,
+					},
+					Data: map[string][]byte{
+						forgerAllowedRunnerImagePrefixesSettingName: []byte(c.prefix),
+					},
+				}
+				wh := newTestForgerWebhook(sec)
+				mdf := newTestModelDeploymentForger(func(m *workercore.ModelDeploymentForger) {
+					m.Spec.Sandbox.RunnerImage = c.image
+				})
+				_, err := wh.ValidateCreate(context.Background(), mdf)
+				if !c.wantErr {
+					require.NoError(t, err)
+					return
+				}
+				require.Error(t, err)
+				assertInvalidField(t, err, "spec.sandbox.runnerImage")
+			})
+		}
+	})
+
+	t.Run("runnerImageMatchesPrefix enforces direct delimiter and segment invariants", func(t *testing.T) {
+		cases := []struct {
+			prefix string
+			image  string
+			want   bool
+		}{
+			{prefix: "gpustack:", image: "gpustack:5000/attacker/evil:v1", want: false},
+			{prefix: "gpustack:", image: "gpustack:v1@" + digestA, want: false},
+			{prefix: "gpustack:", image: "gpustack:", want: false},
+			{prefix: "gpustack:", image: "gpustack:v1", want: true},
+			{prefix: "ghcr.io/org/forge-runner@", image: "ghcr.io/org/forge-runner@" + digestA, want: true},
+			{prefix: "ghcr.io/org/forge-runner@", image: "ghcr.io/org/forge-runner@sha256:bad/evil", want: false},
+			{prefix: "ghcr.io/org/forge-runner@", image: "ghcr.io/org/forge-runner@", want: false},
+			{prefix: "runner:2026", image: "runner:2026/attacker/evil:v1", want: false},
+			{prefix: "runner:2026", image: "runner:2026@" + digestA, want: false},
+			{prefix: "runner:2026", image: "runner:2026", want: true},
+			{prefix: "ghcr.io/org/forge-runner:v1.0.0", image: "ghcr.io/org/forge-runner:v1.0.0@" + digestA, want: false},
+			{prefix: "ghcr.io/org/forge-runner:v1.0.0", image: "ghcr.io/org/forge-runner:v1.0.0", want: true},
+			{prefix: "ghcr.io/trusted-org/", image: "ghcr.io/trusted-org/../attacker-org/evil:v1", want: false},
+			{prefix: "ghcr.io/trusted-org/", image: "ghcr.io/trusted-org/./evil:v1", want: false},
+			{prefix: "ghcr.io/trusted-org/", image: "ghcr.io/trusted-org//evil:v1", want: false},
+			{prefix: "ghcr.io/trusted-org/", image: "ghcr.io/trusted-org/forge-runner:v1", want: true},
+			{prefix: "ghcr.io/org/forge-runner", image: "ghcr.io/org/forge-runner:v1@" + digestA, want: true},
+			{prefix: "registry.corp.internal:5000", image: "registry.corp.internal:5000/forge/runner:v1", want: true},
+			{prefix: "registry.corp.internal:5000", image: "registry.corp.internal:5000", want: false},
+			{prefix: "registry.corp.internal:5000", image: "registry.corp.internal:50000/evil:v1", want: false},
+			{prefix: "localhost:5000", image: "localhost:5000/forge/runner:v1", want: true},
+			{prefix: "localhost:5000", image: "localhost:5000", want: false},
+			{prefix: "localhost:", image: "localhost:5000", want: false},
+			{prefix: "registry.corp.internal", image: "registry.corp.internal/forge/runner:v1", want: true},
+			{prefix: "registry.corp.internal", image: "registry.corp.internal:v1", want: false},
+			{prefix: "registry.corp.internal", image: "registry.corp.internal", want: false},
+			{prefix: "registry.corp.internal", image: "registry.corp.internal:8080/evil:v1", want: false},
+			{prefix: "127.0.0.1:5000", image: "127.0.0.1:5000/forge/runner:v1", want: true},
+			{prefix: "127.0.0.1:5000", image: "127.0.0.1:5000", want: false},
+			{prefix: "docker.io", image: "docker.io/gpustack/runner:v1", want: true},
+			{prefix: "docker.io", image: "docker.io:v1", want: false},
+			{prefix: "runner:v1.0.0", image: "runner:v1.0.0", want: true},
+			{prefix: "runner:v1.0.0", image: "runner:v1.0.0/evil:v1", want: false},
+		}
+		for _, c := range cases {
+			assert.Equal(t, c.want, runnerImageMatchesPrefix(c.image, c.prefix), "prefix=%q image=%q", c.prefix, c.image)
+		}
 	})
 }

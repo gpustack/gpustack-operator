@@ -9,11 +9,13 @@ import (
 	"strings"
 	"unicode"
 
+	conregname "github.com/google/go-containerregistry/pkg/name"
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
+	kvalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -66,10 +68,13 @@ var (
 var forgerAllowedRunnerImagePrefixesValue = func(ctx context.Context, reader ctrlcli.Reader) (string, error) {
 	if s, ok := settings.Indexer()(forgerAllowedRunnerImagePrefixesSettingName); ok {
 		val, err := s.Value(ctx)
-		if err == nil || kerrors.IsNotFound(err) || errors.Is(err, setting.ErrSettingNotFound) {
-			return val, nil
+		if err == nil {
+			if val != "" || reader == nil {
+				return val, nil
+			}
+		} else if !kerrors.IsNotFound(err) && !errors.Is(err, setting.ErrSettingNotFound) {
+			return "", err
 		}
-		return "", err
 	}
 	if reader == nil {
 		return "", nil
@@ -213,6 +218,7 @@ func (r *ModelDeploymentForgerWebhook) validateModelDeploymentForger(
 	defaultModelDeploymentForger(effective)
 
 	var errs field.ErrorList
+	errs = append(errs, validateModelDeploymentForgerName(effective)...)
 	errs = append(errs, validateModelDeploymentForgerTargetRef(effective)...)
 	errs = append(errs, validateModelDeploymentForgerTargetRefImmutable(old, mdf)...)
 	errs = append(errs, validateModelDeploymentForgerMode(effective)...)
@@ -253,6 +259,23 @@ func (r *ModelDeploymentForgerWebhook) readModelDeploymentForgerTarget(
 	}
 
 	return md, nil
+}
+
+func validateModelDeploymentForgerName(mdf *workercore.ModelDeploymentForger) field.ErrorList {
+	if len(mdf.Name) > kvalidation.DNS1123LabelMaxLength {
+		return field.ErrorList{field.Invalid(
+			field.NewPath("metadata", "name"), mdf.Name,
+			fmt.Sprintf("must be at most %d characters so it fits Kubernetes label values",
+				kvalidation.DNS1123LabelMaxLength),
+		)}
+	}
+	if msgs := kvalidation.IsValidLabelValue(mdf.Name); len(msgs) > 0 {
+		return field.ErrorList{field.Invalid(
+			field.NewPath("metadata", "name"), mdf.Name,
+			fmt.Sprintf("must be a valid Kubernetes label value: %s", strings.Join(msgs, "; ")),
+		)}
+	}
+	return nil
 }
 
 func validateModelDeploymentForgerTargetRef(mdf *workercore.ModelDeploymentForger) field.ErrorList {
@@ -312,14 +335,19 @@ func validateModelDeploymentForgerRoles(mdf *workercore.ModelDeploymentForger) f
 		case trimmed == "":
 			errs = append(errs, field.Required(rolePath.Child("name"),
 				"must name a role declared on the target ModelDeployment"))
-		case len(role.Name) > modelDeploymentForgerMaxNameLen || trimmed != role.Name:
+		case len(role.Name) > kvalidation.DNS1123LabelMaxLength || trimmed != role.Name:
 			errs = append(errs, field.Invalid(rolePath.Child("name"), role.Name,
 				fmt.Sprintf("must be at most %d characters without surrounding whitespace",
-					modelDeploymentForgerMaxNameLen)))
-		case seen.Has(role.Name):
-			errs = append(errs, field.Duplicate(rolePath.Child("name"), role.Name))
+					kvalidation.DNS1123LabelMaxLength)))
 		default:
-			seen.Insert(role.Name)
+			if msgs := kvalidation.IsDNS1123Label(role.Name); len(msgs) > 0 {
+				errs = append(errs, field.Invalid(rolePath.Child("name"), role.Name,
+					fmt.Sprintf("must be a valid DNS-1123 label: %s", strings.Join(msgs, "; "))))
+			} else if seen.Has(role.Name) {
+				errs = append(errs, field.Duplicate(rolePath.Child("name"), role.Name))
+			} else {
+				seen.Insert(role.Name)
+			}
 		}
 
 		if role.MaxKernelsPerGeneration < modelDeploymentForgerMinKernelsPerGeneration ||
@@ -397,7 +425,9 @@ func (r *ModelDeploymentForgerWebhook) validateModelDeploymentForgerSandbox(
 			errs = append(errs, field.Invalid(imgPath, img,
 				"must not contain whitespace or control characters"))
 		default:
-			if prefixErr := r.validateModelDeploymentForgerRunnerImagePrefix(ctx, img, imgPath); prefixErr != nil {
+			if err := validateRunnerImageReference(img); err != nil {
+				errs = append(errs, field.Invalid(imgPath, img, err.Error()))
+			} else if prefixErr := r.validateModelDeploymentForgerRunnerImagePrefix(ctx, img, imgPath); prefixErr != nil {
 				errs = append(errs, prefixErr)
 			}
 		}
@@ -463,7 +493,7 @@ func (r *ModelDeploymentForgerWebhook) validateModelDeploymentForgerRunnerImageP
 	}
 
 	for _, prefix := range prefixes {
-		if strings.HasPrefix(image, prefix) {
+		if runnerImageMatchesPrefix(image, prefix) {
 			return nil
 		}
 	}
@@ -472,6 +502,134 @@ func (r *ModelDeploymentForgerWebhook) validateModelDeploymentForgerRunnerImageP
 		"runnerImage %q does not match any allowed prefix configured in setting %q",
 		image, forgerAllowedRunnerImagePrefixesSettingName,
 	))
+}
+
+func validateRunnerImageReference(image string) error {
+	if hasInvalidImagePathSegments(image) {
+		return errors.New("must not contain empty or dot path segments")
+	}
+	parsed, err := conregname.ParseReference(image)
+	if err != nil {
+		return fmt.Errorf("is not a valid container image reference: %w", err)
+	}
+	for seg := range strings.SplitSeq(parsed.Context().RepositoryStr(), "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return errors.New("must not contain empty or dot repository segments")
+		}
+	}
+	return nil
+}
+
+func hasInvalidImagePathSegments(image string) bool {
+	if image == "" {
+		return true
+	}
+	namePart := image
+	if at := strings.IndexByte(namePart, '@'); at != -1 {
+		digestPart := namePart[at+1:]
+		if digestPart == "" || strings.IndexByte(digestPart, '/') != -1 {
+			return true
+		}
+		namePart = namePart[:at]
+	}
+	lastSlash := strings.LastIndexByte(namePart, '/')
+	if colon := strings.IndexByte(namePart[lastSlash+1:], ':'); colon != -1 {
+		tagPart := namePart[lastSlash+1+colon+1:]
+		if tagPart == "" {
+			return true
+		}
+		namePart = namePart[:lastSlash+1+colon]
+	}
+	if namePart == "" {
+		return true
+	}
+	for seg := range strings.SplitSeq(namePart, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func isRegistryAuthorityPrefix(prefix string) bool {
+	host := prefix
+	if colon := strings.IndexByte(prefix, ':'); colon != -1 {
+		host = prefix[:colon]
+	}
+	return strings.IndexByte(host, '.') != -1 || host == "localhost"
+}
+
+func runnerImageMatchesPrefix(image, prefix string) bool {
+	if prefix == "" || hasInvalidImagePathSegments(image) || !strings.HasPrefix(image, prefix) {
+		return false
+	}
+	ref, err := conregname.ParseReference(image)
+	if err != nil {
+		return false
+	}
+	for seg := range strings.SplitSeq(ref.Context().RepositoryStr(), "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return false
+		}
+	}
+
+	rest := image[len(prefix):]
+	if strings.IndexByte(prefix, '/') == -1 {
+		switch {
+		case prefix[len(prefix)-1] == ':' && !isRegistryAuthorityPrefix(prefix):
+			return rest != "" && strings.IndexByte(rest, '/') == -1 && strings.IndexByte(rest, '@') == -1
+		case prefix[len(prefix)-1] == '@':
+			return rest != "" && strings.IndexByte(rest, '/') == -1
+		case strings.IndexByte(prefix, '@') != -1:
+			return rest == ""
+		case isRegistryAuthorityPrefix(prefix):
+			if len(rest) <= 1 || rest[0] != '/' {
+				return false
+			}
+			reg := ref.Context().RegistryStr()
+			return reg == prefix || (prefix == "docker.io" && reg == conregname.DefaultRegistry)
+		case strings.IndexByte(prefix, ':') != -1:
+			return rest == ""
+		default:
+			if rest == "" {
+				return true
+			}
+			switch rest[0] {
+			case '/':
+				return len(rest) > 1
+			case '@', ':':
+				return len(rest) > 1 && strings.IndexByte(rest[1:], '/') == -1
+			default:
+				return false
+			}
+		}
+	}
+
+	switch prefix[len(prefix)-1] {
+	case ':':
+		return rest != "" && strings.IndexByte(rest, '/') == -1 && strings.IndexByte(rest, '@') == -1
+	case '@':
+		return rest != "" && strings.IndexByte(rest, '/') == -1
+	case '/':
+		return rest != ""
+	}
+
+	lastSeg := prefix[strings.LastIndexByte(prefix, '/')+1:]
+	if strings.IndexByte(lastSeg, ':') != -1 || strings.IndexByte(lastSeg, '@') != -1 {
+		return rest == ""
+	}
+
+	if rest == "" {
+		return true
+	}
+	switch rest[0] {
+	case '/':
+		return len(rest) > 1
+	case '@', ':':
+		return len(rest) > 1 && strings.IndexByte(rest[1:], '/') == -1
+	default:
+		return false
+	}
 }
 
 func validateModelDeploymentForgerRollout(rollout *workercore.ModelDeploymentForgerRolloutSpec) field.ErrorList {
@@ -518,6 +676,18 @@ func validateModelDeploymentForgerAgainstTarget(
 		}
 
 		errs = append(errs, validateModelDeploymentRoleKernelScope(md, role, namePath)...)
+		if mdf.Spec.Mode == workercore.ModelDeploymentForgerModeActive {
+			for _, av := range role.AdditionalVolumes {
+				if kernelPathsOverlap(av.MountPath, modelDeploymentKernelMountPath) {
+					errs = append(errs, field.Invalid(namePath, rSpec.Name, fmt.Sprintf(
+						"target role mounts an additionalVolume at %q overlapping %q, "+
+							"which conflicts with Active kernel promotion",
+						av.MountPath, modelDeploymentKernelMountPath,
+					)))
+					break
+				}
+			}
+		}
 	}
 
 	return errs
