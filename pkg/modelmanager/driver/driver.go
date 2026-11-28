@@ -22,20 +22,100 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/modelartifact"
 	"gpustack.ai/gpustack/pkg/modelmanager/metrics"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
+	"gpustack.ai/gpustack/pkg/modelstore"
 )
 
 // secretTokenKey is the key of the artifact's Secret that holds the hub token, the key kubelet hands
 // over from nodePublishSecretRef.
 const secretTokenKey = "token"
 
+// Hub kinds a source descriptor may name when PeersOnly is false.
+const (
+	HubKindHuggingFace = "huggingFace"
+	HubKindModelScope  = "modelscope"
+)
+
+// Source describes how an authorized artifact reaches its content.
+type Source struct {
+	// Kind is the content class this source materializes: store.MarkerKindModel (or empty) versus
+	// store.MarkerKindKernel.
+	Kind string
+	// ArtifactUID identifies the authorizing artifact object across concurrent mounts.
+	ArtifactUID string
+	// HubKind selects the hub endpoint ("huggingFace" or "modelscope") when PeersOnly is false.
+	HubKind string
+	// Repository is the hub repository identifier when PeersOnly is false.
+	Repository string
+	// Commit is the resolved commit revision on the hub when PeersOnly is false.
+	Commit string
+	// Filter holds the allow/ignore file patterns for hub manifest listing.
+	Filter modelartifact.Filter
+	// PeersOnly restricts materialization to peer model-manager plugins with no hub fallback.
+	PeersOnly bool
+}
+
+// ModelArtifactSource derives a typed Source descriptor from an authorized ModelArtifact.
+func ModelArtifactSource(ma *workercore.ModelArtifact) Source {
+	if ma == nil {
+		return Source{Kind: store.MarkerKindModel}
+	}
+	var hubKind, repo, commit string
+	switch {
+	case ma.Spec.Source.HuggingFace != nil:
+		hubKind = HubKindHuggingFace
+		repo = ma.Spec.Source.HuggingFace.Repository
+	case ma.Spec.Source.ModelScope != nil:
+		hubKind = HubKindModelScope
+		repo = ma.Spec.Source.ModelScope.Repository
+	}
+	if ma.Status.Resolved != nil {
+		commit = ma.Status.Resolved.Revision
+	}
+	return Source{
+		Kind:        store.MarkerKindModel,
+		ArtifactUID: string(ma.UID),
+		HubKind:     hubKind,
+		Repository:  repo,
+		Commit:      commit,
+		Filter:      modelartifact.Filter{Allow: ma.Spec.AllowPatterns, Ignore: ma.Spec.IgnorePatterns},
+		PeersOnly:   commit == "",
+	}
+}
+
+// KernelArtifactSource derives a typed Source descriptor from an authorized ModelKernelArtifact.
+func KernelArtifactSource(mka *workercore.ModelKernelArtifact) Source {
+	if mka == nil {
+		return Source{Kind: store.MarkerKindKernel, PeersOnly: true}
+	}
+	if mka.Spec.Source.HuggingFace != nil {
+		commit := mka.Spec.Source.HuggingFace.Revision
+		if mka.Status.Resolved != nil && mka.Status.Resolved.Revision != "" {
+			commit = mka.Status.Resolved.Revision
+		}
+		return Source{
+			Kind:        store.MarkerKindKernel,
+			ArtifactUID: string(mka.UID),
+			HubKind:     HubKindHuggingFace,
+			Repository:  mka.Spec.Source.HuggingFace.Repository,
+			Commit:      commit,
+		}
+	}
+	return Source{
+		Kind:        store.MarkerKindKernel,
+		ArtifactUID: string(mka.UID),
+		PeersOnly:   true,
+	}
+}
+
 // Request is a materialization request, everything one mount call knows about what it asks for.
 type Request struct {
 	// Hex is the manifest digest's hexadecimal part.
 	Hex string
-	// Artifact is the resolved artifact that authorized the mount.
-	Artifact *workercore.ModelArtifact
+	// Source is the typed source descriptor derived from the authorizing artifact.
+	Source Source
 	// Token is the credential kubelet handed over with this call, "" for none.
 	Token string
 }
@@ -164,21 +244,56 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	}
 
 	namespace, attrs := vc[attrPodNamespace], attributesOf(vc)
-	ma, err := d.artifact(ctx, namespace, attrs.Artifact)
+	artifactKind, err := modelstore.ResolveArtifactKind(attrs.ArtifactKind)
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "read ModelArtifact %s/%s: %v", namespace, attrs.Artifact, err)
-	}
-	if rule, msg := authorizeMount(namespace, attrs, ma); rule != "" {
 		metrics.Mounts.WithLabelValues(metrics.MountDenied).Inc()
-		klog.V(2).InfoS("mount refused", "rule", rule, "pod", namespace+"/"+vc[attrPodName], "volumeID", req.GetVolumeId())
-		return nil, status.Error(codes.PermissionDenied, msg)
+		klog.V(2).InfoS("mount refused", "rule", "invalidArtifactKind", "pod", namespace+"/"+vc[attrPodName], "volumeID", req.GetVolumeId())
+		return nil, status.Error(codes.PermissionDenied, err.Error())
 	}
 
+	var reqSource Source
+	switch artifactKind {
+	case modelstore.ArtifactKindKernel:
+		mka, kerr := d.kernelArtifact(ctx, namespace, attrs.Artifact)
+		if kerr != nil {
+			return nil, status.Errorf(codes.Unavailable, "read ModelKernelArtifact %s/%s: %v", namespace, attrs.Artifact, kerr)
+		}
+		if rule, msg := authorizeKernelMount(namespace, attrs, mka); rule != "" {
+			metrics.Mounts.WithLabelValues(metrics.MountDenied).Inc()
+			klog.V(2).InfoS("mount refused", "rule", rule, "pod", namespace+"/"+vc[attrPodName], "volumeID", req.GetVolumeId())
+			return nil, status.Error(codes.PermissionDenied, msg)
+		}
+		reqSource = KernelArtifactSource(mka)
+	default:
+		ma, merr := d.artifact(ctx, namespace, attrs.Artifact)
+		if merr != nil {
+			return nil, status.Errorf(codes.Unavailable, "read ModelArtifact %s/%s: %v", namespace, attrs.Artifact, merr)
+		}
+		if rule, msg := authorizeMount(namespace, attrs, ma); rule != "" {
+			metrics.Mounts.WithLabelValues(metrics.MountDenied).Inc()
+			klog.V(2).InfoS("mount refused", "rule", rule, "pod", namespace+"/"+vc[attrPodName], "volumeID", req.GetVolumeId())
+			return nil, status.Error(codes.PermissionDenied, msg)
+		}
+		reqSource = ModelArtifactSource(ma)
+	}
+
+	hex := store.HexOf(attrs.Digest)
 	mounted, err := d.Mounter.IsMountPoint(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "check the target: %v", err)
 	}
 	if mounted {
+		if d.Store.IsPublished(hex) {
+			marker, merr := d.Store.ReadMarker(hex)
+			if merr != nil {
+				return nil, status.Errorf(codes.Internal, "read the published marker: %v", merr)
+			}
+			if rule, msg := authorizeMarkerKind(artifactKind, namespace, attrs, marker); rule != "" {
+				metrics.Mounts.WithLabelValues(metrics.MountDenied).Inc()
+				klog.V(2).InfoS("mount refused", "rule", rule, "pod", namespace+"/"+vc[attrPodName], "volumeID", req.GetVolumeId())
+				return nil, status.Error(codes.PermissionDenied, msg)
+			}
+		}
 		// Only a mount this call would have made answers a repeated call: a writable one a failed
 		// remount could not undo is removed and refused, so kubelet's retry mounts it again.
 		readOnly, err := d.Mounter.IsReadOnly(target)
@@ -194,7 +309,6 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		return nil, status.Error(codes.Unavailable, "the target was mounted writable and is unmounted; the next call mounts it read-only")
 	}
 
-	hex := store.HexOf(attrs.Digest)
 	ref := store.Ref{
 		VolumeID: req.GetVolumeId(), TargetPath: target, Hex: hex,
 		PodNamespace: namespace, PodName: vc[attrPodName], PodUID: vc[attrPodUID],
@@ -208,7 +322,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		return nil, recordReferenceError(err)
 	}
 	if !published {
-		p := d.Materializer.Ensure(ctx, Request{Hex: hex, Artifact: ma, Token: req.GetSecrets()[secretTokenKey]})
+		p := d.Materializer.Ensure(ctx, Request{Hex: hex, Source: reqSource, Token: req.GetSecrets()[secretTokenKey]})
 		if !p.Published {
 			metrics.Mounts.WithLabelValues(metrics.MountPending).Inc()
 			return nil, status.Error(p.Code, p.Message)
@@ -221,6 +335,18 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 			metrics.Mounts.WithLabelValues(metrics.MountPending).Inc()
 			return nil, status.Error(codes.Unavailable, "the published tree was removed before the mount; the next call materializes it again")
 		}
+	}
+
+	marker, err := d.Store.ReadMarker(hex)
+	if err != nil {
+		d.dropRef(ref)
+		return nil, status.Errorf(codes.Internal, "read the published marker: %v", err)
+	}
+	if rule, msg := authorizeMarkerKind(artifactKind, namespace, attrs, marker); rule != "" {
+		d.dropRef(ref)
+		metrics.Mounts.WithLabelValues(metrics.MountDenied).Inc()
+		klog.V(2).InfoS("mount refused", "rule", rule, "pod", namespace+"/"+vc[attrPodName], "volumeID", req.GetVolumeId())
+		return nil, status.Error(codes.PermissionDenied, msg)
 	}
 
 	if err := os.MkdirAll(target, 0o750); err != nil {
@@ -316,6 +442,21 @@ func (d *Driver) artifact(ctx context.Context, namespace, name string) (*workerc
 	}
 
 	return ma, nil
+}
+
+func (d *Driver) kernelArtifact(ctx context.Context, namespace, name string) (*workercore.ModelKernelArtifact, error) {
+	if namespace == "" || name == "" {
+		return nil, nil
+	}
+	mka := new(workercore.ModelKernelArtifact)
+	if err := d.Artifacts.Get(ctx, ctrlcli.ObjectKey{Namespace: namespace, Name: name}, mka); err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return mka, nil
 }
 
 // targetLock serializes the calls for one target, counting the calls that hold or wait for it.

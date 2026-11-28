@@ -52,6 +52,8 @@ flowchart TD
   graceful retirement. Pair it with
   [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) and
   [Scaling Benchmark](scaling-benchmark.md).
+- [Model Deployment Forger](forger.md) automates short-window kernel probing, sandbox synthesis,
+  `ModelKernelArtifact` delivery, and readiness-gated canary rollout.
 - [Elastic EP](elastic-ep.md) grows one running collective in place. Pair it with
   [Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) (*tensor parallelism
   (TP)* = 2, *data parallelism (DP)* width 2 → 4) and

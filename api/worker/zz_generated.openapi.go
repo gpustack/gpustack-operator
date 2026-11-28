@@ -68,6 +68,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.ModelArtifactProgressReason{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1_ModelArtifactProgressReason(ref),
 		v1.ModelDeployment{}.OpenAPIModelName():                                        schema_gpustack_api_worker_v1_ModelDeployment(ref),
 		v1.ModelDeploymentCacheHit{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1_ModelDeploymentCacheHit(ref),
+		v1.ModelDeploymentForger{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1_ModelDeploymentForger(ref),
+		v1.ModelDeploymentForgerList{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1_ModelDeploymentForgerList(ref),
 		v1.ModelDeploymentList{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1_ModelDeploymentList(ref),
 		v1.ModelDeploymentMetricGauge{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1_ModelDeploymentMetricGauge(ref),
 		v1.ModelDeploymentMetricMissing{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1_ModelDeploymentMetricMissing(ref),
@@ -75,6 +77,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.ModelDeploymentMetrics{}.OpenAPIModelName():                                 schema_gpustack_api_worker_v1_ModelDeploymentMetrics(ref),
 		v1.ModelDeploymentScaler{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1_ModelDeploymentScaler(ref),
 		v1.ModelDeploymentScalerList{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1_ModelDeploymentScalerList(ref),
+		v1.ModelKernelArtifact{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1_ModelKernelArtifact(ref),
+		v1.ModelKernelArtifactList{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1_ModelKernelArtifactList(ref),
 		v1.ModelPrefetch{}.OpenAPIModelName():                                          schema_gpustack_api_worker_v1_ModelPrefetch(ref),
 		v1.ModelPrefetchList{}.OpenAPIModelName():                                      schema_gpustack_api_worker_v1_ModelPrefetchList(ref),
 		v1.ModelStore{}.OpenAPIModelName():                                             schema_gpustack_api_worker_v1_ModelStore(ref),
@@ -196,6 +200,25 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentAdditionalVolume(ref),
 		v1alpha1.ModelDeploymentEngine{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentEngine(ref),
 		v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentEnvVar(ref),
+		v1alpha1.ModelDeploymentForger{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentForger(ref),
+		v1alpha1.ModelDeploymentForgerBinding{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerBinding(ref),
+		v1alpha1.ModelDeploymentForgerBindingStatus{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerBindingStatus(ref),
+		v1alpha1.ModelDeploymentForgerBottleneck{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerBottleneck(ref),
+		v1alpha1.ModelDeploymentForgerDecision{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerDecision(ref),
+		v1alpha1.ModelDeploymentForgerGenerationStatus{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerGenerationStatus(ref),
+		v1alpha1.ModelDeploymentForgerList{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerList(ref),
+		v1alpha1.ModelDeploymentForgerProbeSpec{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerProbeSpec(ref),
+		v1alpha1.ModelDeploymentForgerRoleSpec{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerRoleSpec(ref),
+		v1alpha1.ModelDeploymentForgerRoleStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerRoleStatus(ref),
+		v1alpha1.ModelDeploymentForgerRolloutSpec{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerRolloutSpec(ref),
+		v1alpha1.ModelDeploymentForgerSandboxEnvVar{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxEnvVar(ref),
+		v1alpha1.ModelDeploymentForgerSandboxEnvVarSource{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxEnvVarSource(ref),
+		v1alpha1.ModelDeploymentForgerSandboxResources{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxResources(ref),
+		v1alpha1.ModelDeploymentForgerSandboxRunner{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxRunner(ref),
+		v1alpha1.ModelDeploymentForgerSandboxSpec{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxSpec(ref),
+		v1alpha1.ModelDeploymentForgerSandboxStatus{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxStatus(ref),
+		v1alpha1.ModelDeploymentForgerSpec{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSpec(ref),
+		v1alpha1.ModelDeploymentForgerStatus{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerStatus(ref),
 		v1alpha1.ModelDeploymentGroupMemberStatus{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_ModelDeploymentGroupMemberStatus(ref),
 		v1alpha1.ModelDeploymentGroupStatus{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_ModelDeploymentGroupStatus(ref),
 		v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCache(ref),
@@ -215,6 +238,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentRetirementStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentRetirementStatus(ref),
 		v1alpha1.ModelDeploymentRole{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref),
 		v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleEndpointsStatus(ref),
+		v1alpha1.ModelDeploymentRoleKernelArtifactStatus{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleKernelArtifactStatus(ref),
 		v1alpha1.ModelDeploymentRoleParallelismStatus{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleParallelismStatus(ref),
 		v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref),
 		v1alpha1.ModelDeploymentRoleRuntimeControl{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleRuntimeControl(ref),
@@ -269,6 +293,15 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentServingStatus{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_ModelDeploymentServingStatus(ref),
 		v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref),
 		v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref),
+		v1alpha1.ModelKernelArtifact{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelKernelArtifact(ref),
+		v1alpha1.ModelKernelArtifactCompatibility{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactCompatibility(ref),
+		v1alpha1.ModelKernelArtifactForgerReference{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactForgerReference(ref),
+		v1alpha1.ModelKernelArtifactList{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactList(ref),
+		v1alpha1.ModelKernelArtifactNodeStoreSource{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactNodeStoreSource(ref),
+		v1alpha1.ModelKernelArtifactResolved{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactResolved(ref),
+		v1alpha1.ModelKernelArtifactSource{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactSource(ref),
+		v1alpha1.ModelKernelArtifactSpec{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactSpec(ref),
+		v1alpha1.ModelKernelArtifactStatus{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactStatus(ref),
 		v1alpha1.ModelPrefetch{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1alpha1_ModelPrefetch(ref),
 		v1alpha1.ModelPrefetchArtifactReference{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelPrefetchArtifactReference(ref),
 		v1alpha1.ModelPrefetchBindingReference{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelPrefetchBindingReference(ref),
@@ -2939,6 +2972,102 @@ func schema_gpustack_api_worker_v1_ModelDeploymentCacheHit(ref common.ReferenceC
 	}
 }
 
+func schema_gpustack_api_worker_v1_ModelDeploymentForger(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForger is the v1 view of a closed-loop kernel probing and forging policy over one ModelDeployment.\n\nConfiguration changes proxy to the v1alpha1 resource. No writable status subresource is served on v1 because status carries the worker-verified activeSandbox proof used to authorize node cache ingestion; status is read through the main object.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelDeploymentForgerSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelDeploymentForgerStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentForgerSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentForgerStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelDeploymentForgerList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerList holds the list of ModelDeploymentForgers.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1.ModelDeploymentForger{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.ModelDeploymentForger{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1_ModelDeploymentList(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -3422,6 +3551,102 @@ func schema_gpustack_api_worker_v1_ModelDeploymentScalerList(ref common.Referenc
 		},
 		Dependencies: []string{
 			v1.ModelDeploymentScaler{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelKernelArtifact(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelKernelArtifact is the v1 view of a verified single-GPU kernel bundle and its residency.\n\nMain-resource operations proxy to the v1alpha1 resource. No writable status subresource is served on v1 because status authorizes kernel CSI mounts and is guarded to the worker identity on v1alpha1; status is read through the main object.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelKernelArtifactSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelKernelArtifactStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelKernelArtifactSpec{}.OpenAPIModelName(), v1alpha1.ModelKernelArtifactStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelKernelArtifactList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelKernelArtifactList holds the list of ModelKernelArtifacts.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1.ModelKernelArtifact{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.ModelKernelArtifact{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -10191,6 +10416,1079 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentEnvVar(ref common.Refere
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForger(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForger automates closed-loop short-window kernel probing, Kueue-scheduled single-GPU sandbox synthesis and independent verification, NodeModelStore publication, and readiness-gated canary rollout over one ModelDeployment.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelDeploymentForgerSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelDeploymentForgerStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentForgerSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentForgerStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerBinding(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerBinding is the JSON payload stored in the forger-binding annotation on a target ModelDeployment.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"forgerName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ForgerName is the name of the ModelDeploymentForger that owns the target lease.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"forgerUID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ForgerUID is the UID of the ModelDeploymentForger that owns the target lease.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"term": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Term is the monotonic binding term under which the owner writes.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+				Required: []string{"forgerName", "forgerUID", "term"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerBindingStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerBindingStatus reports the lease held on a target ModelDeployment.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"targetUID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TargetUID is the UID of the bound ModelDeployment.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"targetName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TargetName is the name of the bound ModelDeployment.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"term": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Term is the monotonic binding term under which the forger writes.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerBottleneck(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerBottleneck summarizes one eligible single-GPU non-GEMM operator bottleneck distilled from a short-window sentinel probe.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"localKernelKey": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LocalKernelKey is the canonical single-GPU operator key over static per-rank dimensions.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"opFamily": {
+						SchemaProps: spec.SchemaProps{
+							Description: "OpFamily is the canonical single-GPU operator family name, such as \"rmsnorm\".",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"gpuTimeSharePercent": {
+						SchemaProps: spec.SchemaProps{
+							Description: "GPUTimeSharePercent is the decimal percentage of profiled single-GPU kernel self-time spent in this operator, such as \"12.5\".",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](32),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"observedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ObservedAt is when the probe window that distilled this bottleneck completed.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"localKernelKey", "opFamily", "gpuTimeSharePercent", "observedAt"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerDecision(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerDecision is the JSON payload stored in the forger-decision annotation on a target ModelDeployment to allow controller restart recovery without duplicate promotions.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"decisionID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DecisionID identifies the committed promotion or rollback decision.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"term": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Term is the binding term under which this decision was committed.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"kernelArtifacts": {
+						SchemaProps: spec.SchemaProps{
+							Description: "KernelArtifacts maps each managed role name to the ModelKernelArtifact name committed by this decision, or empty string when rolled back to stock engine kernels.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"decisionID", "term"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerGenerationStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerGenerationStatus records the outcome of one forge generation for a role.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"generation": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Generation is the sequential 1-based forge generation number for this role.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"artifactName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ArtifactName is the ModelKernelArtifact created for this generation, if published.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"manifestDigest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ManifestDigest is the content address of the published kernel bundle, if published.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"outcome": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Outcome summarizes how this generation ended.\n\n\nPossible enum values:\n - `\"Failed\"` indicates probing, sandbox synthesis, verification, or ingestion failed before promotion.\n - `\"Promoted\"` indicates the kernel artifact converged across all target replicas in Active mode (or published cleanly in Shadow mode).\n - `\"RolledBack\"` indicates promotion failed canary verification, rolled back to the prior kernel artifact, and quarantined the failed artifact.\n - `\"Skipped\"` indicates probing found no eligible unforged bottlenecks.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Failed", "Promoted", "RolledBack", "Skipped"},
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Reason is a machine-readable reason code for Outcome.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"message": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Message provides human-readable context for Outcome.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"startedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StartedAt is when this generation began.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"finishedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "FinishedAt is when this generation reached its terminal outcome.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"generation"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerList holds a list of ModelDeploymentForger resources.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelDeploymentForger{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentForger{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerProbeSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerProbeSpec configures bounded short-window sentinel profiling.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"steps": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Steps is the number of execution steps captured per probe window (3 to 5, default 4).",
+							Minimum:     ptr.To[float64](3),
+							Maximum:     ptr.To[float64](5),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"cooldownSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CooldownSeconds is the minimum wait time in seconds between probe passes (at least 60, default 600).",
+							Minimum:     ptr.To[float64](60),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"minActiveRequests": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MinActiveRequests is the minimum running request count observed on a leader replica before arming a short-window probe. Set explicitly to 0 to allow probing idle replicas (default 1).",
+							Minimum:     ptr.To[float64](0),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerRoleSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerRoleSpec configures kernel forging thresholds for one target role.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the target role name in ModelDeployment.spec.roles (Server, Prefill, or Decode).",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"maxKernelsPerGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxKernelsPerGeneration caps how many top non-GEMM single-GPU operator bottlenecks are targeted in one ForgeSandbox pass.",
+							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](16),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"minSpeedupRatio": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MinSpeedupRatio is a decimal ratio string at or above \"1.01\" (default \"1.05\") that forge-verifier requires over the reference implementation before admitting a kernel.",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](32),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerRoleStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerRoleStatus reports closed-loop state for one targeted role.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the targeted role name in ModelDeployment.spec.roles.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"phase": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Phase is the current lifecycle step for this role.\n\n\nPossible enum values:\n - `\"Forging\"` indicates the Kueue ForgeSandbox runner is executing.\n - `\"Idle\"` indicates the role is waiting for its next probe window.\n - `\"Probing\"` indicates a short-window sentinel probe is active.\n - `\"Promoting\"` indicates the new ModelKernelArtifact is rolling out across the target role's replicas under readiness gating.\n - `\"Publishing\"` indicates verified outputs are being ingested into NodeModelStore and published as a ModelKernelArtifact.\n - `\"Verifying\"` indicates forge-verifier is validating candidate solutions.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Forging", "Idle", "Probing", "Promoting", "Publishing", "Verifying"},
+						},
+					},
+					"activeGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ActiveGeneration is the monotonically increasing forge generation number currently running or most recently promoted for this role.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"activeKernelArtifact": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ActiveKernelArtifact names the ModelKernelArtifact currently promoted or staged for this role.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"previousKernelArtifact": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PreviousKernelArtifact names the prior ModelKernelArtifact retained and pinned for automatic rollback while a promotion is in flight; empty when stock engine kernels were running.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"activeSandbox": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ActiveSandbox records the worker-created ForgeSandbox Pod currently running for this role. Model-manager verifies PodUID against this worker-guarded field before ingesting outputs.",
+							Ref:         ref(v1alpha1.ModelDeploymentForgerSandboxStatus{}.OpenAPIModelName()),
+						},
+					},
+					"observedBottlenecks": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "ObservedBottlenecks lists the hottest eligible single-GPU non-GEMM kernels distilled from the most recent probe pass.",
+							MaxItems:    ptr.To[int64](32),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelDeploymentForgerBottleneck{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"generations": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Generations is a bounded history (up to 16 entries) of forge generations for this role.",
+							MaxItems:    ptr.To[int64](16),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelDeploymentForgerGenerationStatus{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentForgerBottleneck{}.OpenAPIModelName(), v1alpha1.ModelDeploymentForgerGenerationStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentForgerSandboxStatus{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerRolloutSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerRolloutSpec configures artifact retention and canary rollback timing.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"maxRetainedGenerations": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxRetainedGenerations is the number of recent ModelKernelArtifact generations retained per role before unreferenced older generations are pruned (1 to 16, default 3).",
+							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](16),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"failureTimeoutSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "FailureTimeoutSeconds is how long a promoted kernel generation may wait for canary readiness and loaded-kernel confirmation before automatic rollback and quarantine (default 600).",
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxEnvVar(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerSandboxEnvVar represents one environment variable injected into initContainer: forge-runner.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the environment variable name. Must be a valid environment variable identifier and must not start with GPUSTACK_FORGE_.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](256),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"value": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Value is a literal environment variable value. Mutually exclusive with ValueFrom.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"valueFrom": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ValueFrom selects a value from a same-namespace ConfigMap or Secret key. Mutually exclusive with Value.",
+							Ref:         ref(v1alpha1.ModelDeploymentForgerSandboxEnvVarSource{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentForgerSandboxEnvVarSource{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxEnvVarSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerSandboxEnvVarSource selects an environment variable value from a same-namespace ConfigMap or Secret key without exposing Pod downward API fields.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"configMapKeyRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ConfigMapKeyRef selects a key of a ConfigMap in the same namespace.",
+							Ref:         ref(corev1.ConfigMapKeySelector{}.OpenAPIModelName()),
+						},
+					},
+					"secretKeyRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SecretKeyRef selects a key of a Secret in the same namespace.",
+							Ref:         ref(corev1.SecretKeySelector{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			corev1.ConfigMapKeySelector{}.OpenAPIModelName(), corev1.SecretKeySelector{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxResources(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerSandboxResources specifies host resources and optional accelerator slicing or hardware partitioning for ForgeSandbox containers.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"cpu": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CPU is the host CPU request and limit for the ForgeSandbox Pod, such as \"8\".",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"ram": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RAM is the host memory request and limit for the ForgeSandbox Pod, such as \"32Gi\".",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"localStorage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LocalStorage is the host ephemeral storage request and limit for the ForgeSandbox Pod, such as \"20Gi\".",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"acceleratorSlicedMemoryPercentage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorSlicedMemoryPercentage requests software slicing with this per-accelerator VRAM percentage (0 to 100) on a sliceable AcceleratorType. 0 disables slicing (exclusive whole card, recommended for deterministic verification timing).",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](100),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"acceleratorSlicedCoresPercentage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorSlicedCoresPercentage requests software slicing with this per-accelerator compute percentage (0 to 100) alongside AcceleratorSlicedMemoryPercentage.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](100),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"acceleratorPartitionedProfile": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorPartitionedProfile requests a hardware partition profile (for example \"3g.40gb\") on a partition-offering AcceleratorType. Mutually exclusive with software slicing percentages.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxRunner(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerSandboxRunner configures the initContainer: forge-runner container in External runner mode using a restricted subset of corev1.Container fields.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"image": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Image is the container image executed by initContainer: forge-runner.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](512),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"imagePullPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullPolicy optionally sets the image pull policy for Image.\n\n\nPossible enum values:\n - `\"Always\"` means that kubelet always attempts to pull the latest image. Container will fail If the pull fails.\n - `\"IfNotPresent\"` means that kubelet pulls if the image isn't present on disk. Container will fail if the image isn't present and the pull fails.\n - `\"Never\"` means that kubelet never pulls an image, but only uses a local image. Container will fail if the image isn't present",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Always", "IfNotPresent", "Never"},
+						},
+					},
+					"command": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Command optionally overrides the container entrypoint argv.",
+							MaxItems:    ptr.To[int64](64),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
+					"args": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Args optionally sets arguments passed to the container entrypoint.",
+							MaxItems:    ptr.To[int64](64),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
+					"env": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Env optionally injects environment variables into initContainer: forge-runner. Names starting with GPUSTACK_FORGE_ are reserved by the operator and rejected.",
+							MaxItems:    ptr.To[int64](64),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelDeploymentForgerSandboxEnvVar{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"envFrom": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "EnvFrom optionally populates environment variables into initContainer: forge-runner from same-namespace ConfigMaps or Secrets. Prefixes starting with GPUSTACK_FORGE_ are rejected, and operator-owned GPUSTACK_FORGE_INPUT_DIR and GPUSTACK_FORGE_OUTPUT_DIR always take precedence.",
+							MaxItems:    ptr.To[int64](16),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(corev1.EnvFromSource{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"image"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentForgerSandboxEnvVar{}.OpenAPIModelName(), corev1.EnvFromSource{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerSandboxSpec configures Kueue-admitted single-GPU ForgeSandbox execution.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"runnerMode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RunnerMode selects External (black-box synthesis container image) or Mock (deterministic built-in operator subcommands for pipeline qualification).\n\n\nPossible enum values:\n - `\"External\"` runs the user-supplied runner container image.\n - `\"Mock\"` runs the deterministic built-in forge-mock subcommand.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"External", "Mock"},
+						},
+					},
+					"runner": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Runner configures the initContainer: forge-runner container when RunnerMode is External.",
+							Ref:         ref(v1alpha1.ModelDeploymentForgerSandboxRunner{}.OpenAPIModelName()),
+						},
+					},
+					"priorityClassName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PriorityClassName optionally sets the Kubernetes PriorityClass on the ForgeSandbox Pod.",
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"activeDeadlineSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ActiveDeadlineSeconds bounds total wall-clock execution of one ForgeSandbox Pod (60 to 14400, default 1800), matching PodSpec.activeDeadlineSeconds.",
+							Minimum:     ptr.To[float64](60),
+							Maximum:     ptr.To[float64](14400),
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"outputSizeLimit": {
+						SchemaProps: spec.SchemaProps{
+							Description: "OutputSizeLimit bounds the forge-output emptyDir staging volume (64Mi to 16Gi, default 2Gi).",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"resources": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Resources optionally specifies host CPU, memory, ephemeral storage, and accelerator slicing or partitioning mode for ForgeSandbox containers. When slicing and partitioning fields are omitted, the sandbox requests one exclusive whole accelerator card (recommended for deterministic verification latency).",
+							Ref:         ref(v1alpha1.ModelDeploymentForgerSandboxResources{}.OpenAPIModelName()),
+						},
+					},
+					"imagePullSecrets": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullSecrets optionally specifies image pull secrets in this namespace for pulling the ForgeSandbox runner image. When omitted, the sandbox inherits the target role's imagePullSecrets.",
+							MaxItems:    ptr.To[int64](32),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentForgerSandboxResources{}.OpenAPIModelName(), v1alpha1.ModelDeploymentForgerSandboxRunner{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSandboxStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerSandboxStatus records the identity of an active worker-owned ForgeSandbox Pod.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"podName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PodName is the name of the ForgeSandbox Pod in this namespace.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"podUID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PodUID is the Kubernetes UID of the ForgeSandbox Pod, verified by model-manager before ingesting emptyDir outputs.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](128),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"nodeName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodeName is the Kubernetes Node where the ForgeSandbox Pod was scheduled; empty while awaiting scheduling.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"configMapName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ConfigMapName is the name of the owner-referenced input ConfigMap mounted into the sandbox.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"startedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StartedAt is when the ForgeSandbox Pod was created.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"podName", "podUID"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerSpec defines the desired closed-loop kernel forging policy for one ModelDeployment.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"targetRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TargetRef names the target ModelDeployment in this namespace. Immutable after creation.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"mode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Mode selects how far the closed loop proceeds: ObserveOnly distills bottlenecks from probes only, Shadow also runs ForgeSandbox and publishes verified ModelKernelArtifacts without mutating the target, and Active promotes verified artifacts onto target roles.\n\n\nPossible enum values:\n - `\"Active\"` runs the full loop and promotes verified ModelKernelArtifact generations onto the target deployment under readiness-gated rollout.\n - `\"ObserveOnly\"` runs short-window sentinel probes and records observed bottlenecks without launching ForgeSandbox Pods or mutating the target deployment.\n - `\"Shadow\"` probes, forges, independently verifies, and publishes ModelKernelArtifact bundles without mutating the target deployment.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Active", "ObserveOnly", "Shadow"},
+						},
+					},
+					"suspend": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Suspend pauses probing, sandbox creation, and promotion and releases any held target binding without deleting the forger.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"roles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Roles lists the serving roles on the target ModelDeployment to probe and specialize.",
+							MinItems:    ptr.To[int64](1),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelDeploymentForgerRoleSpec{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"probe": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Probe configures short-window live sentinel profiling passes.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentForgerProbeSpec{}.OpenAPIModelName()),
+						},
+					},
+					"sandbox": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Sandbox configures the Kueue-admitted single-GPU ForgeSandbox Pod and verifier limits.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentForgerSandboxSpec{}.OpenAPIModelName()),
+						},
+					},
+					"rollout": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Rollout configures generation retention and canary failure rollback deadlines.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentForgerRolloutSpec{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"targetRef", "roles"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentForgerProbeSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentForgerRoleSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentForgerRolloutSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentForgerSandboxSpec{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentForgerStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentForgerStatus defines the observed closed-loop state of ModelDeploymentForger.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"observedGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ObservedGeneration is the metadata generation last evaluated by the controller.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"binding": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Binding records the active forger-binding lease held on the target ModelDeployment.",
+							Ref:         ref(v1alpha1.ModelDeploymentForgerBindingStatus{}.OpenAPIModelName()),
+						},
+					},
+					"roles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Roles reports per-role forging phase, active sandbox identity, distilled bottlenecks, and recent generation outcomes.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelDeploymentForgerRoleStatus{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Conditions reports Bound, Active, Blocked, and Ready status for the forger.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentForgerBindingStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentForgerRoleStatus{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentGroupMemberStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -11307,6 +12605,12 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							Ref:         ref(v1alpha1.ModelDeploymentRoleRuntimeControl{}.OpenAPIModelName()),
 						},
 					},
+					"kernelArtifactRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "KernelArtifactRef optionally names a ModelKernelArtifact in this namespace whose verified kernel bundle is mounted read-only at /var/lib/gpustack/kernels on this role's Pods. Changing or clearing it triggers a readiness-gated rolling replacement of this role's replicas while leaving deployments that omit it unchanged.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"name"},
 			},
@@ -11342,6 +12646,66 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleEndpointsStatus(ref 
 		},
 		Dependencies: []string{
 			v1alpha1.ModelDeploymentServingStatus{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleKernelArtifactStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRoleKernelArtifactStatus echoes the observed kernel bundle state for one role.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"artifact": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Artifact is the name of the referenced ModelKernelArtifact in this namespace.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"manifestDigest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ManifestDigest is the resolved gpustack-manifest v1 digest for node-delivered kernel bundles; absent for OCI image delivery.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"dispatchManifestDigest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DispatchManifestDigest is the SHA-256 digest of dispatch-manifest.json observed for the kernel bundle.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"delivery": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Delivery reports whether the kernel bundle reaches Pods via Node CSI cache or OCI Image volume.\n\n\nPossible enum values:\n - `\"Image\"` mounts a digest-pinned OCI image read-only via a Kubernetes image volume.\n - `\"Node\"` mounts verified files from NodeModelStore via the model-manager CSI plugin.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Image", "Node"},
+						},
+					},
+					"loadedKernels": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LoadedKernels is the count of specialized kernels confirmed loaded by engine sentinel across converged instances of this role.",
+							Minimum:     ptr.To[float64](0),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"quarantined": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Quarantined echoes whether the referenced ModelKernelArtifact has been quarantined.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"artifact", "delivery"},
+			},
+		},
 	}
 }
 
@@ -11707,12 +13071,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 							Ref:         ref(v1alpha1.ModelDeploymentRoleRuntimeControlStatus{}.OpenAPIModelName()),
 						},
 					},
+					"kernelArtifact": {
+						SchemaProps: spec.SchemaProps{
+							Description: "KernelArtifact echoes the resolved kernel bundle identity, delivery mechanism, and loaded kernel count when this role sets spec.roles[].kernelArtifactRef.",
+							Ref:         ref(v1alpha1.ModelDeploymentRoleKernelArtifactStatus{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"name", "desired", "ready", "quotaReserved", "unmanaged", "kind"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelDeploymentGroupStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleParallelismStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleRuntimeControlStatus{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentGroupStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleKernelArtifactStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleParallelismStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleRuntimeControlStatus{}.OpenAPIModelName()},
 	}
 }
 
@@ -14500,7 +15870,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady, WeightsReady, RuntimeControlSynced. They are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.\n\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher that was configured and then crashed therefore remains True until a live consumer observes it.\n\nWeightsReady reports whether every engine role's weights are available: a claim artifact mounted, or an engine's own download of a hub artifact finished. While it is False for a reason other than a Pod still starting, no replica is created and none that runs is touched.",
+							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady, WeightsReady, KernelsReady, RuntimeControlSynced. They are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.\n\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher that was configured and then crashed therefore remains True until a live consumer observes it.\n\nWeightsReady reports whether every engine role's weights are available: a claim artifact mounted, or an engine's own download of a hub artifact finished. While it is False for a reason other than a Pod still starting, no replica is created and none that runs is touched.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -14576,6 +15946,492 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 		},
 		Dependencies: []string{
 			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentModelStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRetirementStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelKernelArtifact(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelKernelArtifact declares an immutable, content-addressed bundle of specialized single-GPU operator kernels and their hardware and engine compatibility envelope.\n\nIts whole spec is immutable after creation, enforced at admission. Binary kernel bundles live in NodeModelStore, a commit-pinned hub repository, or a digest-pinned OCI image; ConfigMap sources are omitted from the schema by design.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelKernelArtifactSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelKernelArtifactStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelKernelArtifactSpec{}.OpenAPIModelName(), v1alpha1.ModelKernelArtifactStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactCompatibility(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelKernelArtifactCompatibility declares the runtime engine, hardware target, and canonical single-GPU kernel identities a bundle serves.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"engine": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Engine selects the inference engine family this bundle targets.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"engineVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "EngineVersion is the normalized inference engine release version this bundle was verified against.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"manufacturer": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Manufacturer is the canonical lowercase accelerator vendor key, such as \"nvidia\", \"amd\", or \"ascend\".",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](63),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"architecture": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Architecture is the canonical accelerator architecture identifier, such as \"sm_90a\", \"gfx942\", or \"910b\".",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](63),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"kernelKeys": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "KernelKeys lists the canonical single-GPU LocalKernelKey entries carried in this bundle's dispatch manifest, over static per-rank dimensions only.",
+							MinItems:    ptr.To[int64](1),
+							MaxItems:    ptr.To[int64](128),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"engine", "engineVersion", "manufacturer", "architecture", "kernelKeys"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactForgerReference(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelKernelArtifactForgerReference identifies the ModelDeploymentForger that produced a node-stored kernel artifact.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the name of the owning ModelDeploymentForger in this namespace.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"uid": {
+						SchemaProps: spec.SchemaProps{
+							Description: "UID is the Kubernetes UID of the owning ModelDeploymentForger at creation time.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](128),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name", "uid"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelKernelArtifactList holds a list of ModelKernelArtifact resources.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelKernelArtifact{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelKernelArtifact{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactNodeStoreSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelKernelArtifactNodeStoreSource identifies a verified forged kernel tree published in NodeModelStore.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"manifestDigest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ManifestDigest is the content address of the published kernel tree (\"sha256:\" followed by 64 lowercase hexadecimal characters).",
+							Default:     "",
+							MaxLength:   ptr.To[int64](71),
+							Pattern:     "^sha256:[a-f0-9]{64}$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"dispatchManifestDigest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DispatchManifestDigest is the SHA-256 digest of dispatch-manifest.json at the root of the kernel tree (\"sha256:\" followed by 64 lowercase hexadecimal characters).",
+							Default:     "",
+							MaxLength:   ptr.To[int64](71),
+							Pattern:     "^sha256:[a-f0-9]{64}$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"sizeBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SizeBytes is the total byte size of all files in the published kernel tree.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"fileCount": {
+						SchemaProps: spec.SchemaProps{
+							Description: "FileCount is the number of regular files in the published kernel tree, including dispatch-manifest.json and at least one solution or kernel file.",
+							Default:     0,
+							Minimum:     ptr.To[float64](2),
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"seedNode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SeedNode names the Kubernetes Node whose model-manager daemon first ingested and published the verified kernel tree.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"forgerRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ForgerRef identifies the owning ModelDeploymentForger in this namespace that produced the kernel bundle.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelKernelArtifactForgerReference{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"manifestDigest", "dispatchManifestDigest", "sizeBytes", "fileCount", "seedNode", "forgerRef"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelKernelArtifactForgerReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactResolved(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelKernelArtifactResolved records the verified content identity of a resolved kernel source.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"manifestDigest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ManifestDigest is the canonical gpustack-manifest v1 SHA-256 content address of the tree.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"dispatchManifestDigest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DispatchManifestDigest is the SHA-256 digest of dispatch-manifest.json at the root of the resolved kernel tree.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"revision": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Revision is the 40-character commit SHA when imported from Hugging Face; empty for forged nodeStore bundles.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"fileCount": {
+						SchemaProps: spec.SchemaProps{
+							Description: "FileCount is the number of files in the resolved manifest.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"sizeBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SizeBytes is the total byte size of all files in the resolved manifest.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"resolvedTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ResolvedTime is when the source first resolved to its content identity.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"lastValidatedTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LastValidatedTime is when source availability or hub access was most recently confirmed.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"digestSource": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DigestSource records whether ManifestDigest originated from an in-cluster Forge publish or a Hugging Face Hub listing.\n\n\nPossible enum values:\n - `\"Forge\"` indicates the digest was produced by in-cluster sandbox forging and NodeModelStore ingestion.\n - `\"Hub\"` indicates the digest was resolved from a commit-pinned Hugging Face repository listing.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Forge", "Hub"},
+						},
+					},
+				},
+				Required: []string{"resolvedTime"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelKernelArtifactSource is a tagged union naming where a kernel bundle is stored. Exactly one member must be set, enforced at admission; ConfigMap sources do not exist on this union.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"nodeStore": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodeStore references a forged kernel bundle ingested into NodeModelStore on a seed node and replicated across peers. Only the operator worker identity may create artifacts with this source.",
+							Ref:         ref(v1alpha1.ModelKernelArtifactNodeStoreSource{}.OpenAPIModelName()),
+						},
+					},
+					"huggingFace": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HuggingFace imports an exported kernel bundle from a Hugging Face repository pinned to a full 40-character hexadecimal commit SHA.",
+							Ref:         ref(v1alpha1.ModelArtifactHubSource{}.OpenAPIModelName()),
+						},
+					},
+					"image": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Image imports an exported kernel bundle from a digest-pinned OCI image mounted read-only through a Kubernetes image volume.",
+							Ref:         ref(v1alpha1.ModelArtifactImageSource{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelArtifactHubSource{}.OpenAPIModelName(), v1alpha1.ModelArtifactImageSource{}.OpenAPIModelName(), v1alpha1.ModelKernelArtifactNodeStoreSource{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelKernelArtifactSpec defines the immutable source and compatibility contract of a ModelKernelArtifact.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"source": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Source declares where the verified kernel bundle comes from.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelKernelArtifactSource{}.OpenAPIModelName()),
+						},
+					},
+					"compatibility": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Compatibility declares the engine, hardware architecture, and canonical single-GPU kernel keys this bundle was built and verified for.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelKernelArtifactCompatibility{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"source", "compatibility"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelKernelArtifactCompatibility{}.OpenAPIModelName(), v1alpha1.ModelKernelArtifactSource{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelKernelArtifactStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelKernelArtifactStatus defines the observed state of ModelKernelArtifact.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"observedGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ObservedGeneration is the metadata generation this status reflects.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"resolved": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Resolved records the immutable content identity once resolution succeeds. Absent for OCI image sources and before initial resolution completes.",
+							Ref:         ref(v1alpha1.ModelKernelArtifactResolved{}.OpenAPIModelName()),
+						},
+					},
+					"nodes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Nodes summarizes how many NodeModelStore caches hold, download, or failed this artifact's manifest digest without exposing node names.",
+							Ref:         ref(v1alpha1.ModelArtifactNodes{}.OpenAPIModelName()),
+						},
+					},
+					"quarantined": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Quarantined is true when a canary rollout or runtime load check failed on this bundle. Quarantined artifacts are never promoted or newly mounted, and quarantine persists across forger recreation.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"quarantineReason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "QuarantineReason classifies why Quarantined was set.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"quarantineMessage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "QuarantineMessage provides human-readable details for why Quarantined was set.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Conditions reports Resolved, Degraded, and Pinned state for this kernel artifact.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelArtifactNodes{}.OpenAPIModelName(), v1alpha1.ModelKernelArtifactResolved{}.OpenAPIModelName()},
 	}
 }
 
@@ -15985,10 +17841,10 @@ func schema_gpustack_api_worker_v1alpha1_NodeModelStoreModel(ref common.Referenc
 					},
 					"source": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Source is where the content's bytes come from: Hub, the model hub, or Peer, the plugins of other nodes. It names no repository or endpoint. Content published before the field existed has none.\n\n\nPossible enum values:\n - `\"Hub\"` is a download from the model hub.\n - `\"Peer\"` is a download from the plugins of other nodes.",
+							Description: "Source is where the content's bytes come from: Hub, the model hub, Peer, the plugins of other nodes, or Forge, a verified kernel bundle published locally on this node. It names no repository, tenant or endpoint. Content published before the field existed has none.\n\n\nPossible enum values:\n - `\"Forge\"` is a verified forged kernel bundle published locally on this node.\n - `\"Hub\"` is a download from the model hub.\n - `\"Peer\"` is a download from the plugins of other nodes.",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Hub", "Peer"},
+							Enum:        []interface{}{"Forge", "Hub", "Peer"},
 						},
 					},
 					"referenced": {
@@ -16224,7 +18080,7 @@ func schema_gpustack_api_worker_v1alpha1_NodeModelStoreSpec(ref common.Reference
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Pinned lists the manifest digests the node must retain: the union of the prefetches whose retention pins them and whose target set holds this node. A pinned digest is never a collection candidate, though it still counts toward usage. The prefetch controller writes the field and the configuration reconciler carries it over untouched, so the two never overwrite each other's work on the same object.",
+							Description: "Pinned lists the manifest digests the node must retain: the single-writer union of admitted ModelTransfer source generations, active and rollback ModelKernelArtifact digests, and ModelPrefetch retention pins targeting this node. A pinned digest is never a collection candidate, though it still counts toward usage. The prefetch controller is the sole writer of this field and the configuration reconciler carries it over untouched, so the two never overwrite each other's work on the same object.",
 							MaxItems:    ptr.To[int64](256),
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{

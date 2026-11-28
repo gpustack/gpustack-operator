@@ -238,9 +238,13 @@ SGLang roles behind `sgl-router` render `--kv-events-config` on ZMQ ports `5557`
 ## Rollout behavior
 
 A change to *`replicas`* adds or removes instances and leaves survivors running. An edit to any field
-that changes the rendered `Pod` rolls that role's replicas. These fields are *`size`*,
-*`acceleratorType`*, *`resources`*, *`command`*, *`image`*, *`extraArgs`*, *`env`*, *`ports`*,
-*`additionalVolumes`*, *`shmSize`*, *`terminationGracePeriodSeconds`* and *`startupTimeoutSeconds`*.
+that changes the rendered `Pod` rolls that role's replicas.
+
+These fields are *`size`*, *`acceleratorType`*, *`resources`*, *`command`*, *`image`*,
+*`extraArgs`*, *`env`*, *`ports`*, *`additionalVolumes`*, *`shmSize`*,
+*`terminationGracePeriodSeconds`*, *`startupTimeoutSeconds`*, and *`kernelArtifactRef`*
+([Model Deployment Forger](forger.md), mounting verified kernels read-only at
+`/var/lib/gpustack/kernels`).
 
 Each rollout deletes and recreates **one replica per role per pass**. It waits for fresh Kueue
 admission before it deletes the next healthy replica.
@@ -316,6 +320,7 @@ spec:
       shmSize: 32Gi  # Editable
       terminationGracePeriodSeconds: 30  # Editable
       startupTimeoutSeconds: 1800  # Editable
+      kernelArtifactRef: {}  # Editable; mounts verified kernels at /var/lib/gpustack/kernels
 ```
 
 > **Use JSON patch for one role field.** `kubectl patch --type=merge` replaces the whole *`roles`*
@@ -344,7 +349,7 @@ Schema and validating webhook checks reject these configurations at apply time:
 | Role structure | `> 10` roles, duplicate role `name`, `replicas > 1024`, `size > 64`, `kind: Server` mixed with other kinds, frozen identity edits, DNS-1035 / colliding `<deployment>-<role>` `Service` names, unnameable members |
 | Resources and placement | Unsupported accelerator mode or whole-card count over pool capacity, accelerator request without `acceleratorType`, slice percentage paired with partition profile, *PD* both logically slicing the same group, invalid `topology.requiredLevel` |
 | Transfer and interfaces | Negative/fractional or unsupported `resources.interface`, incompatible `kvTransfer.backend` (`HIXL` off Ascend, `NIXL` on Ascend, mixed Ascend/non-Ascend *PD*), new binding to mixed-protocol backend |
-| Owned keys and ports | Owned arguments/env on managed roles (including conditional `--kv-cache-dtype`; see [Operator-owned keys](#operator-owned-keys)), `--port` mismatching first `ports` entry, reserved listener ports (`5557`/`5558`, `8998`), unparseable parallel flags or per-member width exceeding cards |
+| Owned keys and ports | Owned arguments/env on managed roles (including conditional `--kv-cache-dtype`; see [Operator-owned keys](#operator-owned-keys)), `--port` mismatching first `ports` entry, reserved listener ports (`5557`/`5558`, `8998`), unparseable parallel flags or per-member width exceeding cards, `ConfigMap` mounts overlapping `/var/lib/gpustack/kernels` (`ConfigMapKernelMountForbidden`) |
 
 Rules that read `AcceleratorType` are skipped during deletion, so a missing type cannot block
 finalizer removal. If `AcceleratorType.status` has not converged, admission passes. The deployment

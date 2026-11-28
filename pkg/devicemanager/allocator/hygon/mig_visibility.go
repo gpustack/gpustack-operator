@@ -68,9 +68,10 @@ func (s *server) ActuatePhysicalSliced(
 		return nil, fmt.Errorf("card %s: absent from the device record: fail closed", card.UUID)
 	}
 
+	slotName := deviceplugin.CanonicalSlotContainerName(pod, ctr)
 	release := lockMigCard(card.PciBusID)
 	inst, outcome, err := reserveMigInstance(
-		s.mig, deviceplugin.OperatorPodsDir, string(pod.UID), ctr.Name, card, profile,
+		s.mig, deviceplugin.OperatorPodsDir, string(pod.UID), slotName, card, profile,
 	)
 	release()
 	if err != nil {
@@ -79,7 +80,7 @@ func (s *server) ActuatePhysicalSliced(
 
 	resp, err := s.migContainerResponse(accel, inst)
 	if err != nil {
-		s.rollbackMigInstance(card, inst, outcome, string(pod.UID), ctr.Name)
+		s.rollbackMigInstance(card, inst, outcome, string(pod.UID), slotName)
 		return nil, err
 	}
 
@@ -92,7 +93,7 @@ func (s *server) ActuatePhysicalSliced(
 		IDs:      map[deviceplugin.Resource]string{res: _MigInstanceIDPrefix + inst.UUID},
 		Response: resp,
 		Rollback: func() {
-			s.rollbackMigInstance(card, inst, outcome, string(pod.UID), ctr.Name)
+			s.rollbackMigInstance(card, inst, outcome, string(pod.UID), slotName)
 		},
 	}, nil
 }

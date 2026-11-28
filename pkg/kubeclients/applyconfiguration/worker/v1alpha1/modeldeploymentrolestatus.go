@@ -107,6 +107,10 @@ type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// RuntimeControl reports the latest live runtime-control convergence state for this role.
 	//
 	RuntimeControl *ModelDeploymentRoleRuntimeControlStatusApplyConfiguration `json:"runtimeControl,omitempty"`
+	// KernelArtifact echoes the resolved kernel bundle identity, delivery mechanism, and loaded
+	// kernel count when this role sets spec.roles[].kernelArtifactRef.
+	//
+	KernelArtifact *ModelDeploymentRoleKernelArtifactStatusApplyConfiguration `json:"kernelArtifact,omitempty"`
 }
 
 // ModelDeploymentRoleStatusApplyConfiguration constructs a declarative configuration of the ModelDeploymentRoleStatus type for use with
@@ -207,5 +211,13 @@ func (b *ModelDeploymentRoleStatusApplyConfiguration) WithGroups(values ...*Mode
 // If called multiple times, the RuntimeControl field is set to the value of the last call.
 func (b *ModelDeploymentRoleStatusApplyConfiguration) WithRuntimeControl(value *ModelDeploymentRoleRuntimeControlStatusApplyConfiguration) *ModelDeploymentRoleStatusApplyConfiguration {
 	b.RuntimeControl = value
+	return b
+}
+
+// WithKernelArtifact sets the KernelArtifact field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the KernelArtifact field is set to the value of the last call.
+func (b *ModelDeploymentRoleStatusApplyConfiguration) WithKernelArtifact(value *ModelDeploymentRoleKernelArtifactStatusApplyConfiguration) *ModelDeploymentRoleStatusApplyConfiguration {
+	b.KernelArtifact = value
 	return b
 }

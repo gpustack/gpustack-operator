@@ -839,6 +839,131 @@ func TestParseFamilyDemands_InitContainerPartition(t *testing.T) {
 	}, parseFamilyDemands(wl), "card count and profile read from the init container")
 }
 
+func TestParseFamilyDemands_InitContainersSequentialVsSidecar(t *testing.T) {
+	gpu := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	always := core.ContainerRestartPolicyAlways
+	reqGPU := func(n string) core.ResourceRequirements {
+		return core.ResourceRequirements{
+			Requests: core.ResourceList{gpu: resource.MustParse(n)},
+			Limits:   core.ResourceList{gpu: resource.MustParse(n)},
+		}
+	}
+
+	cases := []struct {
+		name      string
+		inits     []core.Container
+		apps      []core.Container
+		wantCards int32
+	}{
+		{
+			name: "sequential ForgeSandbox initContainers take max rather than sum",
+			inits: []core.Container{
+				{Name: "forge-runner", Resources: reqGPU("1")},
+				{Name: "forge-stage-sentinel"},
+				{Name: "forge-verifier", Resources: reqGPU("1")},
+			},
+			apps:      []core.Container{{Name: "forge-hold"}},
+			wantCards: 1,
+		},
+		{
+			name: "sidecar initContainer sums with subsequent sequential initContainer and app",
+			inits: []core.Container{
+				{Name: "sidecar", RestartPolicy: &always, Resources: reqGPU("1")},
+				{Name: "setup", Resources: reqGPU("2")},
+			},
+			apps:      []core.Container{{Name: "main", Resources: reqGPU("1")}},
+			wantCards: 3,
+		},
+		{
+			name: "sidecar after sequential initContainer sums only with app",
+			inits: []core.Container{
+				{Name: "setup", Resources: reqGPU("1")},
+				{Name: "sidecar", RestartPolicy: &always, Resources: reqGPU("1")},
+			},
+			apps:      []core.Container{{Name: "main", Resources: reqGPU("1")}},
+			wantCards: 2,
+		},
+		{
+			name: "regular app containers sum concurrently",
+			apps: []core.Container{
+				{Name: "a", Resources: reqGPU("1")},
+				{Name: "b", Resources: reqGPU("2")},
+			},
+			wantCards: 3,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wl := &kueue.Workload{Spec: kueue.WorkloadSpec{PodSets: []kueue.PodSet{{
+				Name:  "main",
+				Count: 1,
+				Template: core.PodTemplateSpec{Spec: core.PodSpec{
+					InitContainers: tc.inits,
+					Containers:     tc.apps,
+				}},
+			}}}}
+			assert.Equal(t, []familyDemand{{
+				family:  nodefeature.ResourceFamilyExclusive,
+				cards:   tc.wantCards,
+				podSets: fromPodSets("main"),
+			}}, parseFamilyDemands(wl))
+		})
+	}
+}
+
+func TestParseFamilyDemands_SharedTieBreakPrefersWiderPerHolderDemand(t *testing.T) {
+	sharedCard := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeShared)
+	reqShared := func(q string) core.ResourceRequirements {
+		return core.ResourceRequirements{Limits: core.ResourceList{sharedCard: resource.MustParse(q)}}
+	}
+
+	cases := []struct {
+		name      string
+		inits     []core.Container
+		apps      []core.Container
+		wantNeeds []sharedNeed
+	}{
+		{
+			name: "equal-card init holder needing 2 cards beats two steady 1-card holders",
+			inits: []core.Container{
+				{Name: "setup", Resources: reqShared("2")},
+			},
+			apps: []core.Container{
+				{Name: "a", Resources: reqShared("1")},
+				{Name: "b", Resources: reqShared("1")},
+			},
+			wantNeeds: []sharedNeed{{cards: 2, containers: 1}},
+		},
+		{
+			name: "init phase with single 3-card holder beats init phase with 2+1 split",
+			inits: []core.Container{
+				{Name: "wide", Resources: reqShared("3")},
+				{Name: "sidecar", RestartPolicy: ptr.To(core.ContainerRestartPolicyAlways), Resources: reqShared("1")},
+				{Name: "narrow", Resources: reqShared("2")},
+			},
+			apps:      []core.Container{{Name: "main", Resources: reqShared("1")}},
+			wantNeeds: []sharedNeed{{cards: 3, containers: 1}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wl := &kueue.Workload{Spec: kueue.WorkloadSpec{PodSets: []kueue.PodSet{{
+				Name:  "main",
+				Count: 1,
+				Template: core.PodTemplateSpec{Spec: core.PodSpec{
+					InitContainers: tc.inits,
+					Containers:     tc.apps,
+				}},
+			}}}}
+			demands := parseFamilyDemands(wl)
+			require.Len(t, demands, 1)
+			assert.Equal(t, tc.wantNeeds, demands[0].sharedNeeds)
+		})
+	}
+}
+
 // TestParseFamilyDemands_LimitsOnly pins that accelerator keys specified only under
 // resources.limits (the conventional place for extended resources) are still parsed — a
 // requests-only scan would miss them and wrongly mark feasibility Ready.

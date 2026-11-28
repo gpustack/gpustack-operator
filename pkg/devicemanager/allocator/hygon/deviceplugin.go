@@ -347,7 +347,8 @@ func (s *server) getSlicedContainerAllocateResponse(
 	// authoritative slot ledger allocateVdev scans, so a read-write mount would let a
 	// co-tenant tamper with another slice's CU/vdev/pipe accounting. allocateVdev creates
 	// the host dir when it writes the first conf.
-	vdevHostDir := filepath.Join(deviceplugin.PodWorkDir(string(pod.UID), ctr.Name), "etc/vdev/docker")
+	slotName := deviceplugin.CanonicalSlotContainerName(pod, ctr)
+	vdevHostDir := filepath.Join(deviceplugin.PodWorkDir(string(pod.UID), slotName), "etc/vdev/docker")
 	ctrResp.Mounts = append(ctrResp.Mounts,
 		&deviceplugin.Mount{ContainerPath: ctrVdevDir, HostPath: vdevHostDir, ReadOnly: true})
 

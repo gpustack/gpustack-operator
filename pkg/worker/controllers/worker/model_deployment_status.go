@@ -243,6 +243,9 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 	)
 
 	applyModelDeploymentRuntimeControlStatus(desired, md, observation.RuntimeControl)
+	if err = r.applyModelDeploymentKernelsStatus(ctx, md, pods, desired); err != nil {
+		return err
+	}
 
 	// kubemeta.DeepEqual covers LastTransitionTime too, and that is correct rather than incidental:
 	// the condition accessors move it only when the condition's value changes, so an unchanged pass
@@ -2390,6 +2393,27 @@ func annotateModelDeploymentPhase(holder *workercore.ModelDeployment, pods []cor
 		}
 		holder.Status.PhaseMessage += "; " + note
 	}
+}
+
+func (r *ModelDeploymentReconciler) applyModelDeploymentKernelsStatus(
+	ctx context.Context,
+	md *workercore.ModelDeployment,
+	pods []core.Pod,
+	desired *workercore.ModelDeploymentStatus,
+) error {
+	holder := &workercore.ModelDeployment{Status: *desired}
+	if err := r.observeModelDeploymentKernels(ctx, md, pods, holder); err != nil {
+		return err
+	}
+	if holder.Status.Phase != ModelDeploymentPhaseReady &&
+		holder.Status.Phase != ModelDeploymentPhaseDeleting &&
+		ModelDeploymentConditionKernelsReady.IsFalse(holder) &&
+		len(pods) == 0 &&
+		!ModelDeploymentConditionWeightsReady.IsFalse(holder) {
+		holder.Status.PhaseMessage = ModelDeploymentConditionKernelsReady.GetMessage(holder)
+	}
+	*desired = holder.Status
+	return nil
 }
 
 // parkedModelDeploymentWorkloads names the deployment's Workloads the joint barrier has deactivated.

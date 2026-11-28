@@ -854,6 +854,34 @@ message ModelDeploymentCacheHit {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time observedAt = 10;
 }
 
+// ModelDeploymentForger is the v1 view of a closed-loop kernel probing and forging policy over one
+// ModelDeployment.
+//
+// Configuration changes proxy to the v1alpha1 resource. No writable status subresource is served
+// on v1 because status carries the worker-verified activeSandbox proof used to authorize node
+// cache ingestion; status is read through the main object.
+//
+// +genclient
+// +genclient:noStatus
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["mdf"]
+message ModelDeploymentForger {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelDeploymentForgerSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelDeploymentForgerStatus status = 3;
+}
+
+// ModelDeploymentForgerList holds the list of ModelDeploymentForgers.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelDeploymentForgerList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelDeploymentForger items = 2;
+}
+
 // ModelDeploymentList holds the list of ModelDeployments.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -967,6 +995,33 @@ message ModelDeploymentScalerList {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
 
   repeated ModelDeploymentScaler items = 2;
+}
+
+// ModelKernelArtifact is the v1 view of a verified single-GPU kernel bundle and its residency.
+//
+// Main-resource operations proxy to the v1alpha1 resource. No writable status subresource is
+// served on v1 because status authorizes kernel CSI mounts and is guarded to the worker identity
+// on v1alpha1; status is read through the main object.
+//
+// +genclient
+// +genclient:noStatus
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["mkart"]
+message ModelKernelArtifact {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelKernelArtifactSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelKernelArtifactStatus status = 3;
+}
+
+// ModelKernelArtifactList holds the list of ModelKernelArtifacts.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelKernelArtifactList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelKernelArtifact items = 2;
 }
 
 // ModelPrefetch is the v1 view of a namespace's model residency: what is being warmed where, and

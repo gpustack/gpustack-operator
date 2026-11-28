@@ -524,7 +524,8 @@ func (s *server) getSlicedContainerAllocateResponse(
 		return nil, err
 	}
 
-	podWorkDir := deviceplugin.PodWorkDir(string(pod.UID), ctr.Name)
+	slotName := deviceplugin.CanonicalSlotContainerName(pod, ctr)
+	podWorkDir := deviceplugin.PodWorkDir(string(pod.UID), slotName)
 	if err = osx.MkdirAll(podWorkDir, 0o777); err != nil {
 		return nil, fmt.Errorf("create pod work dir %q: %w", podWorkDir, err)
 	}

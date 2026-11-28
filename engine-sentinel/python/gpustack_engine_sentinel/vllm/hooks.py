@@ -6,6 +6,10 @@ import inspect
 from functools import wraps
 from typing import Any
 
+from gpustack_engine_sentinel.kernel_loader import (
+    aggregate_kernel_reports,
+    get_process_kernel_report,
+)
 from gpustack_engine_sentinel.latch import BootLatch
 from gpustack_engine_sentinel.protocol import (
     ENGINE_VLLM,
@@ -13,6 +17,7 @@ from gpustack_engine_sentinel.protocol import (
     InvalidRequestError,
     RankReceipt,
     SentinelError,
+    UnsupportedEngineVersionError,
     UnsupportedFieldsError,
 )
 from gpustack_engine_sentinel.server import (
@@ -42,6 +47,103 @@ class VLLMSentinelBackend:
         self.args: Any = None
         self._membership_epoch = 1
         self._last_core_identities: tuple[Any, ...] | None = None
+        self._last_kernel_summary: dict[str, Any] = {}
+
+    async def get_kernel_summary(self) -> dict[str, Any]:
+        local = get_process_kernel_report(engine="vLLM")
+        client = self._resolve_engine_client()
+        engine_core = getattr(client, "engine_core", None)
+        if _supports_async_mp_utility(engine_core):
+            try:
+                raw_results = await engine_core.call_utility_all_async(
+                    UTILITY_METHOD_NAME, {"op": "inspect"}
+                )
+                rank_reports = [
+                    self._extract_rank_kernel_fields(res)
+                    for res in raw_results or ()
+                    if isinstance(res, dict)
+                ]
+                rank_reports = [r for r in rank_reports if r]
+                if rank_reports:
+                    candidates = [*rank_reports, local] if local else list(rank_reports)
+                    merged = aggregate_kernel_reports(candidates)
+                    if merged:
+                        self._last_kernel_summary = dict(merged)
+                        return merged
+            except Exception:
+                pass
+
+        if self._last_kernel_summary and local:
+            merged = aggregate_kernel_reports([self._last_kernel_summary, local])
+            self._last_kernel_summary = dict(merged)
+            return merged
+        if self._last_kernel_summary:
+            return dict(self._last_kernel_summary)
+        if local:
+            self._last_kernel_summary = dict(local)
+        return local
+
+    @staticmethod
+    def _extract_rank_kernel_fields(res: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if "loaded_kernel_keys" in res and isinstance(res["loaded_kernel_keys"], list):
+            out["loaded_kernel_keys"] = list(res["loaded_kernel_keys"])
+        if res.get("dispatch_manifest_digest"):
+            out["dispatch_manifest_digest"] = str(res["dispatch_manifest_digest"])
+        if res.get("kernel_load_error"):
+            out["kernel_load_error"] = str(res["kernel_load_error"])
+        return out
+
+    async def _call_probe_rpc(self, payload: dict[str, Any]) -> dict[str, Any]:
+        client = self._resolve_engine_client()
+        engine_core = getattr(client, "engine_core", None)
+        if not _supports_async_mp_utility(engine_core):
+            raise UnsupportedEngineVersionError(
+                "vLLM engine client lacks EngineCore utility RPC required for /gpustack/v1/probe"
+            )
+        raw_results = await engine_core.call_utility_all_async(
+            UTILITY_METHOD_NAME,
+            payload,
+        )
+        if not raw_results:
+            raise UnsupportedEngineVersionError(
+                "vLLM EngineCore utility RPC returned no rank responses for probe"
+            )
+        chosen: dict[str, Any] | None = None
+        for res in raw_results:
+            if isinstance(res, dict) and not res.get("skipped"):
+                chosen = res
+                break
+        if chosen is None:
+            raise UnsupportedEngineVersionError(
+                "vLLM rank-0 EngineCore did not answer probe RPC"
+            )
+        if not chosen.get("ok", True):
+            err_code = str(chosen.get("error_code") or "probe_worker_error")
+            msg = str(chosen.get("message") or "vLLM worker probe failed")
+            if err_code == "unsupported_engine_version":
+                raise UnsupportedEngineVersionError(msg)
+            status_code = 409 if err_code == "probe_in_progress" else 500
+            raise SentinelError(status_code, err_code, msg)
+        return chosen
+
+    async def start_probe(self, spec: dict[str, Any]) -> dict[str, Any]:
+        rpc_payload = dict(spec)
+        rpc_payload["op"] = "probe_start"
+        rpc_payload.setdefault("target_rank", 0)
+        return await self._call_probe_rpc(rpc_payload)
+
+    async def collect_probe(self, spec: dict[str, Any]) -> dict[str, Any]:
+        rpc_payload = dict(spec)
+        rpc_payload["op"] = "probe_collect"
+        rpc_payload.setdefault("target_rank", 0)
+        return await self._call_probe_rpc(rpc_payload)
+
+    async def abort_probe(self, spec: dict[str, Any]) -> dict[str, Any]:
+        rpc_payload = dict(spec)
+        rpc_payload["op"] = "probe_abort"
+        rpc_payload.setdefault("target_rank", 0)
+        return await self._call_probe_rpc(rpc_payload)
 
     def _resolve_engine_client(self) -> Any:
         if self.engine_client is not None:
@@ -174,17 +276,21 @@ class VLLMSentinelBackend:
                 )
             if not boot_defaults and isinstance(res.get("boot_defaults"), dict):
                 boot_defaults = dict(res["boot_defaults"])
+            kfields = self._extract_rank_kernel_fields(res)
             receipt = RankReceipt(
                 rank_id=rid,
                 boot_id=bid,
                 membership_epoch=epoch,
                 applied_digest=str(res.get("applied_digest", "")),
                 values=dict(res.get("values", {})),
+                loaded_kernel_keys=kfields.get("loaded_kernel_keys"),
+                dispatch_manifest_digest=kfields.get("dispatch_manifest_digest"),
+                kernel_load_error=kfields.get("kernel_load_error"),
             )
             ranks.append(receipt.to_dict())
         ranks.sort(key=lambda r: r["rank_id"])
         values = dict(ranks[0]["values"]) if ranks else {}
-        return {
+        out: dict[str, Any] = {
             "membership_epoch": self._current_membership_epoch(rank_epochs),
             "supported_fields": common_supported,
             "unsupported_fields": all_unsupported,
@@ -192,6 +298,11 @@ class VLLMSentinelBackend:
             "ranks": ranks,
             "values": values,
         }
+        ksummary = aggregate_kernel_reports(ranks)
+        if ksummary:
+            self._last_kernel_summary = dict(ksummary)
+            out.update(ksummary)
+        return out
 
     async def apply_runtime_config(
         self, request_data: dict[str, Any]
@@ -288,17 +399,21 @@ class VLLMSentinelBackend:
                 )
             if not boot_defaults and isinstance(res.get("boot_defaults"), dict):
                 boot_defaults = dict(res["boot_defaults"])
+            kfields = self._extract_rank_kernel_fields(res)
             receipt = RankReceipt(
                 rank_id=int(res.get("rank_id", idx)),
                 boot_id=str(res["boot_id"]),
                 membership_epoch=epoch,
                 applied_digest=str(res["applied_digest"]),
                 values=dict(res.get("values", {})),
+                loaded_kernel_keys=kfields.get("loaded_kernel_keys"),
+                dispatch_manifest_digest=kfields.get("dispatch_manifest_digest"),
+                kernel_load_error=kfields.get("kernel_load_error"),
             )
             ranks.append(receipt.to_dict())
         ranks.sort(key=lambda r: r["rank_id"])
         values = dict(ranks[0]["values"]) if ranks else {}
-        return {
+        out: dict[str, Any] = {
             "membership_epoch": self._current_membership_epoch(rank_epochs),
             "supported_fields": common_supported,
             "unsupported_fields": all_unsupported,
@@ -306,6 +421,11 @@ class VLLMSentinelBackend:
             "ranks": ranks,
             "values": values,
         }
+        ksummary = aggregate_kernel_reports(ranks)
+        if ksummary:
+            self._last_kernel_summary = dict(ksummary)
+            out.update(ksummary)
+        return out
 
     @staticmethod
     async def _rollback_applied_ranks(

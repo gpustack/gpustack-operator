@@ -294,7 +294,8 @@ func (s *server) getSlicedContainerAllocateResponse(
 
 	bdf := accel.Topology.PciBusID
 	wholeCard := coresPct >= 100 && memMib >= int64(group.Memory)
-	res, err := reserveSlice(s.sgpu, string(pod.UID), ctr.Name, bdf, coresPct, memMib, wholeCard)
+	slotName := deviceplugin.CanonicalSlotContainerName(pod, ctr)
+	res, err := reserveSlice(s.sgpu, string(pod.UID), slotName, bdf, coresPct, memMib, wholeCard)
 	if err != nil {
 		return nil, fmt.Errorf("reserve metax sgpu slice: %w", err)
 	}

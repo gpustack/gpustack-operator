@@ -7,6 +7,7 @@ import (
 
 	"gpustack.ai/gpustack/cmd"
 	"gpustack.ai/gpustack/pkg/devicemanager"
+	"gpustack.ai/gpustack/pkg/modelforger"
 	"gpustack.ai/gpustack/pkg/modelmanager"
 	"gpustack.ai/gpustack/pkg/modeltransfer"
 	"gpustack.ai/gpustack/pkg/utils/signalx"
@@ -23,6 +24,7 @@ func main() {
 	c.AddCommand(worker.NewCommand())
 	c.AddCommand(workergateway.NewCommand())
 	c.AddCommand(devicemanager.NewCommand())
+	c.AddCommand(modelforger.NewCommand())
 	c.AddCommand(modelmanager.NewCommand())
 	c.AddCommand(modeltransfer.NewCommand())
 	c = cmd.Harness(c)

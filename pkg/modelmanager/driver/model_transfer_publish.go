@@ -68,6 +68,11 @@ func (d *Driver) publishModelTransferVolume(ctx context.Context, req *csi.NodePu
 			"unknown model-transfer delivery %q: only %q is supported", delivery, modelTransferDeliveryMetadata)
 	}
 	namespace, attrs := vc[attrPodNamespace], attributesOf(vc)
+	artifactKind, err := modelstore.ResolveArtifactKind(attrs.ArtifactKind)
+	if err != nil || artifactKind != modelstore.ArtifactKindModel {
+		metrics.Mounts.WithLabelValues(metrics.MountDenied).Inc()
+		return nil, status.Error(codes.PermissionDenied, "model-transfer metadata delivery supports ModelArtifact volumes only")
+	}
 	ma, err := d.artifact(ctx, namespace, attrs.Artifact)
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "read ModelArtifact %s/%s: %v",
@@ -122,6 +127,20 @@ func (d *Driver) publishModelTransferVolume(ctx context.Context, req *csi.NodePu
 	}
 	if err := d.Store.Acquire(ctx, ref); err != nil {
 		return nil, recordReferenceError(err)
+	}
+	if d.Store.IsPublished(hex) {
+		marker, merr := d.Store.ReadMarker(hex)
+		if merr != nil {
+			d.dropRef(ref)
+			return nil, status.Errorf(codes.Internal, "read the published marker: %v", merr)
+		}
+		if rule, msg := authorizeMarkerKind(modelstore.ArtifactKindModel, namespace, attrs, marker); rule != "" {
+			d.dropRef(ref)
+			metrics.Mounts.WithLabelValues(metrics.MountDenied).Inc()
+			klog.V(2).InfoS("model-transfer metadata mount refused", "rule", rule,
+				"pod", namespace+"/"+vc[attrPodName], "volumeID", req.GetVolumeId())
+			return nil, status.Error(codes.PermissionDenied, msg)
+		}
 	}
 
 	views := d.MetadataViews

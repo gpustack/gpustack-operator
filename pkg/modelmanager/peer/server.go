@@ -60,10 +60,11 @@ type ManifestFile struct {
 	Digest string `json:"digest"`
 }
 
-// Listing is a stored manifest: the tree's digest and its files. The materializer stores it at
-// publish, and the peer server answers a listing with it.
+// Listing is a stored manifest: the tree's digest, optional content class, and files. The
+// materializer or local ingest stores it at publish, and the peer server answers a listing with it.
 type Listing struct {
 	Digest  string         `json:"digest"`
+	Kind    string         `json:"kind,omitempty"`
 	Entries []ManifestFile `json:"entries"`
 }
 
@@ -108,11 +109,14 @@ func (s *Server) serveTree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var l Listing
-	if err := json.Unmarshal(b, &l); err != nil || l.Digest != m.Digest {
+	if err := json.Unmarshal(b, &l); err != nil || l.Digest != m.Digest || (l.Kind != "" && m.Kind != "" && l.Kind != m.Kind) {
 		klog.ErrorS(err, "a stored manifest does not parse or disagrees with its marker", "digest", m.Digest)
 		httpxRefused(w, http.StatusInternalServerError, "the stored manifest is unreadable")
 
 		return
+	}
+	if l.Kind == "" && m.Kind == store.MarkerKindKernel {
+		l.Kind = m.Kind
 	}
 	httpx.PureJSON(w, http.StatusOK, l)
 }

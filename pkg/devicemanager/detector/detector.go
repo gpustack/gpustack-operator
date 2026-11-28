@@ -642,6 +642,9 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	}
 
 	lpCli := system.LoopbackKubeClient.Get()
+	if lpCli == nil {
+		return errors.New("loopback kube client is not configured")
+	}
 	nd, err := lpCli.CoreV1().Nodes().Get(ctx, ndName,
 		meta.GetOptions{
 			ResourceVersion: "0",

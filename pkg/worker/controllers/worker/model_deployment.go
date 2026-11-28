@@ -116,6 +116,9 @@ type ModelDeploymentReconciler struct {
 	// DrainReader scrapes incarnation-relative Prometheus in-flight request metrics before pause
 	// transitions. A nil reader builds the default bounded reader on demand.
 	DrainReader *runtimecontrol.DrainReader
+	// KernelRuntimeReader reads sentinel kernel loader state on /gpustack/v1/runtime_config for
+	// readiness-gated canary slots and status reporting. A nil reader uses the default HTTP client.
+	KernelRuntimeReader ModelDeploymentKernelRuntimeReader
 
 	runtimeControlTarget func(
 		ctx context.Context,
@@ -397,8 +400,14 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		return ctrl.Result{}, err
 	}
 
-	desired, err := r.renderModelDeploymentPodsWithIsolation(
-		ctx, md, connection, interfaceProtocols, weights, ptr.To(routerIsolationReady),
+	kernels, err := r.resolveModelDeploymentKernels(ctx, md, replicas)
+	if err != nil {
+		logger.Error(err, "resolve model kernel artifacts")
+		return ctrl.Result{}, err
+	}
+
+	desired, err := r.renderModelDeploymentPodsWithKernels(
+		ctx, md, connection, interfaceProtocols, weights, kernels, ptr.To(routerIsolationReady), true,
 	)
 	if err != nil {
 		// A render failure is the AcceleratorType not being ready, or a role the renderer cannot build
@@ -670,6 +679,13 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		live := liveByRole[role.Name]
 		declared := int(role.Replicas)
 		want := desired[role.Name]
+
+		if kernels.roleBlocked(role.Name) {
+			if slot, held := slots.slotFor(role.Name); held {
+				holdingRoles[role.Name] = slot
+			}
+			continue
+		}
 
 		// A ROLE ALREADY REPLACING ONE REPLICA DOES NOT SELECT ANOTHER until that replacement
 		// holds an admission. A queued one holds nothing, so spending a second healthy replica
@@ -1201,6 +1217,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 						Ordinal: ordinal,
 						Members: departing,
 					}, workloads)
+					r.populateReplacementSlotKernelGate(&slot, departing, want[ordinal], kernels)
 					if err = r.beginReplacementSlot(ctx, md, slot); err != nil {
 						return objectWriteResult(
 							logger, err, "record the replacement slot", _requeueAfterConflict,
@@ -1381,7 +1398,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				slot.Phase == modelDeploymentReplacementCleanup {
 				slot = modelDeploymentReplacementSlot{
 					Role: role.Name, Ordinal: ordinal, Phase: modelDeploymentReplacementWaitingForAdmission,
-					MemberHashes: replacementRenderHashes(desired[role.Name][ordinal]),
+					MemberHashes:           replacementRenderHashes(desired[role.Name][ordinal]),
+					RequireReadiness:       slot.RequireReadiness,
+					DispatchManifestDigest: slot.DispatchManifestDigest,
 				}
 				if err := r.advanceReplacementSlot(ctx, md, slot); err != nil {
 					return objectWriteResult(logger, err, "record replacement creation", _requeueAfterConflict)
@@ -1602,6 +1621,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	if weights != nil && weights.Render != nil &&
 		weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote &&
 		!weights.Render.SourceReady {
+		return ctrl.Result{RequeueAfter: modelDeploymentDeliveryRecheck}, nil
+	}
+	if kernels != nil && kernels.recheckNeeded() {
 		return ctrl.Result{RequeueAfter: modelDeploymentDeliveryRecheck}, nil
 	}
 
@@ -2399,6 +2421,16 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPodsWithIsolation(
 	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
 	engineSentinelEnabled *bool,
 ) (map[string]map[int][]*core.Pod, error) {
+	return r.renderModelDeploymentPodsWithKernels(
+		ctx, md, connection, interfaceProtocols, weights, nil, engineSentinelEnabled, false,
+	)
+}
+
+func (r *ModelDeploymentReconciler) renderModelDeploymentPodsWithKernels(
+	ctx context.Context, md *workercore.ModelDeployment,
+	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
+	kernels *modelDeploymentKernels, engineSentinelEnabled *bool, allowBlockedRoles bool,
+) (map[string]map[int][]*core.Pod, error) {
 	if err := r.reconcileModelTransferClientConfig(ctx, md, weights); err != nil {
 		return nil, err
 	}
@@ -2408,8 +2440,8 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPodsWithIsolation(
 			ctx, md, connection, interfaceProtocols, weights, awsEFAEnabled, engineSentinelEnabled,
 		)
 	}
-	return r.renderModelDeploymentRolePodsWithSentinel(
-		ctx, md, connection, interfaceProtocols, weights, awsEFAEnabled, engineSentinelEnabled,
+	return r.renderModelDeploymentRolePodsWithKernels(
+		ctx, md, connection, interfaceProtocols, weights, kernels, awsEFAEnabled, engineSentinelEnabled, allowBlockedRoles,
 	)
 }
 
@@ -2428,6 +2460,23 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
 	awsEFAEnabled bool, engineSentinelEnabled *bool,
 ) (map[string]map[int][]*core.Pod, error) {
+	return r.renderModelDeploymentRolePodsWithKernels(
+		ctx, md, connection, interfaceProtocols, weights, nil, awsEFAEnabled, engineSentinelEnabled, false,
+	)
+}
+
+func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithKernels(
+	ctx context.Context, md *workercore.ModelDeployment,
+	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
+	kernels *modelDeploymentKernels, awsEFAEnabled bool, engineSentinelEnabled *bool, allowBlockedRoles bool,
+) (map[string]map[int][]*core.Pod, error) {
+	if kernels == nil && modelDeploymentHasKernelArtifactRefs(md) {
+		var err error
+		kernels, err = r.resolveModelDeploymentKernels(ctx, md, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// The overcommit setting is the Instance path's, deliberately: it decides how a declared
 	// resource becomes a request, and this renderer derives the same values the Instance webhook
 	// does. A second knob for one translation would let the two disagree on one cluster.
@@ -2469,6 +2518,11 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 	}
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
+		rk := kernels.forRole(role.Name)
+		if rk != nil && rk.Blocked && allowBlockedRoles {
+			desired[role.Name] = map[int][]*core.Pod{}
+			continue
+		}
 
 		var accType *worker.AcceleratorType
 		var manufacturer string
@@ -2493,6 +2547,12 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 			TCPTWReuse:                 tcpTWReuse,
 			NativeSidecar:              nativeSidecar,
 			EngineSentinelEnabled:      engineSentinelEnabled,
+		}
+		if rk != nil {
+			if rk.Render == nil {
+				return nil, fmt.Errorf("role %q kernel artifact is not renderable: %s", role.Name, rk.Message)
+			}
+			in.KernelArtifact = rk.Render
 		}
 		if weights != nil && weights.Render != nil {
 			roleArtifact := *weights.Render
@@ -3532,6 +3592,10 @@ func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts co
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentArtifact),
 		).
 		Watches(
+			&workercore.ModelKernelArtifact{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentKernelArtifact),
+		).
+		Watches(
 			// A claim artifact's binding decides whether replicas may be created and where they
 			// may run, and it moves on the claim, not on the artifact.
 			&core.PersistentVolumeClaim{},
@@ -3540,14 +3604,14 @@ func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts co
 		Watches(
 			// The plugin's CSIDriver decides whether a node-delivered artifact can be delivered.
 			&storage.CSIDriver{},
-			enqueueDeliveryChange(r.mapModelDeploymentDelivery, 0),
+			enqueueDeliveryChange(r.mapModelDeploymentDeliveryWithKernels, 0),
 			ctrlbuilder.WithPredicates(namePredicate(modelstore.DriverName)),
 		).
 		Watches(
 			// The delivery Setting decides how a hub artifact is delivered; its value is read through
 			// the Settings cache, so the deployments are looked at once that cache has expired.
 			&core.Secret{},
-			enqueueDeliveryChange(r.mapModelDeploymentDelivery, settingsReadDelay),
+			enqueueDeliveryChange(r.mapModelDeploymentDeliveryWithKernels, settingsReadDelay),
 			ctrlbuilder.WithPredicates(ctrlpredicate.NewPredicateFuncs(func(o ctrlcli.Object) bool {
 				return o.GetNamespace() == setting.DelegatedSecretNamespace && o.GetName() == setting.DelegatedSecretName
 			})),
@@ -3555,10 +3619,10 @@ func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts co
 		Watches(
 			// A node-delivered artifact's materialization is reported by the node, and a replica
 			// Pod waiting on it changes nothing while the node downloads or fails, so WeightsReady
-			// follows the node's NodeModelStore.
+			// and KernelsReady follow the node's NodeModelStore.
 			&workercore.NodeModelStore{},
-			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentNodeModelStore),
-			ctrlbuilder.WithPredicates(nodeModelStoreModelsChanged()),
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentNodeModelStoreWithKernels),
+			ctrlbuilder.WithPredicates(nodeModelStoreModelsOrPeerSyncChanged()),
 		).
 		Watches(
 			&workercore.ModelPrefetch{},

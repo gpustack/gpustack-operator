@@ -129,7 +129,9 @@ also rejects projected footprints (`resolved size × widest node count` per dige
 
 *`spec.retention.pinned`* (requires `allowPinned: true`) protects digests from eviction while still
 counting toward disk usage ([Cache collection rules](operations.md#cache-collection-rules)). The
-controller merges pins across all namespaces into each `NodeModelStore.spec.pinned` list.
+prefetch controller is the sole writer of `NodeModelStore.spec.pinned`, merging `ModelTransfer`
+source digests, active/rollback `ModelKernelArtifact` digests, and `ModelPrefetch` retention pins
+under a per-node `256`-entry cap.
 
 *`spec.retention.ttlAfterLastUse`* unpins a `Node`'s copy once unmounted past that duration
 (evaluated at the 1-hour granularity of *`lastUsedTime`*).
@@ -219,9 +221,9 @@ Before pulling bytes, a cold `Node` verifies the peer's manifest against the art
 *`manifestDigest`* (skipping older manifestless trees). Downloads stream HTTP byte ranges from one
 peer and checkpoint hashes every `64 MiB`, resuming on another peer or the hub if a seed fails.
 
-- **Source tracking**: `NodeModelStore.status.models[].source` reports `Hub` or `Peer` (majority
-  bytes), and plugin `:32444/metrics` exposes `gpustack_model_manager_download_bytes_total` split by
-  the `source` label (`hub` or `peer`).
+- **Source tracking**: `NodeModelStore.status.models[].source` reports `Hub`, `Peer`, or `Forge`
+  (for ingested kernel bundles), and plugin `:32444/metrics` exposes
+  `gpustack_model_manager_download_bytes_total` split by the `source` label (`hub` or `peer`).
 - **Trade-offs**: Peer sync cuts hub egress and hub dependency rather than fan-out time on slower
   east-west fabrics. Each concurrent puller uses `~0.25 vCPU` on 2-vCPU seed `Node`s.
 

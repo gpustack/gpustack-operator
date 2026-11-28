@@ -161,6 +161,46 @@ func TestServerServesPublishedTreesOnly(t *testing.T) {
 		defer func() { _ = resp.Body.Close() }()
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
+
+	t.Run("a kernel tree listing preserves Kind Kernel", func(t *testing.T) {
+		kst, err := store.Open(t.TempDir())
+		require.NoError(t, err)
+		t.Cleanup(writableAgain(kst.Root()))
+		content := `{"schemaVersion":"gpustack-forge-dispatch/v1","entries":[]}`
+		manifest, err := modelartifact.NewManifest([]modelartifact.ManifestEntry{{
+			Path: "dispatch-manifest.json", Size: int64(len(content)), Digest: "sha256:" + stringx.SumBySHA256(content),
+		}})
+		require.NoError(t, err)
+		khex := strings.TrimPrefix(manifest.Digest, "sha256:")
+		a, err := kst.NewAttempt(khex)
+		require.NoError(t, err)
+		dest, err := a.FilePath("dispatch-manifest.json")
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(dest, []byte(content), 0o644))
+		stored, err := json.Marshal(Listing{
+			Digest: manifest.Digest,
+			Kind:   store.MarkerKindKernel,
+			Entries: []ManifestFile{{
+				Path: "dispatch-manifest.json", Size: manifest.SizeBytes, Digest: manifest.Entries[0].Digest,
+			}},
+		})
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(a.Dir(), "manifest.json"), stored, 0o600))
+		require.NoError(t, a.Publish(store.Marker{
+			Digest: manifest.Digest, SizeBytes: manifest.SizeBytes, FileCount: manifest.FileCount,
+			Source: store.SourceForge, Kind: store.MarkerKindKernel,
+		}))
+
+		kts := serve(t, &Server{Store: kst})
+		resp, err := kts.Client().Get(kts.URL + PathPrefix + "trees/" + khex)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		var l Listing
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&l))
+		assert.Equal(t, manifest.Digest, l.Digest)
+		assert.Equal(t, store.MarkerKindKernel, l.Kind)
+	})
 }
 
 // fakeReviews answers a TokenReview the way the test wants.

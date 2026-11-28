@@ -1440,7 +1440,7 @@
         },
         "securePort": {
           "default": 32444,
-          "description": "Secure serving port of the model-manager container: metrics, readiness and liveness.",
+          "description": "Secure serving port of the model-manager container: metrics, readiness, liveness, live\ndownload progress, and authenticated local kernel ingestion (`/ingest/v1/trees`).",
           "title": "securePort",
           "type": "integer"
         },

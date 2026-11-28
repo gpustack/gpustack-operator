@@ -67,7 +67,7 @@ func TestModelDeploymentGoldenYAML(t *testing.T) {
 	})
 
 	scenarios := buildGoldenYAMLScenarios()
-	require.Len(t, scenarios, 41)
+	require.Len(t, scenarios, 43)
 
 	goldenDir := filepath.Join("testdata", "golden-render")
 	if *legacyRenderUpdate {
@@ -129,7 +129,9 @@ func prepareGoldenInputObjects(tc goldenYAMLScenario) []ctrlcli.Object {
 		cloned.SetResourceVersion("")
 		cloned.SetCreationTimestamp(meta.Time{})
 		cloned.SetManagedFields(nil)
-		if _, isArtifact := cloned.(*workercore.ModelArtifact); !isArtifact {
+		_, isArtifact := cloned.(*workercore.ModelArtifact)
+		_, isKernelArtifact := cloned.(*workercore.ModelKernelArtifact)
+		if !isArtifact && !isKernelArtifact {
 			cloned.SetUID("")
 			cloned.SetGeneration(0)
 		}
@@ -150,6 +152,8 @@ func setGoldenObjectTypeMeta(obj ctrlcli.Object) {
 		typed.TypeMeta = meta.TypeMeta{APIVersion: "worker.gpustack.ai/v1", Kind: "KVCacheBackend"}
 	case *workercore.ModelArtifact:
 		typed.TypeMeta = meta.TypeMeta{APIVersion: "worker.gpustack.ai/v1", Kind: "ModelArtifact"}
+	case *workercore.ModelKernelArtifact:
+		typed.TypeMeta = meta.TypeMeta{APIVersion: "worker.gpustack.ai/v1", Kind: "ModelKernelArtifact"}
 	case *workercore.NodeModelStore:
 		typed.TypeMeta = meta.TypeMeta{APIVersion: "worker.gpustack.ai/v1", Kind: "NodeModelStore"}
 	case *worker.AcceleratorType:
@@ -187,6 +191,8 @@ func parseGoldenInputYAML(t *testing.T, srcPath, rawYAML string) []ctrlcli.Objec
 			obj = new(workercore.KVCacheBackend)
 		case "ModelArtifact":
 			obj = new(workercore.ModelArtifact)
+		case "ModelKernelArtifact":
+			obj = new(workercore.ModelKernelArtifact)
 		case "NodeModelStore":
 			obj = new(workercore.NodeModelStore)
 		case "AcceleratorType":
@@ -717,6 +723,174 @@ func goldenAWSEFAEnabledFixtures() []ctrlcli.Object {
 			},
 		},
 	}
+}
+
+func goldenKernelArtifactNodeAndImageFixtures() []ctrlcli.Object {
+	fixedTime := meta.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	manifestDigest := "sha256:" + strings.Repeat("1", 64)
+	dispatchDigest := "sha256:" + strings.Repeat("2", 64)
+	imageRef := "ghcr.io/gpustack/kernels/qwen-decode@sha256:" + strings.Repeat("3", 64)
+
+	nodeStoreKernel := &workercore.ModelKernelArtifact{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace:  "default",
+			Name:       "qwen-kernels-nodestore",
+			UID:        "kernel-artifact-uid-nodestore",
+			Generation: 1,
+		},
+		Spec: workercore.ModelKernelArtifactSpec{
+			Source: workercore.ModelKernelArtifactSource{
+				NodeStore: &workercore.ModelKernelArtifactNodeStoreSource{
+					ManifestDigest:         manifestDigest,
+					DispatchManifestDigest: dispatchDigest,
+					SizeBytes:              4096,
+					FileCount:              3,
+					SeedNode:               "node-0",
+					ForgerRef: workercore.ModelKernelArtifactForgerReference{
+						Name: "qwen-forger",
+						UID:  "forger-uid-1",
+					},
+				},
+			},
+			Compatibility: workercore.ModelKernelArtifactCompatibility{
+				Engine:        workercore.ModelDeploymentEngineVLLM,
+				EngineVersion: "0.19.0",
+				Manufacturer:  nodefeature.ManufacturerNVIDIA,
+				Architecture:  "sm_90a",
+				KernelKeys:    []string{"vLLM/0.19.0/nvidia/sm_90a/rmsnorm/0000000000000001"},
+			},
+		},
+		Status: workercore.ModelKernelArtifactStatus{
+			ObservedGeneration: 1,
+			Resolved: &workercore.ModelKernelArtifactResolved{
+				ManifestDigest:         manifestDigest,
+				DispatchManifestDigest: dispatchDigest,
+				SizeBytes:              4096,
+				FileCount:              3,
+				ResolvedTime:           fixedTime,
+				DigestSource:           workercore.ModelKernelArtifactDigestSourceForge,
+			},
+			Nodes: &workercore.ModelArtifactNodes{Ready: 1},
+		},
+	}
+	ModelKernelArtifactConditionResolved.True(nodeStoreKernel, workercore.ModelKernelArtifactReasonResolved, "resolved")
+	for i := range nodeStoreKernel.Status.Conditions {
+		nodeStoreKernel.Status.Conditions[i].LastTransitionTime = fixedTime
+	}
+
+	imageKernel := &workercore.ModelKernelArtifact{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace:  "default",
+			Name:       "qwen-kernels-image",
+			UID:        "kernel-artifact-uid-image",
+			Generation: 1,
+		},
+		Spec: workercore.ModelKernelArtifactSpec{
+			Source: workercore.ModelKernelArtifactSource{
+				Image: &workercore.ModelArtifactImageSource{
+					Reference: imageRef,
+				},
+			},
+			Compatibility: workercore.ModelKernelArtifactCompatibility{
+				Engine:        workercore.ModelDeploymentEngineVLLM,
+				EngineVersion: "0.19.0",
+				Manufacturer:  nodefeature.ManufacturerNVIDIA,
+				Architecture:  "sm_90a",
+				KernelKeys:    []string{"vLLM/0.19.0/nvidia/sm_90a/silu_and_mul/0000000000000002"},
+			},
+		},
+		Status: workercore.ModelKernelArtifactStatus{
+			ObservedGeneration: 1,
+		},
+	}
+	ModelKernelArtifactConditionResolved.True(imageKernel, workercore.ModelKernelArtifactReasonResolved, "resolved")
+	for i := range imageKernel.Status.Conditions {
+		imageKernel.Status.Conditions[i].LastTransitionTime = fixedTime
+	}
+
+	node := &core.Node{
+		ObjectMeta: meta.ObjectMeta{Name: "node-0"},
+		Status: core.NodeStatus{
+			Conditions: []core.NodeCondition{{Type: core.NodeReady, Status: core.ConditionTrue}},
+		},
+	}
+	nms := &workercore.NodeModelStore{
+		ObjectMeta: meta.ObjectMeta{Name: "node-0"},
+		Spec:       workercore.NodeModelStoreSpec{PeerSyncEnabled: ptr.To(true)},
+		Status: workercore.NodeModelStoreStatus{
+			Models: []workercore.NodeModelStoreModel{{
+				Digest: manifestDigest,
+				State:  workercore.NodeModelStoreModelStateReady,
+			}},
+		},
+	}
+	csiDriver := &storagev1.CSIDriver{
+		ObjectMeta: meta.ObjectMeta{Name: modelstore.DriverName},
+	}
+	return []ctrlcli.Object{nodeStoreKernel, imageKernel, node, nms, csiDriver}
+}
+
+func goldenKernelArtifactHuggingFaceFixtures() []ctrlcli.Object {
+	fixedTime := meta.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	manifestDigest := "sha256:" + strings.Repeat("4", 64)
+	dispatchDigest := "sha256:" + strings.Repeat("5", 64)
+
+	hubKernel := &workercore.ModelKernelArtifact{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace:  "default",
+			Name:       "qwen-kernels-hub",
+			UID:        "kernel-artifact-uid-hub",
+			Generation: 1,
+		},
+		Spec: workercore.ModelKernelArtifactSpec{
+			Source: workercore.ModelKernelArtifactSource{
+				HuggingFace: &workercore.ModelArtifactHubSource{
+					Repository: "gpustack/qwen-forged-kernels",
+					Revision:   "0123456789abcdef0123456789abcdef01234567",
+					SecretRef:  &core.LocalObjectReference{Name: "hf-kernel-token"},
+				},
+			},
+			Compatibility: workercore.ModelKernelArtifactCompatibility{
+				Engine:        workercore.ModelDeploymentEngineSGLang,
+				EngineVersion: "0.5.18",
+				Manufacturer:  nodefeature.ManufacturerNVIDIA,
+				Architecture:  "sm_90a",
+				KernelKeys:    []string{"SGLang/0.5.18/nvidia/sm_90a/rmsnorm/0000000000000003"},
+			},
+		},
+		Status: workercore.ModelKernelArtifactStatus{
+			ObservedGeneration: 1,
+			Resolved: &workercore.ModelKernelArtifactResolved{
+				Revision:               "0123456789abcdef0123456789abcdef01234567",
+				ManifestDigest:         manifestDigest,
+				DispatchManifestDigest: dispatchDigest,
+				SizeBytes:              8192,
+				FileCount:              4,
+				ResolvedTime:           fixedTime,
+				DigestSource:           workercore.ModelKernelArtifactDigestSourceHub,
+			},
+			Nodes: &workercore.ModelArtifactNodes{Ready: 1},
+		},
+	}
+	ModelKernelArtifactConditionResolved.True(hubKernel, workercore.ModelKernelArtifactReasonResolved, "resolved")
+	for i := range hubKernel.Status.Conditions {
+		hubKernel.Status.Conditions[i].LastTransitionTime = fixedTime
+	}
+
+	tokenSecret := &core.Secret{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: "default",
+			Name:      "hf-kernel-token",
+		},
+		Type: core.SecretTypeOpaque,
+		StringData: map[string]string{
+			"token": "hf_test_token_redacted",
+		},
+	}
+	csiDriver := &storagev1.CSIDriver{
+		ObjectMeta: meta.ObjectMeta{Name: modelstore.DriverName},
+	}
+	return []ctrlcli.Object{hubKernel, tokenSecret, csiDriver}
 }
 
 func buildGoldenYAMLScenarios() []goldenYAMLScenario {
@@ -1690,6 +1864,66 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 									runtimecontrol.ParamSpeculativeDraftBudgetFraction:     "0.8",
 								},
 							},
+						},
+					},
+				},
+			},
+		},
+
+		// 7. ModelKernelArtifact Delivery (2 scenarios)
+		{
+			name:    "kernel-artifact-nodestore-and-image",
+			objects: goldenKernelArtifactNodeAndImageFixtures(),
+			md: &workercore.ModelDeployment{
+				ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "qwen"},
+				Spec: workercore.ModelDeploymentSpec{
+					Model:      workercore.ModelDeploymentModel{Name: modelID},
+					Engine:     workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
+					Router:     &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang},
+					KVTransfer: &workercore.ModelDeploymentKVTransfer{Backend: "Nixl"},
+					Roles: []workercore.ModelDeploymentRole{
+						{
+							Name:              "prefill",
+							Kind:              workercore.ModelDeploymentRoleKindPrefill,
+							AcceleratorType:   "h20-8x",
+							Image:             vllmImage,
+							Replicas:          1,
+							ReplicaSize:       1,
+							Resources:         &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							KernelArtifactRef: &core.LocalObjectReference{Name: "qwen-kernels-nodestore"},
+						},
+						{
+							Name:              "decode",
+							Kind:              workercore.ModelDeploymentRoleKindDecode,
+							AcceleratorType:   "h20-8x",
+							Image:             vllmImage,
+							Replicas:          1,
+							ReplicaSize:       1,
+							Resources:         &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							KernelArtifactRef: &core.LocalObjectReference{Name: "qwen-kernels-image"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:    "kernel-artifact-huggingface-secret",
+			objects: goldenKernelArtifactHuggingFaceFixtures(),
+			md: &workercore.ModelDeployment{
+				ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "qwen"},
+				Spec: workercore.ModelDeploymentSpec{
+					Model:  workercore.ModelDeploymentModel{Name: modelID},
+					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineSGLang, Image: sglangImage},
+					Roles: []workercore.ModelDeploymentRole{
+						{
+							Name:              "main",
+							Kind:              workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType:   "h20-8x",
+							Image:             sglangImage,
+							Replicas:          1,
+							ReplicaSize:       1,
+							Resources:         &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							KernelArtifactRef: &core.LocalObjectReference{Name: "qwen-kernels-hub"},
 						},
 					},
 				},

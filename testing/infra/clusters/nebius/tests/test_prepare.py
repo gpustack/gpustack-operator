@@ -27,9 +27,8 @@ elif 'resource-advice' in args:
 elif 'gpu-cluster' in args and 'list' in args:
     obj = {'items': json.loads(os.environ.get('CLUSTERS', '[]'))}
 elif 'spot-price' in args and 'list-series' in args:
-    now = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
-    now -= dt.timedelta(minutes=now.minute % 15)
-    points = [{'timestamp': (now - dt.timedelta(minutes=15*i)).isoformat(), 'value': '1.2' if i == 4 else '1.0'} for i in range(25)]
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    points = [{'timestamp': (now - dt.timedelta(hours=i)).isoformat(), 'value': '1.2' if i == 4 else '1.0'} for i in range(169)]
     if os.environ.get('INCOMPLETE'): points = points[:1]
     obj = {'items': [{'sku_id': 'sku-test', 'region': 'eu-north1', 'compute_instance': {'platform': 'gpu-test'}, 'currency': 'USD', 'unit_title': 'GPU hour', 'points': points}]}
 elif 'spot-price' in args:
@@ -49,9 +48,8 @@ if 'list-series' not in url:
     else:
         obj = {'items': [{'skuId': 'sku-test', 'region': 'eu-north1', 'computeInstance': {'platform': 'gpu-test'}, 'price': {'value': '1.1', 'currency': 'usd', 'unitTitle': 'GPU hour'}}]}
 else:
-    now = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
-    now -= dt.timedelta(minutes=now.minute % 15)
-    points = [{'timestamp': (now - dt.timedelta(minutes=15*i)).isoformat(), 'value': '1.2'} for i in range(25)]
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    points = [{'timestamp': (now - dt.timedelta(hours=i)).isoformat(), 'value': '1.2'} for i in range(169)]
     obj = {'items': [{'skuId': 'sku-test', 'region': 'eu-north1', 'computeInstance': {'platform': 'gpu-test'}, 'currency': 'usd', 'unitTitle': 'GPU hour', 'points': points}]}
 print(json.dumps(obj))
 '''
@@ -99,6 +97,13 @@ class PrepareTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         snapshot = json.loads(self.snapshot.read_text())['nebius_resolved']
         self.assertEqual(snapshot['prices']['gpu']['max_price'], '1.250')
+
+    def test_uncapped_quote_uses_seven_day_high_plus_fifty_percent(self):
+        self.group['spot_price_ceiling'] = None
+        result = self.prepare()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        snapshot = json.loads(self.snapshot.read_text())['nebius_resolved']
+        self.assertEqual(snapshot['prices']['gpu']['max_price'], '1.800')
 
     def test_reuse_excludes_owned_cluster(self):
         self.group['infiniband_fabric'] = 'fabric-2'

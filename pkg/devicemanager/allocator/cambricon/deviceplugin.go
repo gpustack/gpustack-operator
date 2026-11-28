@@ -352,12 +352,13 @@ func (s *server) getSlicedContainerAllocateResponse(
 		return nil, fmt.Errorf("derive sliced memory limit: %w", err)
 	}
 
-	inst, err := reserveInstance(s.smlu, string(pod.UID), ctr.Name, card, int(slot), coresPct, memMib, s.Logger)
+	slotName := deviceplugin.CanonicalSlotContainerName(pod, ctr)
+	inst, err := reserveInstance(s.smlu, string(pod.UID), slotName, card, int(slot), coresPct, memMib, s.Logger)
 	if err != nil {
 		return nil, fmt.Errorf("reserve cambricon smlu instance: %w", err)
 	}
 
-	marker := markerPath(string(pod.UID), ctr.Name)
+	marker := markerPath(string(pod.UID), slotName)
 
 	// The instance's node is checked before the card's: a card node on its own is the whole card,
 	// so it must never be what a response falls back to.

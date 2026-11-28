@@ -203,8 +203,8 @@ price replaces its VM or node group and owned pricing policy. Managed boot disks
 are deleted when their VM is destroyed.
 
 Set `spot_price_from_history = true` on a preemptible entry to use the larger
-of the current price and the highest 15-minute last-price sample over six
-hours, multiplied by 1.10 and rounded up to 0.001 USD per GPU-hour. The sampled
+of the current price and the highest hourly last-price sample over seven
+days, multiplied by 1.50 and rounded up to 0.001 USD per GPU-hour. The sampled
 high is not necessarily the highest instantaneous price. Optionally set
 `spot_price_ceiling` to a decimal string; the bid is capped at that value, so
 it may be below the current market and prevent scheduling. A failed or incomplete

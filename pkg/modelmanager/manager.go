@@ -28,6 +28,7 @@ import (
 	"gpustack.ai/gpustack/pkg/modelmanager/download"
 	"gpustack.ai/gpustack/pkg/modelmanager/driver"
 	"gpustack.ai/gpustack/pkg/modelmanager/gc"
+	"gpustack.ai/gpustack/pkg/modelmanager/ingest"
 	"gpustack.ai/gpustack/pkg/modelmanager/materialize"
 	"gpustack.ai/gpustack/pkg/modelmanager/metrics"
 	"gpustack.ai/gpustack/pkg/modelmanager/peer"
@@ -57,6 +58,10 @@ type Manager struct {
 	// PeerSync, when not nil, serves this node's published trees to the other nodes' plugins and
 	// lets the materializer pull from theirs.
 	PeerSync *peer.Sync
+
+	// IngestServiceAccount names the operator worker ServiceAccount whose gpustack-model-ingest
+	// projected tokens may call POST /ingest/v1/trees.
+	IngestServiceAccount string
 
 	ready atomic.Bool
 }
@@ -103,6 +108,26 @@ func (m *Manager) Start(ctx context.Context) error {
 	materializer.Changed = reporter.Trigger
 
 	cm.GetWebhookServer().Register(modelstore.DownloadsPath, newDownloadsHandler(materializer.Progress))
+	ingestAdmit, err := ingest.NewTokenAdmit(
+		systemname.NamespaceName,
+		m.IngestServiceAccount,
+		tokenReviews{cli: system.LoopbackKubeClient.Get()},
+	)
+	if err != nil {
+		return fmt.Errorf("configure ingest auth: %w", err)
+	}
+	ingestServer := &ingest.Server{
+		NodeID:      m.NodeName,
+		KubeletDir:  m.KubeletDir,
+		Store:       m.Store,
+		APIReader:   cm.GetAPIReader(),
+		Admit:       ingestAdmit,
+		Ready:       m.ready.Load,
+		Reserve:     collector.Reserve,
+		FlushReport: reporter.Flush,
+		Now:         time.Now,
+	}
+	cm.GetWebhookServer().Register(modelstore.IngestTreesPath, ingestServer.Handler())
 
 	d := &driver.Driver{
 		Name:         modelstore.DriverName,
@@ -136,10 +161,13 @@ func (m *Manager) Start(ctx context.Context) error {
 		if err := m.rebuild(ctx); err != nil {
 			return fmt.Errorf("rebuild references: %w", err)
 		}
-		// Every mount reads its artifact from this informer: started and synced here, before the
+		// Every mount reads its artifact from these informers: started and synced here, before the
 		// plugin serves, a mount never waits on a first sync.
 		if _, err := cm.GetCache().GetInformer(ctx, &workercore.ModelArtifact{}, ctrlcache.BlockUntilSynced(true)); err != nil {
 			return fmt.Errorf("watch ModelArtifacts: %w", err)
+		}
+		if _, err := cm.GetCache().GetInformer(ctx, &workercore.ModelKernelArtifact{}, ctrlcache.BlockUntilSynced(true)); err != nil {
+			return fmt.Errorf("watch ModelKernelArtifacts: %w", err)
 		}
 		// The node's object is created by the worker after this plugin registers, and its spec and
 		// the CA bundle change at runtime: each is a reason to apply and report again. The object's

@@ -231,14 +231,15 @@ func assignedFlavor(wl *kueue.Workload, podSet kueue.PodSetReference) kueue.Reso
 	return ""
 }
 
-// podSetFamilyDemands reads one podset's per-family demand. Each family contributes
-// Count × (cards summed across the podset's containers); the card key (<base> exclusive,
-// <base>.shared, <base>.sliced, <base>.partitioned) adds to the count, the counting key
-// (<base>.sliced.units, <base>.partitioned.units) carries the per-card units, and the
-// per-profile partition key names the profile — its own value is per-card, so it does not
-// add to the count. Init containers are scanned as well as app containers, so an init-only
-// request is gated too. The percentage and MiB sub-keys are ignored: the Pod webhook
-// already folded them into the counting key.
+// podSetFamilyDemands reads one podset's per-family demand. Each family contributes Count × the
+// effective single-Pod card demand following Kubernetes Pod resource semantics (KEP-753): regular
+// containers run concurrently with all sidecar init containers (RestartPolicy=Always), while each
+// non-sidecar init container runs sequentially alongside only the sidecar init containers started
+// before it. The card key (<base> exclusive, <base>.shared, <base>.sliced, <base>.partitioned)
+// contributes to the card count, the counting key (<base>.sliced.units, <base>.partitioned.units)
+// carries the per-card units, and the per-profile partition key names the profile — its own value
+// is per-card, so it does not add to the count. The percentage and MiB sub-keys are ignored: the
+// Pod webhook already folded them into the counting key.
 //
 // One tuple per family holds even when a podset's containers name two manufacturers' bases —
 // the Pod webhook forbids two families, not two bases — so a merged tuple sums the cards of two
@@ -252,16 +253,30 @@ func assignedFlavor(wl *kueue.Workload, podSet kueue.PodSetReference) kueue.Reso
 // count is the number of the podset's Pods the demand is sized for: the whole podset, or the share
 // Kueue placed on one node.
 func podSetFamilyDemands(ps *kueue.PodSet, count int32) []familyDemand {
-	byFamily := make(map[nodefeature.ResourceFamily]*familyDemand)
-	containers := make([]*core.Container, 0, len(ps.Template.Spec.InitContainers)+len(ps.Template.Spec.Containers))
-	for ci := range ps.Template.Spec.InitContainers {
-		containers = append(containers, &ps.Template.Spec.InitContainers[ci])
-	}
-	for ci := range ps.Template.Spec.Containers {
-		containers = append(containers, &ps.Template.Spec.Containers[ci])
+	type familyAccum struct {
+		family             nodefeature.ResourceFamily
+		unitsPerCard       int32
+		profile            string
+		steadyCards        int32
+		steadyShared       []sharedNeed
+		prefixSidecarCards int32
+		prefixSidecarNeeds []sharedNeed
+		maxInitCards       int32
+		maxInitShared      []sharedNeed
 	}
 
-	for _, ctr := range containers {
+	byFamily := make(map[nodefeature.ResourceFamily]*familyAccum)
+	getAccum := func(family nodefeature.ResourceFamily) *familyAccum {
+		acc := byFamily[family]
+		if acc == nil {
+			acc = &familyAccum{family: family}
+			byFamily[family] = acc
+		}
+		return acc
+	}
+
+	scanContainer := func(ctr *core.Container) map[nodefeature.ResourceFamily]int32 {
+		cardsByFamily := make(map[nodefeature.ResourceFamily]int32)
 		for name, qty := range mergedContainerResources(ctr) {
 			family := nodefeature.ResourceFamilyOf(name)
 			switch family {
@@ -270,24 +285,17 @@ func podSetFamilyDemands(ps *kueue.PodSet, count int32) []familyDemand {
 			default:
 				continue
 			}
-			d := byFamily[family]
-			if d == nil {
-				d = &familyDemand{family: family}
-				byFamily[family] = d
-			}
+			acc := getAccum(family)
 			switch {
 			case strings.HasSuffix(string(name), nodefeature.SlicedUnitsResourceNameSuffix),
 				strings.HasSuffix(string(name), nodefeature.PartitionedUnitsResourceNameSuffix):
 				// Keep the strictest per-card demand across this podset's containers, so
 				// feasibility is never checked against an undersized slice.
-				if u := clampInt32(qty.Value()); u > d.unitsPerCard {
-					d.unitsPerCard = u
+				if u := clampInt32(qty.Value()); u > acc.unitsPerCard {
+					acc.unitsPerCard = u
 				}
 			case isCardKey(name, family):
-				d.cards += clampInt32(qty.Value())
-				if family == nodefeature.ResourceFamilyShared && qty.Value() > 0 {
-					d.sharedNeeds = mergeSharedNeeds(d.sharedNeeds, []sharedNeed{{cards: clampInt32(qty.Value()), containers: 1}}, 1)
-				}
+				cardsByFamily[family] = clampInt32(int64(cardsByFamily[family]) + qty.Value())
 			default:
 				// One profile per Pod is a request rule, but the Pod webhook enforces it on a
 				// Pod and Kueue builds this Workload from a pod TEMPLATE before any Pod exists —
@@ -296,29 +304,105 @@ func podSetFamilyDemands(ps *kueue.PodSet, count int32) []familyDemand {
 				// refused at Pod creation either way, and this keeps the verdict message stable
 				// across reconciles instead of flipping between the two.
 				if profile, ok := nodefeature.PartitionedProfileOf(name); ok {
-					if d.profile == "" || profile < d.profile {
-						d.profile = profile
+					if acc.profile == "" || profile < acc.profile {
+						acc.profile = profile
 					}
 				}
+			}
+		}
+		return cardsByFamily
+	}
+
+	for ci := range ps.Template.Spec.InitContainers {
+		ctr := &ps.Template.Spec.InitContainers[ci]
+		cardsByFamily := scanContainer(ctr)
+		isSidecar := ctr.RestartPolicy != nil && *ctr.RestartPolicy == core.ContainerRestartPolicyAlways
+		for family, cards := range cardsByFamily {
+			if cards <= 0 {
+				continue
+			}
+			acc := byFamily[family]
+			var ctrShared []sharedNeed
+			if family == nodefeature.ResourceFamilyShared {
+				ctrShared = []sharedNeed{{cards: cards, containers: 1}}
+			}
+			if isSidecar {
+				acc.prefixSidecarCards = clampInt32(int64(acc.prefixSidecarCards) + int64(cards))
+				acc.steadyCards = clampInt32(int64(acc.steadyCards) + int64(cards))
+				if len(ctrShared) > 0 {
+					acc.prefixSidecarNeeds = mergeSharedNeeds(acc.prefixSidecarNeeds, ctrShared, 1)
+					acc.steadyShared = mergeSharedNeeds(acc.steadyShared, ctrShared, 1)
+				}
+				continue
+			}
+			// Non-sidecar init container runs sequentially alongside only sidecars started before it.
+			phaseCards := clampInt32(int64(acc.prefixSidecarCards) + int64(cards))
+			var phaseShared []sharedNeed
+			if family == nodefeature.ResourceFamilyShared {
+				phaseShared = mergeSharedNeeds(acc.prefixSidecarNeeds, ctrShared, 1)
+			}
+			if phaseCards > acc.maxInitCards || (phaseCards == acc.maxInitCards && sharedNeedsHarder(phaseShared, acc.maxInitShared)) {
+				acc.maxInitCards = phaseCards
+				acc.maxInitShared = phaseShared
+			}
+		}
+	}
+
+	for ci := range ps.Template.Spec.Containers {
+		ctr := &ps.Template.Spec.Containers[ci]
+		for family, cards := range scanContainer(ctr) {
+			if cards <= 0 {
+				continue
+			}
+			acc := byFamily[family]
+			acc.steadyCards = clampInt32(int64(acc.steadyCards) + int64(cards))
+			if family == nodefeature.ResourceFamilyShared {
+				acc.steadyShared = mergeSharedNeeds(acc.steadyShared, []sharedNeed{{cards: cards, containers: 1}}, 1)
 			}
 		}
 	}
 
 	out := make([]familyDemand, 0, len(byFamily))
-	for _, d := range byFamily {
+	for _, acc := range byFamily {
+		podCards := acc.steadyCards
+		podShared := acc.steadyShared
+		if acc.maxInitCards > podCards || (acc.maxInitCards == podCards && sharedNeedsHarder(acc.maxInitShared, podShared)) {
+			podCards = acc.maxInitCards
+			podShared = acc.maxInitShared
+		}
 		// Scale to the podset's pod count in int64 and clamp, so a crafted per-container
 		// count times a large pod count cannot wrap to a small (or negative) demand. A
 		// sub-key with no card request behind it, and a podset of zero pods, both demand
 		// no card at all.
-		d.cards = clampInt32(int64(d.cards) * int64(count))
-		if d.cards <= 0 {
+		scaledCards := clampInt32(int64(podCards) * int64(count))
+		if scaledCards <= 0 {
 			continue
 		}
-		d.sharedNeeds = mergeSharedNeeds(nil, d.sharedNeeds, count)
-		out = append(out, *d)
+		out = append(out, familyDemand{
+			family:       acc.family,
+			cards:        scaledCards,
+			unitsPerCard: acc.unitsPerCard,
+			profile:      acc.profile,
+			sharedNeeds:  mergeSharedNeeds(nil, podShared, count),
+		})
 	}
 	sortDemands(out)
 	return out
+}
+
+// sharedNeedsHarder reports whether a requires strictly harder single-node per-holder placement
+// than b at equal total cards. mergeSharedNeeds sorts slices descending by cards, so the larger
+// per-holder card count (then holder count, then slice length) decides placement hardness.
+func sharedNeedsHarder(a, b []sharedNeed) bool {
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i].cards != b[i].cards {
+			return a[i].cards > b[i].cards
+		}
+		if a[i].containers != b[i].containers {
+			return a[i].containers > b[i].containers
+		}
+	}
+	return len(a) > len(b)
 }
 
 // podSetFamilyDemand reads one family's demand of a podset sized for count of its Pods. The family

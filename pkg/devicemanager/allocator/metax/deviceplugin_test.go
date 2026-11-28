@@ -300,3 +300,49 @@ func TestSliced_ExclusiveModeHasNoSlicingArtifacts(t *testing.T) {
 	assert.Empty(t, resp.Envs["METAX_SGPUS"])
 	assert.False(t, markerExists("pod-excl", "train"))
 }
+
+func TestSliced_SequentialInitContainersReuseSubdevice(t *testing.T) {
+	cases := []struct {
+		name        string
+		coresPct    int64
+		memPct      int64
+		wantCreates int
+	}{
+		{name: "partial slice reuses sgpu subdevice", coresPct: 60, memPct: 60, wantCreates: 1},
+		{name: "whole card slice reuses native marker without conflict", coresPct: 100, memPct: 100, wantCreates: 0},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			mgr := newFakeMgr()
+			s := newSlicedServer(mgr)
+			devs := metaxDevicesFixture()
+
+			lim := core.ResourceList{
+				nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer):  *resource.NewQuantity(c.coresPct, resource.DecimalSI),
+				nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer): *resource.NewQuantity(c.memPct, resource.DecimalSI),
+			}
+			pod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{Name: "forge", UID: types.UID("pod-init-metax")},
+				Spec: core.PodSpec{
+					InitContainers: []core.Container{
+						{Name: "forge-runner", Resources: core.ResourceRequirements{Limits: lim}},
+						{Name: "forge-verifier", Resources: core.ResourceRequirements{Limits: lim}},
+					},
+					Containers: []core.Container{{Name: "pause"}},
+				},
+			}
+
+			resp1, err := s.GetContainerAllocateResponse(context.Background(), pod, &pod.Spec.InitContainers[0], devs, allocateGPU0())
+			require.NoError(t, err)
+			resp2, err := s.GetContainerAllocateResponse(context.Background(), pod, &pod.Spec.InitContainers[1], devs, allocateGPU0())
+			require.NoError(t, err)
+
+			assert.Equal(t, c.wantCreates, mgr.creates)
+			assert.Equal(t, resp1.Envs["METAX_SGPUS"], resp2.Envs["METAX_SGPUS"])
+			assert.True(t, markerExists("pod-init-metax", "forge-runner"))
+			assert.False(t, markerExists("pod-init-metax", "forge-verifier"))
+		})
+	}
+}

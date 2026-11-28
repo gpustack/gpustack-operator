@@ -155,11 +155,14 @@ func (c *slicedAllocateCase) buildPods(t *testing.T) []*core.Pod {
 			})
 		}
 		allocations := PodAllocations{}
+		perCardIdx := make(map[string]uint64)
 		for _, h := range c.annotated {
 			if h.pod == f.name {
+				idx := perCardIdx[h.card]
+				perCardIdx[h.card] = idx + 1
 				allocations[h.container] = ContainerAllocation{
 					Devices:   slicedHoldingStatus(h),
-					DeviceIDs: []string{"grp-0:" + h.card + ":0000"},
+					DeviceIDs: []string{"grp-0:" + h.card + ":" + padIndex(idx)},
 				}
 			}
 		}

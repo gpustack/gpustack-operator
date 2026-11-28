@@ -57,8 +57,16 @@ func (c *FakeWorkerV1alpha1) ModelDeployments(namespace string) v1alpha1.ModelDe
 	return newFakeModelDeployments(c, namespace)
 }
 
+func (c *FakeWorkerV1alpha1) ModelDeploymentForgers(namespace string) v1alpha1.ModelDeploymentForgerInterface {
+	return newFakeModelDeploymentForgers(c, namespace)
+}
+
 func (c *FakeWorkerV1alpha1) ModelDeploymentScalers(namespace string) v1alpha1.ModelDeploymentScalerInterface {
 	return newFakeModelDeploymentScalers(c, namespace)
+}
+
+func (c *FakeWorkerV1alpha1) ModelKernelArtifacts(namespace string) v1alpha1.ModelKernelArtifactInterface {
+	return newFakeModelKernelArtifacts(c, namespace)
 }
 
 func (c *FakeWorkerV1alpha1) ModelPrefetches(namespace string) v1alpha1.ModelPrefetchInterface {

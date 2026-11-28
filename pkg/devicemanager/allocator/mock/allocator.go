@@ -333,6 +333,7 @@ func (s *server) ActuatePhysicalSliced(
 	}
 
 	podUID := string(pod.UID)
+	slotName := deviceplugin.CanonicalSlotContainerName(pod, ctr)
 	type reservedItem struct {
 		part    VirtualPartition
 		rebound bool
@@ -349,7 +350,7 @@ func (s *server) ActuatePhysicalSliced(
 				item.part.DeviceID,
 				item.part.ID,
 				podUID,
-				ctr.Name,
+				slotName,
 			)
 		}
 	}
@@ -361,7 +362,7 @@ func (s *server) ActuatePhysicalSliced(
 	for i := range accelerators {
 		grp := accelerators[i].Group
 		acc := accelerators[i].Accel
-		vp, rebound, err := s.partitions.Reserve(s.Manufacturer, podUID, ctr.Name, grp, acc, profile)
+		vp, rebound, err := s.partitions.Reserve(s.Manufacturer, podUID, slotName, grp, acc, profile)
 		if err != nil {
 			rollback()
 			return nil, err

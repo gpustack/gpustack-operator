@@ -2,13 +2,32 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import gzip
 import inspect
+import json
+import logging
 import math
+import os
+import time
 import uuid
+import zlib
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+from gpustack_engine_sentinel.kernel_loader import (
+    aggregate_kernel_reports,
+    get_process_kernel_report,
+)
 from gpustack_engine_sentinel.latch import BootLatch
+from gpustack_engine_sentinel.probe import (
+    directory_size_bytes,
+    distill_probe_directory,
+    purge_probe_dir,
+    select_rank0_trace_file,
+)
 from gpustack_engine_sentinel.protocol import (
     ENGINE_SGLANG,
     FIELD_ACCEPT_THRESHOLD_ACC,
@@ -20,10 +39,13 @@ from gpustack_engine_sentinel.protocol import (
     FIELD_PREFILL_DECODE_INTERVAL,
     FIELD_PREFILL_MAX_REQUESTS,
     FIELD_SCHEDULE_CONSERVATIVENESS,
+    PROBE_MAX_SHM_BYTES,
+    PROBE_WALL_CLOCK_CAP_SECONDS,
     SGLANG_ALL_FIELDS,
     InvalidRequestError,
     RankReceipt,
     SentinelError,
+    UnsupportedEngineVersionError,
     UnsupportedFieldsError,
     parse_decimal_float,
     parse_strict_int,
@@ -33,6 +55,7 @@ from gpustack_engine_sentinel.server import (
     ensure_outermost_sentinel_middleware,
 )
 
+LOGGER = logging.getLogger(__name__)
 APPLY_BUNDLE_KEY = "gpustack_engine_sentinel_apply"
 ROLLBACK_BUNDLE_KEY = "gpustack_engine_sentinel_rollback"
 STATE_NAMESPACE_KEY = "gpustack_engine_sentinel"
@@ -1007,7 +1030,7 @@ def patch_sglang_internal_state_module(mod: Any) -> None:
 
         internal_dict = getattr(output, "internal_state", None)
         if isinstance(internal_dict, dict):
-            internal_dict[STATE_NAMESPACE_KEY] = {
+            sentinel_state: dict[str, Any] = {
                 "rank_id": _sglang_rank_id(scheduler),
                 "boot_id": st.boot_id,
                 "membership_epoch": st.membership_epoch,
@@ -1024,6 +1047,10 @@ def patch_sglang_internal_state_module(mod: Any) -> None:
                 "last_error_message": st.last_error_message,
                 "last_unsupported_fields": list(st.last_unsupported_fields),
             }
+            kernel_report = get_process_kernel_report(engine="SGLang")
+            if kernel_report:
+                sentinel_state.update(kernel_report)
+            internal_dict[STATE_NAMESPACE_KEY] = sentinel_state
         return output
 
     def _wrapped_update_handlers(self: Any) -> dict[str, Any]:
@@ -1070,6 +1097,330 @@ class SGLangSentinelBackend:
         self._http_server = http_server_mod
         self._membership_epoch = 1
         self._last_rank_count: int | None = None
+        self._last_kernel_summary: dict[str, Any] = {}
+        self._active_probe: dict[str, Any] | None = None
+
+    @staticmethod
+    def _extract_rank_kernel_fields(rc: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if "loaded_kernel_keys" in rc and isinstance(rc["loaded_kernel_keys"], list):
+            out["loaded_kernel_keys"] = list(rc["loaded_kernel_keys"])
+        if rc.get("dispatch_manifest_digest"):
+            out["dispatch_manifest_digest"] = str(rc["dispatch_manifest_digest"])
+        if rc.get("kernel_load_error"):
+            out["kernel_load_error"] = str(rc["kernel_load_error"])
+        return out
+
+    async def get_kernel_summary(self) -> dict[str, Any]:
+        local = get_process_kernel_report(engine="SGLang")
+        tm = self._get_tokenizer_manager()
+        get_state_fn = (
+            getattr(tm, "get_internal_state", None) if tm is not None else None
+        )
+        if callable(get_state_fn):
+            try:
+                raw_res = get_state_fn()
+                if inspect.isawaitable(raw_res):
+                    raw_states = await asyncio.wait_for(raw_res, timeout=2.0)
+                else:
+                    raw_states = raw_res
+                rank_reports = [
+                    self._extract_rank_kernel_fields(st[STATE_NAMESPACE_KEY])
+                    for st in (raw_states or ())
+                    if isinstance(st, dict)
+                    and isinstance(st.get(STATE_NAMESPACE_KEY), dict)
+                ]
+                rank_reports = [r for r in rank_reports if r]
+                if rank_reports:
+                    rank_summary = aggregate_kernel_reports(rank_reports)
+                    if rank_summary:
+                        self._last_kernel_summary = dict(rank_summary)
+                    candidates = [*rank_reports, local] if local else list(rank_reports)
+                    merged = aggregate_kernel_reports(candidates)
+                    if merged:
+                        self._last_kernel_summary = dict(merged)
+                        return merged
+            except Exception:
+                LOGGER.debug(
+                    "SGLang get_internal_state in get_kernel_summary failed",
+                    exc_info=True,
+                )
+
+        if self._last_kernel_summary and local:
+            merged = aggregate_kernel_reports([self._last_kernel_summary, local])
+            self._last_kernel_summary = dict(merged)
+            return merged
+        if self._last_kernel_summary:
+            return dict(self._last_kernel_summary)
+        if local:
+            self._last_kernel_summary = dict(local)
+        return local
+
+    async def _stop_sglang_profiler_best_effort(self, tm: Any) -> None:
+        stop_fn = getattr(tm, "stop_profile", None)
+        if callable(stop_fn):
+            try:
+                res = stop_fn()
+                if inspect.isawaitable(res):
+                    await res
+            except Exception:
+                LOGGER.debug(
+                    "SGLang stop_profile best-effort call failed", exc_info=True
+                )
+
+    async def start_probe(self, spec: dict[str, Any]) -> dict[str, Any]:
+        tm = self._get_tokenizer_manager()
+        if tm is None:
+            raise UnsupportedEngineVersionError("TokenizerManager is not initialized")
+        start_profile_fn = getattr(tm, "start_profile", None)
+        if not callable(start_profile_fn):
+            raise UnsupportedEngineVersionError(
+                "SGLang TokenizerManager does not expose start_profile"
+            )
+
+        output_dir = Path(str(spec["output_dir"]))
+        output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            os.chmod(output_dir, 0o700)
+        steps = int(spec["steps"])
+        probe_id = str(spec["probe_id"])
+        desired_kwargs: dict[str, Any] = {
+            "output_dir": str(output_dir),
+            "num_steps": steps,
+            "activities": ["CPU", "GPU"],
+            "record_shapes": True,
+        }
+
+        use_profile_req = False
+        call_kwargs: dict[str, Any] = desired_kwargs
+        try:
+            sig = inspect.signature(start_profile_fn)
+            params = sig.parameters
+            has_var_kw = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+            )
+            if "req" in params and not has_var_kw and "output_dir" not in params:
+                use_profile_req = True
+            elif not has_var_kw:
+                call_kwargs = {k: v for k, v in desired_kwargs.items() if k in params}
+        except (TypeError, ValueError):
+            call_kwargs = desired_kwargs
+
+        started = time.monotonic()
+        try:
+            if use_profile_req:
+                req_obj: Any
+                try:
+                    from sglang.srt.managers.io_struct import ProfileReq
+
+                    req_obj = ProfileReq(
+                        output_dir=str(output_dir),
+                        num_steps=steps,
+                        activities=["CPU", "GPU"],
+                        record_shapes=True,
+                        with_stack=False,
+                        profile_id=probe_id,
+                    )
+                except Exception:
+                    from types import SimpleNamespace
+
+                    req_obj = SimpleNamespace(
+                        output_dir=str(output_dir),
+                        num_steps=steps,
+                        activities=["CPU", "GPU"],
+                        record_shapes=True,
+                        with_stack=False,
+                        profile_id=probe_id,
+                    )
+                res = start_profile_fn(req=req_obj)
+            else:
+                res = start_profile_fn(**call_kwargs)
+            if inspect.isawaitable(res):
+                await res
+        except Exception as exc:
+            purge_probe_dir(output_dir)
+            raise SentinelError(
+                500, "probe_start_failed", f"SGLang start_profile failed: {exc}"
+            ) from exc
+
+        self._active_probe = {
+            "probe_id": str(spec["probe_id"]),
+            "output_dir": output_dir,
+            "steps": steps,
+            "max_shm_bytes": int(spec.get("max_shm_bytes") or PROBE_MAX_SHM_BYTES),
+            "wall_clock_cap_seconds": float(
+                spec.get("wall_clock_cap_seconds") or PROBE_WALL_CLOCK_CAP_SECONDS
+            ),
+            "engine_version": str(spec.get("engine_version") or "0.0.0"),
+            "manufacturer": str(spec.get("manufacturer") or "nvidia"),
+            "architecture": str(spec.get("architecture") or "unknown"),
+            "started_monotonic": started,
+        }
+        return {
+            "ok": True,
+            "status": "running",
+            "probe_id": str(spec["probe_id"]),
+        }
+
+    @staticmethod
+    def _extract_sglang_model_dims(tm: Any) -> dict[str, Any]:
+        """Extract static per-GPU model dimensions from SGLang TokenizerManager for CUDA-graph fallback."""
+        model_cfg = getattr(tm, "model_config", None) if tm is not None else None
+        if model_cfg is None:
+            return {}
+        server_args = getattr(tm, "server_args", None)
+        tp_size = 1
+        if server_args is not None:
+            raw_tp = getattr(server_args, "tp_size", None)
+            if isinstance(raw_tp, int) and not isinstance(raw_tp, bool) and raw_tp > 0:
+                tp_size = raw_tp
+
+        dims: dict[str, Any] = {"num_tokens": 1}
+
+        def _pos(obj: Any, attr: str) -> int:
+            val = getattr(obj, attr, None)
+            if isinstance(val, int) and not isinstance(val, bool) and val > 0:
+                return val
+            return 0
+
+        hidden = _pos(model_cfg, "hidden_size")
+        if hidden > 0:
+            dims["hidden_size"] = hidden
+        head_dim = _pos(model_cfg, "head_dim")
+        if head_dim > 0:
+            dims["head_dim"] = head_dim
+        num_heads = _pos(model_cfg, "num_attention_heads")
+        if num_heads > 0:
+            dims["num_heads_local"] = max(1, num_heads // tp_size)
+        vocab = _pos(model_cfg, "vocab_size")
+        if vocab > 0:
+            dims["vocab_size_local"] = max(1, vocab // tp_size)
+        hf_cfg = getattr(model_cfg, "hf_config", None)
+        if hf_cfg is not None:
+            inter = _pos(hf_cfg, "intermediate_size")
+            if inter > 0:
+                dims["intermediate_size_local"] = max(1, inter // tp_size)
+            for exp_attr in ("num_local_experts", "num_experts", "n_routed_experts"):
+                n_exp = _pos(hf_cfg, exp_attr)
+                if n_exp > 0:
+                    dims["num_experts_local"] = n_exp
+                    break
+        dtype = getattr(model_cfg, "dtype", None)
+        if dtype is not None:
+            dims["dtype"] = str(dtype)
+        return dims
+
+    async def collect_probe(self, spec: dict[str, Any]) -> dict[str, Any]:
+        probe_id = str(spec.get("probe_id") or "")
+        active = self._active_probe
+        if active is None or (probe_id and active["probe_id"] != probe_id):
+            return {"ok": True, "status": "idle", "probe_id": probe_id}
+
+        tm = self._get_tokenizer_manager()
+        output_dir: Path = active["output_dir"]
+        max_shm_bytes: int = active["max_shm_bytes"]
+        wall_cap: float = active["wall_clock_cap_seconds"]
+        elapsed = time.monotonic() - float(active["started_monotonic"])
+
+        if elapsed > wall_cap:
+            try:
+                if tm is not None:
+                    await self._stop_sglang_profiler_best_effort(tm)
+            finally:
+                purge_probe_dir(output_dir)
+                self._active_probe = None
+            return {
+                "ok": True,
+                "status": "failed",
+                "probe_id": probe_id,
+                "error_code": "probe_timeout",
+                "message": f"SGLang probe exceeded {wall_cap}s wall-clock cap",
+            }
+
+        staged_bytes = await asyncio.to_thread(directory_size_bytes, output_dir)
+        if staged_bytes > max_shm_bytes:
+            try:
+                if tm is not None:
+                    await self._stop_sglang_profiler_best_effort(tm)
+            finally:
+                await asyncio.to_thread(purge_probe_dir, output_dir)
+                self._active_probe = None
+            return {
+                "ok": True,
+                "status": "failed",
+                "probe_id": probe_id,
+                "error_code": "probe_shm_budget_exceeded",
+                "message": (
+                    f"SGLang probe staging exceeded {max_shm_bytes} byte ceiling ({staged_bytes} bytes)"
+                ),
+            }
+
+        # Wait while TokenizerManager reports active profiling unless rank-0 trace is ready.
+        is_profiling = (
+            bool(getattr(tm, "is_profiling", False)) if tm is not None else False
+        )
+        trace_file = await asyncio.to_thread(select_rank0_trace_file, output_dir)
+        if is_profiling or trace_file is None:
+            return {"ok": True, "status": "running", "probe_id": probe_id}
+
+        try:
+            if trace_file.stat().st_size == 0:
+                return {"ok": True, "status": "running", "probe_id": probe_id}
+        except OSError:
+            return {"ok": True, "status": "running", "probe_id": probe_id}
+
+        try:
+            model_dims = self._extract_sglang_model_dims(tm)
+            payload = await asyncio.to_thread(
+                distill_probe_directory,
+                output_dir,
+                engine="SGLang",
+                engine_version=active["engine_version"],
+                manufacturer=active["manufacturer"],
+                architecture=active["architecture"],
+                steps_captured=active["steps"],
+                wall_clock_seconds=elapsed,
+                model_dims=model_dims or None,
+            )
+        except (json.JSONDecodeError, EOFError, gzip.BadGzipFile, zlib.error, OSError):
+            # SGLang 0.5.x may open and flush/gzip the rank-0 trace over several seconds without
+            # exposing TokenizerManager.is_profiling; keep polling without purging until complete
+            # or wall_cap expires.
+            return {"ok": True, "status": "running", "probe_id": probe_id}
+        except Exception:
+            await asyncio.to_thread(purge_probe_dir, output_dir)
+            self._active_probe = None
+            raise
+
+        # Always delete ALL TP ranks' trace files immediately after distilling TP rank 0.
+        await asyncio.to_thread(purge_probe_dir, output_dir)
+        self._active_probe = None
+        return {
+            "ok": True,
+            "status": "completed",
+            "probe_id": probe_id,
+            "payload": payload,
+        }
+
+    async def abort_probe(self, spec: dict[str, Any]) -> dict[str, Any]:
+        probe_id = str(spec.get("probe_id") or "")
+        tm = self._get_tokenizer_manager()
+        output_dir_str = str(spec.get("output_dir") or "")
+        active = self._active_probe
+        output_dir = (
+            active["output_dir"]
+            if active is not None
+            else (Path(output_dir_str) if output_dir_str else None)
+        )
+        try:
+            if tm is not None:
+                await self._stop_sglang_profiler_best_effort(tm)
+        finally:
+            if output_dir is not None:
+                purge_probe_dir(output_dir)
+            if active is not None and (not probe_id or active["probe_id"] == probe_id):
+                self._active_probe = None
+        return {"ok": True, "status": "aborted", "probe_id": probe_id}
 
     def _get_tokenizer_manager(self) -> Any:
         get_gs = getattr(self._http_server, "get_global_state", None)
@@ -1195,12 +1546,28 @@ class SGLangSentinelBackend:
             rank_epochs.append(epoch)
             if not boot_defaults and isinstance(rc.get("boot_defaults"), dict):
                 boot_defaults = dict(rc["boot_defaults"])
+            k_keys = (
+                list(rc["loaded_kernel_keys"])
+                if isinstance(rc.get("loaded_kernel_keys"), list)
+                else None
+            )
+            k_digest = (
+                str(rc["dispatch_manifest_digest"])
+                if rc.get("dispatch_manifest_digest")
+                else None
+            )
+            k_error = (
+                str(rc["kernel_load_error"]) if rc.get("kernel_load_error") else None
+            )
             receipt = RankReceipt(
                 rank_id=rid,
                 boot_id=bid,
                 membership_epoch=epoch,
                 applied_digest=str(rc.get("applied_digest", "")),
                 values=dict(rc.get("values", {})),
+                loaded_kernel_keys=k_keys,
+                dispatch_manifest_digest=k_digest,
+                kernel_load_error=k_error,
             )
             ranks.append(receipt.to_dict())
 
@@ -1210,7 +1577,7 @@ class SGLangSentinelBackend:
         all_unsupported = sorted(set(SGLANG_ALL_FIELDS) - set(common_supported))
         ranks.sort(key=lambda r: r["rank_id"])
         top_values = dict(ranks[0]["values"]) if ranks else {}
-        return {
+        out: dict[str, Any] = {
             "membership_epoch": max([self._membership_epoch, *rank_epochs]),
             "supported_fields": common_supported,
             "unsupported_fields": all_unsupported,
@@ -1218,6 +1585,11 @@ class SGLangSentinelBackend:
             "ranks": ranks,
             "values": top_values,
         }
+        ksummary = aggregate_kernel_reports(ranks)
+        if ksummary:
+            self._last_kernel_summary = dict(ksummary)
+            out.update(ksummary)
+        return out
 
     async def get_runtime_config(self) -> dict[str, Any]:
         tm = self._get_tokenizer_manager()

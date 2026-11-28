@@ -16,6 +16,7 @@ import (
 
 	modelartifact "gpustack.ai/gpustack/pkg/modelartifact"
 	"gpustack.ai/gpustack/pkg/modelmanager/download"
+	"gpustack.ai/gpustack/pkg/modelmanager/store"
 	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
@@ -58,12 +59,19 @@ type Puller struct {
 // Enabled reports whether peer pulling is configured.
 func (p *Puller) Enabled() bool { return p != nil && p.Discover != nil }
 
-// FetchFile fills file from a peer that holds the digest, verifying every byte against the
-// manifest the reassembled listing is bound to. The attempt starts from what an earlier one
-// checkpointed, whoever delivered it, and what arrives is checkpointed on the way, so a peer
-// dying mid-file costs the bytes after the last checkpoint rather than the file. Every failure
-// rotates to the next candidate; the caller falls back to the hub when all of them are spent.
+// FetchFile fills file from a peer that holds the digest as a model tree, verifying every byte
+// against the manifest the reassembled listing is bound to.
 func (p *Puller) FetchFile(ctx context.Context, digest string, file download.File) error {
+	return p.FetchFileForKind(ctx, digest, store.MarkerKindModel, file)
+}
+
+// FetchFileForKind fills file from a peer that holds the digest with the expected content class,
+// verifying every byte against the manifest the reassembled listing is bound to. The attempt starts
+// from what an earlier one checkpointed, whoever delivered it, and what arrives is checkpointed on
+// the way, so a peer dying mid-file costs the bytes after the last checkpoint rather than the file.
+// Every failure rotates to the next candidate; the caller falls back to the hub when all of them
+// are spent.
+func (p *Puller) FetchFileForKind(ctx context.Context, digest, wantKind string, file download.File) error {
 	treeHex, ok := HexOf(digest)
 	if !ok {
 		return fmt.Errorf("digest %q is not a manifest digest", digest)
@@ -77,7 +85,7 @@ func (p *Puller) FetchFile(ctx context.Context, digest string, file download.Fil
 		if p.sitsOut(src) {
 			continue
 		}
-		err = p.fetchFrom(ctx, src, treeHex, file)
+		err = p.fetchFrom(ctx, src, treeHex, wantKind, file)
 		if err == nil {
 			return nil
 		}
@@ -94,11 +102,16 @@ func (p *Puller) FetchFile(ctx context.Context, digest string, file download.Fil
 	return fmt.Errorf("%s: %w", file.Path, lastErr)
 }
 
-// FetchManifest returns the tree's manifest from a peer that holds it published, reassembled
-// into the canonical manifest and bound to the digest before it is trusted. A caller with no
-// other way to the manifest — an artifact anchored to its digest without a hub — asks this
-// first; a failure here is the loud no-source failure, not a hub error to dress up.
+// FetchManifest returns the model tree's manifest from a peer that holds it published, reassembled
+// into the canonical manifest and bound to the digest before it is trusted.
 func (p *Puller) FetchManifest(ctx context.Context, digest string) (modelartifact.Manifest, error) {
+	return p.FetchManifestForKind(ctx, digest, store.MarkerKindModel)
+}
+
+// FetchManifestForKind returns the tree's manifest from a peer that holds it published with the
+// expected content class, reassembled into the canonical manifest and bound to the digest before it
+// is trusted.
+func (p *Puller) FetchManifestForKind(ctx context.Context, digest, wantKind string) (modelartifact.Manifest, error) {
 	treeHex, ok := HexOf(digest)
 	if !ok {
 		return modelartifact.Manifest{}, fmt.Errorf("digest %q is not a manifest digest", digest)
@@ -112,7 +125,7 @@ func (p *Puller) FetchManifest(ctx context.Context, digest string) (modelartifac
 		if p.sitsOut(src) {
 			continue
 		}
-		manifest, err := p.fetchListing(ctx, src, treeHex)
+		manifest, err := p.fetchListing(ctx, src, treeHex, wantKind)
 		if err == nil {
 			return manifest, nil
 		}
@@ -132,8 +145,8 @@ func (p *Puller) FetchManifest(ctx context.Context, digest string) (modelartifac
 // fetchFrom pulls the whole file from one source: its listing is reassembled into a canonical
 // manifest and bound to the tree's digest before a byte is trusted, then the file's ranges are
 // fetched and hashed in byte order, checkpointing as they go.
-func (p *Puller) fetchFrom(ctx context.Context, src *Source, treeHex string, file download.File) error {
-	manifest, err := p.fetchListing(ctx, src, treeHex)
+func (p *Puller) fetchFrom(ctx context.Context, src *Source, treeHex, wantKind string, file download.File) error {
+	manifest, err := p.fetchListing(ctx, src, treeHex, wantKind)
 	if err != nil {
 		return err
 	}
@@ -276,7 +289,7 @@ func (p *Puller) fetchOne(
 // entries are reassembled into the canonical manifest, whose recomputed root digest must be the
 // one the artifact resolved to. A listing that does not rebind — truncated, reordered with
 // altered content, or self-consistently forged — is refused here, before any byte is pulled.
-func (p *Puller) fetchListing(ctx context.Context, src *Source, treeHex string) (modelartifact.Manifest, error) {
+func (p *Puller) fetchListing(ctx context.Context, src *Source, treeHex, wantKind string) (modelartifact.Manifest, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listingURL(src.BaseURL, treeHex), nil)
 	if err != nil {
 		return modelartifact.Manifest{}, err
@@ -294,6 +307,9 @@ func (p *Puller) fetchListing(ctx context.Context, src *Source, treeHex string) 
 	if err := json.NewDecoder(io.LimitReader(resp.Body, manifestLimit)).Decode(&l); err != nil {
 		return modelartifact.Manifest{}, fmt.Errorf("the peer's listing does not parse: %w", err)
 	}
+	if err := validateListingKind(l.Kind, wantKind); err != nil {
+		return modelartifact.Manifest{}, err
+	}
 	entries := make([]modelartifact.ManifestEntry, 0, len(l.Entries))
 	for _, e := range l.Entries {
 		entries = append(entries, modelartifact.ManifestEntry{Path: e.Path, Size: e.Size, Digest: e.Digest})
@@ -308,6 +324,19 @@ func (p *Puller) fetchListing(ctx context.Context, src *Source, treeHex string) 
 	}
 
 	return manifest, nil
+}
+
+func validateListingKind(got, want string) error {
+	if want == store.MarkerKindKernel {
+		if got != store.MarkerKindKernel {
+			return fmt.Errorf("the peer's listing has kind %q, want %q: refused", got, store.MarkerKindKernel)
+		}
+		return nil
+	}
+	if got != "" && got != store.MarkerKindModel {
+		return fmt.Errorf("the peer's listing has kind %q, not a model tree: refused", got)
+	}
+	return nil
 }
 
 // manifestLimit bounds one listing's answer: tens of thousands of files at most.

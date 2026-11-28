@@ -27,6 +27,8 @@ flowchart TD
 
 [Model Artifact](artifact.md) defines weight sources, resolution, and workload mounts.
 [Remote Weight Delivery](remote.md) covers streaming tensors from prepared source `Node`s.
+`ModelKernelArtifact` reuses `NodeModelStore` (`Source: Forge`, `Kind: Kernel`) and peer sync to
+deliver forged single-GPU kernels to [Model Deployment Forger](../model-deployment/forger.md).
 
 ## Configuration
 

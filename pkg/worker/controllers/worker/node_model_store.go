@@ -133,9 +133,11 @@ func (r *NodeModelStoreReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	kubemeta.ControlOnWithoutBlock(eNms, nd, core.SchemeGroupVersion.WithKind("Node"))
 	alignFn := func(aNms *workercore.NodeModelStore) (_ *workercore.NodeModelStore, skip bool, err error) {
 		skip = true
-		// spec.pinned belongs to the prefetch controller: carry the stored value into the desired
-		// spec, so a configuration write never drops it and a pinned-only change never shows up in
-		// this diff. A pinned write racing this one lands on a stale resourceVersion, fails, and is
+		// spec.pinned belongs to the prefetch controller as the single-writer 3-voice pin union
+		// (admitted ModelTransfer source generations, active and rollback ModelKernelArtifact
+		// digests, and ModelPrefetch retention pins): carry the stored value into the desired spec
+		// so a configuration write never drops it and a pinned-only change never shows up in this
+		// diff. A pinned write racing this one lands on a stale resourceVersion, fails, and is
 		// retried.
 		eNms.Spec.Pinned = aNms.Spec.Pinned
 		if !kubemeta.DeepEqual(aNms.Spec, eNms.Spec) {

@@ -22,7 +22,7 @@ injection, and mid-flight control-loop disruptions:
   four-view accounting), and [settings.md](../../../docs/reference/settings.md)
   (`GPUSTACK_MOCK_DEVICES_FILE`); owning spec →
   `specs/2026-11-24-cpu-mock-device-manager-and-e2e-consolidation.md`.
-- Functional single-feature E2E cases (`case-1.sh .. case-37.sh`) live in
+- Functional single-feature E2E cases (`case-1.sh .. case-38.sh`) live in
   [gpustack-operator-e2e](../gpustack-operator-e2e/SKILL.md). Use `gpustack-operator-e2e-chaos` when
   stress-testing multi-node concurrency, admission contention, fault transitions, or controller
   churn across local `2–4` worker Kind clusters or remote `8–32+` worker Kind/k3s clusters.

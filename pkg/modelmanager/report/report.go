@@ -101,6 +101,7 @@ type Reporter struct {
 	Interval   time.Duration
 
 	mu        sync.Mutex
+	reportMu  sync.Mutex
 	spec      *workercore.NodeModelStoreSpec
 	specErr   error
 	client    *http.Client
@@ -289,42 +290,65 @@ func (r *Reporter) Run(ctx context.Context) error {
 
 // Report applies the spec, collects, and writes the status if it changed.
 func (r *Reporter) Report(ctx context.Context) error {
-	nms := new(workercore.NodeModelStore)
-	if err := r.Reader.Get(ctx, ctrlcli.ObjectKey{Name: r.NodeName}, nms); err != nil {
-		if kerrors.IsNotFound(err) {
-			// The worker creates it once kubelet lists the driver for this node.
+	return r.report(ctx, false)
+}
+
+// Flush runs an immediate Report pass and retries transient API conflicts so a newly ingested
+// tree is advertised in NodeModelStore.status.models before returning to the caller.
+func (r *Reporter) Flush(ctx context.Context) error {
+	return r.report(ctx, true)
+}
+
+func (r *Reporter) report(ctx context.Context, retryConflict bool) error {
+	r.reportMu.Lock()
+	defer r.reportMu.Unlock()
+
+	const maxConflictAttempts = 4
+	for attempt := range maxConflictAttempts {
+		nms := new(workercore.NodeModelStore)
+		if err := r.Reader.Get(ctx, ctrlcli.ObjectKey{Name: r.NodeName}, nms); err != nil {
+			if kerrors.IsNotFound(err) {
+				// The worker creates it once kubelet lists the driver for this node.
+				return nil
+			}
+			return err
+		}
+		r.apply(ctx, nms)
+
+		res, err := r.Collector.Collect(ctx)
+		if err != nil {
+			return fmt.Errorf("collect: %w", err)
+		}
+		status, err := r.status(nms, res)
+		if err != nil {
+			return err
+		}
+		// Semantically: a time read back from the API is in the local zone, and equal all the same.
+		if equality.Semantic.DeepEqual(status, nms.Status) {
 			return nil
 		}
-		return err
-	}
-	r.apply(ctx, nms)
-
-	res, err := r.Collector.Collect(ctx)
-	if err != nil {
-		return fmt.Errorf("collect: %w", err)
-	}
-	status, err := r.status(nms, res)
-	if err != nil {
-		return err
-	}
-	// Semantically: a time read back from the API is in the local zone, and equal all the same.
-	if equality.Semantic.DeepEqual(status, nms.Status) {
-		return nil
-	}
-	if onlyProgressMoved(status, nms.Status) && !r.progressDue(status, nms.Status) {
-		return nil
-	}
-	nms.Status = status
-	if err := r.Client.Status().Update(ctx, nms); err != nil {
-		if kerrors.IsConflict(err) {
-			time.AfterFunc(conflictRetry, func() { r.Trigger("") })
+		if onlyProgressMoved(status, nms.Status) && !r.progressDue(status, nms.Status) {
 			return nil
 		}
-		return fmt.Errorf("update status: %w", err)
+		nms.Status = status
+		if err := r.Client.Status().Update(ctx, nms); err != nil {
+			if kerrors.IsConflict(err) {
+				if retryConflict && attempt+1 < maxConflictAttempts {
+					continue
+				}
+				time.AfterFunc(conflictRetry, func() { r.Trigger("") })
+				if retryConflict {
+					return fmt.Errorf("update status after %d conflict attempts: %w", maxConflictAttempts, err)
+				}
+				return nil
+			}
+			return fmt.Errorf("update status: %w", err)
+		}
+		r.lastWrite = r.now()
+		return nil
 	}
-	r.lastWrite = r.now()
 
-	return nil
+	return fmt.Errorf("update status: exhausted %d conflict attempts", maxConflictAttempts)
 }
 
 // onlyProgressMoved says next differs from old in progress fields alone: an entry's
@@ -589,14 +613,19 @@ func (r *Reporter) models() ([]workercore.NodeModelStoreModel, int, int64, error
 
 	var stored int64
 	seen := map[string]bool{}
+	kernel := map[string]bool{}
+	pinned := r.Pinned()
 	var models []workercore.NodeModelStoreModel
 	for _, m := range markers {
 		hex := store.HexOf(m.Digest)
 		seen[hex] = true
+		if m.Kind == store.MarkerKindKernel {
+			kernel[hex] = true
+		}
 		stored += m.SizeBytes
 		models = append(models, workercore.NodeModelStoreModel{
 			Digest: m.Digest, State: workercore.NodeModelStoreModelStateReady, SizeBytes: m.SizeBytes,
-			Source:     workercore.NodeModelStoreModelSource(m.Source),
+			Source:     reportSource(m.Source),
 			Referenced: referenced[hex], LastUsedTime: hourOf(records[hex].LastUsedTime),
 		})
 	}
@@ -611,7 +640,7 @@ func (r *Reporter) models() ([]workercore.NodeModelStoreModel, int, int64, error
 		p := progress[hex]
 		models = append(models, workercore.NodeModelStoreModel{
 			Digest: "sha256:" + hex, State: workercore.NodeModelStoreModelStateDownloading,
-			SizeBytes: p.SizeBytes, DownloadedBytes: max(p.DownloadedBytes, 0), Source: p.Source,
+			SizeBytes: p.SizeBytes, DownloadedBytes: max(p.DownloadedBytes, 0), Source: reportSource(string(p.Source)),
 			LastUsedTime: hourOf(records[hex].LastUsedTime),
 		})
 	}
@@ -633,6 +662,13 @@ func (r *Reporter) models() ([]workercore.NodeModelStoreModel, int, int64, error
 		if a.Referenced != b.Referenced {
 			return a.Referenced
 		}
+		aHex, bHex := store.HexOf(a.Digest), store.HexOf(b.Digest)
+		if aPinned, bPinned := pinned[aHex], pinned[bHex]; aPinned != bPinned {
+			return aPinned
+		}
+		if aKernel, bKernel := kernel[aHex], kernel[bHex]; aKernel != bKernel {
+			return aKernel
+		}
 		at, bt := timeOf(a.LastUsedTime), timeOf(b.LastUsedTime)
 		if !at.Equal(bt) {
 			return at.After(bt)
@@ -646,6 +682,19 @@ func (r *Reporter) models() ([]workercore.NodeModelStoreModel, int, int64, error
 	}
 
 	return models, omitted, stored, nil
+}
+
+// reportSource maps an unrecognized Marker.Source string to "" so a downgrade to an older CRD
+// enum never fails NodeModelStore status updates.
+func reportSource(raw string) workercore.NodeModelStoreModelSource {
+	switch workercore.NodeModelStoreModelSource(raw) {
+	case workercore.NodeModelStoreModelSourceHub,
+		workercore.NodeModelStoreModelSourcePeer,
+		workercore.NodeModelStoreModelSourceForge:
+		return workercore.NodeModelStoreModelSource(raw)
+	default:
+		return ""
+	}
 }
 
 // hourOf truncates a use to the hour, so use does not rewrite the object.

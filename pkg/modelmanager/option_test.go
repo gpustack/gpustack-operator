@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOptionsValidate(t *testing.T) {
@@ -14,6 +15,14 @@ func TestOptionsValidate(t *testing.T) {
 		wantErr string
 	}{
 		{name: "a node name and the defaults", edit: func(o *Options) { o.NodeName = "node-1" }},
+		{name: "a valid ingest service account", edit: func(o *Options) {
+			o.NodeName = "node-1"
+			o.IngestServiceAccount = "custom-release-worker"
+		}},
+		{name: "an invalid ingest service account", edit: func(o *Options) {
+			o.NodeName = "node-1"
+			o.IngestServiceAccount = "Invalid_Name"
+		}, wantErr: "--ingest-service-account"},
 		{name: "no node name", edit: func(*Options) {}, wantErr: "--node-name"},
 		{name: "a relative kubelet directory", edit: func(o *Options) { o.NodeName = "n"; o.KubeletDir = "kubelet" }, wantErr: "--kubelet-dir"},
 		{name: "a relative cache root", edit: func(o *Options) { o.NodeName = "n"; o.CacheRoot = "models" }, wantErr: "--cache-root"},
@@ -33,4 +42,11 @@ func TestOptionsValidate(t *testing.T) {
 			assert.ErrorContains(t, err, c.wantErr)
 		})
 	}
+}
+
+func TestCommandExposesIngestServiceAccountFlag(t *testing.T) {
+	cmd := NewCommand()
+	flag := cmd.Flags().Lookup("ingest-service-account")
+	require.NotNil(t, flag)
+	assert.Empty(t, flag.DefValue)
 }

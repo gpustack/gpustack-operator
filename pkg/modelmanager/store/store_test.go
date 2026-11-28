@@ -274,3 +274,89 @@ func TestPartials(t *testing.T) {
 	assert.Equal(t, otherHex, partials[0].Hex)
 	assert.NoDirExists(t, filepath.Join(s.Root(), partialDir, testHex))
 }
+
+func TestPublishPreservesMarkerKindAndSource(t *testing.T) {
+	cases := []struct {
+		name       string
+		source     string
+		kind       string
+		wantSource string
+		wantKind   string
+	}{
+		{
+			name:       "forged kernel marker preserves Forge source and Kernel kind",
+			source:     SourceForge,
+			kind:       MarkerKindKernel,
+			wantSource: "Forge",
+			wantKind:   "Kernel",
+		},
+		{
+			name:       "peer kernel marker preserves Peer source and Kernel kind",
+			source:     SourcePeer,
+			kind:       MarkerKindKernel,
+			wantSource: "Peer",
+			wantKind:   "Kernel",
+		},
+		{
+			name:       "model marker preserves Hub source and Model kind",
+			source:     SourceHub,
+			kind:       MarkerKindModel,
+			wantSource: "Hub",
+			wantKind:   "Model",
+		},
+		{
+			name:       "legacy model marker keeps empty kind omitted",
+			source:     SourceHub,
+			kind:       "",
+			wantSource: "Hub",
+			wantKind:   "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := openTestStore(t)
+			a, err := s.NewAttempt(testHex)
+			require.NoError(t, err)
+			writeAttemptFile(t, a, "dispatch-manifest.json", "{}")
+			require.NoError(t, a.Publish(Marker{
+				Digest:         "sha256:" + testHex,
+				ManifestFormat: "gpustack-manifest v1",
+				SizeBytes:      2,
+				FileCount:      1,
+				Source:         c.source,
+				Kind:           c.kind,
+			}))
+
+			got, err := s.ReadMarker(testHex)
+			require.NoError(t, err)
+			assert.Equal(t, c.wantSource, got.Source)
+			assert.Equal(t, c.wantKind, got.Kind)
+
+			published, err := s.Published()
+			require.NoError(t, err)
+			require.Len(t, published, 1)
+			assert.Equal(t, c.wantKind, published[0].Kind)
+		})
+	}
+}
+
+func TestStoreTryLockAttempt(t *testing.T) {
+	s := openTestStore(t)
+
+	unlock1, ok := s.TryLockAttempt(testHex)
+	require.True(t, ok)
+	require.NotNil(t, unlock1)
+
+	unlock2, ok := s.TryLockAttempt(testHex)
+	assert.False(t, ok)
+	assert.Nil(t, unlock2)
+
+	// Unlocking is idempotent and releases the lock for the next caller.
+	unlock1()
+	unlock1()
+
+	unlock3, ok := s.TryLockAttempt(testHex)
+	require.True(t, ok)
+	require.NotNil(t, unlock3)
+	unlock3()
+}

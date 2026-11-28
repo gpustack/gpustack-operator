@@ -1,0 +1,159 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen
+  namespace: default
+spec:
+  engine:
+    image: vllm/vllm-openai:v0.19.0
+    name: vLLM
+  kvTransfer:
+    backend: Nixl
+  model:
+    name: Qwen/Qwen2.5-72B-Instruct
+  roles:
+  - acceleratorType: h20-8x
+    image: vllm/vllm-openai:v0.19.0
+    kernelArtifactRef:
+      name: qwen-kernels-nodestore
+    kind: Prefill
+    name: prefill
+    replicas: 1
+    resources:
+      accelerator: "1"
+    size: 1
+  - acceleratorType: h20-8x
+    image: vllm/vllm-openai:v0.19.0
+    kernelArtifactRef:
+      name: qwen-kernels-image
+    kind: Decode
+    name: decode
+    replicas: 1
+    resources:
+      accelerator: "1"
+    size: 1
+  router:
+    name: sglang-gateway
+status: {}
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelKernelArtifact
+metadata:
+  generation: 1
+  name: qwen-kernels-nodestore
+  namespace: default
+  uid: kernel-artifact-uid-nodestore
+spec:
+  compatibility:
+    architecture: sm_90a
+    engine: vLLM
+    engineVersion: 0.19.0
+    kernelKeys:
+    - vLLM/0.19.0/nvidia/sm_90a/rmsnorm/0000000000000001
+    manufacturer: nvidia
+  source:
+    nodeStore:
+      dispatchManifestDigest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+      fileCount: 3
+      forgerRef:
+        name: qwen-forger
+        uid: forger-uid-1
+      manifestDigest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      seedNode: node-0
+      sizeBytes: 4096
+status:
+  conditions:
+  - lastTransitionTime: "2026-01-01T00:00:00Z"
+    message: resolved
+    reason: Resolved
+    status: "True"
+    type: Resolved
+  nodes:
+    downloading: 0
+    failed: 0
+    ready: 1
+  observedGeneration: 1
+  resolved:
+    digestSource: Forge
+    dispatchManifestDigest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    fileCount: 3
+    manifestDigest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+    resolvedTime: "2026-01-01T00:00:00Z"
+    sizeBytes: 4096
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelKernelArtifact
+metadata:
+  generation: 1
+  name: qwen-kernels-image
+  namespace: default
+  uid: kernel-artifact-uid-image
+spec:
+  compatibility:
+    architecture: sm_90a
+    engine: vLLM
+    engineVersion: 0.19.0
+    kernelKeys:
+    - vLLM/0.19.0/nvidia/sm_90a/silu_and_mul/0000000000000002
+    manufacturer: nvidia
+  source:
+    image:
+      reference: ghcr.io/gpustack/kernels/qwen-decode@sha256:3333333333333333333333333333333333333333333333333333333333333333
+status:
+  conditions:
+  - lastTransitionTime: "2026-01-01T00:00:00Z"
+    message: resolved
+    reason: Resolved
+    status: "True"
+    type: Resolved
+  observedGeneration: 1
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: node-0
+spec: {}
+status:
+  conditions:
+  - lastHeartbeatTime: null
+    lastTransitionTime: null
+    status: "True"
+    type: Ready
+  daemonEndpoints:
+    kubeletEndpoint:
+      Port: 0
+  nodeInfo:
+    architecture: ""
+    bootID: ""
+    containerRuntimeVersion: ""
+    kernelVersion: ""
+    kubeProxyVersion: ""
+    kubeletVersion: ""
+    machineID: ""
+    operatingSystem: ""
+    osImage: ""
+    systemUUID: ""
+---
+apiVersion: worker.gpustack.ai/v1
+kind: NodeModelStore
+metadata:
+  name: node-0
+spec:
+  download:
+    concurrency: 0
+  hub:
+    huggingFaceEndpoint: ""
+  peerSyncEnabled: true
+  watermarks:
+    highPercent: 0
+    lowPercent: 0
+status:
+  models:
+  - digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+    state: Ready
+---
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: model.csi.gpustack.ai
+spec: {}

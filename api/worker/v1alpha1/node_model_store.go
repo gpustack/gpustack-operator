@@ -88,10 +88,11 @@ type NodeModelStoreSpec struct {
 	// +optional
 	Store string `json:"store,omitempty" protobuf:"bytes,5,opt,name=store"`
 
-	// Pinned lists the manifest digests the node must retain: the union of the prefetches whose
-	// retention pins them and whose target set holds this node. A pinned digest is never a
-	// collection candidate, though it still counts toward usage. The prefetch controller writes
-	// the field and the configuration reconciler carries it over untouched, so the two never
+	// Pinned lists the manifest digests the node must retain: the single-writer union of admitted
+	// ModelTransfer source generations, active and rollback ModelKernelArtifact digests, and
+	// ModelPrefetch retention pins targeting this node. A pinned digest is never a collection
+	// candidate, though it still counts toward usage. The prefetch controller is the sole writer
+	// of this field and the configuration reconciler carries it over untouched, so the two never
 	// overwrite each other's work on the same object.
 	//
 	// +optional
@@ -388,12 +389,12 @@ type NodeModelStoreModel struct {
 	// +k8s:validation:minimum=0
 	DownloadedBytes int64 `json:"downloadedBytes,omitempty" protobuf:"varint,9,opt,name=downloadedBytes"`
 
-	// Source is where the content's bytes come from: Hub, the model hub, or Peer, the plugins of
-	// other nodes. It names no repository or endpoint. Content published before the field existed
-	// has none.
+	// Source is where the content's bytes come from: Hub, the model hub, Peer, the plugins of
+	// other nodes, or Forge, a verified kernel bundle published locally on this node. It names no
+	// repository, tenant or endpoint. Content published before the field existed has none.
 	//
 	// +optional
-	// +k8s:validation:enum=["Hub","Peer"]
+	// +k8s:validation:enum=["Hub","Peer","Forge"]
 	Source NodeModelStoreModelSource `json:"source,omitempty" protobuf:"bytes,10,opt,name=source,casttype=NodeModelStoreModelSource"` // nolint: lll
 
 	// Referenced says some Pod mounts the content. Which Pod is never recorded.
@@ -437,6 +438,9 @@ const NodeModelStoreModelSourceHub NodeModelStoreModelSource = "Hub"
 
 // NodeModelStoreModelSourcePeer is a download from the plugins of other nodes.
 const NodeModelStoreModelSourcePeer NodeModelStoreModelSource = "Peer"
+
+// NodeModelStoreModelSourceForge is a verified forged kernel bundle published locally on this node.
+const NodeModelStoreModelSourceForge NodeModelStoreModelSource = "Forge"
 
 // NodeModelStoreModelState is where a digest is on a node.
 // +enum

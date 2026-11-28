@@ -63,9 +63,18 @@ func (s *ResourceServer) slicedOccupancy(ctx context.Context) (_SlicedOccupancy,
 			holders.Insert(name)
 		}
 		for _, name := range sets.List(holders) {
-			if held := s.priorClaimOf(pod, name); held != nil {
-				occupied.add(_ReservationKey{PodUID: pod.UID, Container: name}, heldAllocation(pod, held.Devices))
+			held := s.priorClaimOf(pod, name)
+			if held == nil {
+				continue
 			}
+			status := heldAllocation(pod, held.Devices)
+			if nonSidecarInitIndex(pod, name) >= 0 {
+				ctr := containerByName(pod, name)
+				key := _ReservationKey{PodUID: pod.UID, Container: CanonicalSlotContainerName(pod, ctr)}
+				occupied.mergeMax(key, status)
+				continue
+			}
+			occupied.add(_ReservationKey{PodUID: pod.UID, Container: name}, status)
 		}
 	}
 	return occupied, nil
@@ -85,6 +94,25 @@ func (o _SlicedOccupancy) add(holder _ReservationKey, held workercore.DevicesSta
 				o[res] = make(map[_ReservationKey]int32)
 			}
 			o[res][holder] += acc.Allocated
+		}
+	}
+}
+
+// mergeMax records a canonical init-container slot's peak slice units without counting sequential
+// reuse as a second concurrent slice.
+func (o _SlicedOccupancy) mergeMax(holder _ReservationKey, held workercore.DevicesStatus) {
+	for i := range held.Groups {
+		grp := &held.Groups[i]
+		for j := range grp.Accelerators {
+			acc := &grp.Accelerators[j]
+			if acc.Mode != workercore.DeviceAllocationModeSliced {
+				continue
+			}
+			res := Resource{Group: grp.ID, Device: acc.ID}
+			if o[res] == nil {
+				o[res] = make(map[_ReservationKey]int32)
+			}
+			o[res][holder] = max(o[res][holder], acc.Allocated)
 		}
 	}
 }
@@ -169,7 +197,7 @@ func (s *ResourceServer) slicedRoomFor(
 ) _SlicedRoom {
 	room := _SlicedRoom{devs: devs, occupied: occupied}
 	if pod != nil && ctr != nil {
-		room.self = _ReservationKey{PodUID: pod.UID, Container: ctr.Name}
+		room.self = _ReservationKey{PodUID: pod.UID, Container: CanonicalSlotContainerName(pod, ctr)}
 	}
 	return room
 }

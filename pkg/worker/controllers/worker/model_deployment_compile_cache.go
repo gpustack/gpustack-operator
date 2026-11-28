@@ -61,6 +61,10 @@ type ModelDeploymentCompileCacheInput struct {
 
 	// ModelArtifact is the artifact the deployment names, for a caller that resolved none.
 	ModelArtifact *workercore.ModelArtifact
+
+	// KernelManifestDigest is the resolved content digest of spec.roles[].kernelArtifactRef, or
+	// empty when the role mounts no kernel bundle.
+	KernelManifestDigest string
 }
 
 // BuildModelDeploymentCompileCacheSubPath returns the relative subdirectory path
@@ -322,10 +326,11 @@ func modelDeploymentCompileCacheDegree(v int) int {
 // rather than a map because JSON writes a struct's fields in declaration order, so the encoding of
 // one set of inputs is byte-identical on every run and every build.
 type modelDeploymentCompileCacheHashSubject struct {
-	Image       string                                 `json:"image"`
-	Parallelism modelDeploymentCompileCacheParallelism `json:"parallelism"`
-	Flags       []string                               `json:"flags"`
-	Env         []string                               `json:"env"`
+	Image                string                                 `json:"image"`
+	Parallelism          modelDeploymentCompileCacheParallelism `json:"parallelism"`
+	Flags                []string                               `json:"flags"`
+	Env                  []string                               `json:"env"`
+	KernelManifestDigest string                                 `json:"kernelManifestDigest,omitempty"`
 }
 
 // modelDeploymentCompileCacheParallelism is the parallel shape as the digest sees it. Every
@@ -381,8 +386,9 @@ func modelDeploymentCompileCacheHash(
 			NodeCount: declared.NodeCount,
 			Modes:     modes,
 		},
-		Flags: modelDeploymentCompileCacheFlags(ModelDeploymentRoleArgs(in.Role)),
-		Env:   modelDeploymentCompileCacheEnv(in.Role.Env),
+		Flags:                modelDeploymentCompileCacheFlags(ModelDeploymentRoleArgs(in.Role)),
+		Env:                  modelDeploymentCompileCacheEnv(in.Role.Env),
+		KernelManifestDigest: strings.TrimSpace(in.KernelManifestDigest),
 	}
 
 	canonical, err := json.Marshal(subject)

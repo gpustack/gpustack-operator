@@ -612,6 +612,7 @@ func (s *server) ActuatePhysicalSliced(
 		inst    migInstance
 		outcome migReserveOutcome
 	}
+	slotName := deviceplugin.CanonicalSlotContainerName(pod, ctr)
 	var results []cardResult
 	rollback := func() {
 		for i := range results {
@@ -620,11 +621,11 @@ func (s *server) ActuatePhysicalSliced(
 			switch r.outcome {
 			case migCreated:
 				_ = s.mig.DestroyInstance(r.card, r.inst)
-				_ = os.Remove(markerPath(string(pod.UID), ctr.Name, r.card))
+				_ = os.Remove(markerPath(string(pod.UID), slotName, r.card))
 			case migBound:
 				// The instance was pre-existing (adopted), so only drop our ownership marker,
 				// returning it to the unbound pool; reclaim destroys it once the accelerator drains.
-				_ = os.Remove(markerPath(string(pod.UID), ctr.Name, r.card))
+				_ = os.Remove(markerPath(string(pod.UID), slotName, r.card))
 			case migRebound:
 				// A prior allocation owns this marker and instance; leave both intact.
 			}
@@ -640,7 +641,7 @@ func (s *server) ActuatePhysicalSliced(
 		}
 		unlock := lockCard(cardUUID)
 		inst, outcome, err := reserveMigInstance(
-			s.mig, deviceplugin.OperatorPodsDir, string(pod.UID), ctr.Name, cardUUID, profile, computeSlices, memorySlices,
+			s.mig, deviceplugin.OperatorPodsDir, string(pod.UID), slotName, cardUUID, profile, computeSlices, memorySlices,
 		)
 		unlock()
 		if err != nil {

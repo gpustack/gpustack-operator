@@ -234,6 +234,12 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// worker Pods.
 	//
 	RuntimeControl *ModelDeploymentRoleRuntimeControlApplyConfiguration `json:"runtimeControl,omitempty"`
+	// KernelArtifactRef optionally names a ModelKernelArtifact in this namespace whose verified
+	// kernel bundle is mounted read-only at /var/lib/gpustack/kernels on this role's Pods.
+	// Changing or clearing it triggers a readiness-gated rolling replacement of this role's
+	// replicas while leaving deployments that omit it unchanged.
+	//
+	KernelArtifactRef *corev1.LocalObjectReferenceApplyConfiguration `json:"kernelArtifactRef,omitempty"`
 }
 
 // ModelDeploymentRoleApplyConfiguration constructs a declarative configuration of the ModelDeploymentRole type for use with
@@ -439,5 +445,13 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithPause(value bool) *ModelDepl
 // If called multiple times, the RuntimeControl field is set to the value of the last call.
 func (b *ModelDeploymentRoleApplyConfiguration) WithRuntimeControl(value *ModelDeploymentRoleRuntimeControlApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
 	b.RuntimeControl = value
+	return b
+}
+
+// WithKernelArtifactRef sets the KernelArtifactRef field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the KernelArtifactRef field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithKernelArtifactRef(value *corev1.LocalObjectReferenceApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
+	b.KernelArtifactRef = value
 	return b
 }

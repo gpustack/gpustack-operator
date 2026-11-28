@@ -994,11 +994,17 @@ func TestStartHoldsBackAFirstPassThatDetectedNothing(t *testing.T) {
 				d.reportedInterfacesKnown = true
 			}
 
+			t.Setenv("KUBERNETES_NODE_NAME", "")
 			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			done := make(chan struct{})
 			go func() {
+				defer close(done)
 				_ = d.Start(ctx)
 			}()
+			t.Cleanup(func() {
+				cancel()
+				<-done
+			})
 
 			if tc.keepsDetecting {
 				// A second detect pass proves the round was repeated, and that the first one is over:
@@ -1056,13 +1062,19 @@ func TestStartKeepsAFailedManufacturerPublished(t *testing.T) {
 		detectedManufacturersCh: publishedCh,
 	}
 
+	t.Setenv("KUBERNETES_NODE_NAME", "")
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		// NB: reporting devices fails without KUBERNETES_NODE_NAME and a loopback client, which the
 		// detector logs and tolerates — and which keeps this loop detecting every period.
 		_ = d.Start(ctx)
 	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
 
 	// The first round detects; every round after it fails.
 	for round := 1; round <= 3; round++ {
@@ -1104,11 +1116,17 @@ func TestStartDetectsAgainAfterAFailedPass(t *testing.T) {
 		detectedManufacturersCh: publishedCh,
 	}
 
+	t.Setenv("KUBERNETES_NODE_NAME", "")
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		_ = d.Start(ctx)
 	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
 
 	for round := 1; round <= 3; round++ {
 		select {

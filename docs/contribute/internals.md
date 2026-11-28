@@ -32,6 +32,8 @@ changes to the operator's services. Vendor libraries and object names have their
   status ([Node Model Store](../reference/model-delivery-node-store.md)).
 - **`model-transfer`** (alias `mx`) serves authorized source generations for remote weight loading
   ([Remote Weight Delivery](../modules/model-delivery/remote.md)).
+- **`model-forger`** (hidden) runs `mock`, `verify`, and `hold` helper stages inside `ForgeSandbox`
+  `Pod`s ([Model Deployment Forger Internals](../reference/model-deployment-forger-internals.md)).
 
 ## Worker startup order
 

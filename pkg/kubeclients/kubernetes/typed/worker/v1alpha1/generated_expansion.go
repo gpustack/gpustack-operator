@@ -27,7 +27,11 @@ type ModelArtifactExpansion interface{}
 
 type ModelDeploymentExpansion interface{}
 
+type ModelDeploymentForgerExpansion interface{}
+
 type ModelDeploymentScalerExpansion interface{}
+
+type ModelKernelArtifactExpansion interface{}
 
 type ModelPrefetchExpansion interface{}
 

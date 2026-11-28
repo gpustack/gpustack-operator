@@ -668,8 +668,11 @@ func (r *PodWebhook) ValidateDelete(_ context.Context, _ runtime.Object) (ctrlad
 //  3. <base>.partitioned is exactly 1;
 //  4. a partition request names exactly one profile shape;
 //  5. each per-profile key's value is exactly 1;
-//  6. at most one container requests a slicing family, logical or physical;
-//  7. a restartable init container requests no accelerator family at all.
+//  6. at most one running container requests a slicing family, logical or physical; sequential
+//     non-sidecar init containers may share a slicing or partition slot;
+//  7. a restartable init container requests no accelerator family at all;
+//  8. sequential non-sidecar init containers that request accelerators must declare identical
+//     accelerator resource keys and quantities so they reuse the same hardware slot.
 //
 // Rules 4 and 6 are scoped to the group holding the claims, which rule 1 makes unique; they are
 // evaluated over every non-sidecar container so that a Pod violating rule 1 still reports them.
@@ -683,10 +686,11 @@ func validatePodAcceleratorRequest(pod *core.Pod) field.ErrorList {
 	}
 
 	var (
-		families = sets.New[nodefeature.ResourceFamily]()
-		groups   = sets.New[containerGroup]()
-		profiles = sets.New[string]()
-		slicing  int
+		families       = sets.New[nodefeature.ResourceFamily]()
+		groups         = sets.New[containerGroup]()
+		profiles       = sets.New[string]()
+		runningSlicing int
+		initClaiming   int
 	)
 	for i := range containers {
 		pc, claim := &containers[i], claims[i]
@@ -713,9 +717,14 @@ func validatePodAcceleratorRequest(pod *core.Pod) field.ErrorList {
 			}
 		}
 		groups.Insert(pc.group)
+		if pc.group == containerGroupInit {
+			initClaiming++
+		}
 		if len(claim[nodefeature.ResourceFamilySliced]) > 0 ||
 			len(claim[nodefeature.ResourceFamilyPartitioned]) > 0 {
-			slicing++
+			if pc.group == containerGroupRunning {
+				runningSlicing++
+			}
 		}
 	}
 
@@ -739,16 +748,23 @@ func validatePodAcceleratorRequest(pod *core.Pod) field.ErrorList {
 				"while the scheduler charges the Pod only once", containerGroupInit)))
 	}
 
-	// Rule 6.
-	if slicing > 1 {
+	// Rule 6. Concurrent running containers may hold at most one slicing or partition request;
+	// sequential non-sidecar init containers execute one at a time and reuse the same slot.
+	if runningSlicing > 1 {
 		errs = append(errs, field.Forbidden(field.NewPath("spec"),
-			fmt.Sprintf("at most one container may request a slicing family, found %d", slicing)))
+			fmt.Sprintf("at most one running container may request a slicing family, found %d", runningSlicing)))
 	}
 
 	// Rule 4.
 	if profiles.Len() > 1 {
 		errs = append(errs, field.Forbidden(field.NewPath("spec"),
 			fmt.Sprintf("a Pod may request only one partition profile, found %v", sets.List(profiles))))
+	}
+
+	// Rule 8. Sequential non-sidecar init containers share the same hardware slot via kubelet
+	// device reuse and must declare identical accelerator requests.
+	if initClaiming > 1 {
+		errs = append(errs, validateHomogeneousInitAcceleratorClaims(containers, claims)...)
 	}
 
 	// Rules 2, 3 and 5, plus the per-family shape checks. A sidecar is skipped: rule 7 already
@@ -770,6 +786,69 @@ func validatePodAcceleratorRequest(pod *core.Pod) field.ErrorList {
 		}
 	}
 
+	return errs
+}
+
+// containerAcceleratorResources returns the effective accelerator resource keys and quantities
+// requested by ctr across the four accelerator families. Requests win over Limits, matching
+// containerResource.
+func containerAcceleratorResources(ctr *core.Container) core.ResourceList {
+	out := core.ResourceList{}
+	for _, rl := range []core.ResourceList{ctr.Resources.Limits, ctr.Resources.Requests} {
+		for name, q := range rl {
+			if _, _, ok := acceleratorBaseOf(name); !ok {
+				continue
+			}
+			out[name] = q
+		}
+	}
+	return out
+}
+
+// equalAcceleratorResources reports whether a and b contain the exact same accelerator resource
+// keys and quantities.
+func equalAcceleratorResources(a, b core.ResourceList) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for name, qa := range a {
+		qb, ok := b[name]
+		if !ok || !qa.Equal(qb) {
+			return false
+		}
+	}
+	return true
+}
+
+// validateHomogeneousInitAcceleratorClaims verifies that every accelerator-claiming non-sidecar
+// initContainer declares the exact same set of accelerator resource keys and quantities. CPU-only
+// initContainers with zero accelerator claims are skipped.
+func validateHomogeneousInitAcceleratorClaims(
+	containers []podContainer,
+	claims []map[nodefeature.ResourceFamily][]core.ResourceName,
+) field.ErrorList {
+	var (
+		errs      field.ErrorList
+		firstName string
+		firstRes  core.ResourceList
+	)
+	for i := range containers {
+		pc := &containers[i]
+		if pc.group != containerGroupInit || len(claims[i]) == 0 {
+			continue
+		}
+		res := containerAcceleratorResources(pc.ctr)
+		if firstRes == nil {
+			firstName = pc.ctr.Name
+			firstRes = res
+			continue
+		}
+		if !equalAcceleratorResources(firstRes, res) {
+			errs = append(errs, field.Forbidden(pc.path.Child("resources", "limits"),
+				fmt.Sprintf("sequential initContainers sharing an accelerator slot must declare identical accelerator requests; "+
+					"initContainer %q does not match %q", pc.ctr.Name, firstName)))
+		}
+	}
 	return errs
 }
 
