@@ -488,32 +488,21 @@ def _normalize_dtypes(dtypes: list[str] | tuple[str, ...] | None) -> list[str]:
     return out
 
 
-_DROP_CONSTANT = object()
-
-
 def _canonicalize_constant_value(value: Any) -> Any:
     if isinstance(value, bool):
         return value
     if isinstance(value, float):
         if not math.isfinite(value):
-            return _DROP_CONSTANT
+            raise ValueError(f"Constant float value must be finite, got {value!r}")
         if value.is_integer():
             return int(value)
         return value
     if isinstance(value, dict):
-        out: dict[str, Any] = {}
-        for k, v in sorted(value.items()):
-            norm = _canonicalize_constant_value(v)
-            if norm is not _DROP_CONSTANT:
-                out[str(k)] = norm
-        return out
+        return {
+            str(k): _canonicalize_constant_value(v) for k, v in sorted(value.items())
+        }
     if isinstance(value, (list, tuple)):
-        items: list[Any] = []
-        for v in value:
-            norm = _canonicalize_constant_value(v)
-            if norm is not _DROP_CONSTANT:
-                items.append(norm)
-        return items
+        return [_canonicalize_constant_value(v) for v in value]
     return value
 
 
@@ -529,14 +518,11 @@ def compute_signature_hash16(
         for k, v in sorted(const_axes.items())
         if str(k).strip() and str(k).strip().lower() not in _DYNAMIC_VAR_AXES
     }
-    norm_constants: dict[str, Any] = {}
-    for k, v in sorted((constants or {}).items()):
-        ks = str(k).strip()
-        if not ks:
-            continue
-        norm_v = _canonicalize_constant_value(v)
-        if norm_v is not _DROP_CONSTANT:
-            norm_constants[ks] = norm_v
+    norm_constants = {
+        str(k).strip(): _canonicalize_constant_value(v)
+        for k, v in sorted((constants or {}).items())
+        if str(k).strip()
+    }
     payload = {
         "constAxes": filtered_axes,
         "constants": norm_constants,
