@@ -198,7 +198,7 @@ func TestGroupForwardProbeRequestIsIdentifiable(t *testing.T) {
 			wantPath: "/v1/completions",
 			wantFields: map[string]any{
 				// The document is read back as generic JSON, so every number arrives a float.
-				"max_tokens": float64(1), "temperature": float64(0),
+				"max_tokens": float64(1), "temperature": float64(0), "ignore_eos": true,
 			},
 		},
 		{
@@ -843,6 +843,8 @@ func TestGroupForwardProbePDPairCarriesTheRequestOnBothHeads(t *testing.T) {
 			"the warmup probe sends the minimal completion prompt without a chat template")
 		assert.Equal(t, float64(modelDeploymentGroupForwardPairMaxTokens), body["max_tokens"],
 			"the warmup probe caps generation to 2 tokens")
+		assert.Equal(t, true, body["ignore_eos"],
+			"the warmup probe ignores EOS so vLLM prefill finishes length-capped for Mooncake transfer")
 		assert.NotContains(t, body, "messages",
 			"the completions warmup probe does not require chat templates")
 
