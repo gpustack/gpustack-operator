@@ -488,17 +488,32 @@ def _normalize_dtypes(dtypes: list[str] | tuple[str, ...] | None) -> list[str]:
     return out
 
 
+_DROP_CONSTANT = object()
+
+
 def _canonicalize_constant_value(value: Any) -> Any:
     if isinstance(value, bool):
         return value
-    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
-        return int(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return _DROP_CONSTANT
+        if value.is_integer():
+            return int(value)
+        return value
     if isinstance(value, dict):
-        return {
-            str(k): _canonicalize_constant_value(v) for k, v in sorted(value.items())
-        }
+        out: dict[str, Any] = {}
+        for k, v in sorted(value.items()):
+            norm = _canonicalize_constant_value(v)
+            if norm is not _DROP_CONSTANT:
+                out[str(k)] = norm
+        return out
     if isinstance(value, (list, tuple)):
-        return [_canonicalize_constant_value(v) for v in value]
+        items: list[Any] = []
+        for v in value:
+            norm = _canonicalize_constant_value(v)
+            if norm is not _DROP_CONSTANT:
+                items.append(norm)
+        return items
     return value
 
 
@@ -514,11 +529,14 @@ def compute_signature_hash16(
         for k, v in sorted(const_axes.items())
         if str(k).strip() and str(k).strip().lower() not in _DYNAMIC_VAR_AXES
     }
-    norm_constants = {
-        str(k).strip(): _canonicalize_constant_value(v)
-        for k, v in sorted((constants or {}).items())
-        if str(k).strip()
-    }
+    norm_constants: dict[str, Any] = {}
+    for k, v in sorted((constants or {}).items()):
+        ks = str(k).strip()
+        if not ks:
+            continue
+        norm_v = _canonicalize_constant_value(v)
+        if norm_v is not _DROP_CONSTANT:
+            norm_constants[ks] = norm_v
     payload = {
         "constAxes": filtered_axes,
         "constants": norm_constants,
@@ -530,6 +548,7 @@ def compute_signature_hash16(
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
+        allow_nan=False,
     )
     # Match Go encoding/json escaping of U+2028/U+2029 for cross-language hash parity.
     encoded_str = encoded_str.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
@@ -955,6 +974,8 @@ def _sanitize_constants(raw_constants: Any) -> dict[str, Any]:
         if ks.lower() in _SENSITIVE_ARG_KEYS or ks not in allowed_keys:
             continue
         if isinstance(v, (int, float, bool)):
+            if isinstance(v, float) and not math.isfinite(v):
+                continue
             out[ks] = v
     return out
 

@@ -2450,7 +2450,8 @@ def test_probe_request_rejects_malformed_version_and_arch_and_worker_finalizer_g
     assert session.error_code == "probe_distill_failed"
     assert not stage_dir.exists()
 
-    # Cross-language hash parity: c10:: dtype prefix, whole-number float 1.0 == 1, U+2028/U+2029.
+    # Cross-language hash parity: c10:: dtype prefix, whole-number float 1.0 == 1, U+2028/U+2029,
+    # and non-finite float constants dropped instead of emitting invalid JSON NaN/Infinity.
     h1 = compute_signature_hash16(
         {"hidden_size": 4096},
         ["torch.float16"],
@@ -2461,6 +2462,11 @@ def test_probe_request_rejects_malformed_version_and_arch_and_worker_finalizer_g
         {"hidden_size": 4096},
         ["c10::float16"],
         ["c10::float16"],
-        constants={"scale": 1, "sep": "a\u2028b\u2029c"},
+        constants={
+            "scale": 1,
+            "sep": "a\u2028b\u2029c",
+            "bad_nan": float("nan"),
+            "bad_inf": float("inf"),
+        },
     )
     assert h1 == h2

@@ -863,4 +863,32 @@ func TestEnsureKernelFromHuggingFacePublishesKindKernel(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, download.ReasonIntegrityMismatch, rec.Reason)
 	})
+
+	t.Run("attempt lock contention cancels without incrementing failure backoff", func(t *testing.T) {
+		digest := env.hub.manifest("owner/kernels").Digest
+		hex := store.HexOf(digest)
+		unlock, ok := env.store.TryLockAttempt(hex)
+		require.True(t, ok)
+		defer unlock()
+
+		mka := &workercore.ModelKernelArtifact{
+			ObjectMeta: meta.ObjectMeta{UID: "uid-k-busy"},
+			Spec: workercore.ModelKernelArtifactSpec{
+				Source: workercore.ModelKernelArtifactSource{
+					HuggingFace: &workercore.ModelArtifactHubSource{Repository: "owner/kernels", Revision: testCommit},
+				},
+			},
+			Status: workercore.ModelKernelArtifactStatus{
+				Resolved: &workercore.ModelKernelArtifactResolved{Revision: testCommit, ManifestDigest: digest},
+			},
+		}
+		req := driver.Request{Hex: hex, Source: driver.KernelArtifactSource(mka), Token: "hf-k-token"}
+		env.m.Ensure(context.Background(), req)
+		env.waitIdle(t, hex)
+
+		rec, err := env.store.ReadDigest(hex)
+		require.NoError(t, err)
+		assert.Zero(t, rec.Failures, "lock contention must not increment failure backoff")
+		assert.True(t, rec.RetryTime.IsZero(), "lock contention must not schedule backoff retry time")
+	})
 }

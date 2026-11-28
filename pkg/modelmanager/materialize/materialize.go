@@ -376,7 +376,11 @@ func (m *Materializer) watchWaiters(ctx context.Context, j *job) func() {
 func (m *Materializer) attempt(ctx context.Context, j *job) error {
 	unlock, ok := m.Store.TryLockAttempt(j.hex)
 	if !ok {
-		return fmt.Errorf("another store operation is already publishing %s", j.hex)
+		return &download.Error{
+			Reason:  download.ReasonCanceled,
+			Message: fmt.Sprintf("another store operation is already publishing %s", j.hex),
+			Detail:  "attempt lock busy",
+		}
 	}
 	defer unlock()
 
