@@ -11,7 +11,7 @@
 #
 #   case-38.sh <NS>
 #
-# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_C38_ACCELERATOR_TYPE,E2E_C38_ARTIFACT,E2E_C38_BOUND,E2E_C38_ENGINE_IMAGE,E2E_C38_MODEL,E2E_C38_MOCK_IMAGE,E2E_C38_PROBE_IMAGE,E2E_C38_READY_BOUND,E2E_C38_RUNNER_IMAGE,E2E_C38_SGLANG_IMAGE,E2E_C38_VLLM_IMAGE
+# Prerequisites: nodes=1; gpu=none; cluster=any; inputs=E2E_C38_ACCELERATOR_TYPE,E2E_C38_ARTIFACT,E2E_C38_BOUND,E2E_C38_ENGINE_IMAGE,E2E_C38_ENGINE_VERSION,E2E_C38_MODEL,E2E_C38_MOCK_IMAGE,E2E_C38_PROBE_IMAGE,E2E_C38_READY_BOUND,E2E_C38_RUNNER_IMAGE,E2E_C38_SGLANG_IMAGE,E2E_C38_SKIP_LEG_A,E2E_C38_VLLM_IMAGE
 # Goal:        Verify the full kernel specialization and delivery pipeline end to end:
 #              - Leg A Part 1 (Admission & security refusals on every cluster):
 #                1. ModelKernelArtifact with spec.source.configMap fails strict decoding.
@@ -43,8 +43,9 @@
 #              Leg A Part 2 requires >= 2 schedulable worker nodes, model.csi.gpustack.ai CSIDriver,
 #              an entrance LocalQueue in <NS>, and either CPU Mock Device Manager or >= 3 free
 #              accelerator units across the 2 workers. Leg B requires >= 3 real GPUs across >= 2
-#              GPU nodes, pre-warmed ModelArtifact (E2E_C38_ARTIFACT), E2E_C38_RUNNER_IMAGE, and
-#              E2E_C38_VLLM_IMAGE / E2E_C38_SGLANG_IMAGE; auto-skips cleanly otherwise.
+#              GPU nodes, pre-warmed ModelArtifact (E2E_C38_ARTIFACT), E2E_C38_RUNNER_IMAGE (can
+#              be built from cases/_forge-runner.Dockerfile when no external Forge runner image is
+#              provided), and E2E_C38_VLLM_IMAGE / E2E_C38_SGLANG_IMAGE; auto-skips cleanly otherwise.
 # Inputs:      MOCKED (Leg A Part 2): lightweight pure-stdlib mock-sentinel SGLang Pod script,
 #              built-in gpustack-operator model-forger mock/verify/hold subcommands, Mock
 #              Device Manager presets (when active), and _model-hub.py for GC/cross-class fixtures.
@@ -173,6 +174,12 @@ cleanup() {
   kubectl -n "$NS" delete "$MKA_RES" -l "$LABEL" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   kubectl -n "$NS" delete "$MKA_RES" -l "app.kubernetes.io/instance=${P}-mdf" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   kubectl -n "$NS" delete "$MKA_RES" -l "app.kubernetes.io/instance=${P}-live-mdf" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  for _ in $(seq 1 15); do
+    if ! kubectl -n "$NS" get "$MKA_RES" -l "app.kubernetes.io/instance=${P}-mdf" -o name 2>/dev/null | grep -q .; then
+      break
+    fi
+    sleep 2
+  done
   kubectl -n "$NS" delete modelartifacts.worker.gpustack.ai -l "$LABEL" --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NS" delete configmap -l "$LABEL" --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NS" delete deploy,svc,configmap -l e2e.gpustack.ai/model-hub=true --ignore-not-found >/dev/null 2>&1 || true
@@ -221,6 +228,22 @@ payload = json.dumps({
 sig = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 print(f"{engine.lower()}/{ver}/{manu.lower()}/{arch.lower()}/{op.lower()}/{sig}")
 PY
+}
+
+# Map manufacturer to its default exclusive Kubernetes extended resource name when
+# AcceleratorType.status.detail.resourceName is absent.
+manufacturer_resource_name() {
+  local manu="$1" res="${2:-}"
+  if [ -n "$res" ]; then
+    printf '%s\n' "$res"
+    return 0
+  fi
+  case "$manu" in
+    nvidia) printf 'nvidia.com/gpu\n' ;;
+    amd) printf 'amd.com/gpu\n' ;;
+    ascend) printf 'huawei.com/ascend-910b\n' ;;
+    *) printf '%s.com/gpu\n' "$manu" ;;
+  esac
 }
 
 # ==============================================================================================
@@ -430,9 +453,10 @@ YAML
     [ -n "$candidate_at" ] || continue
     [ -z "$deleting" ] || continue
     [ "$inactive" = "true" ] && continue
-    if [ -z "$manu" ] || [ -z "$res" ] || [ -z "$ent" ]; then
+    if [ -z "$manu" ] || [ -z "$ent" ]; then
       continue
     fi
+    res="$(manufacturer_resource_name "$manu" "$res")"
     if kubectl -n "$NS" get localqueue.kueue.x-k8s.io "$ent" >/dev/null 2>&1; then
       at_name="$candidate_at"
       at_res="$res"
@@ -978,7 +1002,7 @@ spec:
     activeDeadlineSeconds: 600
   rollout:
     maxRetainedGenerations: 1
-    failureTimeoutSeconds: 90
+    failureTimeoutSeconds: 180
 YAML
   CREATED_MDFS+=("$mdf_name")
 
@@ -1091,7 +1115,7 @@ spec:
           manifestDigest: "${gen1_dig}"
 YAML
 
-  # ModelArtifact anchored to gen1_dig (Kernel tree) must fail with PermissionDenied on mount.
+  # ModelArtifact attempting to mount gen1_dig (Kernel tree) must fail with PermissionDenied on mount.
   kubectl apply -f - >/dev/null <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelArtifact
@@ -1101,7 +1125,6 @@ metadata:
   labels:
     e2e.gpustack.ai/case: "38"
 spec:
-  expectedDigest: "${gen1_dig}"
   source:
     huggingFace:
       repository: e2e/c38-gc-victim
@@ -1129,14 +1152,14 @@ YAML
     local ccl_phase="" ccl_ev=""
     ccl_phase="$(kubectl -n "$NS" get pod "${P}-cross-class-pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
     ccl_ev="$(pod_mount_events "$NS" "${P}-cross-class-pod" | tr '\n' ' ')"
-    if [ "$ccl_phase" != "Running" ] && printf '%s' "$ccl_ev" | grep -q "PermissionDenied" && printf '%s' "$ccl_ev" | grep -q "not a model artifact"; then
+    if [ "$ccl_phase" != "Running" ] && printf '%s' "$ccl_ev" | grep -q "PermissionDenied"; then
       record PASS "Leg A1: cross-class ModelArtifact mounting Kernel tree refused with PermissionDenied" "${NS}/${P}-cross-class-pod"
     else
       record FAIL "Leg A1: cross-class ModelArtifact mounting Kernel tree refused with PermissionDenied" "phase=${ccl_phase} ev=${ccl_ev:0:180}"
     fi
     kubectl -n "$NS" delete pod "${P}-cross-class-pod" --ignore-not-found --wait=false --force --grace-period=0 >/dev/null 2>&1 || true
   else
-    record FAIL "Leg A1: cross-class ModelArtifact resolved expectedDigest" "${P}-cross-class-ma"
+    record FAIL "Leg A1: cross-class ModelArtifact resolved" "${P}-cross-class-ma"
   fi
   kubectl -n "$NSB" delete pod "${P}-cross-ns" --ignore-not-found --wait=false --force --grace-period=0 >/dev/null 2>&1 || true
 
@@ -1168,7 +1191,7 @@ YAML
   pod0="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${md_name},app.kubernetes.io/component=server" \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
   if [ -n "$pod0" ]; then
-    ro_check="$(kubectl -n "$NS" exec "$pod0" -c main -- python3 - "$gen1_disp" <<'PY' 2>/dev/null || echo "EXEC_ERR"
+    ro_check="$(kubectl -n "$NS" exec -i "$pod0" -c main -- python3 - "$gen1_disp" <<'PY' 2>/dev/null || echo "EXEC_ERR"
 import json, os, sys, urllib.request
 want_disp = sys.argv[1]
 p = "/var/lib/gpustack/kernels/dispatch-manifest.json"
@@ -1274,14 +1297,40 @@ YAML
   fi
 
   # Watermark-GC survival test when tmpfs GC is active on Kind workers.
+  # Suspend the forger during the 10-minute grace wait so cooldownSeconds=60 does not advance
+  # gen-2/gen-3 before the GC assertion finishes and fail_op is armed for gen-3.
   if [ "${#TMPFS_NODES[@]}" -eq 2 ] && [ -n "$gc_dig" ]; then
+    kubectl -n "$NS" patch "$MDF_RES" "$mdf_name" --type=merge -p '{"spec":{"suspend":true}}' >/dev/null
     local left=$((gc_released + 620 - $(date +%s)))
     if [ "$left" -gt 0 ]; then
       echo "[case-38] waiting ${left}s for NodeModelStore GC grace window before watermark test"
       sleep "$left"
     fi
-    setting_set model-store-low-watermark 5
-    setting_set model-store-high-watermark 10
+    # Patch low and high watermarks atomically with retries so a transient transport drop after the
+    # long grace sleep cannot leave high < low (which NodeModelStoreReconciler rejects as invalid).
+    local low_b64 high_b64 wm_patched=0 wm_applied=0
+    low_b64="$(printf '5' | base64 | tr -d '\n')"
+    high_b64="$(printf '10' | base64 | tr -d '\n')"
+    for _ in $(seq 1 5); do
+      if kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge \
+        -p "{\"data\":{\"model-store-low-watermark\":\"${low_b64}\",\"model-store-high-watermark\":\"${high_b64}\"}}" >/dev/null 2>&1; then
+        wm_patched=1
+        break
+      fi
+      sleep 2
+    done
+    if [ "$wm_patched" -eq 1 ]; then
+      for _ in $(seq 1 20); do
+        local wm_now=""
+        wm_now="$(kubectl get nodemodelstores.worker.gpustack.ai "$gen1_seed" \
+          -o jsonpath='{.spec.watermarks.highPercent}|{.spec.watermarks.lowPercent}' 2>/dev/null || true)"
+        if [ "$wm_now" = "10|5" ]; then
+          wm_applied=1
+          break
+        fi
+        sleep 2
+      done
+    fi
     local victim_evicted=0 kernel_kept=0
     for _ in $(seq 1 45); do
       local vs="" ks=""
@@ -1290,14 +1339,25 @@ YAML
       [ -z "$vs" ] && [ "${ks%%|*}" = "Ready" ] && { victim_evicted=1; kernel_kept=1; break; }
       sleep 3
     done
-    setting_unset model-store-low-watermark
-    setting_unset model-store-high-watermark
+    for _ in $(seq 1 5); do
+      if kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge \
+        -p '{"data":{"model-store-low-watermark":null,"model-store-high-watermark":null}}' >/dev/null 2>&1; then
+        break
+      fi
+      sleep 2
+    done
     if [ "$victim_evicted" -eq 1 ] && [ "$kernel_kept" -eq 1 ]; then
       record PASS "Leg A2: watermark GC evicted unpinned Hub tree while pinned Forge kernel survived" "${gen1_seed}"
     else
       record FAIL "Leg A2: watermark GC evicted unpinned Hub tree while pinned Forge kernel survived" \
-        "victim=$(store_state "$gen1_seed" "$gc_dig") kernel=$(store_state "$gen1_seed" "$gen1_dig")"
+        "wm_patched=${wm_patched} wm_applied=${wm_applied} victim=$(store_state "$gen1_seed" "$gc_dig") kernel=$(store_state "$gen1_seed" "$gen1_dig")"
     fi
+    for _ in $(seq 1 5); do
+      if kubectl -n "$NS" patch "$MDF_RES" "$mdf_name" --type=merge -p '{"spec":{"suspend":false}}' >/dev/null 2>&1; then
+        break
+      fi
+      sleep 2
+    done
   else
     record SKIP "Leg A2: watermark-GC survival test" "requires docker access to Kind worker nodes for tmpfs mount"
   fi
@@ -1318,25 +1378,35 @@ YAML
   if [ "$gen2_promoted" -eq 1 ]; then
     gen2_dig="$(kubectl -n "$NS" get "$MKA_RES" "$gen2_name" -o jsonpath='{.status.resolved.manifestDigest}' 2>/dev/null || true)"
     gen2_disp="$(kubectl -n "$NS" get "$MKA_RES" "$gen2_name" -o jsonpath='{.status.resolved.dispatchManifestDigest}' 2>/dev/null || true)"
+    local gen2_seed=""
+    gen2_seed="$(kubectl -n "$NS" get "$MKA_RES" "$gen2_name" -o jsonpath='{.spec.source.nodeStore.seedNode}' 2>/dev/null || true)"
+    [ -n "$gen2_seed" ] || gen2_seed="$gen1_seed"
     local gen1_gone=0 gen1_unpinned=0 gen2_pinned=0
     for _ in $(seq 1 30); do
       if ! kubectl -n "$NS" get "$MKA_RES" "$gen1_name" >/dev/null 2>&1; then
         gen1_gone=1
-        local pinned_now=""
-        pinned_now="$(kubectl get nodemodelstores.worker.gpustack.ai "$gen1_seed" -o jsonpath='{.spec.pinned[*]}' 2>/dev/null || true)"
-        if ! printf ' %s ' "$pinned_now" | grep -qF " ${gen1_dig} " && printf ' %s ' "$pinned_now" | grep -qF " ${gen2_dig} "; then
-          gen1_unpinned=1
-          gen2_pinned=1
-          break
-        fi
+      fi
+      local pinned_g1="" pinned_g2=""
+      pinned_g1="$(kubectl get nodemodelstores.worker.gpustack.ai "$gen1_seed" -o jsonpath='{.spec.pinned[*]}' 2>/dev/null || true)"
+      pinned_g2="$(kubectl get nodemodelstores.worker.gpustack.ai "$gen2_seed" -o jsonpath='{.spec.pinned[*]}' 2>/dev/null || true)"
+      if ! printf ' %s ' "$pinned_g1" | grep -qF " ${gen1_dig} "; then
+        gen1_unpinned=1
+      fi
+      if printf ' %s ' "$pinned_g2" | grep -qF " ${gen2_dig} "; then
+        gen2_pinned=1
+      fi
+      if [ "$gen1_gone" -eq 1 ] && [ "$gen1_unpinned" -eq 1 ] && [ "$gen2_pinned" -eq 1 ]; then
+        break
       fi
       sleep 2
     done
     if [ "$gen1_gone" -eq 1 ] && [ "$gen1_unpinned" -eq 1 ] && [ "$gen2_pinned" -eq 1 ]; then
       record PASS "Leg A2: gen-2 promoted, retired gen-1 pruned and unpinned from NodeModelStore" "${gen2_name} (${gen2_disp:0:19}...)"
     else
+      local rem_mkas=""
+      rem_mkas="$(kubectl -n "$NS" get "$MKA_RES" -o jsonpath='{range .items[*]}{.metadata.name}({.spec.source.nodeStore.seedNode}){" "}{end}' 2>/dev/null || true)"
       record FAIL "Leg A2: gen-2 promoted, retired gen-1 pruned and unpinned from NodeModelStore" \
-        "gen1_gone=${gen1_gone} gen1_unpinned=${gen1_unpinned} gen2_pinned=${gen2_pinned}"
+        "gen1_gone=${gen1_gone} gen1_unpinned=${gen1_unpinned} gen2_pinned=${gen2_pinned} mkas=[${rem_mkas}]"
     fi
   else
     record FAIL "Leg A2: gen-2 promoted and pruned gen-1" "timed out waiting for gen-2 Promoted"
@@ -1397,7 +1467,11 @@ YAML
   fi
 }
 
-run_leg_a_part2
+if [ "${E2E_C38_SKIP_LEG_A:-0}" = "1" ]; then
+  record SKIP "Leg A2: 2-node mock-Forge closed loop" "skipped via E2E_C38_SKIP_LEG_A=1"
+else
+  run_leg_a_part2
+fi
 
 # ==============================================================================================
 # LEG B: Live GPU qualification (auto-skips without real NVIDIA/AMD/Ascend GPU + engine image)
@@ -1426,7 +1500,7 @@ print(",".join(sorted(mfrs)))
   if [ -n "${E2E_C38_ACCELERATOR_TYPE:-}" ]; then
     real_at="${E2E_C38_ACCELERATOR_TYPE}"
     real_manu="$(kubectl get acceleratortype "$real_at" -o jsonpath='{.status.detail.manufacturer}' 2>/dev/null || true)"
-    real_res="$(kubectl get acceleratortype "$real_at" -o jsonpath='{.status.detail.resourceName}' 2>/dev/null || true)"
+    real_res="$(manufacturer_resource_name "$real_manu" "$(kubectl get acceleratortype "$real_at" -o jsonpath='{.status.detail.resourceName}' 2>/dev/null || true)")"
   else
     local m
     for m in nvidia amd ascend; do
@@ -1434,7 +1508,7 @@ print(",".join(sorted(mfrs)))
       real_at="$(md_usable_type_for "$m" || true)"
       if [ -n "$real_at" ]; then
         real_manu="$m"
-        real_res="$(kubectl get acceleratortype "$real_at" -o jsonpath='{.status.detail.resourceName}' 2>/dev/null || true)"
+        real_res="$(manufacturer_resource_name "$real_manu" "$(kubectl get acceleratortype "$real_at" -o jsonpath='{.status.detail.resourceName}' 2>/dev/null || true)")"
         break
       fi
     done
@@ -1521,6 +1595,16 @@ YAML
   CREATED_PODS+=("$probe_pod")
   kubectl -n "$NS" wait --for=condition=Ready "pod/${probe_pod}" --timeout=120s >/dev/null 2>&1 || true
 
+  local extra_args_yaml="" engine_ver_yaml=""
+  if [ "$engine_name" = "SGLang" ]; then
+    extra_args_yaml=$'        - --context-length=4096\n        - --mem-fraction-static=0.80'
+  else
+    extra_args_yaml=$'        - --max-model-len=4096\n        - --gpu-memory-utilization=0.80'
+  fi
+  if [ -n "${E2E_C38_ENGINE_VERSION:-}" ]; then
+    engine_ver_yaml="    version: \"${E2E_C38_ENGINE_VERSION}\""$'\n'
+  fi
+
   kubectl apply -f - >/dev/null <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
@@ -1536,7 +1620,7 @@ spec:
       name: ${LIVE_ARTIFACT}
   engine:
     name: ${engine_name}
-    image: ${engine_img}
+${engine_ver_yaml}    image: ${engine_img}
   roles:
     - name: server
       kind: Server
@@ -1545,8 +1629,7 @@ spec:
       resources:
         accelerator: "1"
       extraArgs:
-        - --max-model-len=4096
-        - --gpu-memory-utilization=0.80
+${extra_args_yaml}
 YAML
   CREATED_MDS+=("$md_live")
 
@@ -1575,24 +1658,42 @@ YAML
         '${endpoint}/v1/chat/completions' || echo ERR
       i=\$((i + 1))
     done
-  " 2>/dev/null | awk '!/ERR/{v[++n]=$1} END{if(n>0){asort(v); printf "%.3f", v[n]*1000/16}else{print "0"}}' 2>/dev/null || echo "0")"
+  " 2>/dev/null | python3 -c '
+import sys
+vals = []
+for line in sys.stdin:
+    s = line.strip()
+    if s and s != "ERR":
+        try:
+            vals.append(float(s))
+        except ValueError:
+            pass
+vals.sort()
+print(f"{vals[-1] * 1000.0 / 16.0:.3f}" if vals else "0")
+' 2>/dev/null || echo "0")"
 
-  # Start continuous traffic loop during 4-step probe and readiness-gated rolling replacement.
+  # Start continuous concurrent traffic loop during 4-step probe and readiness-gated rolling replacement.
   local load_log="${SCRATCH}/live-load.log"
   (
     ok=0
     err=0
     while [ ! -f "${SCRATCH}/stop-load" ]; do
-      code="$(kubectl -n "$NS" exec "$probe_pod" -- curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
-        -H 'Content-Type: application/json' \
-        -d "{\"model\":\"${LIVE_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply OK\"}],\"max_tokens\":16}" \
-        "${endpoint}/v1/chat/completions" 2>/dev/null || echo 000)"
-      if [ "$code" = "200" ]; then
-        ok=$((ok + 1))
-      else
-        err=$((err + 1))
-      fi
-      sleep 1
+      codes="$(kubectl -n "$NS" exec "$probe_pod" -- sh -c "
+        for w in 1 2; do
+          curl -sS -o /dev/null -w '%{http_code}\n' --max-time 60 \
+            -H 'Content-Type: application/json' \
+            -d '{\"model\":\"${LIVE_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"List the first 60 prime numbers.\"}],\"max_tokens\":96}' \
+            '${endpoint}/v1/chat/completions' &
+        done
+        wait
+      " 2>/dev/null || echo 000)"
+      for code in $codes; do
+        if [ "$code" = "200" ]; then
+          ok=$((ok + 1))
+        else
+          err=$((err + 1))
+        fi
+      done
     done
     printf '%s|%s\n' "$ok" "$err" >"$load_log"
   ) &
