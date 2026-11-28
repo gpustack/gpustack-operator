@@ -1302,7 +1302,7 @@ func narrowToKubeletPending(
 func (r *DevicesReconciler) classifyAllocatingCandidates(
 	pods []core.Pod, match _AllocationMatch,
 ) (feasible, infeasible, claimed []_AllocatingCandidate) {
-	classify := func(pod *core.Pod, ctr *core.Container) {
+	classify := func(pod *core.Pod, ctr *core.Container, allocations PodAllocations, nonSidecarInit bool) {
 		if !containerRequests(ctr, match.ResourceName, match.Quantity) {
 			return
 		}
@@ -1314,6 +1314,15 @@ func (r *DevicesReconciler) classifyAllocatingCandidates(
 			if _, ok := r.reservedDevices(pod.UID, ctr.Name); ok {
 				claimed = append(claimed, _AllocatingCandidate{pod, ctr})
 				return
+			}
+			// Across a device-manager restart between two sequential init containers, in-memory
+			// reservations are empty while the completed predecessor's durable annotation and exit
+			// status remain on the Pod; treat it as claimed so the successor is selected.
+			if nonSidecarInit {
+				if held, ok := allocations[ctr.Name]; ok && len(held.Devices.Groups) > 0 && initContainerSucceeded(pod, ctr.Name) {
+					claimed = append(claimed, _AllocatingCandidate{pod, ctr})
+					return
+				}
 			}
 		}
 		if match.SkipGranted && r.visibilityGranted(pod.UID, ctr.Name) {
@@ -1332,11 +1341,16 @@ func (r *DevicesReconciler) classifyAllocatingCandidates(
 		if p := pod.Status.Phase; p != "" && p != core.PodPending {
 			continue
 		}
+		var allocations PodAllocations
+		if match.SkipReserved && len(pod.Spec.InitContainers) > 0 {
+			allocations, _ = AllocatedAcceleratorsOf(pod)
+		}
 		for j := range pod.Spec.InitContainers {
-			classify(pod, &pod.Spec.InitContainers[j])
+			ic := &pod.Spec.InitContainers[j]
+			classify(pod, ic, allocations, !isRestartableInitContainer(ic))
 		}
 		for j := range pod.Spec.Containers {
-			classify(pod, &pod.Spec.Containers[j])
+			classify(pod, &pod.Spec.Containers[j], nil, false)
 		}
 	}
 
@@ -1377,6 +1391,83 @@ func containerRequests(ctr *core.Container, resName core.ResourceName, resQuanti
 	return ok && q.Equal(resQuantity)
 }
 
+// CanonicalSlotContainerName returns the container name that owns the canonical per-pod slot for
+// ctr. Non-sidecar init containers run sequentially and share the first accelerator-requesting
+// non-sidecar init container's slot; sidecar init containers and regular containers keep their
+// own name.
+func CanonicalSlotContainerName(pod *core.Pod, ctr *core.Container) string {
+	if ctr == nil {
+		return ""
+	}
+	if pod == nil || isRestartableInitContainer(ctr) {
+		return ctr.Name
+	}
+	ctrIdx := nonSidecarInitIndex(pod, ctr.Name)
+	if ctrIdx < 0 || !containerRequestsAccelerator(ctr) {
+		return ctr.Name
+	}
+	for i := 0; i <= ctrIdx; i++ {
+		cand := &pod.Spec.InitContainers[i]
+		if !isRestartableInitContainer(cand) && containerRequestsAccelerator(cand) {
+			return cand.Name
+		}
+	}
+	return ctr.Name
+}
+
+// isRestartableInitContainer reports whether an init container is a Pod-lifetime sidecar.
+func isRestartableInitContainer(ctr *core.Container) bool {
+	return ctr != nil && ctr.RestartPolicy != nil && *ctr.RestartPolicy == core.ContainerRestartPolicyAlways
+}
+
+// nonSidecarInitIndex returns the index of name in pod.Spec.InitContainers when it names a
+// non-sidecar init container, or -1 otherwise.
+func nonSidecarInitIndex(pod *core.Pod, name string) int {
+	if pod == nil || name == "" {
+		return -1
+	}
+	for i := range pod.Spec.InitContainers {
+		ic := &pod.Spec.InitContainers[i]
+		if ic.Name != name {
+			continue
+		}
+		if isRestartableInitContainer(ic) {
+			return -1
+		}
+		return i
+	}
+	return -1
+}
+
+// containerRequestsAccelerator reports whether ctr requests any accelerator family resource.
+func containerRequestsAccelerator(ctr *core.Container) bool {
+	if ctr == nil {
+		return false
+	}
+	for name, q := range ctr.Resources.Limits {
+		if q.Sign() > 0 && nodefeature.IsKnownAcceleratableResourceName(name) {
+			return true
+		}
+	}
+	for name, q := range ctr.Resources.Requests {
+		if q.Sign() > 0 && nodefeature.IsKnownAcceleratableResourceName(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// initContainerSucceeded reports whether pod's status records init container name as exited 0.
+func initContainerSucceeded(pod *core.Pod, name string) bool {
+	for i := range pod.Status.InitContainerStatuses {
+		st := &pod.Status.InitContainerStatuses[i]
+		if st.Name == name {
+			return st.State.Terminated != nil && st.State.Terminated.ExitCode == 0
+		}
+	}
+	return false
+}
+
 type (
 	// ContainerAllocation is what the device plugin allocated for one container of a pod.
 	//
@@ -1397,9 +1488,11 @@ type (
 	PodAllocations map[string]ContainerAllocation
 )
 
-// Aggregate folds every container's record into the pod-wide allocation the ledger consumes. Two
-// containers holding the same accelerator keep separate entries, so the accelerator is charged for
-// both. Containers are visited in name order, so the result does not depend on map iteration.
+// Aggregate folds every container's record into the pod-wide allocation the ledger consumes.
+// Concurrent containers hold disjoint kubelet device IDs and accumulate independently; sequential
+// init containers reusing the same kubelet device IDs via devicesToReuse share one slot and are
+// deduplicated rather than double-charged. Containers are visited in name order, so the result
+// does not depend on map iteration.
 func (in PodAllocations) Aggregate() workercore.DevicesStatus {
 	names := make([]string, 0, len(in))
 	for name := range in {
@@ -1408,11 +1501,18 @@ func (in PodAllocations) Aggregate() workercore.DevicesStatus {
 	sort.Strings(names)
 
 	var (
-		aggregated workercore.DevicesStatus
-		groupIndex = make(map[string]int)
+		aggregated    workercore.DevicesStatus
+		groupIndex    = make(map[string]int)
+		seenDeviceIDs = sets.New[string]()
 	)
 	for _, name := range names {
-		groups := in[name].Devices.Groups
+		entry := in[name]
+		overlaps := false
+		if len(entry.DeviceIDs) > 0 {
+			overlaps = seenDeviceIDs.HasAny(entry.DeviceIDs...)
+			seenDeviceIDs.Insert(entry.DeviceIDs...)
+		}
+		groups := entry.Devices.Groups
 		for i := range groups {
 			src := &groups[i]
 			idx, ok := groupIndex[src.ID]
@@ -1425,7 +1525,24 @@ func (in PodAllocations) Aggregate() workercore.DevicesStatus {
 				})
 			}
 			dst := &aggregated.Groups[idx]
-			dst.Accelerators = append(dst.Accelerators, src.Accelerators...)
+			if !overlaps {
+				dst.Accelerators = append(dst.Accelerators, src.Accelerators...)
+				continue
+			}
+			for j := range src.Accelerators {
+				srcAcc := &src.Accelerators[j]
+				merged := false
+				for k := range dst.Accelerators {
+					if dst.Accelerators[k].ID == srcAcc.ID && dst.Accelerators[k].Mode == srcAcc.Mode {
+						dst.Accelerators[k].Allocated = max(dst.Accelerators[k].Allocated, srcAcc.Allocated)
+						merged = true
+						break
+					}
+				}
+				if !merged {
+					dst.Accelerators = append(dst.Accelerators, *srcAcc)
+				}
+			}
 		}
 	}
 	return aggregated

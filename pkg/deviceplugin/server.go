@@ -931,7 +931,7 @@ func (s *ResourceServer) decideAllocation(
 	// serialized Allocate places against an accelerator whose window is already spoken for.
 	// Choosing it later — in the responder, after the mutex — cannot be made race-free.
 	if placesLogical {
-		if d.LogicalPlacements, err = s.placeLogicalSlice(ctx, &d, logicalPlacer, occupiedLogical); err != nil {
+		if d.LogicalPlacements, err = s.placeLogicalSlice(ctx, &d, deviceIDs, logicalPlacer, occupiedLogical); err != nil {
 			return d, err
 		}
 		applyLogicalPlacements(&d.Status, d.LogicalPlacements)
@@ -1091,11 +1091,16 @@ func (s *ResourceServer) candidateFeasible(
 			return true
 		}
 	case workercore.DeviceAllocationModePartitioned:
-		return func(_ *core.Pod, ctr *core.Container) bool {
+		offeredIDs := tokenDeviceIDs(accelerators)
+		return func(pod *core.Pod, ctr *core.Container) bool {
 			profile, ok := partitionProfileOf(ctr)
 			if !ok {
 				// A partition request the Pod webhook did not shape names no geometry, so
 				// there is nothing to test it against.
+				return true
+			}
+			if pred := s.predecessorInitClaimOf(pod, ctr, offeredIDs); pred != nil &&
+				statusHasPartitionProfile(pred.Devices, profile) {
 				return true
 			}
 			candidates, _, _ := s.partitionCandidates(devs, occupied, profile)
@@ -1104,6 +1109,29 @@ func (s *ResourceServer) candidateFeasible(
 		}
 	}
 	return nil
+}
+
+// tokenDeviceIDs collects the flat device ID strings from a parsed token map.
+func tokenDeviceIDs(accelerators map[Resource][]ResourceToken) []string {
+	var ids []string
+	for _, tokens := range accelerators {
+		for i := range tokens {
+			ids = append(ids, tokens[i].String())
+		}
+	}
+	return ids
+}
+
+// statusHasPartitionProfile reports whether status records an allocation for profile.
+func statusHasPartitionProfile(status workercore.DevicesStatus, profile string) bool {
+	for i := range status.Groups {
+		for j := range status.Groups[i].Accelerators {
+			if status.Groups[i].Accelerators[j].AllocatedPhysicalProfile == profile {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // partitionCandidates builds the placement decision's input from the live state: every partitioned
@@ -1304,6 +1332,9 @@ func (s *ResourceServer) choosePartitionCards(
 	)
 	if prior, held := s.priorAllocationOf(d.Pod, d.Container.Name); held {
 		cardTokens, placements = priorPartitionTokens(prior)
+	} else if pred := s.predecessorInitClaimOf(d.Pod, d.Container, deviceIDs); pred != nil &&
+		statusHasPartitionProfile(pred.Devices, profile) {
+		cardTokens, placements = priorPartitionTokens(pred.Devices)
 	}
 	if cardTokens == nil {
 		candidates, byID, excluded := s.partitionCandidates(d.Devices, occupied, profile)
@@ -1409,6 +1440,32 @@ func (s *ResourceServer) priorClaimOf(pod *core.Pod, container string) *Containe
 	}
 	if held, ok := allocations[container]; ok && len(held.Devices.Groups) > 0 {
 		return &held
+	}
+	return nil
+}
+
+// predecessorInitClaimOf returns an earlier non-sidecar init container's claim when ctr is a
+// subsequent non-sidecar init container offered the exact same kubelet device IDs (devicesToReuse).
+func (s *ResourceServer) predecessorInitClaimOf(
+	pod *core.Pod, ctr *core.Container, deviceIDs []string,
+) *ContainerAllocation {
+	if pod == nil || ctr == nil || len(deviceIDs) == 0 {
+		return nil
+	}
+	ctrIdx := nonSidecarInitIndex(pod, ctr.Name)
+	if ctrIdx <= 0 {
+		return nil
+	}
+	offered := sets.New(deviceIDs...)
+	for i := 0; i < ctrIdx; i++ {
+		pred := &pod.Spec.InitContainers[i]
+		if isRestartableInitContainer(pred) {
+			continue
+		}
+		held := s.priorClaimOf(pod, pred.Name)
+		if held != nil && len(held.DeviceIDs) > 0 && sets.New(held.DeviceIDs...).Equal(offered) {
+			return held
+		}
 	}
 	return nil
 }
@@ -1573,11 +1630,19 @@ func (s *ResourceServer) accumulateAllocation(
 func (s *ResourceServer) placeLogicalSlice(
 	ctx context.Context,
 	d *_AllocationDecision,
+	deviceIDs []string,
 	logicalPlacer LogicalSlicedResponder,
 	occupiedLogical Placements,
 ) (Placements, error) {
 	if prior, held := s.priorLogicalPlacements(d.Pod, d.Container.Name); held {
 		return prior, nil
+	}
+	if pred := s.predecessorInitClaimOf(d.Pod, d.Container, deviceIDs); pred != nil {
+		inherited := make(Placements)
+		accumulateLogicalOccupied(pred.Devices, inherited)
+		if len(inherited) > 0 {
+			return inherited, nil
+		}
 	}
 
 	placements, err := logicalPlacer.PlaceLogicalSliced(
@@ -2061,7 +2126,8 @@ func (s *ResourceServer) visibilityResponse(
 				"refusing to grant visibility",
 			profile, owner, kubemeta.GetNamespacedNameKey(pod))
 	}
-	ctrResp, err := responder.GetPhysicalSlicedVisibilityResponse(ctx, pod, ctr, devs, allocated, owner)
+	canonicalOwner := CanonicalSlotContainerName(pod, ownerCtr)
+	ctrResp, err := responder.GetPhysicalSlicedVisibilityResponse(ctx, pod, ctr, devs, allocated, canonicalOwner)
 	if err != nil {
 		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition,
 			"name the partition profile %q container %q holds in pod %s: %v; refusing to grant visibility",

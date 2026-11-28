@@ -390,3 +390,43 @@ func TestDeviceSet(t *testing.T) {
 		})
 	}
 }
+
+func TestGetSlicedContainerAllocateResponse_SequentialInitContainersReuseVdev(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	s := newSlicedServer()
+	devs := hygonDevicesFixture()
+
+	lim := core.ResourceList{
+		nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer):  *resource.NewQuantity(100, resource.DecimalSI),
+		nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer): *resource.NewQuantity(60, resource.DecimalSI),
+	}
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: "forge", UID: types.UID("pod-init-vdev")},
+		Spec: core.PodSpec{
+			InitContainers: []core.Container{
+				{Name: "forge-runner", Resources: core.ResourceRequirements{Limits: lim}},
+				{Name: "forge-verifier", Resources: core.ResourceRequirements{Limits: lim}},
+			},
+			Containers: []core.Container{{Name: "pause"}},
+		},
+	}
+	allocated := map[deviceplugin.Resource]int32{{Group: groupID, Device: "dcu-uuid-0"}: 1}
+
+	resp1, err := s.GetContainerAllocateResponse(context.Background(), pod, &pod.Spec.InitContainers[0], devs, allocated)
+	require.NoError(t, err)
+	resp2, err := s.GetContainerAllocateResponse(context.Background(), pod, &pod.Spec.InitContainers[1], devs, allocated)
+	require.NoError(t, err)
+
+	wantDir := filepath.Join(deviceplugin.PodWorkDir("pod-init-vdev", "forge-runner"), "etc/vdev/docker")
+	m1, ok := mountByContainerPath(resp1, "/etc/vdev/docker")
+	require.True(t, ok)
+	m2, ok := mountByContainerPath(resp2, "/etc/vdev/docker")
+	require.True(t, ok)
+	assert.Equal(t, wantDir, m1.HostPath)
+	assert.Equal(t, wantDir, m2.HostPath)
+
+	conf, err := parseVdevConf(filepath.Join(wantDir, "vdev0.conf"))
+	require.NoError(t, err)
+	assert.Equal(t, 0, conf.vdevID)
+	assert.Equal(t, 0, conf.pipeID)
+}

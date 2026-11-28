@@ -15,11 +15,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
@@ -851,4 +853,40 @@ func TestActuatePhysicalSliced_RecordsTheGrantedPartitionIdentity(t *testing.T) 
 	assert.Contains(t, joined, granted, "the granted partition identity is recorded")
 	assert.Contains(t, joined, testGPUUUID0, "the accelerator it was carved on is recorded")
 	assert.Contains(t, joined, "created", "how the partition was obtained is recorded")
+}
+
+func TestActuatePhysicalSliced_SequentialInitContainersReuseSlot(t *testing.T) {
+	const profile = "7g.80gb"
+	redirectLogicalSliceDirs(t)
+	drv := newFakeMigDriver()
+	drv.possible[testGPUUUID0] = []migPlacement{{0, 8}}
+	s := &server{mig: drv}
+
+	devs := migDevices(profile, 7, 8, testGPUUUID0)
+	partRes := nodefeature.GetAcceleratableResourceName(Manufacturer, workercore.DeviceAllocationModePartitioned)
+	lim := core.ResourceList{partRes: resource.MustParse("1")}
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: "forge", UID: types.UID("pod-init-mig")},
+		Spec: core.PodSpec{
+			InitContainers: []core.Container{
+				{Name: "forge-runner", Resources: core.ResourceRequirements{Limits: lim}},
+				{Name: "forge-verifier", Resources: core.ResourceRequirements{Limits: lim}},
+			},
+			Containers: []core.Container{{Name: "pause"}},
+		},
+	}
+	allocated := map[deviceplugin.Resource]int32{{Group: "h100", Device: testGPUUUID0}: nodefeature.ResourceMaxUnits}
+
+	out1, err := s.ActuatePhysicalSliced(context.Background(), pod, &pod.Spec.InitContainers[0], devs, allocated, profile)
+	require.NoError(t, err)
+	out2, err := s.ActuatePhysicalSliced(context.Background(), pod, &pod.Spec.InitContainers[1], devs, allocated, profile)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, drv.createCalls, "sequential init containers share the canonical MIG slot without a second create")
+	assert.Equal(t, out1.Response.Envs["NVIDIA_VISIBLE_DEVICES"], out2.Response.Envs["NVIDIA_VISIBLE_DEVICES"])
+
+	out2.Rollback()
+	assert.Empty(t, drv.destroyed, "rolling back a rebound successor must not destroy the predecessor's partition")
+	_, err = parseMarker(markerPath("pod-init-mig", "forge-runner", testGPUUUID0))
+	require.NoError(t, err)
 }

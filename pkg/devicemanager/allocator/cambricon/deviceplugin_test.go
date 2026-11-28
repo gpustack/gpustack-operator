@@ -555,3 +555,37 @@ func TestSliced_ExclusiveModeHasNoSlicingArtifacts(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, markerExists("pod-excl", "train"))
 }
+
+func TestSliced_SequentialInitContainersReuseInstance(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	redirectCardDevicePath(t)
+	stageCardNode(t, testMLU0Index)
+	d := stagedFakeDriver(t)
+	s := newSlicedServer(d)
+	devs := cambriconDevicesFixture()
+
+	lim := core.ResourceList{
+		nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer):  *resource.NewQuantity(60, resource.DecimalSI),
+		nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer): *resource.NewQuantity(60, resource.DecimalSI),
+	}
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: "forge", UID: types.UID("pod-init-mlu")},
+		Spec: core.PodSpec{
+			InitContainers: []core.Container{
+				{Name: "forge-runner", Resources: core.ResourceRequirements{Limits: lim}},
+				{Name: "forge-verifier", Resources: core.ResourceRequirements{Limits: lim}},
+			},
+			Containers: []core.Container{{Name: "pause"}},
+		},
+	}
+
+	resp1, err := s.GetContainerAllocateResponse(context.Background(), pod, &pod.Spec.InitContainers[0], devs, allocateMLU0())
+	require.NoError(t, err)
+	resp2, err := s.GetContainerAllocateResponse(context.Background(), pod, &pod.Spec.InitContainers[1], devs, allocateMLU0())
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, d.instanceCreates, "sequential init containers reuse the canonical sMLU instance")
+	assert.Equal(t, resp1.Envs["VIRTUAL_DEVICES"], resp2.Envs["VIRTUAL_DEVICES"])
+	assert.True(t, markerExists("pod-init-mlu", "forge-runner"))
+	assert.False(t, markerExists("pod-init-mlu", "forge-verifier"))
+}

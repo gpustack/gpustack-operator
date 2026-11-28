@@ -1092,3 +1092,47 @@ func TestNewAndStop_HostRootLifecycle(t *testing.T) {
 		})
 	}
 }
+
+func TestGetSlicedContainerAllocateResponse_SequentialInitContainersReuseVNPU(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	s := newSlicedServer()
+	devs := ascendDevicesFixture()
+
+	lim := core.ResourceList{
+		nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer):  *resource.NewQuantity(50, resource.DecimalSI),
+		nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer): *resource.NewQuantity(50, resource.DecimalSI),
+	}
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: "forge", UID: types.UID("pod-init-ascend")},
+		Spec: core.PodSpec{
+			InitContainers: []core.Container{
+				{
+					Name:      "forge-runner",
+					Env:       []core.EnvVar{{Name: "ENPU_LOG_LEVEL", Value: "3"}},
+					Resources: core.ResourceRequirements{Limits: lim},
+				},
+				{
+					Name:      "forge-verifier",
+					Resources: core.ResourceRequirements{Limits: lim},
+				},
+			},
+			Containers: []core.Container{{Name: "pause"}},
+		},
+	}
+	allocated := map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1}
+
+	resp1, err := s.GetContainerAllocateResponse(context.Background(), pod, &pod.Spec.InitContainers[0], devs, allocated)
+	require.NoError(t, err)
+	resp2, err := s.GetContainerAllocateResponse(context.Background(), pod, &pod.Spec.InitContainers[1], devs, allocated)
+	require.NoError(t, err)
+
+	_, injected1 := resp1.Envs["ENPU_LOG_LEVEL"]
+	assert.False(t, injected1, "first init container declared ENPU_LOG_LEVEL")
+	assert.Equal(t, "1", resp2.Envs["ENPU_LOG_LEVEL"], "second init container inspects its own Env")
+
+	wantCfg := filepath.Join(deviceplugin.PodWorkDir("pod-init-ascend", "forge-runner"), "etc/enpu/vcann-rt/npu_info.config")
+	_, vnpu, ok := parseNPUInfoConfig(wantCfg)
+	require.True(t, ok)
+	assert.Equal(t, 0, vnpu, "sequential init containers reuse virtual-npu-id 0")
+	assert.NoDirExists(t, deviceplugin.PodWorkDir("pod-init-ascend", "forge-verifier"))
+}

@@ -11,9 +11,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	klog "k8s.io/klog/v2"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 // fakeMigDriver is a driver whose whole state is data, so the reservation core can be exercised
@@ -32,6 +38,9 @@ type fakeMigDriver struct {
 	// onList runs inside ListInstances, which is where a test reproduces something happening
 	// between a caller's record scan and its decision.
 	onList func()
+	// confDir, when non-empty, materializes each created instance's ConfPath under that directory
+	// so migContainerResponse can bind-mount it in unit tests.
+	confDir string
 
 	created   []migPlacement
 	destroyed []migInstance
@@ -53,13 +62,18 @@ func (d *fakeMigDriver) CreateInstance(_, _ string, slot migPlacement) (migInsta
 	d.created = append(d.created, slot)
 	d.nextGiID++
 	d.nextUUID++
+	confPath := fmt.Sprintf("/etc/dmi_mig_config/ci/dev0gi%dci0.conf", d.nextGiID)
+	if d.confDir != "" {
+		confPath = filepath.Join(d.confDir, fmt.Sprintf("dev0gi%dci0.conf", d.nextGiID))
+		_ = os.WriteFile(confPath, []byte("mig_uuid: test\n"), 0o600)
+	}
 	inst := migInstance{
 		GiID:      d.nextGiID,
 		CiID:      0,
 		ProfileID: d.state.ProfileID,
 		Placement: slot,
 		UUID:      fmt.Sprintf("uuid-%d", d.nextUUID),
-		ConfPath:  fmt.Sprintf("/etc/dmi_mig_config/ci/dev0gi%dci0.conf", d.nextGiID),
+		ConfPath:  confPath,
 	}
 	d.state.Live = append(d.state.Live, inst)
 	return inst, nil
@@ -818,4 +832,42 @@ func TestMigReclaimerLeavesAFreshRecordAlone(t *testing.T) {
 	assert.Empty(t, drv.destroyedGiIDs(),
 		"a record younger than the grace window must survive a snapshot that predates it")
 	assert.FileExists(t, migMarkerPath(podsDir, "just-admitted", "main", card))
+}
+
+func TestActuatePhysicalSliced_SequentialInitContainersReuseSlot(t *testing.T) {
+	const profile = "8g.63gb"
+	redirectLogicalSliceDirs(t)
+	redirectDevicePaths(t)
+
+	drv := &fakeMigDriver{
+		state:   migCardState{ProfileID: 1, Possible: []migPlacement{{0, 4}}},
+		confDir: t.TempDir(),
+	}
+	s := &server{mig: drv, ResourceServer: deviceplugin.ResourceServer{Logger: klog.Background()}}
+	devs := hygonDevicesFixture()
+	partRes := nodefeature.GetAcceleratableResourceName(Manufacturer, workercore.DeviceAllocationModePartitioned)
+	lim := core.ResourceList{partRes: resource.MustParse("1")}
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: "forge", UID: types.UID("pod-init-mig")},
+		Spec: core.PodSpec{
+			InitContainers: []core.Container{
+				{Name: "forge-runner", Resources: core.ResourceRequirements{Limits: lim}},
+				{Name: "forge-verifier", Resources: core.ResourceRequirements{Limits: lim}},
+			},
+			Containers: []core.Container{{Name: "pause"}},
+		},
+	}
+	allocated := map[deviceplugin.Resource]int32{{Group: groupID, Device: "dcu-uuid-0"}: 1}
+
+	out1, err := s.ActuatePhysicalSliced(context.Background(), pod, &pod.Spec.InitContainers[0], devs, allocated, profile)
+	require.NoError(t, err)
+	out2, err := s.ActuatePhysicalSliced(context.Background(), pod, &pod.Spec.InitContainers[1], devs, allocated, profile)
+	require.NoError(t, err)
+
+	assert.Len(t, drv.created, 1, "sequential init containers share the canonical MIG slot without a second create")
+	assert.Equal(t, out1.Response.Envs[migVisibleDeviceEnv], out2.Response.Envs[migVisibleDeviceEnv])
+
+	out2.Rollback()
+	assert.Empty(t, drv.destroyed, "rolling back a rebound successor must not destroy the predecessor's partition")
+	assert.FileExists(t, migMarkerPath(deviceplugin.OperatorPodsDir, "pod-init-mig", "forge-runner", "dcu-uuid-0"))
 }

@@ -9,8 +9,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 const (
@@ -339,4 +344,39 @@ func TestGetPhysicalSlicedVisibilityResponseCardStateError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read card")
 	assert.Nil(t, resp)
+}
+
+func TestActuatePhysicalSliced_SequentialInitContainersReuseSlot(t *testing.T) {
+	_, podsDir := redirectNodeRoots(t)
+	createdFixture().write(t)
+
+	s, drv := newPartitionedServer(testPPUUUID0)
+	drv.seedProfile(testPPUUUID0, testProfile, testProfileID, []migPlacement{{0, 2}})
+	devs := partitionDevices(testPPUUUID0)
+	allocated := allocatedOn(testPPUUUID0)
+
+	partRes := nodefeature.GetAcceleratableResourceName(Manufacturer, workercore.DeviceAllocationModePartitioned)
+	lim := core.ResourceList{partRes: resource.MustParse("1")}
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: "forge", UID: types.UID("pod-init-ppu")},
+		Spec: core.PodSpec{
+			InitContainers: []core.Container{
+				{Name: "forge-runner", Resources: core.ResourceRequirements{Limits: lim}},
+				{Name: "forge-verifier", Resources: core.ResourceRequirements{Limits: lim}},
+			},
+			Containers: []core.Container{{Name: "pause"}},
+		},
+	}
+
+	out1, err := s.ActuatePhysicalSliced(context.Background(), pod, &pod.Spec.InitContainers[0], devs, allocated, testProfile)
+	require.NoError(t, err)
+	out2, err := s.ActuatePhysicalSliced(context.Background(), pod, &pod.Spec.InitContainers[1], devs, allocated, testProfile)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, drv.createCalls, "sequential init containers share the canonical partition slot without a second create")
+	assert.Equal(t, devicePaths(out1.Response), devicePaths(out2.Response))
+
+	out2.Rollback()
+	assert.Empty(t, drv.destroyed, "rolling back a rebound successor must not destroy the predecessor's partition")
+	assert.FileExists(t, markerPath(podsDir, "pod-init-ppu", "forge-runner", testPPUUUID0))
 }
